@@ -1,11 +1,20 @@
 <Solution>
-  <Folder Name="/Analyzers/" />
+  <Folder Name="/Analyzers/">
+    <Project Path="Ama.Enterprise.CRDT.Analyzers/Ama.Enterprise.CRDT.Analyzers.csproj" Id="ca718036-9dd1-42b1-a53a-158a6336f699" />
+  </Folder>
+  <Folder Name="/Apps/">
+    <Project Path="Ama.Enterprise.CRDT.BlazorApp/Ama.Enterprise.CRDT.BlazorApp.csproj" Id="8fb88a8e-60af-420c-8cc2-1cdd1d967720" />
+  </Folder>
   <Folder Name="/Solution Items/">
     <File Path=".gitignore" />
     <File Path="CodingStandards.md" />
     <File Path="LICENCE" />
   </Folder>
-  <Project Path="Ama.Enterprise.CRDT.TestHarness/Ama.Enterprise.CRDT.TestHarness.csproj" Id="afe0e391-2e97-4d7c-b6ec-2cc1d8ff638f" />
+  <Project Path="Ama.Enterprise.CRDT.OpenTelemetry/Ama.Enterprise.CRDT.OpenTelemetry.csproj" Id="c43db689-b047-4d09-ba26-ca88479ac36f" />
+  <Project Path="Ama.Enterprise.CRDT.TableStorage/Ama.Enterprise.CRDT.TableStorage.csproj" Id="807a871d-7aad-43f6-83c2-48e62e019c07" />
+  <Project Path="Ama.Enterprise.CRDT.Testing/Ama.Enterprise.CRDT.Testing.csproj" Id="e30d8fc4-45a1-447c-bfb3-64761c771cb4" />
+  <Project Path="Ama.Enterprise.CRDT.UI/Ama.Enterprise.CRDT.UI.csproj" Id="31ebd840-d71d-4df4-b2e6-7420c851eee0" />
+  <Project Path="Ama.Enterprise.CRDT/Ama.Enterprise.CRDT.csproj" />
   <Project Path="Ama.Enterprise.FeatureFlags.UnitTests/Ama.Enterprise.FeatureFlags.UnitTests.csproj" Id="d74539b1-a59f-40bc-81d1-e33de4e85be7" />
   <Project Path="Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj" Id="f29896b4-f84b-45fb-8742-3496884d770e" />
   <Project Path="Ama.Enterprise.P2p.UnitTests/Ama.Enterprise.P2p.UnitTests.csproj" Id="59f1fd65-b40a-4eec-9c39-f99f1665b7f0" />
