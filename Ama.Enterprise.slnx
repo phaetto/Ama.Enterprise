@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/Analyzers/" />
+  <Folder Name="/Solution Items/">
+    <File Path=".gitignore" />
+    <File Path="CodingStandards.md" />
+  </Folder>
+  <Project Path="Ama.Enterprise.P2p/Ama.Enterprise.P2p.csproj" />
+</Solution>
