@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.IntegrationTests.Attributes;
+using Ama.Enterprise.P2p.IntegrationTests.Extensions;
 using Ama.Enterprise.P2p.IntegrationTests.Handlers;
 using Ama.Enterprise.P2p.IntegrationTests.Models;
 using Ama.Enterprise.P2p.Models;
@@ -22,6 +23,13 @@ using Xunit;
 /// </summary>
 public sealed class P2pNetworkIntegrationTests
 {
+    private readonly ITestOutputHelper testOutputHelper;
+
+    public P2pNetworkIntegrationTests(ITestOutputHelper testOutputHelper)
+    {
+        this.testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
+    }
+
     [IntegrationFact]
     public async Task Network_ShouldPropagateMessage_ToAllConnectedNodes()
     {
@@ -192,6 +200,16 @@ public sealed class P2pNetworkIntegrationTests
 
     private bool HasPayload(TestNode node, string expectedText)
     {
+        if (node is null)
+        {
+            throw new ArgumentNullException(nameof(node));
+        }
+
+        if (string.IsNullOrEmpty(expectedText))
+        {
+            throw new ArgumentException("Expected text cannot be null or empty.", nameof(expectedText));
+        }
+
         return node.Handler.ReceivedMessages.Any(m => 
             Encoding.UTF8.GetString(m.Payload.Span) == expectedText);
     }
@@ -202,7 +220,7 @@ public sealed class P2pNetworkIntegrationTests
         
         services.AddLogging(builder => 
         {
-            builder.AddConsole();
+            builder.AddXunit(this.testOutputHelper);
             builder.SetMinimumLevel(LogLevel.Trace);
         });
 

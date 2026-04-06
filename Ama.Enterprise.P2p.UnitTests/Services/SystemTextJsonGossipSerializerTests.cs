@@ -1,7 +1,6 @@
 using Ama.Enterprise.P2p.Models;
 using Ama.Enterprise.P2p.Services;
 using Shouldly;
-using Xunit;
 
 namespace Ama.Enterprise.P2p.UnitTests.Services;
 

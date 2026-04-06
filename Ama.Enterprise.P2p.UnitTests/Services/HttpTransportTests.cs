@@ -5,7 +5,6 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Moq.Protected;
 using Shouldly;
-using Xunit;
 
 namespace Ama.Enterprise.P2p.UnitTests.Services;
 

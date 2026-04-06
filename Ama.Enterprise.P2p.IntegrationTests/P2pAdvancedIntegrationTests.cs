@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.IntegrationTests.Attributes;
+using Ama.Enterprise.P2p.IntegrationTests.Extensions;
 using Ama.Enterprise.P2p.IntegrationTests.Handlers;
 using Ama.Enterprise.P2p.IntegrationTests.Models;
 using Ama.Enterprise.P2p.Models;
@@ -22,6 +23,13 @@ using Xunit;
 /// </summary>
 public sealed class P2pAdvancedIntegrationTests
 {
+    private readonly ITestOutputHelper testOutputHelper;
+
+    public P2pAdvancedIntegrationTests(ITestOutputHelper testOutputHelper)
+    {
+        this.testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
+    }
+
     [IntegrationFact]
     public async Task Network_ShouldPropagateOverMultipleHops_InChainTopology()
     {
@@ -134,6 +142,16 @@ public sealed class P2pAdvancedIntegrationTests
 
     private bool HasPayload(TestNode node, string expectedText)
     {
+        if (node is null)
+        {
+            throw new ArgumentNullException(nameof(node));
+        }
+
+        if (string.IsNullOrEmpty(expectedText))
+        {
+            throw new ArgumentException("Expected text cannot be null or empty.", nameof(expectedText));
+        }
+
         return node.Handler.ReceivedMessages.Any(m => 
             Encoding.UTF8.GetString(m.Payload.Span) == expectedText);
     }
@@ -144,7 +162,7 @@ public sealed class P2pAdvancedIntegrationTests
         
         services.AddLogging(builder => 
         {
-            builder.AddConsole();
+            builder.AddXunit(this.testOutputHelper);
             builder.SetMinimumLevel(LogLevel.Trace);
         });
 
@@ -180,8 +198,15 @@ public sealed class P2pAdvancedIntegrationTests
 
     private async Task RegisterPeerAsync(TestNode sourceNode, TestNode targetNode, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(sourceNode);
-        ArgumentNullException.ThrowIfNull(targetNode);
+        if (sourceNode is null)
+        {
+            throw new ArgumentNullException(nameof(sourceNode));
+        }
+        
+        if (targetNode is null)
+        {
+            throw new ArgumentNullException(nameof(targetNode));
+        }
 
         var nodeDetails = new PeerNode(targetNode.Id, targetNode.Endpoint);
         await sourceNode.Registry.AddOrUpdatePeerAsync(nodeDetails, PeerStatus.Active, cancellationToken).ConfigureAwait(false);

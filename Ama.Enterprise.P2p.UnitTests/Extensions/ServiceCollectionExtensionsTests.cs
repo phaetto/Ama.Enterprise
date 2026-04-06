@@ -5,7 +5,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Shouldly;
-using Xunit;
 
 namespace Ama.Enterprise.P2p.UnitTests.Extensions;
 

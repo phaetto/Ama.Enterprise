@@ -1,0 +1,59 @@
+namespace Ama.Enterprise.P2p.IntegrationTests.Logging;
+
+using System;
+using Microsoft.Extensions.Logging;
+
+/// <summary>
+/// A custom logger that writes messages to xUnit's ITestOutputHelper.
+/// </summary>
+public sealed class XunitLogger : ILogger
+{
+    private readonly ITestOutputHelper testOutputHelper;
+    private readonly string categoryName;
+
+    public XunitLogger(ITestOutputHelper testOutputHelper, string categoryName)
+    {
+        this.testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
+        
+        if (string.IsNullOrEmpty(categoryName))
+        {
+            throw new ArgumentException("Category name cannot be null or empty.", nameof(categoryName));
+        }
+        
+        this.categoryName = categoryName;
+    }
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull
+    {
+        return null;
+    }
+
+    public bool IsEnabled(LogLevel logLevel)
+    {
+        return true;
+    }
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+        if (formatter is null)
+        {
+            throw new ArgumentNullException(nameof(formatter));
+        }
+
+        try
+        {
+            var message = formatter(state, exception);
+            this.testOutputHelper.WriteLine($"[{logLevel}] {this.categoryName}: {message}");
+            
+            if (exception is not null)
+            {
+                this.testOutputHelper.WriteLine(exception.ToString());
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // xUnit throws InvalidOperationException if an attempt is made to write to output after the test completes.
+            // Background tasks (like IHostedService) might still be running and logging during teardown.
+        }
+    }
+}

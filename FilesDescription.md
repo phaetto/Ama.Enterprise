@@ -33,7 +33,10 @@
 | `$/Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Ama.Enterprise.P2p.IntegrationTests.csproj` | Integration tests project for validating P2P networking components via HTTP loopbacks. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Attributes/IntegrationFactAttribute.cs` | Custom xUnit `FactAttribute` providing a centralized toggle to enable or disable all integration tests. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Extensions/XunitLoggingBuilderExtensions.cs` | Extension methods to register xUnit logger in ILoggingBuilder. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Handlers/TestMessageHandler.cs` | Test handler implementation that captures received gossip messages in memory for assertions. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Logging/XunitLogger.cs` | Custom ILogger implementation for routing logs to xUnit's ITestOutputHelper. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Logging/XunitLoggerProvider.cs` | Provider for creating XunitLogger instances. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Models/TestNode.cs` | Data-transfer class orchestrating individual configured test nodes managing service scopes and lifecycles. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/P2pAdvancedIntegrationTests.cs` | Contains advanced integration tests validating high concurrency, multi-hop linear topologies, and TTL expiration behavior within the P2P network. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/P2pNetworkIntegrationTests.cs` | End-to-end integration tests validating real-world message propagation, network lifecycles, and deduplication capabilities. |

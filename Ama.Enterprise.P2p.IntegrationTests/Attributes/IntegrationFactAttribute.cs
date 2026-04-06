@@ -1,6 +1,5 @@
 namespace Ama.Enterprise.P2p.IntegrationTests.Attributes;
 
-using System.Runtime.CompilerServices;
 using Xunit;
 
 /// <summary>
