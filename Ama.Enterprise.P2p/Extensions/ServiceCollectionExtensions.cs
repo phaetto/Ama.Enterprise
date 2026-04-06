@@ -1,6 +1,7 @@
 using Ama.Enterprise.P2p.Models;
 using Ama.Enterprise.P2p.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Ama.Enterprise.P2p.Extensions;
 
@@ -34,12 +35,31 @@ public static class ServiceCollectionExtensions
             services.Configure(configureOptions);
         }
 
-        // Note: Implementations should be added by the consumer or further down the pipeline.
-        // This ensures the Host can resolve the interfaces if they are injected.
-        // Example:
-        // services.AddSingleton<IGossipProtocol, GossipProtocolImpl>();
-        // services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
+        // Register HttpClient specific to the P2P transport
+        services.AddHttpClient("P2pTransport");
+
+        // Use TryAddSingleton so consumers can override default implementations if needed.
         
+        // Serialization
+        services.TryAddSingleton<IGossipSerializer, SystemTextJsonGossipSerializer>();
+
+        // Core P2P services
+        services.TryAddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
+        services.TryAddSingleton<IPeerAuthenticator, PassThroughPeerAuthenticator>();
+        services.TryAddSingleton<IPeerSelector, RandomPeerSelector>();
+        services.TryAddSingleton<IFailureDetector, TimeBasedFailureDetector>();
+        
+        // Transport and Dispatcher
+        services.TryAddSingleton<ITransport, HttpTransport>();
+        services.TryAddSingleton<ITransportListener, HttpTransportListener>();
+        services.TryAddSingleton<IMessageDispatcher, MessageDispatcher>();
+        
+        // Protocol orchestrator
+        services.TryAddSingleton<IGossipProtocol, GossipProtocol>();
+        
+        // Hosted service to manage background lifecycle within the generic host
+        services.AddHostedService<P2pHostedService>();
+
         return services;
     }
 }

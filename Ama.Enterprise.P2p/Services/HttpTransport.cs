@@ -1,0 +1,54 @@
+using System.Net.Http.Headers;
+using Ama.Enterprise.P2p.Models;
+using Microsoft.Extensions.Logging;
+
+namespace Ama.Enterprise.P2p.Services;
+
+/// <summary>
+/// Implements outbound gossip transport using HTTP POST requests.
+/// </summary>
+/// <remarks>
+/// Initializes a new instance of the <see cref="HttpTransport"/> class.
+/// </remarks>
+public sealed class HttpTransport(
+    IHttpClientFactory httpClientFactory,
+    IGossipSerializer serializer,
+    ILogger<HttpTransport> logger) : ITransport
+{
+    private readonly IHttpClientFactory httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+    private readonly IGossipSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+    private readonly ILogger<HttpTransport> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+    /// <inheritdoc />
+    public async Task SendAsync(PeerEndpoint endpoint, GossipMessage message, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(endpoint.Host))
+        {
+            throw new ArgumentException("Endpoint host cannot be null or empty.", nameof(endpoint));
+        }
+
+        if (endpoint.Port is <= 0 or > 65535)
+        {
+            throw new ArgumentOutOfRangeException(nameof(endpoint), "Endpoint port must be between 1 and 65535.");
+        }
+
+        var url = $"http://{endpoint.Host}:{endpoint.Port}/p2p/gossip";
+        
+        using var client = this.httpClientFactory.CreateClient("P2pTransport");
+        client.Timeout = TimeSpan.FromSeconds(5); // Fast fail for gossip network
+
+        var payload = this.serializer.Serialize(message);
+        using var content = new ByteArrayContent(payload.ToArray());
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = content
+        };
+
+        this.logger.LogTrace("Sending message {MessageId} to {Url}", message.MessageId, url);
+
+        using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+    }
+}
