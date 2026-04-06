@@ -56,11 +56,6 @@ public static class ServiceCollectionExtensions
         // Register P2P JSON Context to be combined by Ama.CRDT options context
         services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", P2pJsonSerializerContext.Default);
 
-        // Use TryAddSingleton so consumers can override default implementations if needed.
-        
-        // Serialization
-        services.TryAddSingleton<IMessageSerializer<GossipMessage>, SystemTextJsonGossipSerializer>();
-
         // Core P2P services
         services.TryAddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
         services.TryAddSingleton<IPeerAuthenticator, PassThroughPeerAuthenticator>();

@@ -71,10 +71,11 @@
 | `$/Ama.Enterprise.P2p/Models/Core/UdpDiscoveryOptions.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Gossip/GossipMessage.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Gossip/GossipOptions.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Models/Gossip/P2pJsonSerializerContext.cs` | AOT-friendly JSON context for P2P models, automatically loaded by ICrdtSerializer. |
 | `$/Ama.Enterprise.P2p/Services/Core/IFailureDetector.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IMessageDispatcher.cs` | Generic interface routing incoming protocol messages to registered handlers. |
 | `$/Ama.Enterprise.P2p/Services/Core/IMessageHandler.cs` | Generic interface defining a domain-level consumer for P2P messages. |
-| `$/Ama.Enterprise.P2p/Services/Core/IMessageSerializer.cs` | Generic interface providing generic AOT-friendly serialization capabilities for P2P messages. |
+| `$/Ama.Enterprise.P2p/Services/Core/IMessageSerializer.cs` | Obsolete generic message serializer interface, superseded by ICrdtSerializer. |
 | `$/Ama.Enterprise.P2p/Services/Core/IP2pTelemetry.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerAuthenticator.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerDiscovery.cs` | No description provided. |
@@ -91,11 +92,11 @@
 | `$/Ama.Enterprise.P2p/Services/Core/UdpDiscoveryJsonContext.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/UdpPeerDiscovery.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Gossip/GossipProtocol.cs` | Re-architected implementation of IGossipProtocol targeting generic transport and dispatch interfaces. |
-| `$/Ama.Enterprise.P2p/Services/Gossip/HttpTransport.cs` | Gossip-specific HTTP POST outbound implementation of the generic `ITransport<GossipMessage>`. |
-| `$/Ama.Enterprise.P2p/Services/Gossip/HttpTransportListener.cs` | Gossip-specific inbound listener implementation of the generic `ITransportListener<GossipMessage>`. |
+| `$/Ama.Enterprise.P2p/Services/Gossip/HttpTransport.cs` | Implements outbound gossip transport via HTTP, now leveraging ICrdtSerializer. |
+| `$/Ama.Enterprise.P2p/Services/Gossip/HttpTransportListener.cs` | Implements inbound gossip listener via HttpListener, utilizing ICrdtSerializer. |
 | `$/Ama.Enterprise.P2p/Services/Gossip/IGossipProtocol.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Gossip/P2pHostedService.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Services/Gossip/SystemTextJsonGossipSerializer.cs` | AOT-friendly System.Text.Json implementation mapped specifically for `IMessageSerializer<GossipMessage>`. |
+| `$/Ama.Enterprise.P2p/Services/Gossip/SystemTextJsonGossipSerializer.cs` | Obsolete SystemTextJson implementation, superseded by ICrdtSerializer. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/PropertyInfoUsageAnalyzerTests.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/SystemConvertUsageAnalyzerTests.cs` | No description provided. |

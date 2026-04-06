@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.Services.Gossip;
 
 using System.Net;
+using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
@@ -14,11 +15,11 @@ using Microsoft.Extensions.Options;
 /// </remarks>
 public sealed class HttpTransportListener(
     IOptions<GossipOptions> options,
-    IMessageSerializer<GossipMessage> serializer,
+    ICrdtSerializer serializer,
     ILogger<HttpTransportListener> logger) : ITransportListener<GossipMessage>, IDisposable
 {
     private readonly IOptions<GossipOptions> options = options ?? throw new ArgumentNullException(nameof(options));
-    private readonly IMessageSerializer<GossipMessage> serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
     private readonly ILogger<HttpTransportListener> logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private HttpListener? httpListener;
     private CancellationTokenSource? listenerCts;
@@ -140,7 +141,7 @@ public sealed class HttpTransportListener(
             await context.Request.InputStream.CopyToAsync(memoryStream, cancellationToken).ConfigureAwait(false);
             
             var payload = memoryStream.ToArray();
-            var message = this.serializer.Deserialize(payload);
+            var message = this.serializer.DeserializeFromBytes<GossipMessage>(payload);
 
             // In generic struct serialization, ensure we check default values. 
             // Since GossipMessage has a required valid Guid, checking it avoids processing bad payloads.

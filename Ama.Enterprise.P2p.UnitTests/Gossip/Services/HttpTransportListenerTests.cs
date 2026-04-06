@@ -1,7 +1,7 @@
 namespace Ama.Enterprise.P2p.UnitTests.Gossip.Services;
 
+using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Gossip;
-using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.Services.Gossip;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -10,13 +10,13 @@ using Shouldly;
 
 public sealed class HttpTransportListenerTests
 {
-    private readonly Mock<IMessageSerializer<GossipMessage>> serializerMock;
+    private readonly Mock<ICrdtSerializer> serializerMock;
     private readonly Mock<ILogger<HttpTransportListener>> loggerMock;
     private readonly IOptions<GossipOptions> options;
 
     public HttpTransportListenerTests()
     {
-        this.serializerMock = new Mock<IMessageSerializer<GossipMessage>>();
+        this.serializerMock = new Mock<ICrdtSerializer>();
         this.loggerMock = new Mock<ILogger<HttpTransportListener>>();
         // Use a dynamic port to avoid conflicting with actual services if this runs fully
         this.options = Options.Create(new GossipOptions { ListenPort = 0 }); 

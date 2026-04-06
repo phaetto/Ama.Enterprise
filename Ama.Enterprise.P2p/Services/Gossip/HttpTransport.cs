@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.Services.Gossip;
 
 using System.Net.Http.Headers;
+using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
@@ -14,11 +15,11 @@ using Microsoft.Extensions.Logging;
 /// </remarks>
 public sealed class HttpTransport(
     IHttpClientFactory httpClientFactory,
-    IMessageSerializer<GossipMessage> serializer,
+    ICrdtSerializer serializer,
     ILogger<HttpTransport> logger) : ITransport<GossipMessage>
 {
     private readonly IHttpClientFactory httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-    private readonly IMessageSerializer<GossipMessage> serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
     private readonly ILogger<HttpTransport> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
@@ -39,8 +40,8 @@ public sealed class HttpTransport(
         using var client = this.httpClientFactory.CreateClient("P2pTransport");
         client.Timeout = TimeSpan.FromSeconds(5); // Fast fail for gossip network
 
-        var payload = this.serializer.Serialize(message);
-        using var content = new ByteArrayContent(payload.ToArray());
+        var payload = this.serializer.SerializeToBytes(message);
+        using var content = new ByteArrayContent(payload);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
 
         using var request = new HttpRequestMessage(HttpMethod.Post, url)

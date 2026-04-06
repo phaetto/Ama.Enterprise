@@ -1,9 +1,9 @@
 namespace Ama.Enterprise.P2p.UnitTests.Gossip.Services;
 
 using System.Net;
+using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
-using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.Services.Gossip;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -13,14 +13,14 @@ using Shouldly;
 public sealed class HttpTransportTests
 {
     private readonly Mock<IHttpClientFactory> httpClientFactoryMock;
-    private readonly Mock<IMessageSerializer<GossipMessage>> serializerMock;
+    private readonly Mock<ICrdtSerializer> serializerMock;
     private readonly Mock<ILogger<HttpTransport>> loggerMock;
     private readonly Mock<HttpMessageHandler> httpMessageHandlerMock;
 
     public HttpTransportTests()
     {
         this.httpClientFactoryMock = new Mock<IHttpClientFactory>();
-        this.serializerMock = new Mock<IMessageSerializer<GossipMessage>>();
+        this.serializerMock = new Mock<ICrdtSerializer>();
         this.loggerMock = new Mock<ILogger<HttpTransport>>();
         this.httpMessageHandlerMock = new Mock<HttpMessageHandler>();
     }
@@ -34,7 +34,7 @@ public sealed class HttpTransportTests
         var message = new GossipMessage(Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, new byte[] { 42 });
         var serializedBytes = new byte[] { 0x01, 0x02 };
 
-        this.serializerMock.Setup(s => s.Serialize(message)).Returns(serializedBytes);
+        this.serializerMock.Setup(s => s.SerializeToBytes(message)).Returns(serializedBytes);
 
         this.httpMessageHandlerMock.Protected()
             .Setup<Task<HttpResponseMessage>>(

@@ -34,7 +34,6 @@ public sealed class ServiceCollectionExtensionsTests
         options.Value.Fanout.ShouldBe(5);
         options.Value.ListenPort.ShouldBe(12345);
 
-        provider.GetRequiredService<IMessageSerializer<GossipMessage>>().ShouldBeOfType<SystemTextJsonGossipSerializer>();
         provider.GetRequiredService<IPeerRegistry>().ShouldBeOfType<InMemoryPeerRegistry>();
         provider.GetRequiredService<IPeerAuthenticator>().ShouldBeOfType<PassThroughPeerAuthenticator>();
         provider.GetRequiredService<IPeerSelector>().ShouldBeOfType<RandomPeerSelector>();
