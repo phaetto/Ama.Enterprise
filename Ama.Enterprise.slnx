@@ -7,6 +7,9 @@
   <Folder Name="/Apps/">
     <Project Path="Ama.Enterprise.CRDT.BlazorApp/Ama.Enterprise.CRDT.BlazorApp.csproj" Id="8fb88a8e-60af-420c-8cc2-1cdd1d967720" />
   </Folder>
+  <Folder Name="/ShowCases/">
+    <Project Path="Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj" />
+  </Folder>
   <Folder Name="/Solution Items/">
     <File Path=".github/workflows/ci.yml" />
     <File Path=".github/workflows/publish-nuget-manual.yml" />

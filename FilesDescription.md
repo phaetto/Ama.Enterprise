@@ -32,6 +32,8 @@
 | `$/Ama.Enterprise.CRDT.Testing/Ama.Enterprise.CRDT.Testing.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.UI/Ama.Enterprise.CRDT.UI.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT/Ama.Enterprise.CRDT.csproj` | No description provided. |
+| `$/Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj` | Showcase console application project displaying P2P feature flags integration, AOT readiness, and UDP cluster discovery. |
+| `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Main entry point containing an interactive UI for observing and interacting with distributed feature flags via gossip synchronization. |
 | `$/Ama.Enterprise.FeatureFlags.UnitTests/Ama.Enterprise.FeatureFlags.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags.UnitTests/Extensions/ServiceCollectionExtensionsTests.cs` | Unit tests covering the Dependency Injection registration extensions for feature flags and its P2P components. |
 | `$/Ama.Enterprise.FeatureFlags.UnitTests/Services/FeatureFlagClusterManagerTests.cs` | Unit tests validating local state mutations and DVV state requirements using the CRDT patcher/applicator decorators. |
@@ -41,6 +43,7 @@
 | `$/Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | DI extension methods for registering the feature flags module. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlag.cs` | Data structure representing a single feature flag. |
+| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagOptions.cs` | Configuration options for the feature flags module, including the CRDT ReplicaId mapping. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagState.cs` | Root CRDT document model containing the state of all feature flags. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsCrdtAotContext.cs` | AOT context for the feature flags models. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsJsonContext.cs` | JSON context for the feature flags models. |

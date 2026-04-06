@@ -5,29 +5,34 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services;
 using Ama.CRDT.Services.Serialization;
+using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Models.P2p;
 using Ama.Enterprise.P2p.Services.Gossip;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Background service responsible for broadcasting local state vectors periodically to synchronize feature flags across the P2P cluster.
 /// </summary>
 public sealed class FeatureFlagAntiEntropyService : BackgroundService
 {
-    private readonly IServiceScopeFactory serviceScopeFactory;
+    private readonly ICrdtScopeFactory crdtScopeFactory;
+    private readonly FeatureFlagOptions options;
     private readonly IGossipProtocol gossipProtocol;
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<FeatureFlagAntiEntropyService> logger;
 
     public FeatureFlagAntiEntropyService(
-        IServiceScopeFactory serviceScopeFactory,
+        ICrdtScopeFactory crdtScopeFactory,
+        IOptions<FeatureFlagOptions> options,
         IGossipProtocol gossipProtocol,
         ICrdtSerializer serializer,
         ILogger<FeatureFlagAntiEntropyService> logger)
     {
-        this.serviceScopeFactory = serviceScopeFactory ?? throw new ArgumentNullException(nameof(serviceScopeFactory));
+        this.crdtScopeFactory = crdtScopeFactory ?? throw new ArgumentNullException(nameof(crdtScopeFactory));
+        this.options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         this.gossipProtocol = gossipProtocol ?? throw new ArgumentNullException(nameof(gossipProtocol));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -43,7 +48,7 @@ public sealed class FeatureFlagAntiEntropyService : BackgroundService
         {
             try
             {
-                using var scope = serviceScopeFactory.CreateScope();
+                using var scope = crdtScopeFactory.CreateScope(options.ReplicaId);
                 var clusterManager = scope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
                 var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
                 

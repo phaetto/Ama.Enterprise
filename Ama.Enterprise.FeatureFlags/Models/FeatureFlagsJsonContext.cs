@@ -3,6 +3,7 @@ namespace Ama.Enterprise.FeatureFlags.Models;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using Ama.CRDT.Models;
+using Ama.Enterprise.FeatureFlags.Models.P2p;
 
 /// <summary>
 /// AOT-friendly JSON context for Feature Flags serialization.

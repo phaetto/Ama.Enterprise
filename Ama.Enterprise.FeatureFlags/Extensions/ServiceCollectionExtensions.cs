@@ -6,6 +6,7 @@ using Ama.CRDT.Models;
 using Ama.CRDT.Services.Decorators;
 using Ama.CRDT.Services.Journaling;
 using Ama.Enterprise.FeatureFlags.Models;
+using Ama.Enterprise.FeatureFlags.Models.P2p;
 using Ama.Enterprise.FeatureFlags.Services;
 using Ama.Enterprise.FeatureFlags.Services.P2p;
 using Ama.Enterprise.P2p.Models.Gossip;
@@ -20,11 +21,20 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Adds the feature flags system to the service collection.
     /// </summary>
-    public static IServiceCollection AddFeatureFlags(this IServiceCollection services)
+    public static IServiceCollection AddFeatureFlags(this IServiceCollection services, Action<FeatureFlagOptions>? configure = null)
     {
         if (services == null)
         {
             throw new ArgumentNullException(nameof(services));
+        }
+
+        if (configure != null)
+        {
+            services.Configure(configure);
+        }
+        else
+        {
+            services.Configure<FeatureFlagOptions>(_ => { });
         }
 
         // Register CRDT models specifically for feature flags
@@ -33,8 +43,7 @@ public static class ServiceCollectionExtensions
                 .AddCrdtAotContext<FeatureFlagsCrdtAotContext>();
 
         // Register the shared MemoryJournal as a singleton simulation for V1
-        services.AddSingleton<MemoryJournal>();
-        services.AddSingleton<ICrdtOperationJournal>(sp => sp.GetRequiredService<MemoryJournal>());
+        services.AddCrdtJournaling<MemoryJournal>();
 
         // Attach decorators for automatic journaling and compaction
         services.AddCrdtApplicatorDecorator<JournalingApplicatorDecorator>(DecoratorBehavior.After);
@@ -57,6 +66,7 @@ public static class ServiceCollectionExtensions
             throw new ArgumentNullException(nameof(services));
         }
 
+        services.AddCrdtJsonTypeInfoResolver(FeatureFlagP2pJsonContext.Default);
         services.AddSingleton<IMessageHandler<GossipMessage>, FeatureFlagGossipHandler>();
         services.AddHostedService<FeatureFlagAntiEntropyService>();
 
