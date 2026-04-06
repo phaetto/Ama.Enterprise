@@ -35,6 +35,7 @@
 | `$/Ama.Enterprise.P2p.IntegrationTests/Attributes/IntegrationFactAttribute.cs` | Custom xUnit `FactAttribute` providing a centralized toggle to enable or disable all integration tests. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Handlers/TestMessageHandler.cs` | Test handler implementation that captures received gossip messages in memory for assertions. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Models/TestNode.cs` | Data-transfer class orchestrating individual configured test nodes managing service scopes and lifecycles. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/P2pAdvancedIntegrationTests.cs` | Contains advanced integration tests validating high concurrency, multi-hop linear topologies, and TTL expiration behavior within the P2P network. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/P2pNetworkIntegrationTests.cs` | End-to-end integration tests validating real-world message propagation, network lifecycles, and deduplication capabilities. |
 | `$/Ama.Enterprise.P2p.UnitTests/Ama.Enterprise.P2p.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.UnitTests/Extensions/ServiceCollectionExtensionsTests.cs` | Unit tests for DI setup logic validating proper registration of core gossip services. |

@@ -1,6 +1,8 @@
 <Solution>
   <Folder Name="/Analyzers/">
     <Project Path="Ama.Enterprise.CRDT.Analyzers/Ama.Enterprise.CRDT.Analyzers.csproj" Id="ca718036-9dd1-42b1-a53a-158a6336f699" />
+    <Project Path="Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj" />
+    <Project Path="Ama.Enterprise.Project.Analyzers/Ama.Enterprise.Project.Analyzers.csproj" />
   </Folder>
   <Folder Name="/Apps/">
     <Project Path="Ama.Enterprise.CRDT.BlazorApp/Ama.Enterprise.CRDT.BlazorApp.csproj" Id="8fb88a8e-60af-420c-8cc2-1cdd1d967720" />
@@ -17,6 +19,7 @@
   <Project Path="Ama.Enterprise.CRDT/Ama.Enterprise.CRDT.csproj" />
   <Project Path="Ama.Enterprise.FeatureFlags.UnitTests/Ama.Enterprise.FeatureFlags.UnitTests.csproj" Id="d74539b1-a59f-40bc-81d1-e33de4e85be7" />
   <Project Path="Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj" Id="f29896b4-f84b-45fb-8742-3496884d770e" />
+  <Project Path="Ama.Enterprise.P2p.IntegrationTests/Ama.Enterprise.P2p.IntegrationTests.csproj" Id="15a7eaaf-b3d8-4ec7-a32b-25a409f265c7" />
   <Project Path="Ama.Enterprise.P2p.UnitTests/Ama.Enterprise.P2p.UnitTests.csproj" Id="59f1fd65-b40a-4eec-9c39-f99f1665b7f0" />
   <Project Path="Ama.Enterprise.P2p/Ama.Enterprise.P2p.csproj" />
 </Solution>

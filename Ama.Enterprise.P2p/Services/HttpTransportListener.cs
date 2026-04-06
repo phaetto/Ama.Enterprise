@@ -34,8 +34,9 @@ public sealed class HttpTransportListener(
         this.listenerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         this.httpListener = new HttpListener();
 
+        var host = string.IsNullOrWhiteSpace(this.options.Value.ListenHost) ? "+" : this.options.Value.ListenHost;
         var port = this.options.Value.ListenPort;
-        var prefix = $"http://+:{port}/p2p/gossip/";
+        var prefix = $"http://{host}:{port}/p2p/gossip/";
         
         this.httpListener.Prefixes.Add(prefix);
 
