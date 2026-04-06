@@ -12,4 +12,8 @@
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.5" />
   </ItemGroup>
 
+	<ItemGroup>
+		<ProjectReference Include="..\Ama.Enterprise.Project.Analyzers\Ama.Enterprise.Project.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+	</ItemGroup>
+
 </Project>
