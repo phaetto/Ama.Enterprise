@@ -45,9 +45,9 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
         // Use a distinct multicast port specifically for this test to avoid local execution collisions
         var multicastPort = 8035; 
 
-        var node1 = this.CreateDiscoveryNode(nodeId1, port1, multicastPort);
-        var node2 = this.CreateDiscoveryNode(nodeId2, port2, multicastPort);
-        var node3 = this.CreateDiscoveryNode(nodeId3, port3, multicastPort);
+        var node1 = CreateDiscoveryNode(nodeId1, port1, multicastPort);
+        var node2 = CreateDiscoveryNode(nodeId2, port2, multicastPort);
+        var node3 = CreateDiscoveryNode(nodeId3, port3, multicastPort);
 
         // Start all nodes so their UDP background listeners bind and become active
         await node1.HostedService.StartAsync(cancellationSource.Token);
@@ -84,7 +84,7 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
 
         services.AddLogging(builder => 
         {
-            builder.AddXunit(this.testOutputHelper);
+            builder.AddXunit(testOutputHelper);
             builder.SetMinimumLevel(LogLevel.Trace);
         });
 
@@ -100,7 +100,7 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
         });
 
         var provider = services.BuildServiceProvider();
-        this.serviceProviders.Add(provider);
+        serviceProviders.Add(provider);
 
         var discovery = provider.GetRequiredService<IPeerDiscovery>();
         
@@ -113,11 +113,11 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
 
     public void Dispose()
     {
-        foreach (var provider in this.serviceProviders)
+        foreach (var provider in serviceProviders)
         {
             provider.Dispose();
         }
         
-        this.serviceProviders.Clear();
+        serviceProviders.Clear();
     }
 }

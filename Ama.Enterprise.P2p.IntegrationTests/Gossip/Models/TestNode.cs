@@ -62,23 +62,23 @@ public sealed class TestNode : IAsyncDisposable
         IGossipProtocol protocol,
         IPeerRegistry registry)
     {
-        this.Provider = provider ?? throw new ArgumentNullException(nameof(provider));
-        this.Id = id;
-        this.Endpoint = endpoint;
-        this.Handler = handler ?? throw new ArgumentNullException(nameof(handler));
-        this.HostedService = hostedService ?? throw new ArgumentNullException(nameof(hostedService));
-        this.Protocol = protocol ?? throw new ArgumentNullException(nameof(protocol));
-        this.Registry = registry ?? throw new ArgumentNullException(nameof(registry));
+        Provider = provider ?? throw new ArgumentNullException(nameof(provider));
+        Id = id;
+        Endpoint = endpoint;
+        Handler = handler ?? throw new ArgumentNullException(nameof(handler));
+        HostedService = hostedService ?? throw new ArgumentNullException(nameof(hostedService));
+        Protocol = protocol ?? throw new ArgumentNullException(nameof(protocol));
+        Registry = registry ?? throw new ArgumentNullException(nameof(registry));
     }
 
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
-        if (this.HostedService is not null)
+        if (HostedService is not null)
         {
             try
             {
-                await this.HostedService.StopAsync(CancellationToken.None).ConfigureAwait(false);
+                await HostedService.StopAsync(CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception)
             {
@@ -86,9 +86,9 @@ public sealed class TestNode : IAsyncDisposable
             }
         }
 
-        if (this.Provider is not null)
+        if (Provider is not null)
         {
-            await this.Provider.DisposeAsync().ConfigureAwait(false);
+            await Provider.DisposeAsync().ConfigureAwait(false);
         }
     }
 }

@@ -19,24 +19,24 @@ public sealed class HttpTransportTests
 
     public HttpTransportTests()
     {
-        this.httpClientFactoryMock = new Mock<IHttpClientFactory>();
-        this.serializerMock = new Mock<ICrdtSerializer>();
-        this.loggerMock = new Mock<ILogger<HttpTransport>>();
-        this.httpMessageHandlerMock = new Mock<HttpMessageHandler>();
+        httpClientFactoryMock = new Mock<IHttpClientFactory>();
+        serializerMock = new Mock<ICrdtSerializer>();
+        loggerMock = new Mock<ILogger<HttpTransport>>();
+        httpMessageHandlerMock = new Mock<HttpMessageHandler>();
     }
 
     [Fact]
     public async Task SendAsync_ShouldPostSerializedMessageToEndpoint()
     {
         // Arrange
-        var transport = new HttpTransport(this.httpClientFactoryMock.Object, this.serializerMock.Object, this.loggerMock.Object);
+        var transport = new HttpTransport(httpClientFactoryMock.Object, serializerMock.Object, loggerMock.Object);
         var endpoint = new PeerEndpoint("192.168.1.10", 9000);
         var message = new GossipMessage(Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, new byte[] { 42 });
         var serializedBytes = new byte[] { 0x01, 0x02 };
 
-        this.serializerMock.Setup(s => s.SerializeToBytes(message)).Returns(serializedBytes);
+        serializerMock.Setup(s => s.SerializeToBytes(message)).Returns(serializedBytes);
 
-        this.httpMessageHandlerMock.Protected()
+        httpMessageHandlerMock.Protected()
             .Setup<Task<HttpResponseMessage>>(
                 "SendAsync",
                 ItExpr.Is<HttpRequestMessage>(req => 
@@ -47,14 +47,14 @@ public sealed class HttpTransportTests
             )
             .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
 
-        var httpClient = new HttpClient(this.httpMessageHandlerMock.Object);
-        this.httpClientFactoryMock.Setup(f => f.CreateClient("P2pTransport")).Returns(httpClient);
+        var httpClient = new HttpClient(httpMessageHandlerMock.Object);
+        httpClientFactoryMock.Setup(f => f.CreateClient("P2pTransport")).Returns(httpClient);
 
         // Act
         await transport.SendAsync(endpoint, message, CancellationToken.None);
 
         // Assert
-        this.httpMessageHandlerMock.Protected().Verify(
+        httpMessageHandlerMock.Protected().Verify(
             "SendAsync",
             Times.Once(),
             ItExpr.Is<HttpRequestMessage>(req => req.Method == HttpMethod.Post),
@@ -66,7 +66,7 @@ public sealed class HttpTransportTests
     public async Task SendAsync_ShouldThrow_WhenEndpointHostIsEmpty()
     {
         // Arrange
-        var transport = new HttpTransport(this.httpClientFactoryMock.Object, this.serializerMock.Object, this.loggerMock.Object);
+        var transport = new HttpTransport(httpClientFactoryMock.Object, serializerMock.Object, loggerMock.Object);
         var endpoint = new PeerEndpoint(string.Empty, 9000);
         var message = new GossipMessage(Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, new byte[] { 42 });
 

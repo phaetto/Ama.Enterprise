@@ -16,17 +16,17 @@ public sealed class HttpTransportListenerTests
 
     public HttpTransportListenerTests()
     {
-        this.serializerMock = new Mock<ICrdtSerializer>();
-        this.loggerMock = new Mock<ILogger<HttpTransportListener>>();
+        serializerMock = new Mock<ICrdtSerializer>();
+        loggerMock = new Mock<ILogger<HttpTransportListener>>();
         // Use a dynamic port to avoid conflicting with actual services if this runs fully
-        this.options = Options.Create(new GossipOptions { ListenPort = 0 }); 
+        options = Options.Create(new GossipOptions { ListenPort = 0 }); 
     }
 
     [Fact]
     public void Constructor_ShouldThrow_WhenOptionsIsNull()
     {
         // Act & Assert
-        Should.Throw<ArgumentNullException>(() => new HttpTransportListener(null!, this.serializerMock.Object, this.loggerMock.Object));
+        Should.Throw<ArgumentNullException>(() => new HttpTransportListener(null!, serializerMock.Object, loggerMock.Object));
     }
 
     [Fact(Skip = "Integration test binding to real OS ports")]
@@ -35,7 +35,7 @@ public sealed class HttpTransportListenerTests
         // Arrange
         // We use port 8080 explicitly for integration skip
         var localOptions = Options.Create(new GossipOptions { ListenPort = 8080 });
-        using var listener = new HttpTransportListener(localOptions, this.serializerMock.Object, this.loggerMock.Object);
+        using var listener = new HttpTransportListener(localOptions, serializerMock.Object, loggerMock.Object);
 
         // Act
         await listener.StartListeningAsync(_ => Task.CompletedTask, CancellationToken.None);

@@ -13,14 +13,14 @@ public sealed class MessageDispatcherTests
 
     public MessageDispatcherTests()
     {
-        this.loggerMock = new Mock<ILogger<MessageDispatcher<GossipMessage>>>();
+        loggerMock = new Mock<ILogger<MessageDispatcher<GossipMessage>>>();
     }
 
     [Fact]
     public void Constructor_ThrowsArgumentNullException_WhenHandlersIsNull()
     {
         // Act
-        var exception = Record.Exception(() => new MessageDispatcher<GossipMessage>(null!, this.loggerMock.Object));
+        var exception = Record.Exception(() => new MessageDispatcher<GossipMessage>(null!, loggerMock.Object));
 
         // Assert
         exception.ShouldNotBeNull();
@@ -51,7 +51,7 @@ public sealed class MessageDispatcherTests
         var handler2Mock = new Mock<IMessageHandler<GossipMessage>>();
         
         var handlers = new[] { handler1Mock.Object, handler2Mock.Object };
-        var dispatcher = new MessageDispatcher<GossipMessage>(handlers, this.loggerMock.Object);
+        var dispatcher = new MessageDispatcher<GossipMessage>(handlers, loggerMock.Object);
 
         var message = CreateSampleMessage();
         var cancellationToken = CancellationToken.None;
@@ -76,7 +76,7 @@ public sealed class MessageDispatcherTests
         var successfulHandlerMock = new Mock<IMessageHandler<GossipMessage>>();
         
         var handlers = new[] { failingHandlerMock.Object, successfulHandlerMock.Object };
-        var dispatcher = new MessageDispatcher<GossipMessage>(handlers, this.loggerMock.Object);
+        var dispatcher = new MessageDispatcher<GossipMessage>(handlers, loggerMock.Object);
 
         var message = CreateSampleMessage();
         var cancellationToken = CancellationToken.None;
@@ -95,7 +95,7 @@ public sealed class MessageDispatcherTests
     {
         // Arrange
         var handlers = Enumerable.Empty<IMessageHandler<GossipMessage>>();
-        var dispatcher = new MessageDispatcher<GossipMessage>(handlers, this.loggerMock.Object);
+        var dispatcher = new MessageDispatcher<GossipMessage>(handlers, loggerMock.Object);
 
         var message = CreateSampleMessage();
         var cancellationToken = CancellationToken.None;
@@ -113,7 +113,7 @@ public sealed class MessageDispatcherTests
         // Arrange
         var handlerMock = new Mock<IMessageHandler<GossipMessage>>();
         var handlers = new[] { handlerMock.Object };
-        var dispatcher = new MessageDispatcher<GossipMessage>(handlers, this.loggerMock.Object);
+        var dispatcher = new MessageDispatcher<GossipMessage>(handlers, loggerMock.Object);
 
         var message = CreateSampleMessage();
         using var cts = new CancellationTokenSource();

@@ -19,43 +19,43 @@ public sealed class GossipProtocolTests
 
     public GossipProtocolTests()
     {
-        this.transportMock = new Mock<ITransport<GossipMessage>>();
-        this.listenerMock = new Mock<ITransportListener<GossipMessage>>();
-        this.peerSelectorMock = new Mock<IPeerSelector>();
-        this.dispatcherMock = new Mock<IMessageDispatcher<GossipMessage>>();
-        this.loggerMock = new Mock<ILogger<GossipProtocol>>();
-        this.options = Options.Create(new GossipOptions { GossipInterval = TimeSpan.FromMilliseconds(50), Fanout = 2 });
+        transportMock = new Mock<ITransport<GossipMessage>>();
+        listenerMock = new Mock<ITransportListener<GossipMessage>>();
+        peerSelectorMock = new Mock<IPeerSelector>();
+        dispatcherMock = new Mock<IMessageDispatcher<GossipMessage>>();
+        loggerMock = new Mock<ILogger<GossipProtocol>>();
+        options = Options.Create(new GossipOptions { GossipInterval = TimeSpan.FromMilliseconds(50), Fanout = 2 });
     }
 
     private GossipProtocol CreateProtocol() => new(
-        this.options,
-        this.transportMock.Object,
-        this.listenerMock.Object,
-        this.peerSelectorMock.Object,
-        this.dispatcherMock.Object,
-        this.loggerMock.Object);
+        options,
+        transportMock.Object,
+        listenerMock.Object,
+        peerSelectorMock.Object,
+        dispatcherMock.Object,
+        loggerMock.Object);
 
     [Fact]
     public async Task StartAsync_ShouldStartListener()
     {
         // Arrange
-        using var protocol = this.CreateProtocol();
-        this.listenerMock.Setup(l => l.StartListeningAsync(It.IsAny<Func<GossipMessage, Task>>(), It.IsAny<CancellationToken>()))
+        using var protocol = CreateProtocol();
+        listenerMock.Setup(l => l.StartListeningAsync(It.IsAny<Func<GossipMessage, Task>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         // Act
         await protocol.StartAsync(CancellationToken.None);
 
         // Assert
-        this.listenerMock.Verify(l => l.StartListeningAsync(It.IsAny<Func<GossipMessage, Task>>(), It.IsAny<CancellationToken>()), Times.Once);
+        listenerMock.Verify(l => l.StartListeningAsync(It.IsAny<Func<GossipMessage, Task>>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
     public async Task BroadcastAsync_ShouldDispatchLocallyAndEnqueueForGossiping()
     {
         // Arrange
-        using var protocol = this.CreateProtocol();
-        this.listenerMock.Setup(l => l.StartListeningAsync(It.IsAny<Func<GossipMessage, Task>>(), It.IsAny<CancellationToken>()))
+        using var protocol = CreateProtocol();
+        listenerMock.Setup(l => l.StartListeningAsync(It.IsAny<Func<GossipMessage, Task>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
             
         var payload = new byte[] { 1, 2, 3 };
@@ -66,7 +66,7 @@ public sealed class GossipProtocolTests
         await protocol.BroadcastAsync(payload, CancellationToken.None);
 
         // Assert
-        this.dispatcherMock.Verify(d => d.DispatchAsync(
+        dispatcherMock.Verify(d => d.DispatchAsync(
             It.Is<GossipMessage>(m => m.Payload.ToArray().SequenceEqual(payload)), 
             It.IsAny<CancellationToken>()), Times.Once);
             
@@ -78,12 +78,12 @@ public sealed class GossipProtocolTests
     public async Task GossipLoop_ShouldForwardEnqueuedMessagesToSelectedPeers()
     {
         // Arrange
-        using var protocol = this.CreateProtocol();
-        this.listenerMock.Setup(l => l.StartListeningAsync(It.IsAny<Func<GossipMessage, Task>>(), It.IsAny<CancellationToken>()))
+        using var protocol = CreateProtocol();
+        listenerMock.Setup(l => l.StartListeningAsync(It.IsAny<Func<GossipMessage, Task>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
             
         var peerNode = new PeerNode(new PeerId(Guid.NewGuid()), new PeerEndpoint("localhost", 8080));
-        this.peerSelectorMock.Setup(ps => ps.GetPeersAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+        peerSelectorMock.Setup(ps => ps.GetPeersAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { peerNode });
 
         await protocol.StartAsync(CancellationToken.None);
@@ -94,7 +94,7 @@ public sealed class GossipProtocolTests
         await Task.Delay(150);
 
         // Assert
-        this.transportMock.Verify(t => t.SendAsync(
+        transportMock.Verify(t => t.SendAsync(
             It.Is<PeerEndpoint>(e => e.Host == "localhost" && e.Port == 8080),
             It.Is<GossipMessage>(m => m.Payload.ToArray().SequenceEqual(new byte[] { 1, 2, 3 })),
             It.IsAny<CancellationToken>()), Times.AtLeastOnce);

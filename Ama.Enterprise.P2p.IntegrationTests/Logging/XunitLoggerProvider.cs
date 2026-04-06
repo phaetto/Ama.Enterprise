@@ -22,7 +22,7 @@ public sealed class XunitLoggerProvider : ILoggerProvider
             throw new ArgumentException("Category name cannot be null or empty.", nameof(categoryName));
         }
 
-        return new XunitLogger(this.testOutputHelper, categoryName);
+        return new XunitLogger(testOutputHelper, categoryName);
     }
 
     public void Dispose()

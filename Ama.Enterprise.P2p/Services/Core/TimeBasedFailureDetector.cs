@@ -29,12 +29,12 @@ public sealed class TimeBasedFailureDetector(
             throw new ArgumentException("Peer ID cannot be empty.", nameof(peerId));
         }
 
-        this.lastHeartbeats.AddOrUpdate(
+        lastHeartbeats.AddOrUpdate(
             peerId,
             _ => DateTimeOffset.UtcNow,
             (_, _) => DateTimeOffset.UtcNow);
 
-        this.logger.LogTrace("Recorded heartbeat for peer {PeerId}.", peerId.Value);
+        logger.LogTrace("Recorded heartbeat for peer {PeerId}.", peerId.Value);
 
         return Task.CompletedTask;
     }
@@ -47,17 +47,17 @@ public sealed class TimeBasedFailureDetector(
             throw new ArgumentException("Peer ID cannot be empty.", nameof(peerId));
         }
 
-        if (!this.lastHeartbeats.TryGetValue(peerId, out var lastSeen))
+        if (!lastHeartbeats.TryGetValue(peerId, out var lastSeen))
         {
             // If we have never seen a heartbeat, we assume it's Dead or uninitialized.
             return Task.FromResult(PeerStatus.Dead);
         }
 
         var timeSinceLastHeartbeat = DateTimeOffset.UtcNow - lastSeen;
-        var heartbeatInterval = this.options.Value.HeartbeatInterval;
+        var heartbeatInterval = options.Value.HeartbeatInterval;
 
-        var suspectThreshold = TimeSpan.FromTicks(heartbeatInterval.Ticks * this.options.Value.SuspectThresholdMultiplier);
-        var deadThreshold = TimeSpan.FromTicks(heartbeatInterval.Ticks * this.options.Value.DeadThresholdMultiplier);
+        var suspectThreshold = TimeSpan.FromTicks(heartbeatInterval.Ticks * options.Value.SuspectThresholdMultiplier);
+        var deadThreshold = TimeSpan.FromTicks(heartbeatInterval.Ticks * options.Value.DeadThresholdMultiplier);
 
         if (timeSinceLastHeartbeat >= deadThreshold)
         {

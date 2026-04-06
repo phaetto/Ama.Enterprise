@@ -21,7 +21,7 @@ public sealed class MessageDispatcher<TMessage>(
     /// <inheritdoc />
     public async Task DispatchAsync(TMessage message, CancellationToken cancellationToken)
     {
-        foreach (var handler in this.handlers)
+        foreach (var handler in handlers)
         {
             try
             {
@@ -30,12 +30,12 @@ public sealed class MessageDispatcher<TMessage>(
             }
             catch (OperationCanceledException)
             {
-                this.logger.LogInformation("Message dispatching was canceled.");
+                logger.LogInformation("Message dispatching was canceled.");
                 throw;
             }
             catch (Exception ex)
             {
-                this.logger.LogError(ex, "Error occurred in handler {HandlerType} while processing message.", handler.GetType().Name);
+                logger.LogError(ex, "Error occurred in handler {HandlerType} while processing message.", handler.GetType().Name);
             }
         }
     }

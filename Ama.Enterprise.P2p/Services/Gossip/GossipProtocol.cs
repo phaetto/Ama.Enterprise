@@ -38,34 +38,34 @@ public sealed class GossipProtocol(
     /// <inheritdoc />
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        this.logger.LogInformation("Starting Gossip Protocol...");
+        logger.LogInformation("Starting Gossip Protocol...");
 
-        this.loopCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        loopCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        await this.listener.StartListeningAsync(this.HandleIncomingMessageAsync, this.loopCts.Token).ConfigureAwait(false);
+        await listener.StartListeningAsync(HandleIncomingMessageAsync, loopCts.Token).ConfigureAwait(false);
 
-        this.backgroundLoopTask = Task.Run(() => this.GossipLoopAsync(this.loopCts.Token), this.loopCts.Token);
+        backgroundLoopTask = Task.Run(() => GossipLoopAsync(loopCts.Token), loopCts.Token);
 
-        this.logger.LogInformation("Gossip Protocol started successfully.");
+        logger.LogInformation("Gossip Protocol started successfully.");
     }
 
     /// <inheritdoc />
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        this.logger.LogInformation("Stopping Gossip Protocol...");
+        logger.LogInformation("Stopping Gossip Protocol...");
 
-        if (this.loopCts is not null)
+        if (loopCts is not null)
         {
-            await this.loopCts.CancelAsync().ConfigureAwait(false);
+            await loopCts.CancelAsync().ConfigureAwait(false);
         }
 
-        await this.listener.StopListeningAsync(cancellationToken).ConfigureAwait(false);
+        await listener.StopListeningAsync(cancellationToken).ConfigureAwait(false);
 
-        if (this.backgroundLoopTask is not null)
+        if (backgroundLoopTask is not null)
         {
             try
             {
-                await this.backgroundLoopTask.ConfigureAwait(false);
+                await backgroundLoopTask.ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -73,7 +73,7 @@ public sealed class GossipProtocol(
             }
         }
 
-        this.logger.LogInformation("Gossip Protocol stopped.");
+        logger.LogInformation("Gossip Protocol stopped.");
     }
 
     /// <inheritdoc />
@@ -91,20 +91,20 @@ public sealed class GossipProtocol(
 
         var message = new GossipMessage(
             Guid.NewGuid(),
-            this.localPeerId,
-            this.options.Value.DefaultTimeToLive,
+            localPeerId,
+            options.Value.DefaultTimeToLive,
             payload);
 
-        this.logger.LogDebug("Broadcasting new message {MessageId} locally.", message.MessageId);
+        logger.LogDebug("Broadcasting new message {MessageId} locally.", message.MessageId);
 
         // Mark as seen so we don't process our own broadcast if it echoes back
-        this.seenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow);
+        seenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow);
 
         // Queue for gossip
-        this.messageQueue.Enqueue(message);
+        messageQueue.Enqueue(message);
 
         // Dispatch locally as well so the local node processes the operation
-        return this.dispatcher.DispatchAsync(message, cancellationToken);
+        return dispatcher.DispatchAsync(message, cancellationToken);
     }
 
     private async Task GossipLoopAsync(CancellationToken cancellationToken)
@@ -113,11 +113,11 @@ public sealed class GossipProtocol(
         {
             try
             {
-                await Task.Delay(this.options.Value.GossipInterval, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(options.Value.GossipInterval, cancellationToken).ConfigureAwait(false);
 
-                await this.PerformGossipTickAsync(cancellationToken).ConfigureAwait(false);
+                await PerformGossipTickAsync(cancellationToken).ConfigureAwait(false);
                 
-                this.CleanupSeenMessages();
+                CleanupSeenMessages();
             }
             catch (OperationCanceledException)
             {
@@ -125,20 +125,20 @@ public sealed class GossipProtocol(
             }
             catch (Exception ex)
             {
-                this.logger.LogError(ex, "An error occurred during the gossip tick.");
+                logger.LogError(ex, "An error occurred during the gossip tick.");
             }
         }
     }
 
     private async Task PerformGossipTickAsync(CancellationToken cancellationToken)
     {
-        if (this.messageQueue.IsEmpty)
+        if (messageQueue.IsEmpty)
         {
             return; // Nothing to gossip
         }
 
         // Fetching generic peers
-        var peers = (await this.peerSelector.GetPeersAsync(this.options.Value.Fanout, cancellationToken).ConfigureAwait(false)).ToList();
+        var peers = (await peerSelector.GetPeersAsync(options.Value.Fanout, cancellationToken).ConfigureAwait(false)).ToList();
         
         if (peers.Count == 0)
         {
@@ -147,7 +147,7 @@ public sealed class GossipProtocol(
 
         // Dequeue current snapshot of messages to forward
         var messagesToForward = new List<GossipMessage>();
-        while (this.messageQueue.TryDequeue(out var msg))
+        while (messageQueue.TryDequeue(out var msg))
         {
             messagesToForward.Add(msg);
         }
@@ -158,11 +158,11 @@ public sealed class GossipProtocol(
             {
                 try
                 {
-                    await this.transport.SendAsync(peer.Endpoint, message, cancellationToken).ConfigureAwait(false);
+                    await transport.SendAsync(peer.Endpoint, message, cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
-                    this.logger.LogWarning(ex, "Failed to send message {MessageId} to peer {PeerEndpoint}.", message.MessageId, peer.Endpoint.Host);
+                    logger.LogWarning(ex, "Failed to send message {MessageId} to peer {PeerEndpoint}.", message.MessageId, peer.Endpoint.Host);
                 }
             }
         }
@@ -170,28 +170,28 @@ public sealed class GossipProtocol(
 
     private async Task HandleIncomingMessageAsync(GossipMessage message)
     {
-        if (this.seenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow))
+        if (seenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow))
         {
-            this.logger.LogDebug("Received new gossip message {MessageId} from {SenderId}. TTL: {Ttl}", message.MessageId, message.SenderId.Value, message.TimeToLive);
+            logger.LogDebug("Received new gossip message {MessageId} from {SenderId}. TTL: {Ttl}", message.MessageId, message.SenderId.Value, message.TimeToLive);
 
             try
             {
                 // Dispatch to local business logic
-                if (this.loopCts is not null)
+                if (loopCts is not null)
                 {
-                    await this.dispatcher.DispatchAsync(message, this.loopCts.Token).ConfigureAwait(false);
+                    await dispatcher.DispatchAsync(message, loopCts.Token).ConfigureAwait(false);
                 }
 
                 // Decrement TTL and enqueue for further gossiping if still valid
                 if (message.TimeToLive > 1)
                 {
                     var forwardedMessage = message with { TimeToLive = message.TimeToLive - 1 };
-                    this.messageQueue.Enqueue(forwardedMessage);
+                    messageQueue.Enqueue(forwardedMessage);
                 }
             }
             catch (Exception ex)
             {
-                this.logger.LogError(ex, "Error processing incoming message {MessageId}.", message.MessageId);
+                logger.LogError(ex, "Error processing incoming message {MessageId}.", message.MessageId);
             }
         }
     }
@@ -199,11 +199,11 @@ public sealed class GossipProtocol(
     private void CleanupSeenMessages()
     {
         var threshold = DateTimeOffset.UtcNow.AddMinutes(-5); // Arbitrary expiry for seen messages
-        foreach (var kvp in this.seenMessages)
+        foreach (var kvp in seenMessages)
         {
             if (kvp.Value < threshold)
             {
-                this.seenMessages.TryRemove(kvp.Key, out _);
+                seenMessages.TryRemove(kvp.Key, out _);
             }
         }
     }
@@ -211,10 +211,10 @@ public sealed class GossipProtocol(
     /// <inheritdoc />
     public void Dispose()
     {
-        if (this.loopCts is not null)
+        if (loopCts is not null)
         {
-            this.loopCts.Cancel();
-            this.loopCts.Dispose();
+            loopCts.Cancel();
+            loopCts.Dispose();
         }
     }
 }

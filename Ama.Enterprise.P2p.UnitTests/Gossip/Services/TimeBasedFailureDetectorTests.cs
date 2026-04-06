@@ -14,14 +14,14 @@ public sealed class TimeBasedFailureDetectorTests
 
     public TimeBasedFailureDetectorTests()
     {
-        this.detectorOptions = new FailureDetectorOptions { HeartbeatInterval = TimeSpan.FromMilliseconds(50) }; // Short interval for testing
+        detectorOptions = new FailureDetectorOptions { HeartbeatInterval = TimeSpan.FromMilliseconds(50) }; // Short interval for testing
         
         var optionsMock = new Mock<IOptions<FailureDetectorOptions>>();
-        optionsMock.Setup(o => o.Value).Returns(this.detectorOptions);
+        optionsMock.Setup(o => o.Value).Returns(detectorOptions);
         
         var loggerMock = new Mock<ILogger<TimeBasedFailureDetector>>();
         
-        this.detector = new TimeBasedFailureDetector(optionsMock.Object, loggerMock.Object);
+        detector = new TimeBasedFailureDetector(optionsMock.Object, loggerMock.Object);
     }
 
     [Fact]
@@ -31,7 +31,7 @@ public sealed class TimeBasedFailureDetectorTests
         var peerId = new PeerId(Guid.NewGuid());
 
         // Act
-        var status = await this.detector.EvaluatePeerHealthAsync(peerId, CancellationToken.None);
+        var status = await detector.EvaluatePeerHealthAsync(peerId, CancellationToken.None);
 
         // Assert
         status.ShouldBe(PeerStatus.Dead);
@@ -42,10 +42,10 @@ public sealed class TimeBasedFailureDetectorTests
     {
         // Arrange
         var peerId = new PeerId(Guid.NewGuid());
-        await this.detector.RecordHeartbeatAsync(peerId, CancellationToken.None);
+        await detector.RecordHeartbeatAsync(peerId, CancellationToken.None);
 
         // Act
-        var status = await this.detector.EvaluatePeerHealthAsync(peerId, CancellationToken.None);
+        var status = await detector.EvaluatePeerHealthAsync(peerId, CancellationToken.None);
 
         // Assert
         status.ShouldBe(PeerStatus.Active);
@@ -56,13 +56,13 @@ public sealed class TimeBasedFailureDetectorTests
     {
         // Arrange
         var peerId = new PeerId(Guid.NewGuid());
-        await this.detector.RecordHeartbeatAsync(peerId, CancellationToken.None);
+        await detector.RecordHeartbeatAsync(peerId, CancellationToken.None);
 
         // Wait to miss > 3 intervals (50ms * 3 = 150ms)
         await Task.Delay(180);
 
         // Act
-        var status = await this.detector.EvaluatePeerHealthAsync(peerId, CancellationToken.None);
+        var status = await detector.EvaluatePeerHealthAsync(peerId, CancellationToken.None);
 
         // Assert
         // Since Task.Delay is not 100% precise, we assert Suspect or Dead just in case the delay spiked over 6 intervals.
@@ -81,13 +81,13 @@ public sealed class TimeBasedFailureDetectorTests
     {
         // Arrange
         var peerId = new PeerId(Guid.NewGuid());
-        await this.detector.RecordHeartbeatAsync(peerId, CancellationToken.None);
+        await detector.RecordHeartbeatAsync(peerId, CancellationToken.None);
 
         // Wait to miss > 6 intervals (50ms * 6 = 300ms)
         await Task.Delay(350);
 
         // Act
-        var status = await this.detector.EvaluatePeerHealthAsync(peerId, CancellationToken.None);
+        var status = await detector.EvaluatePeerHealthAsync(peerId, CancellationToken.None);
 
         // Assert
         status.ShouldBe(PeerStatus.Dead);
@@ -98,7 +98,7 @@ public sealed class TimeBasedFailureDetectorTests
     {
         // Act & Assert
         await Should.ThrowAsync<ArgumentException>(async () =>
-            await this.detector.RecordHeartbeatAsync(new PeerId(Guid.Empty), CancellationToken.None));
+            await detector.RecordHeartbeatAsync(new PeerId(Guid.Empty), CancellationToken.None));
     }
 
     [Fact]
@@ -106,6 +106,6 @@ public sealed class TimeBasedFailureDetectorTests
     {
         // Act & Assert
         await Should.ThrowAsync<ArgumentException>(async () =>
-            await this.detector.EvaluatePeerHealthAsync(new PeerId(Guid.Empty), CancellationToken.None));
+            await detector.EvaluatePeerHealthAsync(new PeerId(Guid.Empty), CancellationToken.None));
     }
 }

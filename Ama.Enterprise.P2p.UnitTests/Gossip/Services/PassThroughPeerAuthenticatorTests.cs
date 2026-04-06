@@ -13,7 +13,7 @@ public sealed class PassThroughPeerAuthenticatorTests
     public PassThroughPeerAuthenticatorTests()
     {
         var loggerMock = new Mock<ILogger<PassThroughPeerAuthenticator>>();
-        this.authenticator = new PassThroughPeerAuthenticator(loggerMock.Object);
+        authenticator = new PassThroughPeerAuthenticator(loggerMock.Object);
     }
 
     [Fact]
@@ -24,7 +24,7 @@ public sealed class PassThroughPeerAuthenticatorTests
         var handshakeData = new byte[] { 1, 2, 3 }.AsMemory();
 
         // Act
-        var result = await this.authenticator.AuthenticateAsync(node, handshakeData, CancellationToken.None);
+        var result = await authenticator.AuthenticateAsync(node, handshakeData, CancellationToken.None);
 
         // Assert
         result.ShouldBeTrue();
@@ -38,6 +38,6 @@ public sealed class PassThroughPeerAuthenticatorTests
         
         // Act & Assert
         await Should.ThrowAsync<ArgumentException>(async () => 
-            await this.authenticator.AuthenticateAsync(node, ReadOnlyMemory<byte>.Empty, CancellationToken.None));
+            await authenticator.AuthenticateAsync(node, ReadOnlyMemory<byte>.Empty, CancellationToken.None));
     }
 }

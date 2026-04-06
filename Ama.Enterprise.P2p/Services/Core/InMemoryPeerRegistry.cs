@@ -31,7 +31,7 @@ public sealed class InMemoryPeerRegistry(
         PeerStatus? oldStatus = null;
         var entry = new PeerEntry(node, status);
 
-        this.peers.AddOrUpdate(
+        peers.AddOrUpdate(
             node.Id,
             _ =>
             {
@@ -46,13 +46,13 @@ public sealed class InMemoryPeerRegistry(
 
         if (isNew)
         {
-            this.logger.LogInformation("New peer joined the registry: {PeerId} at {Endpoint}", node.Id.Value, node.Endpoint.Host);
-            await this.NotifyObserversAsync(observer => observer.OnPeerJoinedAsync(node, cancellationToken)).ConfigureAwait(false);
+            logger.LogInformation("New peer joined the registry: {PeerId} at {Endpoint}", node.Id.Value, node.Endpoint.Host);
+            await NotifyObserversAsync(observer => observer.OnPeerJoinedAsync(node, cancellationToken)).ConfigureAwait(false);
         }
         else if (oldStatus.HasValue && oldStatus.Value != status)
         {
-            this.logger.LogInformation("Peer {PeerId} status changed from {OldStatus} to {NewStatus}", node.Id.Value, oldStatus.Value, status);
-            await this.NotifyObserversAsync(observer => observer.OnPeerStatusChangedAsync(node.Id, status, cancellationToken)).ConfigureAwait(false);
+            logger.LogInformation("Peer {PeerId} status changed from {OldStatus} to {NewStatus}", node.Id.Value, oldStatus.Value, status);
+            await NotifyObserversAsync(observer => observer.OnPeerStatusChangedAsync(node.Id, status, cancellationToken)).ConfigureAwait(false);
         }
     }
 
@@ -64,10 +64,10 @@ public sealed class InMemoryPeerRegistry(
             throw new ArgumentException("Peer ID cannot be empty.", nameof(peerId));
         }
 
-        if (this.peers.TryRemove(peerId, out _))
+        if (peers.TryRemove(peerId, out _))
         {
-            this.logger.LogInformation("Peer {PeerId} was removed from the registry.", peerId.Value);
-            await this.NotifyObserversAsync(observer => observer.OnPeerDepartedAsync(peerId, cancellationToken)).ConfigureAwait(false);
+            logger.LogInformation("Peer {PeerId} was removed from the registry.", peerId.Value);
+            await NotifyObserversAsync(observer => observer.OnPeerDepartedAsync(peerId, cancellationToken)).ConfigureAwait(false);
         }
     }
 
@@ -75,7 +75,7 @@ public sealed class InMemoryPeerRegistry(
     public Task<IEnumerable<PeerNode>> GetAllPeersAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var allPeers = this.peers.Values.Select(entry => entry.Node).ToList();
+        var allPeers = peers.Values.Select(entry => entry.Node).ToList();
         return Task.FromResult<IEnumerable<PeerNode>>(allPeers);
     }
 
@@ -83,7 +83,7 @@ public sealed class InMemoryPeerRegistry(
     public Task<IEnumerable<PeerNode>> GetPeersByStatusAsync(PeerStatus status, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var filteredPeers = this.peers.Values
+        var filteredPeers = peers.Values
             .Where(entry => entry.Status == status)
             .Select(entry => entry.Node)
             .ToList();
@@ -93,7 +93,7 @@ public sealed class InMemoryPeerRegistry(
 
     private async Task NotifyObserversAsync(Func<IPeerTopologyObserver, Task> action)
     {
-        foreach (var observer in this.topologyObservers)
+        foreach (var observer in topologyObservers)
         {
             try
             {
@@ -101,7 +101,7 @@ public sealed class InMemoryPeerRegistry(
             }
             catch (Exception ex)
             {
-                this.logger.LogError(ex, "An error occurred while notifying topology observer {ObserverType}.", observer.GetType().Name);
+                logger.LogError(ex, "An error occurred while notifying topology observer {ObserverType}.", observer.GetType().Name);
             }
         }
     }

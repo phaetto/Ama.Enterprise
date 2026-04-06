@@ -14,9 +14,9 @@ public sealed class InMemoryPeerRegistryTests
 
     public InMemoryPeerRegistryTests()
     {
-        this.observerMock = new Mock<IPeerTopologyObserver>();
-        this.loggerMock = new Mock<ILogger<InMemoryPeerRegistry>>();
-        this.registry = new InMemoryPeerRegistry([this.observerMock.Object], this.loggerMock.Object);
+        observerMock = new Mock<IPeerTopologyObserver>();
+        loggerMock = new Mock<ILogger<InMemoryPeerRegistry>>();
+        registry = new InMemoryPeerRegistry([observerMock.Object], loggerMock.Object);
     }
 
     [Fact]
@@ -27,14 +27,14 @@ public sealed class InMemoryPeerRegistryTests
         var node = new PeerNode(peerId, new PeerEndpoint("localhost", 8080));
 
         // Act
-        await this.registry.AddOrUpdatePeerAsync(node, PeerStatus.Active, CancellationToken.None);
+        await registry.AddOrUpdatePeerAsync(node, PeerStatus.Active, CancellationToken.None);
 
         // Assert
-        var peers = await this.registry.GetAllPeersAsync(CancellationToken.None);
+        var peers = await registry.GetAllPeersAsync(CancellationToken.None);
         peers.ShouldContain(node);
 
-        this.observerMock.Verify(o => o.OnPeerJoinedAsync(node, It.IsAny<CancellationToken>()), Times.Once);
-        this.observerMock.Verify(o => o.OnPeerStatusChangedAsync(It.IsAny<PeerId>(), It.IsAny<PeerStatus>(), It.IsAny<CancellationToken>()), Times.Never);
+        observerMock.Verify(o => o.OnPeerJoinedAsync(node, It.IsAny<CancellationToken>()), Times.Once);
+        observerMock.Verify(o => o.OnPeerStatusChangedAsync(It.IsAny<PeerId>(), It.IsAny<PeerStatus>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -44,17 +44,17 @@ public sealed class InMemoryPeerRegistryTests
         var peerId = new PeerId(Guid.NewGuid());
         var node = new PeerNode(peerId, new PeerEndpoint("localhost", 8080));
         
-        await this.registry.AddOrUpdatePeerAsync(node, PeerStatus.Active, CancellationToken.None);
-        this.observerMock.Invocations.Clear();
+        await registry.AddOrUpdatePeerAsync(node, PeerStatus.Active, CancellationToken.None);
+        observerMock.Invocations.Clear();
 
         // Act
-        await this.registry.AddOrUpdatePeerAsync(node, PeerStatus.Suspect, CancellationToken.None);
+        await registry.AddOrUpdatePeerAsync(node, PeerStatus.Suspect, CancellationToken.None);
 
         // Assert
-        this.observerMock.Verify(o => o.OnPeerJoinedAsync(It.IsAny<PeerNode>(), It.IsAny<CancellationToken>()), Times.Never);
-        this.observerMock.Verify(o => o.OnPeerStatusChangedAsync(peerId, PeerStatus.Suspect, It.IsAny<CancellationToken>()), Times.Once);
+        observerMock.Verify(o => o.OnPeerJoinedAsync(It.IsAny<PeerNode>(), It.IsAny<CancellationToken>()), Times.Never);
+        observerMock.Verify(o => o.OnPeerStatusChangedAsync(peerId, PeerStatus.Suspect, It.IsAny<CancellationToken>()), Times.Once);
 
-        var suspectPeers = await this.registry.GetPeersByStatusAsync(PeerStatus.Suspect, CancellationToken.None);
+        var suspectPeers = await registry.GetPeersByStatusAsync(PeerStatus.Suspect, CancellationToken.None);
         suspectPeers.ShouldContain(node);
     }
 
@@ -65,17 +65,17 @@ public sealed class InMemoryPeerRegistryTests
         var peerId = new PeerId(Guid.NewGuid());
         var node = new PeerNode(peerId, new PeerEndpoint("localhost", 8080));
         
-        await this.registry.AddOrUpdatePeerAsync(node, PeerStatus.Active, CancellationToken.None);
-        this.observerMock.Invocations.Clear();
+        await registry.AddOrUpdatePeerAsync(node, PeerStatus.Active, CancellationToken.None);
+        observerMock.Invocations.Clear();
 
         // Act
-        await this.registry.RemovePeerAsync(peerId, CancellationToken.None);
+        await registry.RemovePeerAsync(peerId, CancellationToken.None);
 
         // Assert
-        var peers = await this.registry.GetAllPeersAsync(CancellationToken.None);
+        var peers = await registry.GetAllPeersAsync(CancellationToken.None);
         peers.ShouldBeEmpty();
 
-        this.observerMock.Verify(o => o.OnPeerDepartedAsync(peerId, It.IsAny<CancellationToken>()), Times.Once);
+        observerMock.Verify(o => o.OnPeerDepartedAsync(peerId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -87,6 +87,6 @@ public sealed class InMemoryPeerRegistryTests
 
         // Act & Assert
         await Should.ThrowAsync<ArgumentException>(async () => 
-            await this.registry.AddOrUpdatePeerAsync(node, PeerStatus.Active, CancellationToken.None));
+            await registry.AddOrUpdatePeerAsync(node, PeerStatus.Active, CancellationToken.None));
     }
 }

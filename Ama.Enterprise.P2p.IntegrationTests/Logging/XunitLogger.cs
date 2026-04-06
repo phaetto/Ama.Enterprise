@@ -43,11 +43,11 @@ public sealed class XunitLogger : ILogger
         try
         {
             var message = formatter(state, exception);
-            this.testOutputHelper.WriteLine($"[{logLevel}] {this.categoryName}: {message}");
+            testOutputHelper.WriteLine($"[{logLevel}] {categoryName}: {message}");
             
             if (exception is not null)
             {
-                this.testOutputHelper.WriteLine(exception.ToString());
+                testOutputHelper.WriteLine(exception.ToString());
             }
         }
         catch (InvalidOperationException)

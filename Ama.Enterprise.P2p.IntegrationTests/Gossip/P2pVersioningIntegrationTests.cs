@@ -37,7 +37,7 @@ public sealed class P2pVersioningIntegrationTests
     public async Task Network_ShouldRejectMessages_WithIncompatibleMajorProtocolVersion()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var node = this.CreateTestNode(8210);
+        await using var node = CreateTestNode(8210);
         await node.HostedService.StartAsync(cts.Token);
 
         var localVersion = Version.Parse(Constants.ProtocolVersion);
@@ -62,7 +62,7 @@ public sealed class P2pVersioningIntegrationTests
     public async Task Network_ShouldAcceptMessages_WithCompatibleProtocolVersion_ForBackwardsCompatibility()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var node = this.CreateTestNode(8211);
+        await using var node = CreateTestNode(8211);
         await node.HostedService.StartAsync(cts.Token);
 
         var localVersion = Version.Parse(Constants.ProtocolVersion);
@@ -93,7 +93,7 @@ public sealed class P2pVersioningIntegrationTests
     public async Task Network_ShouldAcceptMessages_WithCurrentYamlProtocolVersion_0_1()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var node = this.CreateTestNode(8212);
+        await using var node = CreateTestNode(8212);
         await node.HostedService.StartAsync(cts.Token);
 
         // This explicit test directly maps to the deployed YAML version. 
@@ -124,7 +124,7 @@ public sealed class P2pVersioningIntegrationTests
 
         services.AddLogging(builder => 
         {
-            builder.AddXunit(this.testOutputHelper);
+            builder.AddXunit(testOutputHelper);
             builder.SetMinimumLevel(LogLevel.Trace);
         });
 

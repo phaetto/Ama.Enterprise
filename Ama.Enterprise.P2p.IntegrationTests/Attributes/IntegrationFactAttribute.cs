@@ -21,7 +21,7 @@ public sealed class IntegrationFactAttribute : FactAttribute
     {
         if (!EnableIntegrationTests)
         {
-            this.Skip = "Integration tests are disabled by default. Change 'EnableIntegrationTests' in IntegrationFactAttribute to true to execute.";
+            Skip = "Integration tests are disabled by default. Change 'EnableIntegrationTests' in IntegrationFactAttribute to true to execute.";
         }
     }
 }

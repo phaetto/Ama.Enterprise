@@ -26,7 +26,7 @@ public sealed class TestedProtocolVersionAttribute : Attribute
     /// <param name="minor">The minor version number.</param>
     public TestedProtocolVersionAttribute(int major, int minor)
     {
-        this.Major = major;
-        this.Minor = minor;
+        Major = major;
+        Minor = minor;
     }
 }

@@ -40,19 +40,19 @@ public sealed class P2pAdvancedIntegrationTests
 
         // Create a linear chain: A <-> B <-> C <-> D
         // Node A only knows B, Node B knows A and C, Node C knows B and D, Node D only knows C.
-        await using var nodeA = this.CreateTestNode(8201);
-        await using var nodeB = this.CreateTestNode(8202);
-        await using var nodeC = this.CreateTestNode(8203);
-        await using var nodeD = this.CreateTestNode(8204);
+        await using var nodeA = CreateTestNode(8201);
+        await using var nodeB = CreateTestNode(8202);
+        await using var nodeC = CreateTestNode(8203);
+        await using var nodeD = CreateTestNode(8204);
 
-        await this.RegisterPeerAsync(nodeA, nodeB, cts.Token);
-        await this.RegisterPeerAsync(nodeB, nodeA, cts.Token);
+        await RegisterPeerAsync(nodeA, nodeB, cts.Token);
+        await RegisterPeerAsync(nodeB, nodeA, cts.Token);
         
-        await this.RegisterPeerAsync(nodeB, nodeC, cts.Token);
-        await this.RegisterPeerAsync(nodeC, nodeB, cts.Token);
+        await RegisterPeerAsync(nodeB, nodeC, cts.Token);
+        await RegisterPeerAsync(nodeC, nodeB, cts.Token);
         
-        await this.RegisterPeerAsync(nodeC, nodeD, cts.Token);
-        await this.RegisterPeerAsync(nodeD, nodeC, cts.Token);
+        await RegisterPeerAsync(nodeC, nodeD, cts.Token);
+        await RegisterPeerAsync(nodeD, nodeC, cts.Token);
 
         await nodeA.HostedService.StartAsync(cts.Token);
         await nodeB.HostedService.StartAsync(cts.Token);
@@ -66,10 +66,10 @@ public sealed class P2pAdvancedIntegrationTests
         await Task.Delay(TimeSpan.FromSeconds(4), cts.Token);
 
         // Assert that the message successfully hopped through B and C to reach D
-        this.HasPayload(nodeA, "ChainTopologyMessage").ShouldBeTrue(); // A also receives/processes the broadcast locally or via echo.
-        this.HasPayload(nodeB, "ChainTopologyMessage").ShouldBeTrue();
-        this.HasPayload(nodeC, "ChainTopologyMessage").ShouldBeTrue();
-        this.HasPayload(nodeD, "ChainTopologyMessage").ShouldBeTrue();
+        HasPayload(nodeA, "ChainTopologyMessage").ShouldBeTrue(); // A also receives/processes the broadcast locally or via echo.
+        HasPayload(nodeB, "ChainTopologyMessage").ShouldBeTrue();
+        HasPayload(nodeC, "ChainTopologyMessage").ShouldBeTrue();
+        HasPayload(nodeD, "ChainTopologyMessage").ShouldBeTrue();
     }
 
     [IntegrationFact]
@@ -78,15 +78,15 @@ public sealed class P2pAdvancedIntegrationTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         // Nodes configured with a strict TTL of 1
-        await using var nodeA = this.CreateTestNode(8205, defaultTtl: 1);
-        await using var nodeB = this.CreateTestNode(8206, defaultTtl: 1);
-        await using var nodeC = this.CreateTestNode(8207, defaultTtl: 1);
+        await using var nodeA = CreateTestNode(8205, defaultTtl: 1);
+        await using var nodeB = CreateTestNode(8206, defaultTtl: 1);
+        await using var nodeC = CreateTestNode(8207, defaultTtl: 1);
 
         // Chain topology: A <-> B <-> C
-        await this.RegisterPeerAsync(nodeA, nodeB, cts.Token);
-        await this.RegisterPeerAsync(nodeB, nodeA, cts.Token);
-        await this.RegisterPeerAsync(nodeB, nodeC, cts.Token);
-        await this.RegisterPeerAsync(nodeC, nodeB, cts.Token);
+        await RegisterPeerAsync(nodeA, nodeB, cts.Token);
+        await RegisterPeerAsync(nodeB, nodeA, cts.Token);
+        await RegisterPeerAsync(nodeB, nodeC, cts.Token);
+        await RegisterPeerAsync(nodeC, nodeB, cts.Token);
 
         await nodeA.HostedService.StartAsync(cts.Token);
         await nodeB.HostedService.StartAsync(cts.Token);
@@ -100,10 +100,10 @@ public sealed class P2pAdvancedIntegrationTests
         await Task.Delay(TimeSpan.FromSeconds(3), cts.Token);
 
         // Assert Node B got the message
-        this.HasPayload(nodeB, "TtlExpirationMessage").ShouldBeTrue();
+        HasPayload(nodeB, "TtlExpirationMessage").ShouldBeTrue();
         
         // Assert Node C did NOT get the message due to TTL exhaustion at Node B
-        this.HasPayload(nodeC, "TtlExpirationMessage").ShouldBeFalse();
+        HasPayload(nodeC, "TtlExpirationMessage").ShouldBeFalse();
     }
 
     [IntegrationFact]
@@ -111,11 +111,11 @@ public sealed class P2pAdvancedIntegrationTests
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
 
-        await using var nodeA = this.CreateTestNode(8208);
-        await using var nodeB = this.CreateTestNode(8209);
+        await using var nodeA = CreateTestNode(8208);
+        await using var nodeB = CreateTestNode(8209);
 
-        await this.RegisterPeerAsync(nodeA, nodeB, cts.Token);
-        await this.RegisterPeerAsync(nodeB, nodeA, cts.Token);
+        await RegisterPeerAsync(nodeA, nodeB, cts.Token);
+        await RegisterPeerAsync(nodeB, nodeA, cts.Token);
 
         await nodeA.HostedService.StartAsync(cts.Token);
         await nodeB.HostedService.StartAsync(cts.Token);
@@ -139,7 +139,7 @@ public sealed class P2pAdvancedIntegrationTests
 
         for (var i = 0; i < messageCount; i++)
         {
-            this.HasPayload(nodeB, $"ConcurrentMessage_{i}").ShouldBeTrue();
+            HasPayload(nodeB, $"ConcurrentMessage_{i}").ShouldBeTrue();
         }
     }
 
@@ -167,7 +167,7 @@ public sealed class P2pAdvancedIntegrationTests
         
         services.AddLogging(builder => 
         {
-            builder.AddXunit(this.testOutputHelper);
+            builder.AddXunit(testOutputHelper);
             builder.SetMinimumLevel(LogLevel.Trace);
         });
 

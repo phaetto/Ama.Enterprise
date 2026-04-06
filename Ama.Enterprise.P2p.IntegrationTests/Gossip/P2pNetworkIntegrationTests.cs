@@ -40,17 +40,17 @@ public sealed class P2pNetworkIntegrationTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         // Create 3 independent nodes running locally on different ports
-        await using var nodeA = this.CreateTestNode(8101);
-        await using var nodeB = this.CreateTestNode(8102);
-        await using var nodeC = this.CreateTestNode(8103);
+        await using var nodeA = CreateTestNode(8101);
+        await using var nodeB = CreateTestNode(8102);
+        await using var nodeC = CreateTestNode(8103);
 
         // Establish a mesh topology for quick propagation
-        await this.RegisterPeerAsync(nodeA, nodeB, cts.Token);
-        await this.RegisterPeerAsync(nodeA, nodeC, cts.Token);
-        await this.RegisterPeerAsync(nodeB, nodeA, cts.Token);
-        await this.RegisterPeerAsync(nodeB, nodeC, cts.Token);
-        await this.RegisterPeerAsync(nodeC, nodeA, cts.Token);
-        await this.RegisterPeerAsync(nodeC, nodeB, cts.Token);
+        await RegisterPeerAsync(nodeA, nodeB, cts.Token);
+        await RegisterPeerAsync(nodeA, nodeC, cts.Token);
+        await RegisterPeerAsync(nodeB, nodeA, cts.Token);
+        await RegisterPeerAsync(nodeB, nodeC, cts.Token);
+        await RegisterPeerAsync(nodeC, nodeA, cts.Token);
+        await RegisterPeerAsync(nodeC, nodeB, cts.Token);
 
         // Start generic host services (opens ports)
         await nodeA.HostedService.StartAsync(cts.Token);
@@ -78,10 +78,10 @@ public sealed class P2pNetworkIntegrationTests
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
-        await using var nodeA = this.CreateTestNode(8104);
-        await using var nodeB = this.CreateTestNode(8105);
+        await using var nodeA = CreateTestNode(8104);
+        await using var nodeB = CreateTestNode(8105);
 
-        await this.RegisterPeerAsync(nodeA, nodeB, cts.Token);
+        await RegisterPeerAsync(nodeA, nodeB, cts.Token);
         await nodeA.HostedService.StartAsync(cts.Token);
         await nodeB.HostedService.StartAsync(cts.Token);
 
@@ -107,7 +107,7 @@ public sealed class P2pNetworkIntegrationTests
     public async Task BroadcastAsync_ShouldThrow_WhenPayloadExceedsLimit()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await using var nodeA = this.CreateTestNode(8106);
+        await using var nodeA = CreateTestNode(8106);
 
         var largePayload = new byte[Ama.Enterprise.P2p.Constants.MaximumPayloadSizeBytes + 1];
 
@@ -124,17 +124,17 @@ public sealed class P2pNetworkIntegrationTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
 
         // Use distinct ports to avoid parallel test execution conflicts
-        await using var nodeA = this.CreateTestNode(8111);
-        await using var nodeB = this.CreateTestNode(8112);
-        await using var nodeC = this.CreateTestNode(8113);
+        await using var nodeA = CreateTestNode(8111);
+        await using var nodeB = CreateTestNode(8112);
+        await using var nodeC = CreateTestNode(8113);
 
         // Phase 1: Setup initial A-B-C mesh
-        await this.RegisterPeerAsync(nodeA, nodeB, cts.Token);
-        await this.RegisterPeerAsync(nodeA, nodeC, cts.Token);
-        await this.RegisterPeerAsync(nodeB, nodeA, cts.Token);
-        await this.RegisterPeerAsync(nodeB, nodeC, cts.Token);
-        await this.RegisterPeerAsync(nodeC, nodeA, cts.Token);
-        await this.RegisterPeerAsync(nodeC, nodeB, cts.Token);
+        await RegisterPeerAsync(nodeA, nodeB, cts.Token);
+        await RegisterPeerAsync(nodeA, nodeC, cts.Token);
+        await RegisterPeerAsync(nodeB, nodeA, cts.Token);
+        await RegisterPeerAsync(nodeB, nodeC, cts.Token);
+        await RegisterPeerAsync(nodeC, nodeA, cts.Token);
+        await RegisterPeerAsync(nodeC, nodeB, cts.Token);
 
         await nodeA.HostedService.StartAsync(cts.Token);
         await nodeB.HostedService.StartAsync(cts.Token);
@@ -147,9 +147,9 @@ public sealed class P2pNetworkIntegrationTests
         await Task.Delay(TimeSpan.FromSeconds(3), cts.Token);
 
         // Assert Phase 1: Everyone got Message 1
-        this.HasPayload(nodeA, "Message_Phase1").ShouldBeTrue();
-        this.HasPayload(nodeB, "Message_Phase1").ShouldBeTrue();
-        this.HasPayload(nodeC, "Message_Phase1").ShouldBeTrue();
+        HasPayload(nodeA, "Message_Phase1").ShouldBeTrue();
+        HasPayload(nodeB, "Message_Phase1").ShouldBeTrue();
+        HasPayload(nodeC, "Message_Phase1").ShouldBeTrue();
 
         // Phase 2: Node C crashes/drops out
         await nodeC.HostedService.StopAsync(cts.Token);
@@ -157,12 +157,12 @@ public sealed class P2pNetworkIntegrationTests
         await nodeB.Registry.RemovePeerAsync(nodeC.Id, cts.Token);
 
         // Phase 3: Node D joins the network mid-flight
-        await using var nodeD = this.CreateTestNode(8114);
+        await using var nodeD = CreateTestNode(8114);
         
-        await this.RegisterPeerAsync(nodeA, nodeD, cts.Token);
-        await this.RegisterPeerAsync(nodeB, nodeD, cts.Token);
-        await this.RegisterPeerAsync(nodeD, nodeA, cts.Token);
-        await this.RegisterPeerAsync(nodeD, nodeB, cts.Token);
+        await RegisterPeerAsync(nodeA, nodeD, cts.Token);
+        await RegisterPeerAsync(nodeB, nodeD, cts.Token);
+        await RegisterPeerAsync(nodeD, nodeA, cts.Token);
+        await RegisterPeerAsync(nodeD, nodeB, cts.Token);
         
         await nodeD.HostedService.StartAsync(cts.Token);
 
@@ -181,24 +181,24 @@ public sealed class P2pNetworkIntegrationTests
         // Assert Final State:
         // A should have 3 messages
         nodeA.Handler.ReceivedMessages.Count.ShouldBe(3);
-        this.HasPayload(nodeA, "Message_Phase3").ShouldBeTrue();
-        this.HasPayload(nodeA, "Message_Phase3_FromD").ShouldBeTrue();
+        HasPayload(nodeA, "Message_Phase3").ShouldBeTrue();
+        HasPayload(nodeA, "Message_Phase3_FromD").ShouldBeTrue();
 
         // B should have 3 messages
         nodeB.Handler.ReceivedMessages.Count.ShouldBe(3);
-        this.HasPayload(nodeB, "Message_Phase3").ShouldBeTrue();
-        this.HasPayload(nodeB, "Message_Phase3_FromD").ShouldBeTrue();
+        HasPayload(nodeB, "Message_Phase3").ShouldBeTrue();
+        HasPayload(nodeB, "Message_Phase3_FromD").ShouldBeTrue();
 
         // C should ONLY have the 1 message from before it dropped
         nodeC.Handler.ReceivedMessages.Count.ShouldBe(1);
-        this.HasPayload(nodeC, "Message_Phase3").ShouldBeFalse();
-        this.HasPayload(nodeC, "Message_Phase3_FromD").ShouldBeFalse();
+        HasPayload(nodeC, "Message_Phase3").ShouldBeFalse();
+        HasPayload(nodeC, "Message_Phase3_FromD").ShouldBeFalse();
 
         // D should have the 2 messages sent after it joined
         nodeD.Handler.ReceivedMessages.Count.ShouldBe(2);
-        this.HasPayload(nodeD, "Message_Phase1").ShouldBeFalse(); // Joined late, missed phase 1
-        this.HasPayload(nodeD, "Message_Phase3").ShouldBeTrue();
-        this.HasPayload(nodeD, "Message_Phase3_FromD").ShouldBeTrue();
+        HasPayload(nodeD, "Message_Phase1").ShouldBeFalse(); // Joined late, missed phase 1
+        HasPayload(nodeD, "Message_Phase3").ShouldBeTrue();
+        HasPayload(nodeD, "Message_Phase3_FromD").ShouldBeTrue();
     }
 
     private bool HasPayload(TestNode node, string expectedText)
@@ -225,7 +225,7 @@ public sealed class P2pNetworkIntegrationTests
 
         services.AddLogging(builder => 
         {
-            builder.AddXunit(this.testOutputHelper);
+            builder.AddXunit(testOutputHelper);
             builder.SetMinimumLevel(LogLevel.Trace);
         });
 

@@ -24,21 +24,21 @@ public sealed class RandomPeerSelector(
             throw new ArgumentOutOfRangeException(nameof(count), "Count must be greater than zero.");
         }
 
-        var activePeers = await this.peerRegistry.GetPeersByStatusAsync(PeerStatus.Active, cancellationToken).ConfigureAwait(false);
+        var activePeers = await peerRegistry.GetPeersByStatusAsync(PeerStatus.Active, cancellationToken).ConfigureAwait(false);
         var peerList = activePeers.ToList();
 
         if (peerList.Count == 0)
         {
-            this.logger.LogDebug("No active peers available for selection.");
+            logger.LogDebug("No active peers available for selection.");
             return Enumerable.Empty<PeerNode>();
         }
 
         // Shuffle the list and take the requested amount
-        this.Shuffle(peerList);
+        Shuffle(peerList);
 
         var selectedPeers = peerList.Take(count).ToList();
         
-        this.logger.LogTrace("Selected {Count} peers out of {Total} active peers.", selectedPeers.Count, peerList.Count);
+        logger.LogTrace("Selected {Count} peers out of {Total} active peers.", selectedPeers.Count, peerList.Count);
         
         return selectedPeers;
     }

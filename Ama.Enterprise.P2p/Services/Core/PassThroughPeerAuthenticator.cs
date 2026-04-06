@@ -21,7 +21,7 @@ public sealed class PassThroughPeerAuthenticator(ILogger<PassThroughPeerAuthenti
             throw new ArgumentException("Peer ID cannot be empty.", nameof(node));
         }
 
-        this.logger.LogDebug("Auto-authenticating peer {PeerId} via pass-through strategy.", node.Id.Value);
+        logger.LogDebug("Auto-authenticating peer {PeerId} via pass-through strategy.", node.Id.Value);
 
         return Task.FromResult(true);
     }

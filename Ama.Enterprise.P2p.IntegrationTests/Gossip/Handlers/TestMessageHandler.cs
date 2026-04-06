@@ -19,7 +19,7 @@ public sealed class TestMessageHandler : IMessageHandler<GossipMessage>
     /// <inheritdoc />
     public Task HandleAsync(GossipMessage message, CancellationToken cancellationToken)
     {
-        this.ReceivedMessages.Add(message);
+        ReceivedMessages.Add(message);
         return Task.CompletedTask;
     }
 }

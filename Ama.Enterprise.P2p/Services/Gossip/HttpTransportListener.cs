@@ -33,27 +33,27 @@ public sealed class HttpTransportListener(
             throw new ArgumentNullException(nameof(onMessageReceived));
         }
 
-        this.listenerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        this.httpListener = new HttpListener();
+        listenerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        httpListener = new HttpListener();
 
-        var host = string.IsNullOrWhiteSpace(this.options.Value.ListenHost) ? "+" : this.options.Value.ListenHost;
-        var port = this.options.Value.ListenPort;
+        var host = string.IsNullOrWhiteSpace(options.Value.ListenHost) ? "+" : options.Value.ListenHost;
+        var port = options.Value.ListenPort;
         var prefix = $"http://{host}:{port}/p2p/gossip/";
         
-        this.httpListener.Prefixes.Add(prefix);
+        httpListener.Prefixes.Add(prefix);
 
         try
         {
-            this.httpListener.Start();
-            this.logger.LogInformation("Listening for gossip messages on {Prefix}", prefix);
+            httpListener.Start();
+            logger.LogInformation("Listening for gossip messages on {Prefix}", prefix);
         }
         catch (HttpListenerException ex)
         {
-            this.logger.LogError(ex, "Failed to start HTTP listener on {Prefix}. Ensure proper permissions or use a different port.", prefix);
+            logger.LogError(ex, "Failed to start HTTP listener on {Prefix}. Ensure proper permissions or use a different port.", prefix);
             throw;
         }
 
-        this.listeningTask = Task.Run(() => this.ListenLoopAsync(onMessageReceived, this.listenerCts.Token), this.listenerCts.Token);
+        listeningTask = Task.Run(() => ListenLoopAsync(onMessageReceived, listenerCts.Token), listenerCts.Token);
 
         return Task.CompletedTask;
     }
@@ -61,18 +61,18 @@ public sealed class HttpTransportListener(
     /// <inheritdoc />
     public async Task StopListeningAsync(CancellationToken cancellationToken)
     {
-        if (this.listenerCts is not null)
+        if (listenerCts is not null)
         {
-            await this.listenerCts.CancelAsync().ConfigureAwait(false);
+            await listenerCts.CancelAsync().ConfigureAwait(false);
         }
 
-        this.httpListener?.Stop();
+        httpListener?.Stop();
 
-        if (this.listeningTask is not null)
+        if (listeningTask is not null)
         {
             try
             {
-                await this.listeningTask.ConfigureAwait(false);
+                await listeningTask.ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -80,27 +80,27 @@ public sealed class HttpTransportListener(
             }
         }
         
-        this.logger.LogInformation("Gossip listener stopped.");
+        logger.LogInformation("Gossip listener stopped.");
     }
 
     private async Task ListenLoopAsync(Func<GossipMessage, Task> onMessageReceived, CancellationToken cancellationToken)
     {
-        if (this.httpListener is null) return;
+        if (httpListener is null) return;
 
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                var context = await this.httpListener.GetContextAsync().ConfigureAwait(false);
-                _ = Task.Run(() => this.ProcessRequestAsync(context, onMessageReceived, cancellationToken), cancellationToken);
+                var context = await httpListener.GetContextAsync().ConfigureAwait(false);
+                _ = Task.Run(() => ProcessRequestAsync(context, onMessageReceived, cancellationToken), cancellationToken);
             }
-            catch (HttpListenerException) when (cancellationToken.IsCancellationRequested || !this.httpListener.IsListening)
+            catch (HttpListenerException) when (cancellationToken.IsCancellationRequested || !httpListener.IsListening)
             {
                 break; // Listener was stopped
             }
             catch (Exception ex)
             {
-                this.logger.LogError(ex, "Error accepting incoming HTTP request.");
+                logger.LogError(ex, "Error accepting incoming HTTP request.");
             }
         }
     }
@@ -129,7 +129,7 @@ public sealed class HttpTransportListener(
             // Rejects mismatched major versions since they indicate breaking protocol changes
             if (incomingVersion.Major != localVersion.Major)
             {
-                this.logger.LogWarning(
+                logger.LogWarning(
                     "Rejected incoming gossip message due to major protocol version mismatch. Local: {LocalVersion}, Incoming: {IncomingVersion}", 
                     localVersion, 
                     incomingVersion);
@@ -141,7 +141,7 @@ public sealed class HttpTransportListener(
             await context.Request.InputStream.CopyToAsync(memoryStream, cancellationToken).ConfigureAwait(false);
             
             var payload = memoryStream.ToArray();
-            var message = this.serializer.DeserializeFromBytes<GossipMessage>(payload);
+            var message = serializer.DeserializeFromBytes<GossipMessage>(payload);
 
             // In generic struct serialization, ensure we check default values. 
             // Since GossipMessage has a required valid Guid, checking it avoids processing bad payloads.
@@ -152,13 +152,13 @@ public sealed class HttpTransportListener(
             }
             else
             {
-                this.logger.LogWarning("Failed to deserialize incoming gossip message. Invalid format.");
+                logger.LogWarning("Failed to deserialize incoming gossip message. Invalid format.");
                 context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
             }
         }
         catch (Exception ex)
         {
-            this.logger.LogError(ex, "Error processing incoming HTTP request.");
+            logger.LogError(ex, "Error processing incoming HTTP request.");
             context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
         }
         finally
@@ -170,19 +170,19 @@ public sealed class HttpTransportListener(
     /// <inheritdoc />
     public void Dispose()
     {
-        if (this.listenerCts is not null)
+        if (listenerCts is not null)
         {
-            this.listenerCts.Cancel();
-            this.listenerCts.Dispose();
+            listenerCts.Cancel();
+            listenerCts.Dispose();
         }
 
-        if (this.httpListener is not null)
+        if (httpListener is not null)
         {
-            if (this.httpListener.IsListening)
+            if (httpListener.IsListening)
             {
-                this.httpListener.Stop();
+                httpListener.Stop();
             }
-            this.httpListener.Close();
+            httpListener.Close();
         }
     }
 }

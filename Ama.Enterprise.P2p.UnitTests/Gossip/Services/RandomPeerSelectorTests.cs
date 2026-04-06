@@ -13,9 +13,9 @@ public sealed class RandomPeerSelectorTests
 
     public RandomPeerSelectorTests()
     {
-        this.registryMock = new Mock<IPeerRegistry>();
+        registryMock = new Mock<IPeerRegistry>();
         var loggerMock = new Mock<ILogger<RandomPeerSelector>>();
-        this.selector = new RandomPeerSelector(this.registryMock.Object, loggerMock.Object);
+        selector = new RandomPeerSelector(registryMock.Object, loggerMock.Object);
     }
 
     [Fact]
@@ -23,18 +23,18 @@ public sealed class RandomPeerSelectorTests
     {
         // Act & Assert
         await Should.ThrowAsync<ArgumentOutOfRangeException>(async () =>
-            await this.selector.GetPeersAsync(0, CancellationToken.None));
+            await selector.GetPeersAsync(0, CancellationToken.None));
     }
 
     [Fact]
     public async Task GetPeersAsync_WithNoActivePeers_ShouldReturnEmpty()
     {
         // Arrange
-        this.registryMock.Setup(r => r.GetPeersByStatusAsync(PeerStatus.Active, It.IsAny<CancellationToken>()))
+        registryMock.Setup(r => r.GetPeersByStatusAsync(PeerStatus.Active, It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
 
         // Act
-        var result = await this.selector.GetPeersAsync(3, CancellationToken.None);
+        var result = await selector.GetPeersAsync(3, CancellationToken.None);
 
         // Assert
         result.ShouldBeEmpty();
@@ -48,11 +48,11 @@ public sealed class RandomPeerSelectorTests
             .Select(_ => new PeerNode(new PeerId(Guid.NewGuid()), new PeerEndpoint("localhost", 8080)))
             .ToList();
 
-        this.registryMock.Setup(r => r.GetPeersByStatusAsync(PeerStatus.Active, It.IsAny<CancellationToken>()))
+        registryMock.Setup(r => r.GetPeersByStatusAsync(PeerStatus.Active, It.IsAny<CancellationToken>()))
             .ReturnsAsync(activePeers);
 
         // Act
-        var result = (await this.selector.GetPeersAsync(3, CancellationToken.None)).ToList();
+        var result = (await selector.GetPeersAsync(3, CancellationToken.None)).ToList();
 
         // Assert
         result.Count.ShouldBe(3);
@@ -67,11 +67,11 @@ public sealed class RandomPeerSelectorTests
             .Select(_ => new PeerNode(new PeerId(Guid.NewGuid()), new PeerEndpoint("localhost", 8080)))
             .ToList();
 
-        this.registryMock.Setup(r => r.GetPeersByStatusAsync(PeerStatus.Active, It.IsAny<CancellationToken>()))
+        registryMock.Setup(r => r.GetPeersByStatusAsync(PeerStatus.Active, It.IsAny<CancellationToken>()))
             .ReturnsAsync(activePeers);
 
         // Act
-        var result = (await this.selector.GetPeersAsync(5, CancellationToken.None)).ToList();
+        var result = (await selector.GetPeersAsync(5, CancellationToken.None)).ToList();
 
         // Assert
         result.Count.ShouldBe(2);

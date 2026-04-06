@@ -33,8 +33,8 @@ public sealed class TableStoragePeerRegistry : IPeerRegistry
         ArgumentException.ThrowIfNullOrEmpty(options.Value.TableName);
         ArgumentException.ThrowIfNullOrEmpty(options.Value.PartitionKey);
 
-        this.tableClient = new TableClient(options.Value.ConnectionString, options.Value.TableName);
-        this.partitionKey = options.Value.PartitionKey;
+        tableClient = new TableClient(options.Value.ConnectionString, options.Value.TableName);
+        partitionKey = options.Value.PartitionKey;
     }
 
     /// <inheritdoc />
@@ -43,7 +43,7 @@ public sealed class TableStoragePeerRegistry : IPeerRegistry
         await EnsureTableExistsAsync(cancellationToken).ConfigureAwait(false);
 
         // Using standard TableEntity (dictionary) avoids reflection and maintains strict AOT compatibility.
-        var entity = new TableEntity(this.partitionKey, node.Id.Value.ToString("N"))
+        var entity = new TableEntity(partitionKey, node.Id.Value.ToString("N"))
         {
             { "Host", node.Endpoint.Host },
             { "Port", node.Endpoint.Port },
@@ -51,7 +51,7 @@ public sealed class TableStoragePeerRegistry : IPeerRegistry
             { "LastSeen", DateTimeOffset.UtcNow }
         };
 
-        await this.tableClient.UpsertEntityAsync(entity, TableUpdateMode.Replace, cancellationToken).ConfigureAwait(false);
+        await tableClient.UpsertEntityAsync(entity, TableUpdateMode.Replace, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -59,8 +59,8 @@ public sealed class TableStoragePeerRegistry : IPeerRegistry
     {
         await EnsureTableExistsAsync(cancellationToken).ConfigureAwait(false);
 
-        await this.tableClient.DeleteEntityAsync(
-            this.partitionKey, 
+        await tableClient.DeleteEntityAsync(
+            partitionKey, 
             peerId.Value.ToString("N"), 
             ETag.All, 
             cancellationToken).ConfigureAwait(false);
@@ -72,8 +72,8 @@ public sealed class TableStoragePeerRegistry : IPeerRegistry
         await EnsureTableExistsAsync(cancellationToken).ConfigureAwait(false);
 
         var nodes = new List<PeerNode>();
-        var query = this.tableClient.QueryAsync<TableEntity>(
-            $"PartitionKey eq '{this.partitionKey}'", 
+        var query = tableClient.QueryAsync<TableEntity>(
+            $"PartitionKey eq '{partitionKey}'", 
             cancellationToken: cancellationToken);
 
         await foreach (var entity in query.ConfigureAwait(false))
@@ -91,8 +91,8 @@ public sealed class TableStoragePeerRegistry : IPeerRegistry
 
         var nodes = new List<PeerNode>();
         var statusString = status.ToString();
-        var query = this.tableClient.QueryAsync<TableEntity>(
-            $"PartitionKey eq '{this.partitionKey}' and Status eq '{statusString}'", 
+        var query = tableClient.QueryAsync<TableEntity>(
+            $"PartitionKey eq '{partitionKey}' and Status eq '{statusString}'", 
             cancellationToken: cancellationToken);
 
         await foreach (var entity in query.ConfigureAwait(false))
@@ -105,13 +105,13 @@ public sealed class TableStoragePeerRegistry : IPeerRegistry
 
     private async ValueTask EnsureTableExistsAsync(CancellationToken cancellationToken)
     {
-        if (Volatile.Read(ref this.isTableEnsured) == 1)
+        if (Volatile.Read(ref isTableEnsured) == 1)
         {
             return;
         }
 
-        await this.tableClient.CreateIfNotExistsAsync(cancellationToken).ConfigureAwait(false);
-        Interlocked.Exchange(ref this.isTableEnsured, 1);
+        await tableClient.CreateIfNotExistsAsync(cancellationToken).ConfigureAwait(false);
+        Interlocked.Exchange(ref isTableEnsured, 1);
     }
 
     private static PeerNode ParseEntity(TableEntity entity)

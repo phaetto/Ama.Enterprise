@@ -16,7 +16,7 @@ public sealed class VersioningArchitectureTests
     [Fact]
     public void DeployedYamlVersion_MustHaveExplicitTestCoverage()
     {
-        var yamlPath = this.FindPublishNugetYaml();
+        var yamlPath = FindPublishNugetYaml();
         yamlPath.ShouldNotBeNull("Could not locate .github/workflows/publish-nuget.yml. Ensure the test is running within the repository structure.");
 
         var yamlContent = File.ReadAllText(yamlPath);

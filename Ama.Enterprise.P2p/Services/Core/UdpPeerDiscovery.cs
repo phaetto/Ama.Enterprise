@@ -53,26 +53,26 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        ObjectDisposedException.ThrowIf(this.isDisposed, this);
+        ObjectDisposedException.ThrowIf(isDisposed, this);
 
-        this.backgroundTaskCancellationSource = new CancellationTokenSource();
+        backgroundTaskCancellationSource = new CancellationTokenSource();
         
-        var localIpEndpoint = new IPEndPoint(IPAddress.Any, this.options.MulticastPort);
-        this.listener = new UdpClient(AddressFamily.InterNetwork);
+        var localIpEndpoint = new IPEndPoint(IPAddress.Any, options.MulticastPort);
+        listener = new UdpClient(AddressFamily.InterNetwork);
         
         // Allow multiple listeners on the same port (e.g., multiple node instances on the same machine)
-        this.listener.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-        this.listener.Client.Bind(localIpEndpoint);
+        listener.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+        listener.Client.Bind(localIpEndpoint);
         
-        var multicastAddress = IPAddress.Parse(this.options.MulticastAddress);
-        this.listener.JoinMulticastGroup(multicastAddress);
+        var multicastAddress = IPAddress.Parse(options.MulticastAddress);
+        listener.JoinMulticastGroup(multicastAddress);
 
-        this.listenTask = this.ListenLoopAsync(this.backgroundTaskCancellationSource.Token);
+        listenTask = ListenLoopAsync(backgroundTaskCancellationSource.Token);
 
-        this.logger.LogInformation(
+        logger.LogInformation(
             "UDP Peer Discovery started listening on multicast group {Address}:{Port}", 
-            this.options.MulticastAddress, 
-            this.options.MulticastPort);
+            options.MulticastAddress, 
+            options.MulticastPort);
 
         return Task.CompletedTask;
     }
@@ -80,18 +80,18 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     /// <inheritdoc />
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        if (this.backgroundTaskCancellationSource is null)
+        if (backgroundTaskCancellationSource is null)
         {
             return;
         }
 
-        await this.backgroundTaskCancellationSource.CancelAsync().ConfigureAwait(false);
+        await backgroundTaskCancellationSource.CancelAsync().ConfigureAwait(false);
 
-        if (this.listenTask is not null)
+        if (listenTask is not null)
         {
             try
             {
-                await this.listenTask.ConfigureAwait(false);
+                await listenTask.ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -99,13 +99,13 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
             }
         }
 
-        this.listener?.Close();
+        listener?.Close();
     }
 
     /// <inheritdoc />
     public async Task<IEnumerable<PeerNode>> DiscoverPeersAsync(CancellationToken cancellationToken)
     {
-        ObjectDisposedException.ThrowIf(this.isDisposed, this);
+        ObjectDisposedException.ThrowIf(isDisposed, this);
 
         var discoveredPeers = new HashSet<PeerNode>();
         
@@ -116,12 +116,12 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
         client.Client.Bind(new IPEndPoint(IPAddress.Any, 0)); 
         
         var requestBytes = new byte[] { (byte)'D', (byte)'I', (byte)'S', (byte)'C' };
-        var targetEndpoint = new IPEndPoint(IPAddress.Parse(this.options.MulticastAddress), this.options.MulticastPort);
+        var targetEndpoint = new IPEndPoint(IPAddress.Parse(options.MulticastAddress), options.MulticastPort);
         
         await client.SendAsync(requestBytes, requestBytes.Length, targetEndpoint).ConfigureAwait(false);
         
         using var timeoutCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCancellationSource.CancelAfter(this.options.DiscoveryTimeout);
+        timeoutCancellationSource.CancelAfter(options.DiscoveryTimeout);
         
         try
         {
@@ -132,10 +132,10 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
 
                 try
                 {
-                    var typeInfo = this.serializerOptions.GetTypeInfo(typeof(PeerNode));
+                    var typeInfo = serializerOptions.GetTypeInfo(typeof(PeerNode));
                     var deserializedResult = JsonSerializer.Deserialize(payload, typeInfo);
 
-                    if (deserializedResult is PeerNode node && node.Id.Value != this.options.LocalPeerId && node.Id.Value != Guid.Empty)
+                    if (deserializedResult is PeerNode node && node.Id.Value != options.LocalPeerId && node.Id.Value != Guid.Empty)
                     {
                         discoveredPeers.Add(node);
                     }
@@ -152,7 +152,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
         }
         catch (Exception ex)
         {
-            this.logger.LogWarning(ex, "An error occurred while receiving UDP discovery responses.");
+            logger.LogWarning(ex, "An error occurred while receiving UDP discovery responses.");
         }
         
         return discoveredPeers;
@@ -161,20 +161,20 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     /// <inheritdoc />
     public void Dispose()
     {
-        if (this.isDisposed)
+        if (isDisposed)
         {
             return;
         }
 
-        this.backgroundTaskCancellationSource?.Cancel();
-        this.backgroundTaskCancellationSource?.Dispose();
-        this.listener?.Dispose();
-        this.isDisposed = true;
+        backgroundTaskCancellationSource?.Cancel();
+        backgroundTaskCancellationSource?.Dispose();
+        listener?.Dispose();
+        isDisposed = true;
     }
 
     private async Task ListenLoopAsync(CancellationToken token)
     {
-        if (this.listener is null)
+        if (listener is null)
         {
             return;
         }
@@ -183,21 +183,21 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
         {
             while (!token.IsCancellationRequested)
             {
-                var result = await this.listener.ReceiveAsync(token).ConfigureAwait(false);
+                var result = await listener.ReceiveAsync(token).ConfigureAwait(false);
                 var payload = result.Buffer;
                 
                 // Fast check to ensure the payload is our known "DISC" request
                 if (payload.Length == 4 && payload[0] == 'D' && payload[1] == 'I' && payload[2] == 'S' && payload[3] == 'C')
                 {
-                    var localId = new PeerId(this.options.LocalPeerId);
-                    var localEndpoint = new PeerEndpoint(this.options.LocalEndpointHost, this.options.LocalEndpointPort);
+                    var localId = new PeerId(options.LocalPeerId);
+                    var localEndpoint = new PeerEndpoint(options.LocalEndpointHost, options.LocalEndpointPort);
                     var localNode = new PeerNode(localId, localEndpoint);
                     
-                    var typeInfo = this.serializerOptions.GetTypeInfo(typeof(PeerNode));
+                    var typeInfo = serializerOptions.GetTypeInfo(typeof(PeerNode));
                     var responseBytes = JsonSerializer.SerializeToUtf8Bytes(localNode, typeInfo);
                     
                     // Send the response directly to the endpoint that requested discovery
-                    await this.listener.SendAsync(responseBytes, responseBytes.Length, result.RemoteEndPoint).ConfigureAwait(false);
+                    await listener.SendAsync(responseBytes, responseBytes.Length, result.RemoteEndPoint).ConfigureAwait(false);
                 }
             }
         }
@@ -207,11 +207,11 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
         }
         catch (SocketException ex)
         {
-            this.logger.LogDebug(ex, "UDP listener socket exception during shutdown or network configuration change.");
+            logger.LogDebug(ex, "UDP listener socket exception during shutdown or network configuration change.");
         }
         catch (Exception ex)
         {
-            this.logger.LogError(ex, "Unexpected error in UDP peer discovery background listen loop.");
+            logger.LogError(ex, "Unexpected error in UDP peer discovery background listen loop.");
         }
     }
 }

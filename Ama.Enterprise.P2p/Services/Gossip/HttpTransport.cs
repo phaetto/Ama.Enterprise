@@ -37,10 +37,10 @@ public sealed class HttpTransport(
 
         var url = $"http://{endpoint.Host}:{endpoint.Port}/p2p/gossip";
         
-        using var client = this.httpClientFactory.CreateClient("P2pTransport");
+        using var client = httpClientFactory.CreateClient("P2pTransport");
         client.Timeout = TimeSpan.FromSeconds(5); // Fast fail for gossip network
 
-        var payload = this.serializer.SerializeToBytes(message);
+        var payload = serializer.SerializeToBytes(message);
         using var content = new ByteArrayContent(payload);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
 
@@ -52,7 +52,7 @@ public sealed class HttpTransport(
         // Add the protocol version header for compatibility checks
         request.Headers.Add("X-P2P-Protocol-Version", Constants.ProtocolVersion);
 
-        this.logger.LogTrace("Sending message {MessageId} to {Url}", message.MessageId, url);
+        logger.LogTrace("Sending message {MessageId} to {Url}", message.MessageId, url);
 
         using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
