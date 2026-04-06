@@ -60,6 +60,7 @@
 | `$/Ama.Enterprise.P2p/Constants.cs` | Global constants for the P2P module, including protocol versions and payload size limits. |
 | `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Extension methods for setting up P2P DI configuration and options registration. |
 | `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Registration logic configuring Dependency Injection specifically targeting the UDP peer discovery sub-components and background services. |
+| `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
 | `$/Ama.Enterprise.P2p/Models/GossipMessage.cs` | Core message DTO enveloping the payload, sender ID, message ID, and TTL for P2P transport. |
 | `$/Ama.Enterprise.P2p/Models/GossipOptions.cs` | Class providing configuration for the gossip protocol (interval, fanout, TTL) using the Options pattern. |
 | `$/Ama.Enterprise.P2p/Models/PeerEndpoint.cs` | DTO mapping an IP/hostname and a port for peer network reachability. |
@@ -67,6 +68,19 @@
 | `$/Ama.Enterprise.P2p/Models/PeerNode.cs` | DTO combining a peer's identity (`PeerId`) and network reachability (`PeerEndpoint`). |
 | `$/Ama.Enterprise.P2p/Models/PeerStatus.cs` | Enum defining the lifecycle states of a peer (Active, Suspect, Dead). |
 | `$/Ama.Enterprise.P2p/Models/UdpDiscoveryOptions.cs` | Model representing configuration settings for the UDP multicast peer discovery system, including address bindings and discovery timeouts. |
+| `$/Ama.Enterprise.P2p/Services/Core/IMessageDispatcher.cs` | Generic interface routing incoming protocol messages to registered handlers. |
+| `$/Ama.Enterprise.P2p/Services/Core/IMessageHandler.cs` | Generic interface defining a domain-level consumer for P2P messages. |
+| `$/Ama.Enterprise.P2p/Services/Core/IMessageSerializer.cs` | Generic interface providing generic AOT-friendly serialization capabilities for P2P messages. |
+| `$/Ama.Enterprise.P2p/Services/Core/IPeerSelector.cs` | Interface for algorithms that select a generic subset of peers for communication. |
+| `$/Ama.Enterprise.P2p/Services/Core/ITransport.cs` | Generic interface defining the outbound network transport capabilities for sending generic messages to peers. |
+| `$/Ama.Enterprise.P2p/Services/Core/ITransportListener.cs` | Generic interface defining the inbound network listener capabilities for receiving protocol messages. |
+| `$/Ama.Enterprise.P2p/Services/Core/MessageDispatcher.cs` | Implements the generic message dispatcher for routing parsed P2P messages. |
+| `$/Ama.Enterprise.P2p/Services/Core/RandomPeerSelector.cs` | Implementation of IPeerSelector utilizing random distribution selection. |
+| `$/Ama.Enterprise.P2p/Services/Core/TimeBasedFailureDetector.cs` | Implementation of IFailureDetector using abstract heartbeats decoupled from specific protocol options. |
+| `$/Ama.Enterprise.P2p/Services/Gossip/GossipProtocol.cs` | Re-architected implementation of IGossipProtocol targeting generic transport and dispatch interfaces. |
+| `$/Ama.Enterprise.P2p/Services/Gossip/HttpTransport.cs` | Gossip-specific HTTP POST outbound implementation of the generic `ITransport<GossipMessage>`. |
+| `$/Ama.Enterprise.P2p/Services/Gossip/HttpTransportListener.cs` | Gossip-specific inbound listener implementation of the generic `ITransportListener<GossipMessage>`. |
+| `$/Ama.Enterprise.P2p/Services/Gossip/SystemTextJsonGossipSerializer.cs` | AOT-friendly System.Text.Json implementation mapped specifically for `IMessageSerializer<GossipMessage>`. |
 | `$/Ama.Enterprise.P2p/Services/GossipProtocol.cs` | Implementation of IGossipProtocol handling the periodic background loop, state tracking, deduplication, and routing of P2P messages. |
 | `$/Ama.Enterprise.P2p/Services/HttpTransport.cs` | Implementation of ITransport utilizing IHttpClientFactory to send outbound serialized gossip messages using HTTP POST. |
 | `$/Ama.Enterprise.P2p/Services/HttpTransportListener.cs` | Implementation of ITransportListener utilizing an HttpListener for capturing and deserializing inbound network gossip traffic over HTTP. |

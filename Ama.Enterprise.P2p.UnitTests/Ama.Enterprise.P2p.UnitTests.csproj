@@ -34,4 +34,8 @@
 		<ProjectReference Include="..\Ama.Enterprise.Project.Analyzers\Ama.Enterprise.Project.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
 
+	<ItemGroup>
+	  <Folder Include="Gossip\" />
+	</ItemGroup>
+
 </Project>

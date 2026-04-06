@@ -1,7 +1,10 @@
-using Ama.Enterprise.P2p.Models;
-using Ama.Enterprise.P2p.Services;
+using Ama.Enterprise.P2p.Models.Core;
+using Ama.Enterprise.P2p.Models.Gossip;
+using Ama.Enterprise.P2p.Services.Core;
+using Ama.Enterprise.P2p.Services.Gossip;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 namespace Ama.Enterprise.P2p.Extensions;
 
@@ -35,13 +38,23 @@ public static class ServiceCollectionExtensions
             services.Configure(configureOptions);
         }
 
+        // Map GossipInterval down to the new generic generic failure detector
+        services.AddOptions<FailureDetectorOptions>()
+            .Configure<IOptions<GossipOptions>>((failureOptions, gossipOptions) =>
+            {
+                if (gossipOptions?.Value is not null)
+                {
+                    failureOptions.HeartbeatInterval = gossipOptions.Value.GossipInterval;
+                }
+            });
+
         // Register HttpClient specific to the P2P transport
         services.AddHttpClient("P2pTransport");
 
         // Use TryAddSingleton so consumers can override default implementations if needed.
         
         // Serialization
-        services.TryAddSingleton<IGossipSerializer, SystemTextJsonGossipSerializer>();
+        services.TryAddSingleton<IMessageSerializer<GossipMessage>, SystemTextJsonGossipSerializer>();
 
         // Core P2P services
         services.TryAddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
@@ -50,9 +63,9 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IFailureDetector, TimeBasedFailureDetector>();
         
         // Transport and Dispatcher
-        services.TryAddSingleton<ITransport, HttpTransport>();
-        services.TryAddSingleton<ITransportListener, HttpTransportListener>();
-        services.TryAddSingleton<IMessageDispatcher, MessageDispatcher>();
+        services.TryAddSingleton<ITransport<GossipMessage>, HttpTransport>();
+        services.TryAddSingleton<ITransportListener<GossipMessage>, HttpTransportListener>();
+        services.TryAddSingleton<IMessageDispatcher<GossipMessage>, MessageDispatcher<GossipMessage>>();
         
         // Protocol orchestrator
         services.TryAddSingleton<IGossipProtocol, GossipProtocol>();
