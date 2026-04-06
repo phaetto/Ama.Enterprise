@@ -1,6 +1,9 @@
 | File Path | Description |
 | --- | --- |
 | `$/.editorconfig` | No description provided. |
+| `$/.github/workflows/ci.yml` | GitHub Actions workflow for building and testing the solution on PRs and non-master branch pushes. |
+| `$/.github/workflows/publish-nuget-manual.yml` | GitHub Actions workflow for manually publishing stable releases to NuGet with explicit version inputs. |
+| `$/.github/workflows/publish-nuget.yml` | GitHub Actions workflow for automatically publishing preview packages to NuGet upon pushing to the master branch. |
 | `$/.gitignore` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Analyzers/Ama.Enterprise.CRDT.Analyzers.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.BlazorApp/Ama.Enterprise.CRDT.BlazorApp.csproj` | No description provided. |
@@ -84,6 +87,12 @@
 | `$/Ama.Enterprise.P2p/Services/RandomPeerSelector.cs` | Implementation of IPeerSelector that randomizes available active peers for gossip distribution. |
 | `$/Ama.Enterprise.P2p/Services/SystemTextJsonGossipSerializer.cs` | Implementation of IGossipSerializer using AOT-friendly System.Text.Json source generators. |
 | `$/Ama.Enterprise.P2p/Services/TimeBasedFailureDetector.cs` | Implementation of IFailureDetector using heartbeats and time intervals to determine peer health. |
+| `$/Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj` | No description provided. |
+| `$/Ama.Enterprise.Project.Analyzers.UnitTests/PropertyInfoUsageAnalyzerTests.cs` | No description provided. |
+| `$/Ama.Enterprise.Project.Analyzers.UnitTests/SystemConvertUsageAnalyzerTests.cs` | No description provided. |
+| `$/Ama.Enterprise.Project.Analyzers/Ama.Enterprise.Project.Analyzers.csproj` | No description provided. |
+| `$/Ama.Enterprise.Project.Analyzers/PropertyInfoUsageAnalyzer.cs` | No description provided. |
+| `$/Ama.Enterprise.Project.Analyzers/SystemConvertUsageAnalyzer.cs` | No description provided. |
 | `$/Ama.Enterprise.slnx` | No description provided. |
 | `$/CodingStandards.md` | No description provided. |
 | `$/FilesDescription.md` | No description provided. |
