@@ -39,9 +39,15 @@
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagState.cs` | Root CRDT document model containing the state of all feature flags. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsCrdtAotContext.cs` | AOT context for the feature flags models. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsJsonContext.cs` | JSON context for the feature flags models. |
+| `$/Ama.Enterprise.FeatureFlags/Models/P2p/FeatureFlagMessageWrapper.cs` | Envelope wrapper for feature flag messages sent over the P2P network. |
+| `$/Ama.Enterprise.FeatureFlags/Models/P2p/FeatureFlagOperationsMessage.cs` | DTO containing missing CRDT operations transmitted in response to an anti-entropy state sync. |
+| `$/Ama.Enterprise.FeatureFlags/Models/P2p/FeatureFlagP2pJsonContext.cs` | System.Text.Json AOT serialization context for P2P feature flag data transmission models. |
+| `$/Ama.Enterprise.FeatureFlags/Models/P2p/FeatureFlagStateSyncMessage.cs` | DTO carrying the Dotted Version Vector for anti-entropy synchronization over P2P. |
 | `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagClusterManager.cs` | Implementation of the feature flag cluster manager using DVV sync. |
 | `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagClusterManager.cs` | Interface for the feature flag cluster manager. |
 | `$/Ama.Enterprise.FeatureFlags/Services/MemoryJournal.cs` | Thread-safe memory journal for CRDT operations in the feature flags module. |
+| `$/Ama.Enterprise.FeatureFlags/Services/P2p/FeatureFlagAntiEntropyService.cs` | Background service that intermittently broadcasts the native replica state over Gossip to trigger feature flag sync across peers. |
+| `$/Ama.Enterprise.FeatureFlags/Services/P2p/FeatureFlagGossipHandler.cs` | Message handler implementing P2P logic to parse payload wrappers and execute CRDT anti-entropy sync locally. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Ama.Enterprise.P2p.IntegrationTests.csproj` | Integration tests project for validating P2P networking components via HTTP loopbacks. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Architecture/VersioningArchitectureTests.cs` | Architectural tests that parse the CI/CD deployment files ensuring specific deployed versions always possess explicit test coverage. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Attributes/IntegrationFactAttribute.cs` | Custom xUnit `FactAttribute` providing a centralized toggle to enable or disable all integration tests. |

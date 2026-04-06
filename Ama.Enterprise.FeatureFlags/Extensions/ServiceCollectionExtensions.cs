@@ -7,6 +7,9 @@ using Ama.CRDT.Services.Decorators;
 using Ama.CRDT.Services.Journaling;
 using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Services;
+using Ama.Enterprise.FeatureFlags.Services.P2p;
+using Ama.Enterprise.P2p.Models.Gossip;
+using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
@@ -40,6 +43,22 @@ public static class ServiceCollectionExtensions
 
         // Register the cluster manager
         services.AddScoped<IFeatureFlagClusterManager, FeatureFlagClusterManager>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Adds P2P networking support for the feature flags system to synchronize across nodes.
+    /// </summary>
+    public static IServiceCollection AddFeatureFlagsP2p(this IServiceCollection services)
+    {
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }
+
+        services.AddSingleton<IMessageHandler<GossipMessage>, FeatureFlagGossipHandler>();
+        services.AddHostedService<FeatureFlagAntiEntropyService>();
 
         return services;
     }
