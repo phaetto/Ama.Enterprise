@@ -43,6 +43,7 @@
 | `$/Ama.Enterprise.P2p.IntegrationTests/Models/TestNode.cs` | Data-transfer class orchestrating individual configured test nodes managing service scopes and lifecycles. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/P2pAdvancedIntegrationTests.cs` | Contains advanced integration tests validating high concurrency, multi-hop linear topologies, and TTL expiration behavior within the P2P network. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/P2pNetworkIntegrationTests.cs` | End-to-end integration tests validating real-world message propagation, network lifecycles, and deduplication capabilities. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/UdpPeerDiscoveryIntegrationTests.cs` | Network integration tests validating reliable peer identification logic using UDP loops across parallel testing instances. |
 | `$/Ama.Enterprise.P2p.UnitTests/Ama.Enterprise.P2p.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.UnitTests/Extensions/ServiceCollectionExtensionsTests.cs` | Unit tests for DI setup logic validating proper registration of core gossip services. |
 | `$/Ama.Enterprise.P2p.UnitTests/Services/GossipProtocolTests.cs` | Unit tests for GossipProtocol covering the background loop, message deduplication, and local message dispatch. |
@@ -58,12 +59,14 @@
 | `$/Ama.Enterprise.P2p/Ama.Enterprise.P2p.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p/Constants.cs` | Global constants for the P2P module, including protocol versions and payload size limits. |
 | `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Extension methods for setting up P2P DI configuration and options registration. |
+| `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Registration logic configuring Dependency Injection specifically targeting the UDP peer discovery sub-components and background services. |
 | `$/Ama.Enterprise.P2p/Models/GossipMessage.cs` | Core message DTO enveloping the payload, sender ID, message ID, and TTL for P2P transport. |
 | `$/Ama.Enterprise.P2p/Models/GossipOptions.cs` | Class providing configuration for the gossip protocol (interval, fanout, TTL) using the Options pattern. |
 | `$/Ama.Enterprise.P2p/Models/PeerEndpoint.cs` | DTO mapping an IP/hostname and a port for peer network reachability. |
 | `$/Ama.Enterprise.P2p/Models/PeerId.cs` | DTO representing a unique peer identifier using an underlying GUID. |
 | `$/Ama.Enterprise.P2p/Models/PeerNode.cs` | DTO combining a peer's identity (`PeerId`) and network reachability (`PeerEndpoint`). |
 | `$/Ama.Enterprise.P2p/Models/PeerStatus.cs` | Enum defining the lifecycle states of a peer (Active, Suspect, Dead). |
+| `$/Ama.Enterprise.P2p/Models/UdpDiscoveryOptions.cs` | Model representing configuration settings for the UDP multicast peer discovery system, including address bindings and discovery timeouts. |
 | `$/Ama.Enterprise.P2p/Services/GossipProtocol.cs` | Implementation of IGossipProtocol handling the periodic background loop, state tracking, deduplication, and routing of P2P messages. |
 | `$/Ama.Enterprise.P2p/Services/HttpTransport.cs` | Implementation of ITransport utilizing IHttpClientFactory to send outbound serialized gossip messages using HTTP POST. |
 | `$/Ama.Enterprise.P2p/Services/HttpTransportListener.cs` | Implementation of ITransportListener utilizing an HttpListener for capturing and deserializing inbound network gossip traffic over HTTP. |
@@ -87,6 +90,8 @@
 | `$/Ama.Enterprise.P2p/Services/RandomPeerSelector.cs` | Implementation of IPeerSelector that randomizes available active peers for gossip distribution. |
 | `$/Ama.Enterprise.P2p/Services/SystemTextJsonGossipSerializer.cs` | Implementation of IGossipSerializer using AOT-friendly System.Text.Json source generators. |
 | `$/Ama.Enterprise.P2p/Services/TimeBasedFailureDetector.cs` | Implementation of IFailureDetector using heartbeats and time intervals to determine peer health. |
+| `$/Ama.Enterprise.P2p/Services/UdpDiscoveryJsonContext.cs` | Source-generated System.Text.Json context strictly enforcing AOT-friendly serialization for peer discovery payload DTOs. |
+| `$/Ama.Enterprise.P2p/Services/UdpPeerDiscovery.cs` | Core implementation executing active UDP multicast discovery and running an independent background service to continually respond to inbound requests. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/PropertyInfoUsageAnalyzerTests.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/SystemConvertUsageAnalyzerTests.cs` | No description provided. |

@@ -1,0 +1,120 @@
+namespace Ama.Enterprise.P2p.IntegrationTests;
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Ama.Enterprise.P2p.Extensions;
+using Ama.Enterprise.P2p.IntegrationTests.Attributes;
+using Ama.Enterprise.P2p.IntegrationTests.Extensions;
+using Ama.Enterprise.P2p.Services;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Shouldly;
+using Xunit;
+
+/// <summary>
+/// Contains integration tests focusing on the UDP multicast discovery mechanism.
+/// </summary>
+public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
+{
+    private readonly ITestOutputHelper testOutputHelper;
+    private readonly IList<ServiceProvider> serviceProviders = new List<ServiceProvider>();
+
+    public UdpPeerDiscoveryIntegrationTests(ITestOutputHelper testOutputHelper)
+    {
+        this.testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
+    }
+
+    [IntegrationFact]
+    public async Task DiscoverPeersAsync_ShouldFindOtherNodes_WhenTheyAreListening()
+    {
+        using var cancellationSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        var nodeId1 = Guid.NewGuid();
+        var nodeId2 = Guid.NewGuid();
+        var nodeId3 = Guid.NewGuid();
+
+        var port1 = 8301;
+        var port2 = 8302;
+        var port3 = 8303;
+
+        // Use a distinct multicast port specifically for this test to avoid local execution collisions
+        var multicastPort = 8035; 
+
+        var node1 = this.CreateDiscoveryNode(nodeId1, port1, multicastPort);
+        var node2 = this.CreateDiscoveryNode(nodeId2, port2, multicastPort);
+        var node3 = this.CreateDiscoveryNode(nodeId3, port3, multicastPort);
+
+        // Start all nodes so their UDP background listeners bind and become active
+        await node1.HostedService.StartAsync(cancellationSource.Token);
+        await node2.HostedService.StartAsync(cancellationSource.Token);
+        await node3.HostedService.StartAsync(cancellationSource.Token);
+
+        // Provide a short delay for sockets to fully bind on the OS level
+        await Task.Delay(500, cancellationSource.Token);
+
+        // Act - Node 1 requests a network discovery
+        var discoveredPeers = await node1.Discovery.DiscoverPeersAsync(cancellationSource.Token);
+
+        // Assert
+        var peersList = discoveredPeers.ToList();
+        peersList.Count.ShouldBeGreaterThanOrEqualTo(2);
+        
+        peersList.Any(p => p.Id.Value == nodeId2).ShouldBeTrue();
+        peersList.Any(p => p.Id.Value == nodeId3).ShouldBeTrue();
+        
+        // Assert that a node does not discover itself in the returned results
+        peersList.Any(p => p.Id.Value == nodeId1).ShouldBeFalse();
+
+        // Graceful Cleanup
+        await node1.HostedService.StopAsync(cancellationSource.Token);
+        await node2.HostedService.StopAsync(cancellationSource.Token);
+        await node3.HostedService.StopAsync(cancellationSource.Token);
+    }
+
+    private (IPeerDiscovery Discovery, IHostedService HostedService) CreateDiscoveryNode(Guid peerId, int listenPort, int multicastPort)
+    {
+        var services = new ServiceCollection();
+        
+        services.AddLogging(builder => 
+        {
+            builder.AddXunit(this.testOutputHelper);
+            builder.SetMinimumLevel(LogLevel.Trace);
+        });
+
+        services.AddUdpPeerDiscovery(options => 
+        {
+            // Use local loopback compatible multicast group for testing environments
+            options.MulticastAddress = "239.255.0.1"; 
+            options.MulticastPort = multicastPort;
+            options.LocalPeerId = peerId;
+            options.LocalEndpointHost = "localhost";
+            options.LocalEndpointPort = listenPort;
+            options.DiscoveryTimeout = TimeSpan.FromSeconds(3);
+        });
+
+        var provider = services.BuildServiceProvider();
+        this.serviceProviders.Add(provider);
+
+        var discovery = provider.GetRequiredService<IPeerDiscovery>();
+        
+        // Retrieve specifically the UDP background listener service
+        var hostedService = provider.GetServices<IHostedService>()
+            .First(s => s is UdpPeerDiscovery);
+
+        return (discovery, hostedService);
+    }
+
+    public void Dispose()
+    {
+        foreach (var provider in this.serviceProviders)
+        {
+            provider.Dispose();
+        }
+        
+        this.serviceProviders.Clear();
+    }
+}

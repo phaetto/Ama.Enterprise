@@ -12,7 +12,7 @@ public sealed class IntegrationFactAttribute : FactAttribute
     /// Centralized toggle for integration tests. 
     /// Change to true to enable all integration tests decorated with this attribute.
     /// </summary>
-    private const bool EnableIntegrationTests = false;
+    private const bool EnableIntegrationTests = true;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="IntegrationFactAttribute"/> class.
