@@ -31,7 +31,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Ama.CRDT" Version="3.1.260406-ci1202" />
+		<PackageReference Include="Ama.CRDT" Version="3.1.260406-ci1209" />
 		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.5" />
 		<PackageReference Include="Microsoft.Extensions.Http" Version="10.0.5" />
 	</ItemGroup>

@@ -15,6 +15,7 @@
     <File Path="CodingStandards.md" />
     <File Path="LICENCE" />
   </Folder>
+  <Project Path="Ama.Enterprise.CRDT.MessagePack/Ama.Enterprise.CRDT.MessagePack.csproj" Id="a96ff158-4583-485b-9d64-eb52b2b25123" />
   <Project Path="Ama.Enterprise.CRDT.OpenTelemetry/Ama.Enterprise.CRDT.OpenTelemetry.csproj" Id="c43db689-b047-4d09-ba26-ca88479ac36f" />
   <Project Path="Ama.Enterprise.CRDT.TableStorage/Ama.Enterprise.CRDT.TableStorage.csproj" Id="807a871d-7aad-43f6-83c2-48e62e019c07" />
   <Project Path="Ama.Enterprise.CRDT.Testing/Ama.Enterprise.CRDT.Testing.csproj" Id="e30d8fc4-45a1-447c-bfb3-64761c771cb4" />
