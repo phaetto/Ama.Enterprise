@@ -52,6 +52,7 @@
 | `$/Ama.Enterprise.FeatureFlags/Models/P2p/FeatureFlagP2pJsonContext.cs` | System.Text.Json AOT serialization context for P2P feature flag data transmission models. |
 | `$/Ama.Enterprise.FeatureFlags/Models/P2p/FeatureFlagStateSyncMessage.cs` | DTO carrying the Dotted Version Vector for anti-entropy synchronization over P2P. |
 | `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagClusterManager.cs` | Implementation of the feature flag cluster manager using DVV sync. |
+| `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagCrdtScopeProvider.cs` | Singleton provider that maintains the long-lived CRDT scope for the local replica, ensuring consistent in-memory state. |
 | `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagClusterManager.cs` | Interface for the feature flag cluster manager. |
 | `$/Ama.Enterprise.FeatureFlags/Services/MemoryJournal.cs` | Thread-safe memory journal for CRDT operations in the feature flags module. |
 | `$/Ama.Enterprise.FeatureFlags/Services/P2p/FeatureFlagAntiEntropyService.cs` | Background service that intermittently broadcasts the native replica state over Gossip to trigger feature flag sync across peers. |

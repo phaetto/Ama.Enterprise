@@ -6,33 +6,28 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services;
 using Ama.CRDT.Services.Serialization;
-using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Models.P2p;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.Services.Gossip;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Message handler that bridges generic gossip messages into the feature flags CRDT domain.
 /// </summary>
 public sealed class FeatureFlagGossipHandler : IMessageHandler<GossipMessage>
 {
-    private readonly ICrdtScopeFactory crdtScopeFactory;
-    private readonly FeatureFlagOptions options;
+    private readonly FeatureFlagCrdtScopeProvider scopeProvider;
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<FeatureFlagGossipHandler> logger;
 
     public FeatureFlagGossipHandler(
-        ICrdtScopeFactory crdtScopeFactory,
-        IOptions<FeatureFlagOptions> options,
+        FeatureFlagCrdtScopeProvider scopeProvider,
         ICrdtSerializer serializer,
         ILogger<FeatureFlagGossipHandler> logger)
     {
-        this.crdtScopeFactory = crdtScopeFactory ?? throw new ArgumentNullException(nameof(crdtScopeFactory));
-        this.options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        this.scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -79,13 +74,12 @@ public sealed class FeatureFlagGossipHandler : IMessageHandler<GossipMessage>
         {
             var syncMsg = serializer.DeserializeFromBytes<FeatureFlagStateSyncMessage>(payload);
             
-            // Generate a valid CRDT scope matching the current node ReplicaId
-            using var scope = crdtScopeFactory.CreateScope(options.ReplicaId);
-            var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
-            var clusterManager = scope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
+            // Resolve services from the long-lived shared scope
+            var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+            var clusterManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
             
-            // Resolve IGossipProtocol from the scope here instead of constructor to break the circular dependency.
-            var gossipProtocol = scope.ServiceProvider.GetRequiredService<IGossipProtocol>();
+            // Resolve IGossipProtocol lazily to break the generic dispatcher circular dependency
+            var gossipProtocol = scopeProvider.Scope.ServiceProvider.GetRequiredService<IGossipProtocol>();
 
             if (string.IsNullOrEmpty(syncMsg.ReplicaId) || syncMsg.ReplicaId == replicaContext.ReplicaId || syncMsg.State == null)
             {
@@ -124,8 +118,8 @@ public sealed class FeatureFlagGossipHandler : IMessageHandler<GossipMessage>
                 return;
             }
 
-            using var scope = crdtScopeFactory.CreateScope(options.ReplicaId);
-            var clusterManager = scope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
+            // Resolve cluster manager from the long-lived shared scope
+            var clusterManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
 
             logger.LogDebug("Applying {Count} incoming operations from replica {ReplicaId}", opsMsg.Operations.Length, opsMsg.ReplicaId);
             

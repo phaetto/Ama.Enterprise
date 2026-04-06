@@ -45,6 +45,7 @@ public static class Program
         services.AddFeatureFlags(options =>
         {
             options.ReplicaId = replicaId;
+            options.ActiveSyncEnabled = true;
         });
         services.AddFeatureFlagsP2p();
 
@@ -66,11 +67,9 @@ public static class Program
 
         await using var provider = services.BuildServiceProvider();
         
-        // Resolve the scope factory and create a dedicated scope for this replica node
-        var scopeFactory = provider.GetRequiredService<ICrdtScopeFactory>();
-        using var scope = scopeFactory.CreateScope(replicaId);
-        
-        var clusterManager = scope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
+        // Resolve the centralized scope provider to ensure all parts of the application share the same CRDT State
+        var scopeProvider = provider.GetRequiredService<FeatureFlagCrdtScopeProvider>();
+        var clusterManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
         
         // Background services typically remain resolved from the root provider as singletons
         var hostedServices = provider.GetServices<IHostedService>().ToList();

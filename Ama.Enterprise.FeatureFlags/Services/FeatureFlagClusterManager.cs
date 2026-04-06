@@ -13,6 +13,7 @@ using Ama.CRDT.Services;
 using Ama.CRDT.Services.Journaling;
 using Ama.CRDT.Services.Versioning;
 using Ama.Enterprise.FeatureFlags.Models;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Implementation of the cluster manager for feature flags.
@@ -25,9 +26,13 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
     private readonly IJournalManager journalManager;
     private readonly IVersionVectorSyncService syncService;
     private readonly ICrdtMetadataManager metadataManager;
+    private readonly bool activeSyncEnabled;
 
     private CrdtDocument<FeatureFlagState> document;
     private readonly object syncRoot = new();
+
+    /// <inheritdoc />
+    public event EventHandler? LocalStateChanged;
 
     public FeatureFlagClusterManager(
         ReplicaContext replicaContext,
@@ -35,7 +40,8 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
         ICrdtPatcher patcher,
         IJournalManager journalManager,
         IVersionVectorSyncService syncService,
-        ICrdtMetadataManager metadataManager)
+        ICrdtMetadataManager metadataManager,
+        IOptions<FeatureFlagOptions> options)
     {
         this.replicaContext = replicaContext ?? throw new ArgumentNullException(nameof(replicaContext));
         this.applicator = applicator ?? throw new ArgumentNullException(nameof(applicator));
@@ -43,6 +49,13 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
         this.journalManager = journalManager ?? throw new ArgumentNullException(nameof(journalManager));
         this.syncService = syncService ?? throw new ArgumentNullException(nameof(syncService));
         this.metadataManager = metadataManager ?? throw new ArgumentNullException(nameof(metadataManager));
+        
+        if (options == null)
+        {
+            throw new ArgumentNullException(nameof(options));
+        }
+        
+        this.activeSyncEnabled = options.Value.ActiveSyncEnabled;
 
         var initialState = new FeatureFlagState();
         var metadata = this.metadataManager.Initialize(initialState);
@@ -84,6 +97,11 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
         {
             document = result.Document;
         }
+
+        if (activeSyncEnabled)
+        {
+            LocalStateChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     /// <inheritdoc />
@@ -109,6 +127,11 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
         lock (syncRoot)
         {
             document = result.Document;
+        }
+
+        if (activeSyncEnabled)
+        {
+            LocalStateChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 

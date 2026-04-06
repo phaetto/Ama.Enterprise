@@ -21,11 +21,13 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
 {
     private readonly UdpDiscoveryOptions options;
     private readonly ILogger<UdpPeerDiscovery> logger;
+    private readonly IPeerRegistry peerRegistry;
     private readonly JsonSerializerOptions serializerOptions;
     
     private UdpClient? listener;
     private CancellationTokenSource? backgroundTaskCancellationSource;
     private Task? listenTask;
+    private Task? discoveryTask;
     private bool isDisposed;
 
     /// <summary>
@@ -33,11 +35,13 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     /// </summary>
     /// <param name="options">The UDP discovery configuration options.</param>
     /// <param name="logger">The logger instance.</param>
+    /// <param name="peerRegistry">The peer registry to populate with discovered nodes.</param>
     /// <param name="serializerOptions">The JSON serializer options provided by the base library.</param>
     /// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
     public UdpPeerDiscovery(
         IOptions<UdpDiscoveryOptions> options, 
         ILogger<UdpPeerDiscovery> logger,
+        IPeerRegistry peerRegistry,
         [FromKeyedServices("Ama.CRDT")] JsonSerializerOptions serializerOptions)
     {
         if (options is null)
@@ -47,6 +51,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
 
         this.options = options.Value ?? throw new ArgumentException("Options value cannot be null", nameof(options));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        this.peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
         this.serializerOptions = serializerOptions ?? throw new ArgumentNullException(nameof(serializerOptions));
     }
 
@@ -68,6 +73,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
         listener.JoinMulticastGroup(multicastAddress);
 
         listenTask = ListenLoopAsync(backgroundTaskCancellationSource.Token);
+        discoveryTask = DiscoveryLoopAsync(backgroundTaskCancellationSource.Token);
 
         logger.LogInformation(
             "UDP Peer Discovery started listening on multicast group {Address}:{Port}", 
@@ -87,11 +93,23 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
 
         await backgroundTaskCancellationSource.CancelAsync().ConfigureAwait(false);
 
+        var tasksToWait = new List<Task>();
+
         if (listenTask is not null)
+        {
+            tasksToWait.Add(listenTask);
+        }
+
+        if (discoveryTask is not null)
+        {
+            tasksToWait.Add(discoveryTask);
+        }
+
+        if (tasksToWait.Count > 0)
         {
             try
             {
-                await listenTask.ConfigureAwait(false);
+                await Task.WhenAll(tasksToWait).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -212,6 +230,54 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
         catch (Exception ex)
         {
             logger.LogError(ex, "Unexpected error in UDP peer discovery background listen loop.");
+        }
+    }
+
+    private async Task DiscoveryLoopAsync(CancellationToken token)
+    {
+        // Add a small initial delay to avoid a discovery storm immediately upon startup
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2), token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                var discoveredPeers = await DiscoverPeersAsync(token).ConfigureAwait(false);
+                
+                foreach (var peer in discoveredPeers)
+                {
+                    await peerRegistry.AddOrUpdatePeerAsync(peer, PeerStatus.Active, token).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected during shutdown
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Unexpected error in UDP peer discovery loop.");
+            }
+
+            if (token.IsCancellationRequested)
+            {
+                break;
+            }
+
+            try
+            {
+                await Task.Delay(options.DiscoveryInterval, token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected during shutdown
+            }
         }
     }
 }

@@ -23,6 +23,11 @@ public sealed class UdpDiscoveryOptions : IEquatable<UdpDiscoveryOptions>
     public TimeSpan DiscoveryTimeout { get; set; } = TimeSpan.FromSeconds(2);
 
     /// <summary>
+    /// Gets or sets the interval at which the background service will actively broadcast discovery requests.
+    /// </summary>
+    public TimeSpan DiscoveryInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// Gets or sets the unique identifier of the local peer.
     /// </summary>
     public Guid LocalPeerId { get; set; } = Guid.NewGuid();
@@ -52,6 +57,7 @@ public sealed class UdpDiscoveryOptions : IEquatable<UdpDiscoveryOptions>
 
         return MulticastPort == other.MulticastPort &&
                DiscoveryTimeout.Equals(other.DiscoveryTimeout) &&
+               DiscoveryInterval.Equals(other.DiscoveryInterval) &&
                LocalPeerId.Equals(other.LocalPeerId) &&
                LocalEndpointPort == other.LocalEndpointPort &&
                string.Equals(MulticastAddress, other.MulticastAddress, StringComparison.OrdinalIgnoreCase) &&
@@ -68,6 +74,7 @@ public sealed class UdpDiscoveryOptions : IEquatable<UdpDiscoveryOptions>
             StringComparer.OrdinalIgnoreCase.GetHashCode(MulticastAddress ?? string.Empty),
             MulticastPort,
             DiscoveryTimeout,
+            DiscoveryInterval,
             LocalPeerId,
             StringComparer.OrdinalIgnoreCase.GetHashCode(LocalEndpointHost ?? string.Empty),
             LocalEndpointPort);

@@ -30,33 +30,36 @@ public sealed class FeatureFlagAntiEntropyServiceTests
     [Fact]
     public void Constructor_ShouldThrowArgumentNullException_WhenDependenciesAreNull()
     {
-        var scopeFactory = new Mock<ICrdtScopeFactory>().Object;
+        var crdtScopeFactoryMock = new Mock<ICrdtScopeFactory>();
+        crdtScopeFactoryMock.Setup(s => s.CreateScope(It.IsAny<string>())).Returns(new Mock<IServiceScope>().Object);
         var options = Options.Create(new FeatureFlagOptions { ReplicaId = "rep1" });
+        var scopeProvider = new FeatureFlagCrdtScopeProvider(crdtScopeFactoryMock.Object, options);
+        
         var gossip = new Mock<IGossipProtocol>().Object;
         var serializer = new Mock<ICrdtSerializer>().Object;
         var logger = new Mock<ILogger<FeatureFlagAntiEntropyService>>().Object;
 
-        Should.Throw<ArgumentNullException>(() => new FeatureFlagAntiEntropyService(null!, options, gossip, serializer, logger));
-        Should.Throw<ArgumentNullException>(() => new FeatureFlagAntiEntropyService(scopeFactory, null!, gossip, serializer, logger));
-        Should.Throw<ArgumentNullException>(() => new FeatureFlagAntiEntropyService(scopeFactory, options, null!, serializer, logger));
-        Should.Throw<ArgumentNullException>(() => new FeatureFlagAntiEntropyService(scopeFactory, options, gossip, null!, logger));
-        Should.Throw<ArgumentNullException>(() => new FeatureFlagAntiEntropyService(scopeFactory, options, gossip, serializer, null!));
+        Should.Throw<ArgumentNullException>(() => new FeatureFlagAntiEntropyService(null!, gossip, serializer, logger));
+        Should.Throw<ArgumentNullException>(() => new FeatureFlagAntiEntropyService(scopeProvider, null!, serializer, logger));
+        Should.Throw<ArgumentNullException>(() => new FeatureFlagAntiEntropyService(scopeProvider, gossip, null!, logger));
+        Should.Throw<ArgumentNullException>(() => new FeatureFlagAntiEntropyService(scopeProvider, gossip, serializer, null!));
     }
 
     [Fact]
     public async Task ExecuteAsync_ShouldBroadcastState_AndCancelGracefully()
     {
-        var scopeFactoryMock = new Mock<ICrdtScopeFactory>();
+        var crdtScopeFactoryMock = new Mock<ICrdtScopeFactory>();
+        var scopeMock = new Mock<IServiceScope>();
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        scopeMock.Setup(s => s.ServiceProvider).Returns(serviceProviderMock.Object);
+        crdtScopeFactoryMock.Setup(s => s.CreateScope("rep1")).Returns(scopeMock.Object);
+        
         var options = Options.Create(new FeatureFlagOptions { ReplicaId = "rep1" });
+        var scopeProvider = new FeatureFlagCrdtScopeProvider(crdtScopeFactoryMock.Object, options);
+        
         var gossipMock = new Mock<IGossipProtocol>();
         var serializerMock = new Mock<ICrdtSerializer>();
         var loggerMock = new Mock<ILogger<FeatureFlagAntiEntropyService>>();
-
-        var scopeMock = new Mock<IServiceScope>();
-        var serviceProviderMock = new Mock<IServiceProvider>();
-
-        scopeFactoryMock.Setup(s => s.CreateScope("rep1")).Returns(scopeMock.Object);
-        scopeMock.Setup(s => s.ServiceProvider).Returns(serviceProviderMock.Object);
 
         var clusterManagerMock = new Mock<IFeatureFlagClusterManager>();
         clusterManagerMock.Setup(c => c.GetLocalState()).Returns(CreateDvv());
@@ -70,7 +73,7 @@ public sealed class FeatureFlagAntiEntropyServiceTests
         serializerMock.Setup(s => s.SerializeToBytes(It.IsAny<FeatureFlagStateSyncMessage>())).Returns(new byte[] { 1, 2, 3 });
         serializerMock.Setup(s => s.SerializeToBytes(It.IsAny<FeatureFlagMessageWrapper>())).Returns(new byte[] { 4, 5, 6 });
 
-        var service = new FeatureFlagAntiEntropyService(scopeFactoryMock.Object, options, gossipMock.Object, serializerMock.Object, loggerMock.Object);
+        var service = new FeatureFlagAntiEntropyService(scopeProvider, gossipMock.Object, serializerMock.Object, loggerMock.Object);
 
         var cts = new CancellationTokenSource();
         

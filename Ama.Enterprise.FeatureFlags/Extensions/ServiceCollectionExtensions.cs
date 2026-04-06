@@ -42,6 +42,8 @@ public static class ServiceCollectionExtensions
                 .AddCrdtJsonTypeInfoResolver(FeatureFlagsJsonContext.Default)
                 .AddCrdtAotContext<FeatureFlagsCrdtAotContext>();
 
+        services.AddCrdtSerializableType<FeatureFlag>("feature-flag");
+
         // Register the shared MemoryJournal as a singleton simulation for V1
         services.AddCrdtJournaling<MemoryJournal>();
 
@@ -49,6 +51,9 @@ public static class ServiceCollectionExtensions
         services.AddCrdtApplicatorDecorator<JournalingApplicatorDecorator>(DecoratorBehavior.After);
         services.AddCrdtPatcherDecorator<JournalingPatcherDecorator>(DecoratorBehavior.After);
         services.AddCrdtApplicatorDecorator<CompactingApplicatorDecorator>(DecoratorBehavior.After);
+
+        // Register the singleton scope provider to hold the ReplicaContext alive
+        services.AddSingleton<FeatureFlagCrdtScopeProvider>();
 
         // Register the cluster manager
         services.AddScoped<IFeatureFlagClusterManager, FeatureFlagClusterManager>();

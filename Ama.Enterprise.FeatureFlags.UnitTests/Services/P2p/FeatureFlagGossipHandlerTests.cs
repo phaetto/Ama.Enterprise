@@ -127,26 +127,30 @@ public sealed class FeatureFlagGossipHandlerTests
     [Fact]
     public void Constructor_ShouldThrowArgumentNullException_WhenDependenciesAreNull()
     {
-        var scopeFactory = new Mock<ICrdtScopeFactory>().Object;
+        var crdtScopeFactoryMock = new Mock<ICrdtScopeFactory>();
+        crdtScopeFactoryMock.Setup(s => s.CreateScope(It.IsAny<string>())).Returns(new Mock<IServiceScope>().Object);
         var options = Options.Create(new FeatureFlagOptions { ReplicaId = "rep1" });
+        var scopeProvider = new FeatureFlagCrdtScopeProvider(crdtScopeFactoryMock.Object, options);
         var serializer = new FakeCrdtSerializer();
         var logger = new Mock<ILogger<FeatureFlagGossipHandler>>().Object;
 
-        Should.Throw<ArgumentNullException>(() => new FeatureFlagGossipHandler(null!, options, serializer, logger));
-        Should.Throw<ArgumentNullException>(() => new FeatureFlagGossipHandler(scopeFactory, null!, serializer, logger));
-        Should.Throw<ArgumentNullException>(() => new FeatureFlagGossipHandler(scopeFactory, options, null!, logger));
-        Should.Throw<ArgumentNullException>(() => new FeatureFlagGossipHandler(scopeFactory, options, serializer, null!));
+        Should.Throw<ArgumentNullException>(() => new FeatureFlagGossipHandler(null!, serializer, logger));
+        Should.Throw<ArgumentNullException>(() => new FeatureFlagGossipHandler(scopeProvider, null!, logger));
+        Should.Throw<ArgumentNullException>(() => new FeatureFlagGossipHandler(scopeProvider, serializer, null!));
     }
 
     [Fact]
     public async Task HandleAsync_ShouldIgnoreEmptyPayload()
     {
-        var scopeFactoryMock = new Mock<ICrdtScopeFactory>();
+        var crdtScopeFactoryMock = new Mock<ICrdtScopeFactory>();
+        crdtScopeFactoryMock.Setup(s => s.CreateScope(It.IsAny<string>())).Returns(new Mock<IServiceScope>().Object);
         var options = Options.Create(new FeatureFlagOptions { ReplicaId = "rep1" });
+        var scopeProvider = new FeatureFlagCrdtScopeProvider(crdtScopeFactoryMock.Object, options);
+        
         var serializer = new FakeCrdtSerializer();
         var loggerMock = new Mock<ILogger<FeatureFlagGossipHandler>>();
 
-        var handler = new FeatureFlagGossipHandler(scopeFactoryMock.Object, options, serializer, loggerMock.Object);
+        var handler = new FeatureFlagGossipHandler(scopeProvider, serializer, loggerMock.Object);
 
         var message = CreateGossipMessage(Array.Empty<byte>());
         
@@ -158,25 +162,39 @@ public sealed class FeatureFlagGossipHandlerTests
     [Fact]
     public async Task HandleAsync_ShouldIgnoreInvalidPayload()
     {
-        var scopeFactoryMock = new Mock<ICrdtScopeFactory>();
+        var crdtScopeFactoryMock = new Mock<ICrdtScopeFactory>();
+        var scopeMock = new Mock<IServiceScope>();
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        scopeMock.Setup(s => s.ServiceProvider).Returns(serviceProviderMock.Object);
+        crdtScopeFactoryMock.Setup(s => s.CreateScope(It.IsAny<string>())).Returns(scopeMock.Object);
+        
         var options = Options.Create(new FeatureFlagOptions { ReplicaId = "rep1" });
+        var scopeProvider = new FeatureFlagCrdtScopeProvider(crdtScopeFactoryMock.Object, options);
+        
         var serializer = new FakeCrdtSerializer { ThrowOnDeserialize = true };
         var loggerMock = new Mock<ILogger<FeatureFlagGossipHandler>>();
 
-        var handler = new FeatureFlagGossipHandler(scopeFactoryMock.Object, options, serializer, loggerMock.Object);
+        var handler = new FeatureFlagGossipHandler(scopeProvider, serializer, loggerMock.Object);
 
         var message = CreateGossipMessage(new byte[] { 1, 2, 3 });
         
         await handler.HandleAsync(message, CancellationToken.None);
 
-        scopeFactoryMock.Verify(s => s.CreateScope(It.IsAny<string>()), Times.Never);
+        serviceProviderMock.Verify(sp => sp.GetService(It.IsAny<Type>()), Times.Never);
     }
 
     [Fact]
     public async Task HandleAsync_ShouldProcessFeatureFlagSync_AndBroadcastOps()
     {
-        var scopeFactoryMock = new Mock<ICrdtScopeFactory>();
+        var crdtScopeFactoryMock = new Mock<ICrdtScopeFactory>();
+        var scopeMock = new Mock<IServiceScope>();
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        scopeMock.Setup(s => s.ServiceProvider).Returns(serviceProviderMock.Object);
+        crdtScopeFactoryMock.Setup(s => s.CreateScope("rep1")).Returns(scopeMock.Object);
+        
         var options = Options.Create(new FeatureFlagOptions { ReplicaId = "rep1" });
+        var scopeProvider = new FeatureFlagCrdtScopeProvider(crdtScopeFactoryMock.Object, options);
+        
         var gossipMock = new Mock<IGossipProtocol>();
         var loggerMock = new Mock<ILogger<FeatureFlagGossipHandler>>();
 
@@ -187,12 +205,6 @@ public sealed class FeatureFlagGossipHandlerTests
             NextSerializeOpsResult = new byte[] { 2 },
             NextSerializeWrapperResult = new byte[] { 3 }
         };
-
-        var scopeMock = new Mock<IServiceScope>();
-        var serviceProviderMock = new Mock<IServiceProvider>();
-
-        scopeFactoryMock.Setup(s => s.CreateScope("rep1")).Returns(scopeMock.Object);
-        scopeMock.Setup(s => s.ServiceProvider).Returns(serviceProviderMock.Object);
 
         var ctx = (ReplicaContext)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(ReplicaContext));
         typeof(ReplicaContext).GetProperty(nameof(ReplicaContext.ReplicaId))?.SetValue(ctx, "rep1");
@@ -209,7 +221,7 @@ public sealed class FeatureFlagGossipHandlerTests
             
         serviceProviderMock.Setup(sp => sp.GetService(typeof(IFeatureFlagClusterManager))).Returns(clusterManagerMock.Object);
 
-        var handler = new FeatureFlagGossipHandler(scopeFactoryMock.Object, options, serializer, loggerMock.Object);
+        var handler = new FeatureFlagGossipHandler(scopeProvider, serializer, loggerMock.Object);
 
         var message = CreateGossipMessage(new byte[] { 1, 2, 3 });
         
@@ -221,8 +233,15 @@ public sealed class FeatureFlagGossipHandlerTests
     [Fact]
     public async Task HandleAsync_ShouldProcessFeatureFlagOps_AndApplyThem()
     {
-        var scopeFactoryMock = new Mock<ICrdtScopeFactory>();
+        var crdtScopeFactoryMock = new Mock<ICrdtScopeFactory>();
+        var scopeMock = new Mock<IServiceScope>();
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        scopeMock.Setup(s => s.ServiceProvider).Returns(serviceProviderMock.Object);
+        crdtScopeFactoryMock.Setup(s => s.CreateScope("rep1")).Returns(scopeMock.Object);
+        
         var options = Options.Create(new FeatureFlagOptions { ReplicaId = "rep1" });
+        var scopeProvider = new FeatureFlagCrdtScopeProvider(crdtScopeFactoryMock.Object, options);
+        
         var loggerMock = new Mock<ILogger<FeatureFlagGossipHandler>>();
 
         var serializer = new FakeCrdtSerializer
@@ -231,16 +250,10 @@ public sealed class FeatureFlagGossipHandlerTests
             NextOperationsResult = new FeatureFlagOperationsMessage("rep2", new[] { CreateOperation() })
         };
 
-        var scopeMock = new Mock<IServiceScope>();
-        var serviceProviderMock = new Mock<IServiceProvider>();
-
-        scopeFactoryMock.Setup(s => s.CreateScope("rep1")).Returns(scopeMock.Object);
-        scopeMock.Setup(s => s.ServiceProvider).Returns(serviceProviderMock.Object);
-
         var clusterManagerMock = new Mock<IFeatureFlagClusterManager>();
         serviceProviderMock.Setup(sp => sp.GetService(typeof(IFeatureFlagClusterManager))).Returns(clusterManagerMock.Object);
 
-        var handler = new FeatureFlagGossipHandler(scopeFactoryMock.Object, options, serializer, loggerMock.Object);
+        var handler = new FeatureFlagGossipHandler(scopeProvider, serializer, loggerMock.Object);
 
         var message = CreateGossipMessage(new byte[] { 1, 2, 3 });
         
