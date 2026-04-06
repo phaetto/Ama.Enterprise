@@ -33,6 +33,11 @@
 | `$/Ama.Enterprise.CRDT.UI/Ama.Enterprise.CRDT.UI.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT/Ama.Enterprise.CRDT.csproj` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags.UnitTests/Ama.Enterprise.FeatureFlags.UnitTests.csproj` | No description provided. |
+| `$/Ama.Enterprise.FeatureFlags.UnitTests/Extensions/ServiceCollectionExtensionsTests.cs` | Unit tests covering the Dependency Injection registration extensions for feature flags and its P2P components. |
+| `$/Ama.Enterprise.FeatureFlags.UnitTests/Services/FeatureFlagClusterManagerTests.cs` | Unit tests validating local state mutations and DVV state requirements using the CRDT patcher/applicator decorators. |
+| `$/Ama.Enterprise.FeatureFlags.UnitTests/Services/MemoryJournalTests.cs` | Unit tests enforcing bounded historical operation access and trimming inside the feature flags in-memory journal. |
+| `$/Ama.Enterprise.FeatureFlags.UnitTests/Services/P2p/FeatureFlagAntiEntropyServiceTests.cs` | Unit tests for the background service that intermittently broadcasts local anti-entropy state over gossip. |
+| `$/Ama.Enterprise.FeatureFlags.UnitTests/Services/P2p/FeatureFlagGossipHandlerTests.cs` | Unit tests ensuring generic payload parsing and integration of remote P2P gossip into the native feature flags CRDT pipeline. |
 | `$/Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | DI extension methods for registering the feature flags module. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlag.cs` | Data structure representing a single feature flag. |

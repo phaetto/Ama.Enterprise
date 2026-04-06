@@ -47,17 +47,9 @@ dotnet_diagnostic.IDE0028.severity = none
 dotnet_diagnostic.IDE0306.severity = none
 
 # === EXPLICITLY ENABLE CA2007 STRICTLY FOR SHIPPED LIBRARY PROJECTS ===
-[Ama.CRDT/**/*.cs]
+[Ama.Enterprise.CRDT/**/*.cs]
 dotnet_diagnostic.CA2007.severity = error
 
-[Ama.CRDT.Partitioning.Streams/**/*.cs]
-dotnet_diagnostic.CA2007.severity = error
-
-[Ama.CRDT.Analyzers/**/*.cs]
-dotnet_diagnostic.CA2007.severity = error
-
-[Ama.CRDT.Project.Analyzers/**/*.cs]
-dotnet_diagnostic.CA2007.severity = error
 # ======================================================================
 
 [*.{cs,vb}]

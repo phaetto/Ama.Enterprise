@@ -109,7 +109,7 @@ public sealed class P2pNetworkIntegrationTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await using var nodeA = CreateTestNode(8106);
 
-        var largePayload = new byte[Ama.Enterprise.P2p.Constants.MaximumPayloadSizeBytes + 1];
+        var largePayload = new byte[Constants.MaximumPayloadSizeBytes + 1];
 
         await Should.ThrowAsync<ArgumentException>(async () =>
         {
