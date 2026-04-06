@@ -40,7 +40,7 @@ public static class UdpDiscoveryServiceCollectionExtensions
         services.TryAddSingleton<IPeerDiscovery>(serviceProvider => 
             serviceProvider.GetRequiredService<UdpPeerDiscovery>());
             
-        services.AddHostedService<UdpPeerDiscovery>(serviceProvider => 
+        services.AddHostedService(serviceProvider => 
             serviceProvider.GetRequiredService<UdpPeerDiscovery>());
 
         return services;

@@ -35,77 +35,67 @@
 | `$/Ama.Enterprise.FeatureFlags.UnitTests/Ama.Enterprise.FeatureFlags.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Ama.Enterprise.P2p.IntegrationTests.csproj` | Integration tests project for validating P2P networking components via HTTP loopbacks. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Architecture/VersioningArchitectureTests.cs` | Architectural tests that parse the CI/CD deployment files ensuring specific deployed versions always possess explicit test coverage. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Attributes/IntegrationFactAttribute.cs` | Custom xUnit `FactAttribute` providing a centralized toggle to enable or disable all integration tests. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Attributes/TestedProtocolVersionAttribute.cs` | Custom attribute utilized by structural reflection tests to declare protocol versions explicitly covered by a method. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Extensions/XunitLoggingBuilderExtensions.cs` | Extension methods to register xUnit logger in ILoggingBuilder. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Handlers/TestMessageHandler.cs` | Test handler implementation that captures received gossip messages in memory for assertions. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/Handlers/TestMessageHandler.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/Models/TestNode.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pAdvancedIntegrationTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pNetworkIntegrationTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pVersioningIntegrationTests.cs` | Integration tests verifying backwards compatibility and explicit deployment protocol versioning constraints. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/UdpPeerDiscoveryIntegrationTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Logging/XunitLogger.cs` | Custom ILogger implementation for routing logs to xUnit's ITestOutputHelper. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Logging/XunitLoggerProvider.cs` | Provider for creating XunitLogger instances. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Models/TestNode.cs` | Data-transfer class orchestrating individual configured test nodes managing service scopes and lifecycles. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/P2pAdvancedIntegrationTests.cs` | Contains advanced integration tests validating high concurrency, multi-hop linear topologies, and TTL expiration behavior within the P2P network. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/P2pNetworkIntegrationTests.cs` | End-to-end integration tests validating real-world message propagation, network lifecycles, and deduplication capabilities. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/UdpPeerDiscoveryIntegrationTests.cs` | Network integration tests validating reliable peer identification logic using UDP loops across parallel testing instances. |
 | `$/Ama.Enterprise.P2p.UnitTests/Ama.Enterprise.P2p.UnitTests.csproj` | No description provided. |
-| `$/Ama.Enterprise.P2p.UnitTests/Extensions/ServiceCollectionExtensionsTests.cs` | Unit tests for DI setup logic validating proper registration of core gossip services. |
-| `$/Ama.Enterprise.P2p.UnitTests/Services/GossipProtocolTests.cs` | Unit tests for GossipProtocol covering the background loop, message deduplication, and local message dispatch. |
-| `$/Ama.Enterprise.P2p.UnitTests/Services/HttpTransportListenerTests.cs` | Unit tests for HttpTransportListener checking constructor constraints and lifecycle. |
-| `$/Ama.Enterprise.P2p.UnitTests/Services/HttpTransportTests.cs` | Unit tests for HttpTransport ensuring proper HttpClient requests to peer endpoints are constructed. |
-| `$/Ama.Enterprise.P2p.UnitTests/Services/InMemoryPeerRegistryTests.cs` | Unit tests for the thread-safe `InMemoryPeerRegistry` validating peer state changes and observer notifications. |
-| `$/Ama.Enterprise.P2p.UnitTests/Services/MessageDispatcherTests.cs` | Unit tests for MessageDispatcher verifying message routing to multiple handlers and robust exception handling. |
-| `$/Ama.Enterprise.P2p.UnitTests/Services/P2pHostedServiceTests.cs` | Unit tests covering start/stop lifecycle management tied to the generic host. |
-| `$/Ama.Enterprise.P2p.UnitTests/Services/PassThroughPeerAuthenticatorTests.cs` | Unit tests for the `PassThroughPeerAuthenticator` ensuring all valid peers pass without complex checks. |
-| `$/Ama.Enterprise.P2p.UnitTests/Services/RandomPeerSelectorTests.cs` | Unit tests validating edge cases and list shuffling in the `RandomPeerSelector`. |
-| `$/Ama.Enterprise.P2p.UnitTests/Services/SystemTextJsonGossipSerializerTests.cs` | Unit tests assuring payload serialization and fault-tolerance when parsing broken JSON. |
-| `$/Ama.Enterprise.P2p.UnitTests/Services/TimeBasedFailureDetectorTests.cs` | Unit tests managing interval-based evaluations verifying nodes transition to Suspect and Dead accurately. |
+| `$/Ama.Enterprise.P2p.UnitTests/Gossip/Extensions/ServiceCollectionExtensionsTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/GossipProtocolTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/HttpTransportListenerTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/HttpTransportTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/InMemoryPeerRegistryTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/MessageDispatcherTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/P2pHostedServiceTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/PassThroughPeerAuthenticatorTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/RandomPeerSelectorTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/SystemTextJsonGossipSerializerTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/TimeBasedFailureDetectorTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Ama.Enterprise.P2p.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p/Constants.cs` | Global constants for the P2P module, including protocol versions and payload size limits. |
 | `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Extension methods for setting up P2P DI configuration and options registration. |
 | `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Registration logic configuring Dependency Injection specifically targeting the UDP peer discovery sub-components and background services. |
 | `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
-| `$/Ama.Enterprise.P2p/Models/GossipMessage.cs` | Core message DTO enveloping the payload, sender ID, message ID, and TTL for P2P transport. |
-| `$/Ama.Enterprise.P2p/Models/GossipOptions.cs` | Class providing configuration for the gossip protocol (interval, fanout, TTL) using the Options pattern. |
-| `$/Ama.Enterprise.P2p/Models/PeerEndpoint.cs` | DTO mapping an IP/hostname and a port for peer network reachability. |
-| `$/Ama.Enterprise.P2p/Models/PeerId.cs` | DTO representing a unique peer identifier using an underlying GUID. |
-| `$/Ama.Enterprise.P2p/Models/PeerNode.cs` | DTO combining a peer's identity (`PeerId`) and network reachability (`PeerEndpoint`). |
-| `$/Ama.Enterprise.P2p/Models/PeerStatus.cs` | Enum defining the lifecycle states of a peer (Active, Suspect, Dead). |
-| `$/Ama.Enterprise.P2p/Models/UdpDiscoveryOptions.cs` | Model representing configuration settings for the UDP multicast peer discovery system, including address bindings and discovery timeouts. |
+| `$/Ama.Enterprise.P2p/Models/Core/PeerEndpoint.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Models/Core/PeerId.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Models/Core/PeerNode.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Models/Core/PeerStatus.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Models/Core/UdpDiscoveryOptions.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Models/Gossip/GossipMessage.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Models/Gossip/GossipOptions.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Services/Core/IFailureDetector.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IMessageDispatcher.cs` | Generic interface routing incoming protocol messages to registered handlers. |
 | `$/Ama.Enterprise.P2p/Services/Core/IMessageHandler.cs` | Generic interface defining a domain-level consumer for P2P messages. |
 | `$/Ama.Enterprise.P2p/Services/Core/IMessageSerializer.cs` | Generic interface providing generic AOT-friendly serialization capabilities for P2P messages. |
+| `$/Ama.Enterprise.P2p/Services/Core/IP2pTelemetry.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Services/Core/IPeerAuthenticator.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Services/Core/IPeerDiscovery.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Services/Core/IPeerRegistry.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerSelector.cs` | Interface for algorithms that select a generic subset of peers for communication. |
+| `$/Ama.Enterprise.P2p/Services/Core/IPeerTopologyObserver.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/ITransport.cs` | Generic interface defining the outbound network transport capabilities for sending generic messages to peers. |
 | `$/Ama.Enterprise.P2p/Services/Core/ITransportListener.cs` | Generic interface defining the inbound network listener capabilities for receiving protocol messages. |
+| `$/Ama.Enterprise.P2p/Services/Core/InMemoryPeerRegistry.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/MessageDispatcher.cs` | Implements the generic message dispatcher for routing parsed P2P messages. |
+| `$/Ama.Enterprise.P2p/Services/Core/PassThroughPeerAuthenticator.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/RandomPeerSelector.cs` | Implementation of IPeerSelector utilizing random distribution selection. |
 | `$/Ama.Enterprise.P2p/Services/Core/TimeBasedFailureDetector.cs` | Implementation of IFailureDetector using abstract heartbeats decoupled from specific protocol options. |
+| `$/Ama.Enterprise.P2p/Services/Core/UdpDiscoveryJsonContext.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Services/Core/UdpPeerDiscovery.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Gossip/GossipProtocol.cs` | Re-architected implementation of IGossipProtocol targeting generic transport and dispatch interfaces. |
 | `$/Ama.Enterprise.P2p/Services/Gossip/HttpTransport.cs` | Gossip-specific HTTP POST outbound implementation of the generic `ITransport<GossipMessage>`. |
 | `$/Ama.Enterprise.P2p/Services/Gossip/HttpTransportListener.cs` | Gossip-specific inbound listener implementation of the generic `ITransportListener<GossipMessage>`. |
+| `$/Ama.Enterprise.P2p/Services/Gossip/IGossipProtocol.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Services/Gossip/P2pHostedService.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Gossip/SystemTextJsonGossipSerializer.cs` | AOT-friendly System.Text.Json implementation mapped specifically for `IMessageSerializer<GossipMessage>`. |
-| `$/Ama.Enterprise.P2p/Services/GossipProtocol.cs` | Implementation of IGossipProtocol handling the periodic background loop, state tracking, deduplication, and routing of P2P messages. |
-| `$/Ama.Enterprise.P2p/Services/HttpTransport.cs` | Implementation of ITransport utilizing IHttpClientFactory to send outbound serialized gossip messages using HTTP POST. |
-| `$/Ama.Enterprise.P2p/Services/HttpTransportListener.cs` | Implementation of ITransportListener utilizing an HttpListener for capturing and deserializing inbound network gossip traffic over HTTP. |
-| `$/Ama.Enterprise.P2p/Services/IFailureDetector.cs` | Interface providing logic for health evaluation and heartbeats to accurately determine node death/suspicion. |
-| `$/Ama.Enterprise.P2p/Services/IGossipProtocol.cs` | Interface orchestrating the core logic, starting/stopping the P2P loop, and handling broadcast intent. |
-| `$/Ama.Enterprise.P2p/Services/IGossipSerializer.cs` | Interface isolating the AOT-friendly System.Text.Json serialization logic for P2P messages. |
-| `$/Ama.Enterprise.P2p/Services/IMessageDispatcher.cs` | Interface defining a bus/dispatcher to decouple the network protocol from the application handlers (CRDTs). |
-| `$/Ama.Enterprise.P2p/Services/IMessageHandler.cs` | Interface implemented by the domain (like the CRDT engine) to react to parsed incoming gossip data. |
-| `$/Ama.Enterprise.P2p/Services/IP2pTelemetry.cs` | Interface abstracting network observability, ready to be implemented by the OpenTelemetry project. |
-| `$/Ama.Enterprise.P2p/Services/IPeerAuthenticator.cs` | Interface acting as the security boundary to validate and authenticate peers attempting to connect. |
-| `$/Ama.Enterprise.P2p/Services/IPeerDiscovery.cs` | Interface defining mechanisms for discovering existing peers within the network context. |
-| `$/Ama.Enterprise.P2p/Services/IPeerRegistry.cs` | Interface for managing the active routing table, storing and removing known peers. |
-| `$/Ama.Enterprise.P2p/Services/IPeerSelector.cs` | Interface for algorithms that select a subset of peers to target during a gossip tick (e.g., random selection). |
-| `$/Ama.Enterprise.P2p/Services/IPeerTopologyObserver.cs` | Interface for subscribing to peer network topology changes (joins, departures, status changes). |
-| `$/Ama.Enterprise.P2p/Services/ITransport.cs` | Interface abstracting the outbound network calls for sending gossip messages. |
-| `$/Ama.Enterprise.P2p/Services/ITransportListener.cs` | Interface abstracting the inbound network listeners and message callbacks. |
-| `$/Ama.Enterprise.P2p/Services/InMemoryPeerRegistry.cs` | Implementation of IPeerRegistry storing active peers in a thread-safe in-memory dictionary and notifying topology observers. |
-| `$/Ama.Enterprise.P2p/Services/MessageDispatcher.cs` | Implementation of IMessageDispatcher that routes incoming gossip messages to all registered IMessageHandler instances, ensuring errors in one handler do not crash the dispatch process. |
-| `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | Standard .NET `IHostedService` implementation to manage the background lifecycle of the Gossip protocol. |
-| `$/Ama.Enterprise.P2p/Services/PassThroughPeerAuthenticator.cs` | Default implementation of IPeerAuthenticator that accepts all incoming peer connections. |
-| `$/Ama.Enterprise.P2p/Services/RandomPeerSelector.cs` | Implementation of IPeerSelector that randomizes available active peers for gossip distribution. |
-| `$/Ama.Enterprise.P2p/Services/SystemTextJsonGossipSerializer.cs` | Implementation of IGossipSerializer using AOT-friendly System.Text.Json source generators. |
-| `$/Ama.Enterprise.P2p/Services/TimeBasedFailureDetector.cs` | Implementation of IFailureDetector using heartbeats and time intervals to determine peer health. |
-| `$/Ama.Enterprise.P2p/Services/UdpDiscoveryJsonContext.cs` | Source-generated System.Text.Json context strictly enforcing AOT-friendly serialization for peer discovery payload DTOs. |
-| `$/Ama.Enterprise.P2p/Services/UdpPeerDiscovery.cs` | Core implementation executing active UDP multicast discovery and running an independent background service to continually respond to inbound requests. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/PropertyInfoUsageAnalyzerTests.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/SystemConvertUsageAnalyzerTests.cs` | No description provided. |

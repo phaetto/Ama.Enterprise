@@ -114,6 +114,28 @@ public sealed class HttpTransportListener(
                 return;
             }
 
+            // Verify protocol version for backwards compatibility.
+            var versionHeader = context.Request.Headers["X-P2P-Protocol-Version"];
+            var incomingVersion = new Version(0, 0, 0); // Default to 0.0.0 for older clients without header
+
+            if (!string.IsNullOrWhiteSpace(versionHeader) && Version.TryParse(versionHeader, out var parsedVersion))
+            {
+                incomingVersion = parsedVersion;
+            }
+
+            var localVersion = Version.Parse(Constants.ProtocolVersion);
+            
+            // Rejects mismatched major versions since they indicate breaking protocol changes
+            if (incomingVersion.Major != localVersion.Major)
+            {
+                this.logger.LogWarning(
+                    "Rejected incoming gossip message due to major protocol version mismatch. Local: {LocalVersion}, Incoming: {IncomingVersion}", 
+                    localVersion, 
+                    incomingVersion);
+                context.Response.StatusCode = (int)HttpStatusCode.HttpVersionNotSupported;
+                return;
+            }
+
             using var memoryStream = new MemoryStream();
             await context.Request.InputStream.CopyToAsync(memoryStream, cancellationToken).ConfigureAwait(false);
             

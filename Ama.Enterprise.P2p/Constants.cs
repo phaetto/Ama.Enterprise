@@ -7,8 +7,9 @@ public static class Constants
 {
     /// <summary>
     /// The current version of the gossip protocol to ensure backwards compatibility and prevent cross-version pollution.
+    /// Derived from the assembly version at runtime.
     /// </summary>
-    public const string ProtocolVersion = "1.0.0";
+    public static readonly string ProtocolVersion = typeof(Constants).Assembly.GetName().Version?.ToString() ?? "0.0.0";
 
     /// <summary>
     /// The maximum allowable size for a gossip message payload in bytes (1MB).

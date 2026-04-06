@@ -178,7 +178,7 @@ public sealed class P2pAdvancedIntegrationTests
         });
 
         var handler = new TestMessageHandler();
-        services.AddSingleton<TestMessageHandler>(handler);
+        services.AddSingleton(handler);
         
         services.AddSingleton<IMessageHandler<GossipMessage>>(sp => sp.GetRequiredService<TestMessageHandler>());
 

@@ -48,6 +48,9 @@ public sealed class HttpTransport(
             Content = content
         };
 
+        // Add the protocol version header for compatibility checks
+        request.Headers.Add("X-P2P-Protocol-Version", Constants.ProtocolVersion);
+
         this.logger.LogTrace("Sending message {MessageId} to {Url}", message.MessageId, url);
 
         using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);

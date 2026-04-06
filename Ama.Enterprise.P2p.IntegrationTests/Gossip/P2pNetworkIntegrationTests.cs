@@ -237,7 +237,7 @@ public sealed class P2pNetworkIntegrationTests
         });
 
         var handler = new TestMessageHandler();
-        services.AddSingleton<TestMessageHandler>(handler);
+        services.AddSingleton(handler);
         
         // Delegate interface registration to the exact same tracking instance
         services.AddSingleton<IMessageHandler<GossipMessage>>(sp => sp.GetRequiredService<TestMessageHandler>());

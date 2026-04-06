@@ -1,4 +1,3 @@
-using Ama.Enterprise.P2p.Services;
 using Ama.Enterprise.P2p.Services.Gossip;
 using Moq;
 
