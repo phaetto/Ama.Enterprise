@@ -1,7 +1,7 @@
+namespace Ama.Enterprise.P2p.Services.Core;
+
 using Ama.Enterprise.P2p.Models.Core;
 using Microsoft.Extensions.Logging;
-
-namespace Ama.Enterprise.P2p.Services.Core;
 
 /// <summary>
 /// A default implementation of <see cref="IPeerAuthenticator"/> that accepts all peer connections.

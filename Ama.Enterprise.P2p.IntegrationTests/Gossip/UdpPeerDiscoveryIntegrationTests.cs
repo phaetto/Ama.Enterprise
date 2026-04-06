@@ -1,10 +1,6 @@
 namespace Ama.Enterprise.P2p.IntegrationTests.Gossip;
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
+using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.IntegrationTests.Attributes;
 using Ama.Enterprise.P2p.IntegrationTests.Extensions;
@@ -13,6 +9,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Shouldly;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Xunit;
 
 /// <summary>
@@ -78,7 +79,9 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
     private (IPeerDiscovery Discovery, IHostedService HostedService) CreateDiscoveryNode(Guid peerId, int listenPort, int multicastPort)
     {
         var services = new ServiceCollection();
-        
+
+        services.AddCrdt();
+
         services.AddLogging(builder => 
         {
             builder.AddXunit(this.testOutputHelper);

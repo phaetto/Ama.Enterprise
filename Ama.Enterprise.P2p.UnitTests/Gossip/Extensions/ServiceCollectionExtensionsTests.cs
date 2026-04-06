@@ -1,3 +1,6 @@
+namespace Ama.Enterprise.P2p.UnitTests.Gossip.Extensions;
+
+using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
@@ -7,8 +10,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Shouldly;
 
-namespace Ama.Enterprise.P2p.UnitTests.Gossip.Extensions;
-
 public sealed class ServiceCollectionExtensionsTests
 {
     [Fact]
@@ -17,6 +18,7 @@ public sealed class ServiceCollectionExtensionsTests
         // Arrange
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddCrdt();
 
         // Act
         services.AddP2pGossipNetwork(options =>

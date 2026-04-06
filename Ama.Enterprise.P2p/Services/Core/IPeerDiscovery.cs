@@ -1,6 +1,6 @@
-using Ama.Enterprise.P2p.Models.Core;
-
 namespace Ama.Enterprise.P2p.Services.Core;
+
+using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
 /// Defines mechanisms for discovering other peers within the network.

@@ -1,3 +1,7 @@
+namespace Ama.Enterprise.P2p.Extensions;
+
+using System;
+using System.Text.Json.Serialization.Metadata;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
@@ -5,8 +9,6 @@ using Ama.Enterprise.P2p.Services.Gossip;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
-
-namespace Ama.Enterprise.P2p.Extensions;
 
 /// <summary>
 /// Provides extension methods for registering P2P gossip components in the dependency injection container.
@@ -50,6 +52,9 @@ public static class ServiceCollectionExtensions
 
         // Register HttpClient specific to the P2P transport
         services.AddHttpClient("P2pTransport");
+
+        // Register P2P JSON Context to be combined by Ama.CRDT options context
+        services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", P2pJsonSerializerContext.Default);
 
         // Use TryAddSingleton so consumers can override default implementations if needed.
         

@@ -1,6 +1,6 @@
-using Microsoft.Extensions.Hosting;
-
 namespace Ama.Enterprise.P2p.Services.Gossip;
+
+using Microsoft.Extensions.Hosting;
 
 /// <summary>
 /// A background service that ties the P2P Gossip protocol to the .NET generic host lifetime.

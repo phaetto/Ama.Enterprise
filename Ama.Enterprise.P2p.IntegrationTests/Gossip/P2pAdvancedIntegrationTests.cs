@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.IntegrationTests.Attributes;
 using Ama.Enterprise.P2p.IntegrationTests.Extensions;
@@ -161,6 +162,8 @@ public sealed class P2pAdvancedIntegrationTests
     private TestNode CreateTestNode(int port, int defaultTtl = 5)
     {
         var services = new ServiceCollection();
+
+        services.AddCrdt();
         
         services.AddLogging(builder => 
         {

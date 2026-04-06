@@ -1,3 +1,5 @@
+namespace Ama.Enterprise.P2p.UnitTests.Gossip.Services;
+
 using System.Net;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
@@ -7,8 +9,6 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Moq.Protected;
 using Shouldly;
-
-namespace Ama.Enterprise.P2p.UnitTests.Gossip.Services;
 
 public sealed class HttpTransportTests
 {

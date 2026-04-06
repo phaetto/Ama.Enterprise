@@ -1,3 +1,5 @@
+namespace Ama.Enterprise.P2p.UnitTests.Gossip.Services;
+
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
@@ -5,8 +7,6 @@ using Ama.Enterprise.P2p.Services.Gossip;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
-
-namespace Ama.Enterprise.P2p.UnitTests.Gossip.Services;
 
 public sealed class GossipProtocolTests
 {

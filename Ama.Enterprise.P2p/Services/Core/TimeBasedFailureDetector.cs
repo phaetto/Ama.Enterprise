@@ -1,9 +1,9 @@
+namespace Ama.Enterprise.P2p.Services.Core;
+
 using System.Collections.Concurrent;
 using Ama.Enterprise.P2p.Models.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-
-namespace Ama.Enterprise.P2p.Services.Core;
 
 /// <summary>
 /// Determines peer health based on the time elapsed since the last received heartbeat,

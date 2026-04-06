@@ -1,6 +1,6 @@
-using Ama.Enterprise.P2p.Models.Core;
-
 namespace Ama.Enterprise.P2p.Services.Core;
+
+using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
 /// Defines an observer pattern for services that need to react to changes in the P2P network topology.

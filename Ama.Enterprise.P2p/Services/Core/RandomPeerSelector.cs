@@ -1,7 +1,7 @@
+namespace Ama.Enterprise.P2p.Services.Core;
+
 using Ama.Enterprise.P2p.Models.Core;
 using Microsoft.Extensions.Logging;
-
-namespace Ama.Enterprise.P2p.Services.Core;
 
 /// <summary>
 /// Selects a randomized subset of active peers, primarily suited for Epidemic/Gossip distributions.

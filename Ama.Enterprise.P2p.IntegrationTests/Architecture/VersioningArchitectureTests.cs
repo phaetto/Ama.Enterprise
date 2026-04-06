@@ -13,7 +13,7 @@ using Shouldly;
 /// </summary>
 public sealed class VersioningArchitectureTests
 {
-    [IntegrationFact]
+    [Fact]
     public void DeployedYamlVersion_MustHaveExplicitTestCoverage()
     {
         var yamlPath = this.FindPublishNugetYaml();

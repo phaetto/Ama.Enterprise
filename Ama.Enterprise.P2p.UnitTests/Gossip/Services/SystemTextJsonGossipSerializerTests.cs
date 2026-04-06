@@ -1,9 +1,21 @@
+namespace Ama.Enterprise.P2p.UnitTests.Gossip.Services;
+
+using System;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Gossip;
 using Shouldly;
+using Xunit;
 
-namespace Ama.Enterprise.P2p.UnitTests.Gossip.Services;
+/// <summary>
+/// AOT-friendly JSON context tailored for testing to avoid dependency on internal implementation contexts.
+/// </summary>
+[JsonSerializable(typeof(GossipMessage))]
+internal partial class TestP2pJsonContext : JsonSerializerContext
+{
+}
 
 public sealed class SystemTextJsonGossipSerializerTests
 {
@@ -11,7 +23,19 @@ public sealed class SystemTextJsonGossipSerializerTests
 
     public SystemTextJsonGossipSerializerTests()
     {
-        this.serializer = new SystemTextJsonGossipSerializer();
+        var options = new JsonSerializerOptions
+        {
+            TypeInfoResolver = TestP2pJsonContext.Default
+        };
+        
+        this.serializer = new SystemTextJsonGossipSerializer(options);
+    }
+
+    [Fact]
+    public void Constructor_NullOptions_ShouldThrowArgumentNullException()
+    {
+        // Act & Assert
+        Should.Throw<ArgumentNullException>(() => new SystemTextJsonGossipSerializer(null!));
     }
 
     [Fact]

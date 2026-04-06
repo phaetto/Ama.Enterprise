@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -20,6 +21,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
 {
     private readonly UdpDiscoveryOptions options;
     private readonly ILogger<UdpPeerDiscovery> logger;
+    private readonly JsonSerializerOptions serializerOptions;
     
     private UdpClient? listener;
     private CancellationTokenSource? backgroundTaskCancellationSource;
@@ -31,8 +33,12 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     /// </summary>
     /// <param name="options">The UDP discovery configuration options.</param>
     /// <param name="logger">The logger instance.</param>
+    /// <param name="serializerOptions">The JSON serializer options provided by the base library.</param>
     /// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
-    public UdpPeerDiscovery(IOptions<UdpDiscoveryOptions> options, ILogger<UdpPeerDiscovery> logger)
+    public UdpPeerDiscovery(
+        IOptions<UdpDiscoveryOptions> options, 
+        ILogger<UdpPeerDiscovery> logger,
+        [FromKeyedServices("Ama.CRDT")] JsonSerializerOptions serializerOptions)
     {
         if (options is null)
         {
@@ -41,6 +47,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
 
         this.options = options.Value ?? throw new ArgumentException("Options value cannot be null", nameof(options));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        this.serializerOptions = serializerOptions ?? throw new ArgumentNullException(nameof(serializerOptions));
     }
 
     /// <inheritdoc />
@@ -125,8 +132,10 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
 
                 try
                 {
-                    var node = JsonSerializer.Deserialize(payload, UdpDiscoveryJsonContext.Default.PeerNode);
-                    if (node.Id.Value != this.options.LocalPeerId && node.Id.Value != Guid.Empty)
+                    var typeInfo = this.serializerOptions.GetTypeInfo(typeof(PeerNode));
+                    var deserializedResult = JsonSerializer.Deserialize(payload, typeInfo);
+
+                    if (deserializedResult is PeerNode node && node.Id.Value != this.options.LocalPeerId && node.Id.Value != Guid.Empty)
                     {
                         discoveredPeers.Add(node);
                     }
@@ -184,7 +193,8 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
                     var localEndpoint = new PeerEndpoint(this.options.LocalEndpointHost, this.options.LocalEndpointPort);
                     var localNode = new PeerNode(localId, localEndpoint);
                     
-                    var responseBytes = JsonSerializer.SerializeToUtf8Bytes(localNode, UdpDiscoveryJsonContext.Default.PeerNode);
+                    var typeInfo = this.serializerOptions.GetTypeInfo(typeof(PeerNode));
+                    var responseBytes = JsonSerializer.SerializeToUtf8Bytes(localNode, typeInfo);
                     
                     // Send the response directly to the endpoint that requested discovery
                     await this.listener.SendAsync(responseBytes, responseBytes.Length, result.RemoteEndPoint).ConfigureAwait(false);

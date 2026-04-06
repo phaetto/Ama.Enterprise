@@ -1,6 +1,6 @@
-using Microsoft.Extensions.Logging;
-
 namespace Ama.Enterprise.P2p.Services.Core;
+
+using Microsoft.Extensions.Logging;
 
 /// <summary>
 /// Implements the generic message dispatcher, routing incoming protocol messages to all registered domain handlers.

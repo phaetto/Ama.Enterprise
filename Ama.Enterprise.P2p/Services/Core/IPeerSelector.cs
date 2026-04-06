@@ -1,6 +1,6 @@
-using Ama.Enterprise.P2p.Models.Core;
-
 namespace Ama.Enterprise.P2p.Services.Core;
+
+using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
 /// Defines the strategy for selecting a subset of peers from the routing table for communication.

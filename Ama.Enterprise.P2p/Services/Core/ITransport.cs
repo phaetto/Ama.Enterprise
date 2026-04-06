@@ -1,6 +1,6 @@
-using Ama.Enterprise.P2p.Models.Core;
-
 namespace Ama.Enterprise.P2p.Services.Core;
+
+using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
 /// Defines the outbound network transport capabilities for sending protocol-specific messages to peers.

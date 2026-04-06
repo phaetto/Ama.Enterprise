@@ -1,10 +1,10 @@
+namespace Ama.Enterprise.P2p.Services.Gossip;
+
 using System.Net.Http.Headers;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
-
-namespace Ama.Enterprise.P2p.Services.Gossip;
 
 /// <summary>
 /// Implements outbound gossip transport using HTTP POST requests.

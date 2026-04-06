@@ -16,9 +16,4 @@ public static class Constants
     /// Prevents network flooding and memory exhaustion attacks.
     /// </summary>
     public const int MaximumPayloadSizeBytes = 1048576;
-
-    /// <summary>
-    /// The default network port used if no configuration is provided.
-    /// </summary>
-    public const int DefaultGossipPort = 8080;
 }

@@ -1,6 +1,6 @@
-using Ama.Enterprise.P2p.Models.Core;
-
 namespace Ama.Enterprise.P2p.Services.Core;
+
+using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
 /// Provides security and validation to ensure only authorized peers can join the gossip network.

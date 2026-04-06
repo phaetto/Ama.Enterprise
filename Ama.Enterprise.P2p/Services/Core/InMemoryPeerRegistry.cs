@@ -1,8 +1,8 @@
+namespace Ama.Enterprise.P2p.Services.Core;
+
 using System.Collections.Concurrent;
 using Ama.Enterprise.P2p.Models.Core;
 using Microsoft.Extensions.Logging;
-
-namespace Ama.Enterprise.P2p.Services.Core;
 
 /// <summary>
 /// Implements an in-memory thread-safe registry for managing known peers and their statuses.

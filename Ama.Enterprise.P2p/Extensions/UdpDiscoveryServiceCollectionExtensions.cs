@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.Extensions;
 
 using System;
+using System.Text.Json.Serialization.Metadata;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -33,6 +34,9 @@ public static class UdpDiscoveryServiceCollectionExtensions
         }
 
         services.Configure(configureOptions);
+
+        // Register UDP Discovery JSON Context to be combined by Ama.CRDT options context
+        services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", UdpDiscoveryJsonContext.Default);
 
         // Register the singleton instance so it can be retrieved as both the discovery interface and the hosted service.
         services.TryAddSingleton<UdpPeerDiscovery>();

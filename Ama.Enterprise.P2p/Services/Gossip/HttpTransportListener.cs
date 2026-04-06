@@ -1,10 +1,10 @@
+namespace Ama.Enterprise.P2p.Services.Gossip;
+
 using System.Net;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-
-namespace Ama.Enterprise.P2p.Services.Gossip;
 
 /// <summary>
 /// Implements inbound gossip listener using an <see cref="HttpListener"/>.
