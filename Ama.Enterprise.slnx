@@ -23,6 +23,7 @@
   <Project Path="Ama.Enterprise.FeatureFlags.UnitTests/Ama.Enterprise.FeatureFlags.UnitTests.csproj" Id="d74539b1-a59f-40bc-81d1-e33de4e85be7" />
   <Project Path="Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj" Id="f29896b4-f84b-45fb-8742-3496884d770e" />
   <Project Path="Ama.Enterprise.P2p.IntegrationTests/Ama.Enterprise.P2p.IntegrationTests.csproj" Id="15a7eaaf-b3d8-4ec7-a32b-25a409f265c7" />
+  <Project Path="Ama.Enterprise.P2p.TableStorage/Ama.Enterprise.P2p.TableStorage.csproj" Id="5e219df9-09b5-428a-936a-225f002d6075" />
   <Project Path="Ama.Enterprise.P2p.UnitTests/Ama.Enterprise.P2p.UnitTests.csproj" Id="59f1fd65-b40a-4eec-9c39-f99f1665b7f0" />
   <Project Path="Ama.Enterprise.P2p/Ama.Enterprise.P2p.csproj" />
 </Solution>

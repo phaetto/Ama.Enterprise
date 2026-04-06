@@ -47,6 +47,10 @@
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/UdpPeerDiscoveryIntegrationTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Logging/XunitLogger.cs` | Custom ILogger implementation for routing logs to xUnit's ITestOutputHelper. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Logging/XunitLoggerProvider.cs` | Provider for creating XunitLogger instances. |
+| `$/Ama.Enterprise.P2p.TableStorage/Ama.Enterprise.P2p.TableStorage.csproj` | Serverless-focused Azure Table Storage integration for P2P state management. |
+| `$/Ama.Enterprise.P2p.TableStorage/Extensions/ServiceCollectionExtensions.cs` | DI extension methods for registering the Table Storage peer registry. |
+| `$/Ama.Enterprise.P2p.TableStorage/Models/TableStorageRegistryOptions.cs` | Configuration options for the Table Storage peer registry. |
+| `$/Ama.Enterprise.P2p.TableStorage/Services/TableStoragePeerRegistry.cs` | Implementation of `IPeerRegistry` utilizing Azure Table Storage, optimized for ephemeral/serverless compute nodes. |
 | `$/Ama.Enterprise.P2p.UnitTests/Ama.Enterprise.P2p.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.UnitTests/Gossip/Extensions/ServiceCollectionExtensionsTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/GossipProtocolTests.cs` | No description provided. |
