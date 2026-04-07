@@ -20,12 +20,12 @@ public sealed class UdpDiscoveryOptions : IEquatable<UdpDiscoveryOptions>
     /// <summary>
     /// Gets or sets the duration to wait for discovery responses before returning the result.
     /// </summary>
-    public TimeSpan DiscoveryTimeout { get; set; } = TimeSpan.FromSeconds(2);
+    public TimeSpan DiscoveryTimeout { get; set; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
     /// Gets or sets the interval at which the background service will actively broadcast discovery requests.
     /// </summary>
-    public TimeSpan DiscoveryInterval { get; set; } = TimeSpan.FromSeconds(30);
+    public TimeSpan DiscoveryInterval { get; set; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
     /// Gets or sets the unique identifier of the local peer.

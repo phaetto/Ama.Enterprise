@@ -152,20 +152,32 @@ public sealed class GossipProtocol(
             messagesToForward.Add(msg);
         }
 
+        var sendTasks = new List<Task>();
+
         foreach (var peer in peers)
         {
             foreach (var message in messagesToForward)
             {
-                try
+                // Assign to local variables to prevent closure capture issues inside the Task loop
+                var currentPeer = peer;
+                var currentMessage = message;
+
+                sendTasks.Add(Task.Run(async () =>
                 {
-                    await transport.SendAsync(peer.Endpoint, message, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "Failed to send message {MessageId} to peer {PeerEndpoint}.", message.MessageId, peer.Endpoint.Host);
-                }
+                    try
+                    {
+                        await transport.SendAsync(currentPeer.Endpoint, currentMessage, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(ex, "Failed to send message {MessageId} to peer {PeerEndpoint}.", currentMessage.MessageId, currentPeer.Endpoint.Host);
+                    }
+                }, cancellationToken));
             }
         }
+
+        // Await all parallel transport tasks rather than blocking the gossip queue serially
+        await Task.WhenAll(sendTasks).ConfigureAwait(false);
     }
 
     private async Task HandleIncomingMessageAsync(GossipMessage message)

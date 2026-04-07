@@ -4,11 +4,10 @@ using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -22,7 +21,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     private readonly UdpDiscoveryOptions options;
     private readonly ILogger<UdpPeerDiscovery> logger;
     private readonly IPeerRegistry peerRegistry;
-    private readonly JsonSerializerOptions serializerOptions;
+    private readonly ICrdtSerializer serializer;
     
     private UdpClient? listener;
     private CancellationTokenSource? backgroundTaskCancellationSource;
@@ -36,13 +35,13 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     /// <param name="options">The UDP discovery configuration options.</param>
     /// <param name="logger">The logger instance.</param>
     /// <param name="peerRegistry">The peer registry to populate with discovered nodes.</param>
-    /// <param name="serializerOptions">The JSON serializer options provided by the base library.</param>
+    /// <param name="serializer">The centralized CRDT serializer.</param>
     /// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
     public UdpPeerDiscovery(
         IOptions<UdpDiscoveryOptions> options, 
         ILogger<UdpPeerDiscovery> logger,
         IPeerRegistry peerRegistry,
-        [FromKeyedServices("Ama.CRDT")] JsonSerializerOptions serializerOptions)
+        ICrdtSerializer serializer)
     {
         if (options is null)
         {
@@ -52,7 +51,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
         this.options = options.Value ?? throw new ArgumentException("Options value cannot be null", nameof(options));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
         this.peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
-        this.serializerOptions = serializerOptions ?? throw new ArgumentNullException(nameof(serializerOptions));
+        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
     }
 
     /// <inheritdoc />
@@ -133,7 +132,13 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
         // Bind to any available local port for receiving responses
         client.Client.Bind(new IPEndPoint(IPAddress.Any, 0)); 
         
-        var requestBytes = new byte[] { (byte)'D', (byte)'I', (byte)'S', (byte)'C' };
+        // Serialize local node to send in the broadcast request
+        var localId = new PeerId(options.LocalPeerId);
+        var localEndpoint = new PeerEndpoint(options.LocalEndpointHost, options.LocalEndpointPort);
+        var localNode = new PeerNode(localId, localEndpoint);
+        
+        var requestBytes = serializer.SerializeToBytes(localNode);
+        
         var targetEndpoint = new IPEndPoint(IPAddress.Parse(options.MulticastAddress), options.MulticastPort);
         
         await client.SendAsync(requestBytes, requestBytes.Length, targetEndpoint).ConfigureAwait(false);
@@ -150,17 +155,16 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
 
                 try
                 {
-                    var typeInfo = serializerOptions.GetTypeInfo(typeof(PeerNode));
-                    var deserializedResult = JsonSerializer.Deserialize(payload, typeInfo);
+                    var node = serializer.DeserializeFromBytes<PeerNode>(payload);
 
-                    if (deserializedResult is PeerNode node && node.Id.Value != options.LocalPeerId && node.Id.Value != Guid.Empty)
+                    if (node.Id.Value != options.LocalPeerId && node.Id.Value != Guid.Empty)
                     {
                         discoveredPeers.Add(node);
                     }
                 }
-                catch (JsonException)
+                catch
                 {
-                    // Not a valid PeerNode JSON, ignore and continue listening
+                    // Not a valid PeerNode payload, ignore and continue listening
                 }
             }
         }
@@ -204,18 +208,29 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
                 var result = await listener.ReceiveAsync(token).ConfigureAwait(false);
                 var payload = result.Buffer;
                 
-                // Fast check to ensure the payload is our known "DISC" request
-                if (payload.Length == 4 && payload[0] == 'D' && payload[1] == 'I' && payload[2] == 'S' && payload[3] == 'C')
+                try
                 {
-                    var localId = new PeerId(options.LocalPeerId);
-                    var localEndpoint = new PeerEndpoint(options.LocalEndpointHost, options.LocalEndpointPort);
-                    var localNode = new PeerNode(localId, localEndpoint);
-                    
-                    var typeInfo = serializerOptions.GetTypeInfo(typeof(PeerNode));
-                    var responseBytes = JsonSerializer.SerializeToUtf8Bytes(localNode, typeInfo);
-                    
-                    // Send the response directly to the endpoint that requested discovery
-                    await listener.SendAsync(responseBytes, responseBytes.Length, result.RemoteEndPoint).ConfigureAwait(false);
+                    var remoteNode = serializer.DeserializeFromBytes<PeerNode>(payload);
+
+                    if (remoteNode.Id.Value != options.LocalPeerId && remoteNode.Id.Value != Guid.Empty)
+                    {
+                        // Register the node that sent the discovery broadcast immediately
+                        await peerRegistry.AddOrUpdatePeerAsync(remoteNode, PeerStatus.Active, token).ConfigureAwait(false);
+
+                        // Serialize our local node to reply
+                        var localId = new PeerId(options.LocalPeerId);
+                        var localEndpoint = new PeerEndpoint(options.LocalEndpointHost, options.LocalEndpointPort);
+                        var localNode = new PeerNode(localId, localEndpoint);
+                        
+                        var responseBytes = serializer.SerializeToBytes(localNode);
+                        
+                        // Send the response directly to the endpoint that requested discovery
+                        await listener.SendAsync(responseBytes, responseBytes.Length, result.RemoteEndPoint).ConfigureAwait(false);
+                    }
+                }
+                catch
+                {
+                    // Not a valid PeerNode payload, ignore and continue listening
                 }
             }
         }

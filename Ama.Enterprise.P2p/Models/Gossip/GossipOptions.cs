@@ -7,7 +7,7 @@ public sealed class GossipOptions : IEquatable<GossipOptions>
     /// <summary>
     /// Gets or sets the interval at which the node will initiate a gossip round.
     /// </summary>
-    public TimeSpan GossipInterval { get; set; } = TimeSpan.FromSeconds(1);
+    public TimeSpan GossipInterval { get; set; } = TimeSpan.FromMilliseconds(500);
 
     /// <summary>
     /// Gets or sets the number of peers to select for each gossip round (the fanout).

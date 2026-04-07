@@ -34,11 +34,17 @@ public static class Program
         var replicaId = $"node-{currentPort}";
         var services = new ServiceCollection();
 
-        // Configure Logging - Disable lower levels so the UI isn't destroyed by background Gossip traces
+        // Configure Logging - Using a custom lock-aware logger so background tasks
+        // (like our UDP discovery logs) don't shred the interactive console UI.
         services.AddLogging(builder =>
         {
-            builder.SetMinimumLevel(LogLevel.Error);
-            builder.AddConsole();
+            builder.SetMinimumLevel(LogLevel.Information);
+            builder.AddFilter("Microsoft", LogLevel.Warning);
+            builder.AddFilter("System", LogLevel.Warning);
+            
+            // Optionally clear default providers and use our synchronized console logger
+            builder.ClearProviders();
+            builder.AddProvider(new LockedConsoleLoggerProvider());
         });
 
         // 1. Add CRDT and Feature Flags with the assigned ReplicaId for the Showcase process node
@@ -54,7 +60,7 @@ public static class Program
         {
             options.ListenPort = currentPort;
             options.ListenHost = "localhost";
-            options.GossipInterval = TimeSpan.FromSeconds(2);
+            options.GossipInterval = TimeSpan.FromMilliseconds(500);
         });
 
         // 3. Add UDP Peer Discovery so nodes automatically find each other in the local network
@@ -63,9 +69,12 @@ public static class Program
             options.LocalEndpointPort = currentPort;
             options.MulticastAddress = "239.255.0.1";
             options.MulticastPort = 8035;
+            options.DiscoveryInterval = TimeSpan.FromSeconds(1);
+            options.DiscoveryTimeout = TimeSpan.FromSeconds(1);
         });
 
         await using var provider = services.BuildServiceProvider();
+        var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("ShowCase");
         
         // Resolve the centralized scope provider to ensure all parts of the application share the same CRDT State
         var scopeProvider = provider.GetRequiredService<FeatureFlagCrdtScopeProvider>();
@@ -84,6 +93,8 @@ public static class Program
 
         try
         {
+            logger.LogInformation("Starting showcase node on port {Port}...", currentPort);
+
             // Start all background hosted services (Gossip loop, Anti-Entropy, UDP Listener)
             foreach (var service in hostedServices)
             {
@@ -134,7 +145,7 @@ public static class Program
                             break;
 
                         case "clone":
-                            CloneProcess();
+                            CloneProcess(logger);
                             break;
 
                         case "exit":
@@ -149,13 +160,13 @@ public static class Program
                 }
                 catch (Exception ex)
                 {
-                    WriteLineLocked($"Error: {ex.Message}");
+                    logger.LogError(ex, "Error processing command.");
                 }
             }
         }
         finally
         {
-            WriteLineLocked("Shutting down services. Please wait...");
+            logger.LogInformation("Shutting down services. Please wait...");
             foreach (var service in hostedServices)
             {
                 await service.StopAsync(CancellationToken.None).ConfigureAwait(false);
@@ -166,14 +177,14 @@ public static class Program
     /// <summary>
     /// Spawns a new instance of this console application on a new random port to join the cluster.
     /// </summary>
-    private static void CloneProcess()
+    private static void CloneProcess(ILogger logger)
     {
         var nextPort = 8080 + Random.Shared.Next(0, 1000);
         var processPath = Environment.ProcessPath;
 
         if (string.IsNullOrEmpty(processPath))
         {
-            WriteLineLocked("Unable to determine process path for cloning.");
+            logger.LogWarning("Unable to determine process path for cloning.");
             return;
         }
 
@@ -184,7 +195,7 @@ public static class Program
             UseShellExecute = true // Spawns a new independent console window
         });
 
-        WriteLineLocked($"Cloned new cluster node instance on port {nextPort}.");
+        logger.LogInformation("Cloned new cluster node instance on port {NextPort}.", nextPort);
     }
 
     /// <summary>
@@ -264,6 +275,46 @@ public static class Program
         lock (ConsoleLock)
         {
             Console.WriteLine(message);
+        }
+    }
+
+    // Custom lock-aware logger provider ensuring dependency injection traces format synchronously
+    // without scrambling the showcase input console.
+    private sealed class LockedConsoleLoggerProvider : ILoggerProvider
+    {
+        public ILogger CreateLogger(string categoryName) => new LockedConsoleLogger(categoryName);
+        public void Dispose() { }
+    }
+
+    private sealed class LockedConsoleLogger(string categoryName) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Information;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (!IsEnabled(logLevel))
+            {
+                return;
+            }
+
+            var message = formatter(state, exception);
+            if (string.IsNullOrEmpty(message) && exception is null)
+            {
+                return;
+            }
+
+            var shortCategory = categoryName.Split('.').LastOrDefault() ?? categoryName;
+            var logLine = $"[{logLevel.ToString().ToUpperInvariant()}] {shortCategory}: {message}";
+            
+            if (exception is not null)
+            {
+                logLine += Environment.NewLine + exception;
+            }
+
+            // Route standard background logs through the locked console sync block
+            WriteLineLocked(logLine);
         }
     }
 }
