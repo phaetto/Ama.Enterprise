@@ -91,6 +91,13 @@ public static class Program
             cts.Cancel();
         };
 
+        // Wire up the event handler to react to cluster changes rather than polling
+        clusterManager.StateChanged += (sender, eventArgs) =>
+        {
+            var flags = clusterManager.GetFlags();
+            DrawFlags(flags);
+        };
+
         try
         {
             logger.LogInformation("Starting showcase node on port {Port}...", currentPort);
@@ -101,10 +108,11 @@ public static class Program
                 await service.StartAsync(cts.Token).ConfigureAwait(false);
             }
 
-            // Launch the background UI updater
-            _ = Task.Run(() => MonitorChangesAsync(clusterManager, cts.Token), cts.Token);
-
             DrawMenu();
+
+            // Initial UI draw
+            var initialFlags = clusterManager.GetFlags();
+            DrawFlags(initialFlags);
 
             // Interactive Console Loop
             while (!cts.Token.IsCancellationRequested)
@@ -196,42 +204,6 @@ public static class Program
         });
 
         logger.LogInformation("Cloned new cluster node instance on port {NextPort}.", nextPort);
-    }
-
-    /// <summary>
-    /// Polls the cluster manager to observe state changes and redraws the UI.
-    /// </summary>
-    private static async Task MonitorChangesAsync(IFeatureFlagClusterManager clusterManager, CancellationToken token)
-    {
-        var lastHash = 0;
-
-        while (!token.IsCancellationRequested)
-        {
-            var flags = clusterManager.GetFlags();
-            var currentHash = ComputeHash(flags);
-
-            if (currentHash != lastHash)
-            {
-                lastHash = currentHash;
-                DrawFlags(flags);
-            }
-
-            await Task.Delay(500, token).ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>
-    /// Deterministic hash within the current process lifetime to track dict mutations.
-    /// </summary>
-    private static int ComputeHash(IReadOnlyDictionary<string, FeatureFlag> flags)
-    {
-        var hash = new HashCode();
-        foreach (var kvp in flags.OrderBy(k => k.Key))
-        {
-            hash.Add(kvp.Key);
-            hash.Add(kvp.Value.IsEnabled);
-        }
-        return hash.ToHashCode();
     }
 
     private static void DrawMenu()

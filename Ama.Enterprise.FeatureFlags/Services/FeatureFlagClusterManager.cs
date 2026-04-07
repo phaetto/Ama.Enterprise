@@ -39,6 +39,9 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
     private CrdtDocument<FeatureFlagState> document;
     private readonly object syncRoot = new();
 
+    /// <inheritdoc />
+    public event EventHandler? StateChanged;
+
     public FeatureFlagClusterManager(
         ReplicaContext replicaContext,
         IAsyncCrdtApplicator applicator,
@@ -109,6 +112,8 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
             document = result.Document;
         }
 
+        StateChanged?.Invoke(this, EventArgs.Empty);
+
         if (activeSyncEnabled)
         {
             await BroadcastOperationAsync(operation, cancellationToken).ConfigureAwait(false);
@@ -140,6 +145,8 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
             document = result.Document;
         }
 
+        StateChanged?.Invoke(this, EventArgs.Empty);
+
         if (activeSyncEnabled)
         {
             await BroadcastOperationAsync(operation, cancellationToken).ConfigureAwait(false);
@@ -149,7 +156,6 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
     /// <inheritdoc />
     public DottedVersionVector GetLocalState()
     {
-        // TODO: Add deep cloning to DVV
         var sourceDvv = replicaContext.GlobalVersionVector;
 
         // Creating a clone of the DottedVersionVector to avoid concurrent modification issues
@@ -229,6 +235,8 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
         {
             document = result.Document;
         }
+
+        StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private async Task BroadcastOperationAsync(CrdtOperation operation, CancellationToken cancellationToken)
@@ -238,7 +246,9 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
             var gossipProtocol = serviceProvider.GetRequiredService<IGossipProtocol>();
             var opsMsg = new FeatureFlagOperationsMessage(replicaContext.ReplicaId, new[] { operation });
             var payload = serializer.SerializeToBytes(opsMsg);
-            var wrapper = new FeatureFlagMessageWrapper("FeatureFlagOperations", payload);
+            
+            // Fixed mismatch: Using "FeatureFlagOps" to correctly match what FeatureFlagGossipHandler expects
+            var wrapper = new FeatureFlagMessageWrapper("FeatureFlagOps", payload);
             var finalBytes = serializer.SerializeToBytes(wrapper);
 
             await gossipProtocol.BroadcastAsync(finalBytes, cancellationToken).ConfigureAwait(false);

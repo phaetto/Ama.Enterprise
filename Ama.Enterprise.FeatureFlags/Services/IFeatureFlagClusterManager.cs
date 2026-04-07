@@ -13,6 +13,11 @@ using Ama.Enterprise.FeatureFlags.Models;
 public interface IFeatureFlagClusterManager
 {
     /// <summary>
+    /// Event triggered when the state of the feature flags has been updated, either locally or remotely.
+    /// </summary>
+    event EventHandler? StateChanged;
+
+    /// <summary>
     /// Gets the current read-only state of feature flags.
     /// </summary>
     IReadOnlyDictionary<string, FeatureFlag> GetFlags();
