@@ -40,7 +40,7 @@ public static class ServiceCollectionExtensions
             services.Configure(configureOptions);
         }
 
-        // Map GossipInterval down to the new generic generic failure detector
+        // Map GossipInterval down to the new generic failure detector
         services.AddOptions<FailureDetectorOptions>()
             .Configure<IOptions<GossipOptions>>((failureOptions, gossipOptions) =>
             {
@@ -67,8 +67,8 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ITransportListener<GossipMessage>, HttpTransportListener>();
         services.TryAddSingleton<IMessageDispatcher<GossipMessage>, MessageDispatcher<GossipMessage>>();
         
-        // Protocol orchestrator
-        services.TryAddSingleton<IGossipProtocol, GossipProtocol>();
+        // Protocol orchestrator mapped to the generic IP2pProtocol interface
+        services.TryAddSingleton<IP2pProtocol, GossipProtocol>();
         
         // Hosted service to manage background lifecycle within the generic host
         services.AddHostedService<P2pHostedService>();

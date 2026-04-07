@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using Ama.Enterprise.P2p.IntegrationTests.Gossip.Handlers;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
-using Ama.Enterprise.P2p.Services.Gossip;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -41,9 +40,9 @@ public sealed class TestNode : IAsyncDisposable
     public IHostedService HostedService { get; }
 
     /// <summary>
-    /// Gets the protocol instance.
+    /// Gets the generic protocol instance.
     /// </summary>
-    public IGossipProtocol Protocol { get; }
+    public IP2pProtocol Protocol { get; }
 
     /// <summary>
     /// Gets the routing registry instance.
@@ -59,7 +58,7 @@ public sealed class TestNode : IAsyncDisposable
         PeerEndpoint endpoint,
         TestMessageHandler handler,
         IHostedService hostedService,
-        IGossipProtocol protocol,
+        IP2pProtocol protocol,
         IPeerRegistry registry)
     {
         Provider = provider ?? throw new ArgumentNullException(nameof(provider));

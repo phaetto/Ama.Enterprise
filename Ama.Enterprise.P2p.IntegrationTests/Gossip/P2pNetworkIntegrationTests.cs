@@ -9,7 +9,6 @@ using Ama.Enterprise.P2p.IntegrationTests.Gossip.Models;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
-using Ama.Enterprise.P2p.Services.Gossip;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -99,7 +98,7 @@ public sealed class P2pNetworkIntegrationTests
 
         await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
 
-        // Assert Node B handled deduplication within IGossipProtocol and didn't dispatch to handlers again
+        // Assert Node B handled deduplication within IP2pProtocol and didn't dispatch to handlers again
         nodeB.Handler.ReceivedMessages.Count.ShouldBe(1);
     }
 
@@ -256,7 +255,7 @@ public sealed class P2pNetworkIntegrationTests
             endpoint,
             handler,
             provider.GetRequiredService<IHostedService>(),
-            provider.GetRequiredService<IGossipProtocol>(),
+            provider.GetRequiredService<IP2pProtocol>(),
             provider.GetRequiredService<IPeerRegistry>()
         );
     }

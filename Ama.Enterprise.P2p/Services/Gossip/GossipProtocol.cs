@@ -1,6 +1,11 @@
 namespace Ama.Enterprise.P2p.Services.Gossip;
 
+using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
@@ -20,7 +25,7 @@ public sealed class GossipProtocol(
     ITransportListener<GossipMessage> listener,
     IPeerSelector peerSelector,
     IMessageDispatcher<GossipMessage> dispatcher,
-    ILogger<GossipProtocol> logger) : IGossipProtocol, IDisposable
+    ILogger<GossipProtocol> logger) : IP2pProtocol, IDisposable
 {
     private readonly IOptions<GossipOptions> options = options ?? throw new ArgumentNullException(nameof(options));
     private readonly ITransport<GossipMessage> transport = transport ?? throw new ArgumentNullException(nameof(transport));

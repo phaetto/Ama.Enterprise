@@ -9,6 +9,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Shouldly;
+using Xunit;
+using System;
 
 public sealed class ServiceCollectionExtensionsTests
 {
@@ -41,7 +43,7 @@ public sealed class ServiceCollectionExtensionsTests
         provider.GetRequiredService<ITransport<GossipMessage>>().ShouldBeOfType<HttpTransport>();
         provider.GetRequiredService<ITransportListener<GossipMessage>>().ShouldBeOfType<HttpTransportListener>();
         provider.GetRequiredService<IMessageDispatcher<GossipMessage>>().ShouldBeOfType<MessageDispatcher<GossipMessage>>();
-        provider.GetRequiredService<IGossipProtocol>().ShouldBeOfType<GossipProtocol>();
+        provider.GetRequiredService<IP2pProtocol>().ShouldBeOfType<GossipProtocol>();
 
         var hostedServices = provider.GetServices<IHostedService>();
         hostedServices.ShouldContain(s => s is P2pHostedService);

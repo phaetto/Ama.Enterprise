@@ -9,7 +9,6 @@ using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.FeatureFlags.Models.P2p;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
-using Ama.Enterprise.P2p.Services.Gossip;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -78,8 +77,8 @@ public sealed class FeatureFlagGossipHandler : IMessageHandler<GossipMessage>
             var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
             var clusterManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
             
-            // Resolve IGossipProtocol lazily to break the generic dispatcher circular dependency
-            var gossipProtocol = scopeProvider.Scope.ServiceProvider.GetRequiredService<IGossipProtocol>();
+            // Resolve IP2pProtocol lazily to break the generic dispatcher circular dependency
+            var p2pProtocol = scopeProvider.Scope.ServiceProvider.GetRequiredService<IP2pProtocol>();
 
             if (string.IsNullOrEmpty(syncMsg.ReplicaId) || syncMsg.ReplicaId == replicaContext.ReplicaId || syncMsg.State == null)
             {
@@ -98,7 +97,7 @@ public sealed class FeatureFlagGossipHandler : IMessageHandler<GossipMessage>
                 var replyWrapper = new FeatureFlagMessageWrapper("FeatureFlagOps", opsPayload);
                 var replyBytes = serializer.SerializeToBytes(replyWrapper);
 
-                await gossipProtocol.BroadcastAsync(replyBytes, cancellationToken).ConfigureAwait(false);
+                await p2pProtocol.BroadcastAsync(replyBytes, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (Exception ex)

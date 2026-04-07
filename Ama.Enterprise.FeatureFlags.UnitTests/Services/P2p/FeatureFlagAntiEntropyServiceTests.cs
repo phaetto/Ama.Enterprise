@@ -11,7 +11,7 @@ using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Models.P2p;
 using Ama.Enterprise.FeatureFlags.Services;
 using Ama.Enterprise.FeatureFlags.Services.P2p;
-using Ama.Enterprise.P2p.Services.Gossip;
+using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -35,14 +35,14 @@ public sealed class FeatureFlagAntiEntropyServiceTests
         var options = Options.Create(new FeatureFlagOptions { ReplicaId = "rep1" });
         var scopeProvider = new FeatureFlagCrdtScopeProvider(crdtScopeFactoryMock.Object, options);
         
-        var gossip = new Mock<IGossipProtocol>().Object;
+        var p2pProtocol = new Mock<IP2pProtocol>().Object;
         var serializer = new Mock<ICrdtSerializer>().Object;
         var logger = new Mock<ILogger<FeatureFlagAntiEntropyService>>().Object;
 
-        Should.Throw<ArgumentNullException>(() => new FeatureFlagAntiEntropyService(null!, gossip, serializer, logger));
+        Should.Throw<ArgumentNullException>(() => new FeatureFlagAntiEntropyService(null!, p2pProtocol, serializer, logger));
         Should.Throw<ArgumentNullException>(() => new FeatureFlagAntiEntropyService(scopeProvider, null!, serializer, logger));
-        Should.Throw<ArgumentNullException>(() => new FeatureFlagAntiEntropyService(scopeProvider, gossip, null!, logger));
-        Should.Throw<ArgumentNullException>(() => new FeatureFlagAntiEntropyService(scopeProvider, gossip, serializer, null!));
+        Should.Throw<ArgumentNullException>(() => new FeatureFlagAntiEntropyService(scopeProvider, p2pProtocol, null!, logger));
+        Should.Throw<ArgumentNullException>(() => new FeatureFlagAntiEntropyService(scopeProvider, p2pProtocol, serializer, null!));
     }
 
     [Fact]
@@ -57,7 +57,7 @@ public sealed class FeatureFlagAntiEntropyServiceTests
         var options = Options.Create(new FeatureFlagOptions { ReplicaId = "rep1" });
         var scopeProvider = new FeatureFlagCrdtScopeProvider(crdtScopeFactoryMock.Object, options);
         
-        var gossipMock = new Mock<IGossipProtocol>();
+        var p2pProtocolMock = new Mock<IP2pProtocol>();
         var serializerMock = new Mock<ICrdtSerializer>();
         var loggerMock = new Mock<ILogger<FeatureFlagAntiEntropyService>>();
 
@@ -73,7 +73,7 @@ public sealed class FeatureFlagAntiEntropyServiceTests
         serializerMock.Setup(s => s.SerializeToBytes(It.IsAny<FeatureFlagStateSyncMessage>())).Returns(new byte[] { 1, 2, 3 });
         serializerMock.Setup(s => s.SerializeToBytes(It.IsAny<FeatureFlagMessageWrapper>())).Returns(new byte[] { 4, 5, 6 });
 
-        var service = new FeatureFlagAntiEntropyService(scopeProvider, gossipMock.Object, serializerMock.Object, loggerMock.Object);
+        var service = new FeatureFlagAntiEntropyService(scopeProvider, p2pProtocolMock.Object, serializerMock.Object, loggerMock.Object);
 
         var cts = new CancellationTokenSource();
         

@@ -9,7 +9,6 @@ using Ama.Enterprise.P2p.IntegrationTests.Gossip.Models;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
-using Ama.Enterprise.P2p.Services.Gossip;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -153,7 +152,7 @@ public sealed class P2pVersioningIntegrationTests
             endpoint,
             handler,
             provider.GetRequiredService<IHostedService>(),
-            provider.GetRequiredService<IGossipProtocol>(),
+            provider.GetRequiredService<IP2pProtocol>(),
             provider.GetRequiredService<IPeerRegistry>()
         );
     }

@@ -14,7 +14,7 @@ using Ama.Enterprise.FeatureFlags.Models.P2p;
 using Ama.Enterprise.FeatureFlags.Services;
 using Ama.Enterprise.FeatureFlags.Services.P2p;
 using Ama.Enterprise.P2p.Models.Gossip;
-using Ama.Enterprise.P2p.Services.Gossip;
+using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -195,7 +195,7 @@ public sealed class FeatureFlagGossipHandlerTests
         var options = Options.Create(new FeatureFlagOptions { ReplicaId = "rep1" });
         var scopeProvider = new FeatureFlagCrdtScopeProvider(crdtScopeFactoryMock.Object, options);
         
-        var gossipMock = new Mock<IGossipProtocol>();
+        var p2pProtocolMock = new Mock<IP2pProtocol>();
         var loggerMock = new Mock<ILogger<FeatureFlagGossipHandler>>();
 
         var serializer = new FakeCrdtSerializer
@@ -210,8 +210,8 @@ public sealed class FeatureFlagGossipHandlerTests
         typeof(ReplicaContext).GetProperty(nameof(ReplicaContext.ReplicaId))?.SetValue(ctx, "rep1");
         serviceProviderMock.Setup(sp => sp.GetService(typeof(ReplicaContext))).Returns(ctx);
         
-        // Setup resolution of IGossipProtocol from DI scope inside the handler
-        serviceProviderMock.Setup(sp => sp.GetService(typeof(IGossipProtocol))).Returns(gossipMock.Object);
+        // Setup resolution of IP2pProtocol from DI scope inside the handler
+        serviceProviderMock.Setup(sp => sp.GetService(typeof(IP2pProtocol))).Returns(p2pProtocolMock.Object);
 
         var clusterManagerMock = new Mock<IFeatureFlagClusterManager>();
         var ops = new List<CrdtOperation> { CreateOperation() };
@@ -227,7 +227,7 @@ public sealed class FeatureFlagGossipHandlerTests
         
         await handler.HandleAsync(message, CancellationToken.None);
 
-        gossipMock.Verify(g => g.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once);
+        p2pProtocolMock.Verify(g => g.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

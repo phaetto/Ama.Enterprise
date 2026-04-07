@@ -103,6 +103,7 @@
 | `$/Ama.Enterprise.P2p/Services/Core/IMessageDispatcher.cs` | Generic interface routing incoming protocol messages to registered handlers. |
 | `$/Ama.Enterprise.P2p/Services/Core/IMessageHandler.cs` | Generic interface defining a domain-level consumer for P2P messages. |
 | `$/Ama.Enterprise.P2p/Services/Core/IMessageSerializer.cs` | Obsolete generic message serializer interface, superseded by ICrdtSerializer. |
+| `$/Ama.Enterprise.P2p/Services/Core/IP2pProtocol.cs` | Generic interface defining the orchestrator for the P2P protocol, abstracting algorithms like Gossip. |
 | `$/Ama.Enterprise.P2p/Services/Core/IP2pTelemetry.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerAuthenticator.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerDiscovery.cs` | No description provided. |

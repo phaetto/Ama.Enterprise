@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Ama.CRDT.Services;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.FeatureFlags.Models.P2p;
-using Ama.Enterprise.P2p.Services.Gossip;
+using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -17,18 +17,18 @@ using Microsoft.Extensions.Logging;
 public sealed class FeatureFlagAntiEntropyService : BackgroundService
 {
     private readonly FeatureFlagCrdtScopeProvider scopeProvider;
-    private readonly IGossipProtocol gossipProtocol;
+    private readonly IP2pProtocol p2pProtocol;
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<FeatureFlagAntiEntropyService> logger;
 
     public FeatureFlagAntiEntropyService(
         FeatureFlagCrdtScopeProvider scopeProvider,
-        IGossipProtocol gossipProtocol,
+        IP2pProtocol p2pProtocol,
         ICrdtSerializer serializer,
         ILogger<FeatureFlagAntiEntropyService> logger)
     {
         this.scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
-        this.gossipProtocol = gossipProtocol ?? throw new ArgumentNullException(nameof(gossipProtocol));
+        this.p2pProtocol = p2pProtocol ?? throw new ArgumentNullException(nameof(p2pProtocol));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -56,7 +56,7 @@ public sealed class FeatureFlagAntiEntropyService : BackgroundService
                 var wrapper = new FeatureFlagMessageWrapper("FeatureFlagSync", payload);
                 var finalBytes = serializer.SerializeToBytes(wrapper);
 
-                await gossipProtocol.BroadcastAsync(finalBytes, stoppingToken).ConfigureAwait(false);
+                await p2pProtocol.BroadcastAsync(finalBytes, stoppingToken).ConfigureAwait(false);
                 
                 logger.LogTrace("Broadcasted local feature flag synchronization state.");
             }

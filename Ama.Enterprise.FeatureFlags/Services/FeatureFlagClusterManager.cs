@@ -15,7 +15,7 @@ using Ama.CRDT.Services.Serialization;
 using Ama.CRDT.Services.Versioning;
 using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Models.P2p;
-using Ama.Enterprise.P2p.Services.Gossip;
+using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -243,7 +243,7 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
     {
         try
         {
-            var gossipProtocol = serviceProvider.GetRequiredService<IGossipProtocol>();
+            var p2pProtocol = serviceProvider.GetRequiredService<IP2pProtocol>();
             var opsMsg = new FeatureFlagOperationsMessage(replicaContext.ReplicaId, new[] { operation });
             var payload = serializer.SerializeToBytes(opsMsg);
             
@@ -251,7 +251,7 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
             var wrapper = new FeatureFlagMessageWrapper("FeatureFlagOps", payload);
             var finalBytes = serializer.SerializeToBytes(wrapper);
 
-            await gossipProtocol.BroadcastAsync(finalBytes, cancellationToken).ConfigureAwait(false);
+            await p2pProtocol.BroadcastAsync(finalBytes, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
