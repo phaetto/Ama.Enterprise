@@ -28,7 +28,7 @@ public sealed class ServiceCollectionExtensionsTests
         services.AddFeatureFlags();
 
         services.Count.ShouldBeGreaterThan(0);
-        services.ShouldContain(s => s.ServiceType == typeof(MemoryJournal));
+        services.ShouldContain(s => s.ImplementationType == typeof(MemoryJournal) || s.ServiceType == typeof(MemoryJournal));
         services.ShouldContain(s => s.ServiceType == typeof(IFeatureFlagClusterManager));
     }
 

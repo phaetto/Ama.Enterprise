@@ -4,7 +4,6 @@ using System;
 using Ama.CRDT.Extensions;
 using Ama.CRDT.Models;
 using Ama.CRDT.Services.Decorators;
-using Ama.CRDT.Services.Journaling;
 using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Models.P2p;
 using Ama.Enterprise.FeatureFlags.Services;

@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Text.Json;
 using Ama.CRDT.Models;
-using Ama.CRDT.Services.Journaling;
 using Ama.Enterprise.FeatureFlags.Models.P2p;
 using Ama.Enterprise.FeatureFlags.Services;
 using Shouldly;

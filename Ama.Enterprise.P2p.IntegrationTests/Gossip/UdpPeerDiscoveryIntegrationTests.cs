@@ -88,6 +88,9 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
             builder.SetMinimumLevel(LogLevel.Trace);
         });
 
+        // Add the missing required IPeerRegistry for the UdpPeerDiscovery service
+        services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
+
         services.AddUdpPeerDiscovery(options => 
         {
             // Use local loopback compatible multicast group for testing environments
