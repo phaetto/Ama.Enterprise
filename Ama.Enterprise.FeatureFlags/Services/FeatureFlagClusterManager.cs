@@ -11,8 +11,13 @@ using Ama.CRDT.Models;
 using Ama.CRDT.Models.Intents;
 using Ama.CRDT.Services;
 using Ama.CRDT.Services.Journaling;
+using Ama.CRDT.Services.Serialization;
 using Ama.CRDT.Services.Versioning;
 using Ama.Enterprise.FeatureFlags.Models;
+using Ama.Enterprise.FeatureFlags.Models.P2p;
+using Ama.Enterprise.P2p.Services.Gossip;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
@@ -26,13 +31,13 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
     private readonly IJournalManager journalManager;
     private readonly IVersionVectorSyncService syncService;
     private readonly ICrdtMetadataManager metadataManager;
+    private readonly IServiceProvider serviceProvider;
+    private readonly ICrdtSerializer serializer;
+    private readonly ILogger<FeatureFlagClusterManager> logger;
     private readonly bool activeSyncEnabled;
 
     private CrdtDocument<FeatureFlagState> document;
     private readonly object syncRoot = new();
-
-    /// <inheritdoc />
-    public event EventHandler? LocalStateChanged;
 
     public FeatureFlagClusterManager(
         ReplicaContext replicaContext,
@@ -41,7 +46,10 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
         IJournalManager journalManager,
         IVersionVectorSyncService syncService,
         ICrdtMetadataManager metadataManager,
-        IOptions<FeatureFlagOptions> options)
+        IOptions<FeatureFlagOptions> options,
+        IServiceProvider serviceProvider,
+        ICrdtSerializer serializer,
+        ILogger<FeatureFlagClusterManager> logger)
     {
         this.replicaContext = replicaContext ?? throw new ArgumentNullException(nameof(replicaContext));
         this.applicator = applicator ?? throw new ArgumentNullException(nameof(applicator));
@@ -49,6 +57,9 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
         this.journalManager = journalManager ?? throw new ArgumentNullException(nameof(journalManager));
         this.syncService = syncService ?? throw new ArgumentNullException(nameof(syncService));
         this.metadataManager = metadataManager ?? throw new ArgumentNullException(nameof(metadataManager));
+        this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
         
         if (options == null)
         {
@@ -100,7 +111,7 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
 
         if (activeSyncEnabled)
         {
-            LocalStateChanged?.Invoke(this, EventArgs.Empty);
+            await BroadcastOperationAsync(operation, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -131,7 +142,7 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
 
         if (activeSyncEnabled)
         {
-            LocalStateChanged?.Invoke(this, EventArgs.Empty);
+            await BroadcastOperationAsync(operation, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -217,6 +228,24 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
         lock (syncRoot)
         {
             document = result.Document;
+        }
+    }
+
+    private async Task BroadcastOperationAsync(CrdtOperation operation, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var gossipProtocol = serviceProvider.GetRequiredService<IGossipProtocol>();
+            var opsMsg = new FeatureFlagOperationsMessage(replicaContext.ReplicaId, new[] { operation });
+            var payload = serializer.SerializeToBytes(opsMsg);
+            var wrapper = new FeatureFlagMessageWrapper("FeatureFlagOperations", payload);
+            var finalBytes = serializer.SerializeToBytes(wrapper);
+
+            await gossipProtocol.BroadcastAsync(finalBytes, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to broadcast newly generated CRDT operation.");
         }
     }
 }

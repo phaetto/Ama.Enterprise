@@ -40,73 +40,46 @@ public sealed class FeatureFlagAntiEntropyService : BackgroundService
         var clusterManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
         var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
 
-        // Using SemaphoreSlim to safely signal and bypass the regular anti-entropy delay
-        using var syncSignal = new SemaphoreSlim(0, 1);
+        // Initial delay allowing node discovery and initialization to settle before generating network traffic
+        await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
 
-        void OnStateChanged(object? sender, EventArgs e)
+        while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                if (syncSignal.CurrentCount == 0)
-                {
-                    syncSignal.Release();
-                }
+                var state = clusterManager.GetLocalState();
+                var syncMsg = new FeatureFlagStateSyncMessage(replicaContext.ReplicaId, state);
+                
+                // Use the standardized ICrdtSerializer rather than explicit System.Text.Json implementations
+                var payload = serializer.SerializeToBytes(syncMsg);
+                
+                var wrapper = new FeatureFlagMessageWrapper("FeatureFlagSync", payload);
+                var finalBytes = serializer.SerializeToBytes(wrapper);
+
+                await gossipProtocol.BroadcastAsync(finalBytes, stoppingToken).ConfigureAwait(false);
+                
+                logger.LogTrace("Broadcasted local feature flag synchronization state.");
             }
-            catch (ObjectDisposedException)
+            catch (OperationCanceledException)
             {
-                // Ignore if firing concurrently during graceful shutdown disposal
+                // Graceful cancellation triggered.
+                break;
             }
-        }
-
-        clusterManager.LocalStateChanged += OnStateChanged;
-
-        try
-        {
-            // Initial delay allowing node discovery and initialization to settle before generating network traffic
-            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
-
-            while (!stoppingToken.IsCancellationRequested)
+            catch (Exception ex)
             {
-                try
-                {
-                    var state = clusterManager.GetLocalState();
-                    var syncMsg = new FeatureFlagStateSyncMessage(replicaContext.ReplicaId, state);
-                    
-                    // Use the standardized ICrdtSerializer rather than explicit System.Text.Json implementations
-                    var payload = serializer.SerializeToBytes(syncMsg);
-                    
-                    var wrapper = new FeatureFlagMessageWrapper("FeatureFlagSync", payload);
-                    var finalBytes = serializer.SerializeToBytes(wrapper);
-
-                    await gossipProtocol.BroadcastAsync(finalBytes, stoppingToken).ConfigureAwait(false);
-                    
-                    logger.LogTrace("Broadcasted local feature flag synchronization state.");
-                }
-                catch (OperationCanceledException)
-                {
-                    // Graceful cancellation triggered.
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "An error occurred during feature flag anti-entropy broadcast.");
-                }
-
-                try
-                {
-                    // Wait 15 seconds, or wake up immediately if a local state change occurs while Active Sync is enabled
-                    await syncSignal.WaitAsync(TimeSpan.FromSeconds(15), stoppingToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    // Graceful cancellation triggered during waiting.
-                    break;
-                }
+                logger.LogError(ex, "An error occurred during feature flag anti-entropy broadcast.");
             }
-        }
-        finally
-        {
-            clusterManager.LocalStateChanged -= OnStateChanged;
+
+            try
+            {
+                // Wait 15 seconds before the next anti-entropy sync
+                await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Graceful cancellation triggered during waiting.
+                break;
+            }
         }
     }
 }
