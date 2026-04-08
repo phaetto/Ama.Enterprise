@@ -44,14 +44,17 @@ public sealed class ServiceCollectionExtensionsTests
         options.Fanout.ShouldBe(5);
         options.ListenPort.ShouldBe(12345);
 
-        provider.GetRequiredKeyedService<IPeerRegistry>(TestMeshId).ShouldBeOfType<InMemoryPeerRegistry>();
+        // Core singletons un-keyed
+        provider.GetRequiredService<IPeerRegistry>().ShouldBeOfType<InMemoryPeerRegistry>();
+        provider.GetRequiredService<IP2pProtocol>().ShouldBeOfType<GossipProtocol>();
+
+        // Mesh specific keyed
         provider.GetRequiredKeyedService<IPeerAuthenticator>(TestMeshId).ShouldBeOfType<PassThroughPeerAuthenticator>();
         provider.GetRequiredKeyedService<IPeerSelector>(TestMeshId).ShouldBeOfType<RandomPeerSelector>();
         provider.GetRequiredKeyedService<IFailureDetector>(TestMeshId).ShouldBeOfType<TimeBasedFailureDetector>();
         provider.GetRequiredKeyedService<ITransport<GossipMessage>>(TestMeshId).ShouldBeOfType<HttpTransport>();
         provider.GetRequiredKeyedService<ITransportListener<GossipMessage>>(TestMeshId).ShouldBeOfType<HttpTransportListener>();
         provider.GetRequiredKeyedService<IMessageDispatcher<GossipMessage>>(TestMeshId).ShouldBeOfType<MessageDispatcher<GossipMessage>>();
-        provider.GetRequiredKeyedService<IP2pProtocol>(TestMeshId).ShouldBeOfType<GossipProtocol>();
 
         var hostedServices = provider.GetServices<IHostedService>();
         hostedServices.ShouldContain(s => s is P2pHostedService);

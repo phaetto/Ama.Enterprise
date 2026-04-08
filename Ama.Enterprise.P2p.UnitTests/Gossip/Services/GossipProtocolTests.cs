@@ -10,6 +10,7 @@ using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.Services.Gossip;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -26,6 +27,7 @@ public sealed class GossipProtocolTests
     private readonly Mock<ILogger<GossipProtocol>> loggerMock;
     private readonly Mock<IOptionsMonitor<GossipOptions>> gossipOptionsMock;
     private readonly Mock<IOptionsMonitor<P2pNodeOptions>> nodeOptionsMock;
+    private readonly IServiceProvider serviceProvider;
 
     public GossipProtocolTests()
     {
@@ -47,6 +49,13 @@ public sealed class GossipProtocolTests
 
         inboundQueueMock.Setup(q => q.ReadAllAsync(It.IsAny<CancellationToken>()))
             .Returns(EmptyAsyncEnumerable());
+
+        var services = new ServiceCollection();
+        services.AddKeyedSingleton(TestMeshId, transportRouterMock.Object);
+        services.AddKeyedSingleton(TestMeshId, inboundQueueMock.Object);
+        services.AddKeyedSingleton(TestMeshId, peerSelectorMock.Object);
+        services.AddKeyedSingleton(TestMeshId, dispatcherMock.Object);
+        serviceProvider = services.BuildServiceProvider();
     }
 
     [Fact]
@@ -140,13 +149,10 @@ public sealed class GossipProtocolTests
     }
 
     private GossipProtocol CreateProtocol() => new(
-        TestMeshId,
+        serviceProvider,
+        new[] { new P2pMeshMetadata(TestMeshId) },
         gossipOptionsMock.Object,
         nodeOptionsMock.Object,
-        transportRouterMock.Object,
-        inboundQueueMock.Object,
-        peerSelectorMock.Object,
-        dispatcherMock.Object,
         loggerMock.Object);
 
     private async IAsyncEnumerable<GossipMessage> EmptyAsyncEnumerable([EnumeratorCancellation] CancellationToken cancellationToken = default)

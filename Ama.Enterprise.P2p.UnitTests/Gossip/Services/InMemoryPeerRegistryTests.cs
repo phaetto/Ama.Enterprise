@@ -12,7 +12,6 @@ using Xunit;
 
 public sealed class InMemoryPeerRegistryTests
 {
-    private const string TestMeshId = "TestMesh";
     private readonly Mock<IPeerTopologyObserver> observerMock;
     private readonly Mock<ILogger<InMemoryPeerRegistry>> loggerMock;
     private readonly InMemoryPeerRegistry registry;
@@ -21,7 +20,7 @@ public sealed class InMemoryPeerRegistryTests
     {
         observerMock = new Mock<IPeerTopologyObserver>();
         loggerMock = new Mock<ILogger<InMemoryPeerRegistry>>();
-        registry = new InMemoryPeerRegistry(TestMeshId, [observerMock.Object], loggerMock.Object);
+        registry = new InMemoryPeerRegistry([observerMock.Object], loggerMock.Object);
     }
 
     [Fact]

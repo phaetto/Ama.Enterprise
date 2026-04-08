@@ -20,13 +20,12 @@ public sealed class P2pHostedServiceTests
         // Arrange
         var protocolMock = new Mock<IP2pProtocol>();
         var services = new ServiceCollection();
-        services.AddKeyedSingleton(TestMeshId, protocolMock.Object);
         var serviceProvider = services.BuildServiceProvider();
 
         var meshes = new[] { new P2pMeshMetadata(TestMeshId) };
         var loggerMock = new Mock<ILogger<P2pHostedService>>();
         
-        var service = new P2pHostedService(serviceProvider, meshes, loggerMock.Object);
+        var service = new P2pHostedService(serviceProvider, meshes, protocolMock.Object, loggerMock.Object);
         var token = new CancellationTokenSource().Token;
 
         // Act
@@ -42,13 +41,12 @@ public sealed class P2pHostedServiceTests
         // Arrange
         var protocolMock = new Mock<IP2pProtocol>();
         var services = new ServiceCollection();
-        services.AddKeyedSingleton(TestMeshId, protocolMock.Object);
         var serviceProvider = services.BuildServiceProvider();
 
         var meshes = new[] { new P2pMeshMetadata(TestMeshId) };
         var loggerMock = new Mock<ILogger<P2pHostedService>>();
         
-        var service = new P2pHostedService(serviceProvider, meshes, loggerMock.Object);
+        var service = new P2pHostedService(serviceProvider, meshes, protocolMock.Object, loggerMock.Object);
         var token = new CancellationTokenSource().Token;
 
         // Act

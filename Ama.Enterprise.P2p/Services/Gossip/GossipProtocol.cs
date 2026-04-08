@@ -9,66 +9,70 @@ using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Orchestrates the Gossip protocol for a specific mesh, managing the background sync loop,
-/// message deduplication, and delegating to generic transport routing and inbound queueing.
+/// Orchestrates the Gossip protocol universally across all configured meshes, managing the background sync loops,
+/// message deduplication, and delegating to generic transport routing dynamically based on mesh context.
 /// </summary>
 public sealed class GossipProtocol : IP2pProtocol, IDisposable
 {
-    private readonly string meshId;
+    private readonly IServiceProvider serviceProvider;
+    private readonly IEnumerable<P2pMeshMetadata> meshes;
     private readonly IOptionsMonitor<GossipOptions> gossipOptionsMonitor;
     private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
-    private readonly ITransportRouter<GossipMessage> transportRouter;
-    private readonly IInboundMessageQueue<GossipMessage> inboundQueue;
-    private readonly IPeerSelector peerSelector;
-    private readonly IMessageDispatcher<GossipMessage> dispatcher;
     private readonly ILogger<GossipProtocol> logger;
 
-    private readonly ConcurrentDictionary<Guid, DateTimeOffset> seenMessages = new ConcurrentDictionary<Guid, DateTimeOffset>();
-    private readonly ConcurrentQueue<GossipMessage> messageQueue = new ConcurrentQueue<GossipMessage>();
-    
-    private CancellationTokenSource? loopCts;
-    private Task? backgroundLoopTask;
-    private Task? inboundLoopTask;
+    private readonly ConcurrentDictionary<string, MeshState> activeMeshes = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="GossipProtocol"/> class.
     /// </summary>
     public GossipProtocol(
-        string meshId,
+        IServiceProvider serviceProvider,
+        IEnumerable<P2pMeshMetadata> meshes,
         IOptionsMonitor<GossipOptions> gossipOptionsMonitor,
         IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
-        ITransportRouter<GossipMessage> transportRouter,
-        IInboundMessageQueue<GossipMessage> inboundQueue,
-        IPeerSelector peerSelector,
-        IMessageDispatcher<GossipMessage> dispatcher,
         ILogger<GossipProtocol> logger)
     {
-        this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
+        this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        this.meshes = meshes ?? throw new ArgumentNullException(nameof(meshes));
         this.gossipOptionsMonitor = gossipOptionsMonitor ?? throw new ArgumentNullException(nameof(gossipOptionsMonitor));
         this.nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
-        this.transportRouter = transportRouter ?? throw new ArgumentNullException(nameof(transportRouter));
-        this.inboundQueue = inboundQueue ?? throw new ArgumentNullException(nameof(inboundQueue));
-        this.peerSelector = peerSelector ?? throw new ArgumentNullException(nameof(peerSelector));
-        this.dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        var nodeOptions = nodeOptionsMonitor.Get(meshId);
-        logger.LogInformation("[{MeshId}] Starting Gossip Protocol for node {NodeId}...", meshId, nodeOptions.LocalPeerId);
+        foreach (var mesh in meshes)
+        {
+            var meshId = mesh.MeshId;
+            if (activeMeshes.ContainsKey(meshId))
+            {
+                continue;
+            }
 
-        loopCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var nodeOptions = nodeOptionsMonitor.Get(meshId);
+            logger.LogInformation("[{MeshId}] Starting Gossip Protocol for node {NodeId}...", meshId, nodeOptions.LocalPeerId);
 
-        inboundLoopTask = Task.Run(() => ProcessInboundQueueAsync(loopCts.Token), loopCts.Token);
-        backgroundLoopTask = Task.Run(() => GossipLoopAsync(loopCts.Token), loopCts.Token);
+            var state = new MeshState(
+                serviceProvider.GetRequiredKeyedService<ITransportRouter<GossipMessage>>(meshId),
+                serviceProvider.GetRequiredKeyedService<IInboundMessageQueue<GossipMessage>>(meshId),
+                serviceProvider.GetRequiredKeyedService<IPeerSelector>(meshId),
+                serviceProvider.GetRequiredKeyedService<IMessageDispatcher<GossipMessage>>(meshId)
+            );
 
-        logger.LogInformation("[{MeshId}] Gossip Protocol started successfully.", meshId);
+            state.LoopCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            state.InboundLoopTask = Task.Run(() => ProcessInboundQueueAsync(meshId, state, state.LoopCts.Token), state.LoopCts.Token);
+            state.BackgroundLoopTask = Task.Run(() => GossipLoopAsync(meshId, state, state.LoopCts.Token), state.LoopCts.Token);
+
+            activeMeshes.TryAdd(meshId, state);
+
+            logger.LogInformation("[{MeshId}] Gossip Protocol started successfully.", meshId);
+        }
         
         return Task.CompletedTask;
     }
@@ -76,32 +80,48 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
     /// <inheritdoc />
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        logger.LogInformation("[{MeshId}] Stopping Gossip Protocol...", meshId);
+        var stopTasks = new List<Task>();
+        var meshIds = activeMeshes.Keys.ToList();
 
-        if (loopCts is not null)
+        foreach (var meshId in meshIds)
         {
-            await loopCts.CancelAsync().ConfigureAwait(false);
-        }
-
-        if (inboundLoopTask is not null)
-        {
-            try
+            if (activeMeshes.TryRemove(meshId, out var state))
             {
-                await inboundLoopTask.ConfigureAwait(false);
+                logger.LogInformation("[{MeshId}] Stopping Gossip Protocol...", meshId);
+
+                stopTasks.Add(Task.Run(async () =>
+                {
+                    if (state.LoopCts is not null)
+                    {
+                        await state.LoopCts.CancelAsync().ConfigureAwait(false);
+                    }
+
+                    if (state.InboundLoopTask is not null)
+                    {
+                        try
+                        {
+                            await state.InboundLoopTask.ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) { }
+                    }
+
+                    if (state.BackgroundLoopTask is not null)
+                    {
+                        try
+                        {
+                            await state.BackgroundLoopTask.ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) { }
+                    }
+
+                    state.Dispose();
+
+                    logger.LogInformation("[{MeshId}] Gossip Protocol stopped.", meshId);
+                }, cancellationToken));
             }
-            catch (OperationCanceledException) { }
         }
 
-        if (backgroundLoopTask is not null)
-        {
-            try
-            {
-                await backgroundLoopTask.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) { }
-        }
-
-        logger.LogInformation("[{MeshId}] Gossip Protocol stopped.", meshId);
+        await Task.WhenAll(stopTasks).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -117,30 +137,44 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
             throw new ArgumentException($"Payload exceeds maximum size of {Constants.MaximumPayloadSizeBytes} bytes.", nameof(payload));
         }
 
-        var gossipOptions = gossipOptionsMonitor.Get(meshId);
-        var nodeOptions = nodeOptionsMonitor.Get(meshId);
+        if (activeMeshes.IsEmpty)
+        {
+            throw new InvalidOperationException("Gossip Protocol is not actively running for any meshes.");
+        }
 
-        var message = new GossipMessage(
-            Guid.NewGuid(),
-            new PeerId(nodeOptions.LocalPeerId),
-            gossipOptions.DefaultTimeToLive,
-            payload);
+        var dispatchTasks = new List<Task>();
 
-        logger.LogDebug("[{MeshId}] Broadcasting new message {MessageId} locally from node {NodeId}.", meshId, message.MessageId, nodeOptions.LocalPeerId);
+        foreach (var kvp in activeMeshes)
+        {
+            var meshId = kvp.Key;
+            var state = kvp.Value;
+            var gossipOptions = gossipOptionsMonitor.Get(meshId);
+            var nodeOptions = nodeOptionsMonitor.Get(meshId);
 
-        seenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow);
-        messageQueue.Enqueue(message);
+            var message = new GossipMessage(
+                Guid.NewGuid(),
+                new PeerId(nodeOptions.LocalPeerId),
+                gossipOptions.DefaultTimeToLive,
+                payload);
 
-        return dispatcher.DispatchAsync(message, cancellationToken);
+            logger.LogDebug("[{MeshId}] Broadcasting new message {MessageId} locally from node {NodeId}.", meshId, message.MessageId, nodeOptions.LocalPeerId);
+
+            state.SeenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow);
+            state.MessageQueue.Enqueue(message);
+
+            dispatchTasks.Add(state.Dispatcher.DispatchAsync(message, cancellationToken));
+        }
+
+        return Task.WhenAll(dispatchTasks);
     }
 
-    private async Task ProcessInboundQueueAsync(CancellationToken cancellationToken)
+    private async Task ProcessInboundQueueAsync(string meshId, MeshState state, CancellationToken cancellationToken)
     {
         try
         {
-            await foreach (var message in inboundQueue.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            await foreach (var message in state.InboundQueue.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
-                await HandleIncomingMessageAsync(message).ConfigureAwait(false);
+                await HandleIncomingMessageAsync(meshId, state, message).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) { }
@@ -150,7 +184,7 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
         }
     }
 
-    private async Task GossipLoopAsync(CancellationToken cancellationToken)
+    private async Task GossipLoopAsync(string meshId, MeshState state, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -159,9 +193,9 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
                 var options = gossipOptionsMonitor.Get(meshId);
                 await Task.Delay(options.GossipInterval, cancellationToken).ConfigureAwait(false);
 
-                await PerformGossipTickAsync(cancellationToken).ConfigureAwait(false);
+                await PerformGossipTickAsync(meshId, state, cancellationToken).ConfigureAwait(false);
                 
-                CleanupSeenMessages();
+                CleanupSeenMessages(state);
             }
             catch (OperationCanceledException)
             {
@@ -174,17 +208,17 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
         }
     }
 
-    private async Task PerformGossipTickAsync(CancellationToken cancellationToken)
+    private async Task PerformGossipTickAsync(string meshId, MeshState state, CancellationToken cancellationToken)
     {
-        if (messageQueue.IsEmpty) return;
+        if (state.MessageQueue.IsEmpty) return;
 
         var options = gossipOptionsMonitor.Get(meshId);
-        var peers = (await peerSelector.GetPeersAsync(options.Fanout, cancellationToken).ConfigureAwait(false)).ToList();
+        var peers = (await state.PeerSelector.GetPeersAsync(options.Fanout, cancellationToken).ConfigureAwait(false)).ToList();
         
         if (peers.Count == 0) return;
 
         var messagesToForward = new List<GossipMessage>();
-        while (messageQueue.TryDequeue(out var msg))
+        while (state.MessageQueue.TryDequeue(out var msg))
         {
             messagesToForward.Add(msg);
         }
@@ -202,7 +236,7 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
                 {
                     try
                     {
-                        await transportRouter.SendAsync(currentPeer.Endpoint, currentMessage, cancellationToken).ConfigureAwait(false);
+                        await state.TransportRouter.SendAsync(currentPeer.Endpoint, currentMessage, cancellationToken).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
@@ -215,23 +249,23 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
         await Task.WhenAll(sendTasks).ConfigureAwait(false);
     }
 
-    private async Task HandleIncomingMessageAsync(GossipMessage message)
+    private async Task HandleIncomingMessageAsync(string meshId, MeshState state, GossipMessage message)
     {
-        if (seenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow))
+        if (state.SeenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow))
         {
             logger.LogDebug("[{MeshId}] Received new gossip message {MessageId} from {SenderId}. TTL: {Ttl}", meshId, message.MessageId, message.SenderId.Value, message.TimeToLive);
 
             try
             {
-                if (loopCts is not null)
+                if (state.LoopCts is not null)
                 {
-                    await dispatcher.DispatchAsync(message, loopCts.Token).ConfigureAwait(false);
+                    await state.Dispatcher.DispatchAsync(message, state.LoopCts.Token).ConfigureAwait(false);
                 }
 
                 if (message.TimeToLive > 1)
                 {
                     var forwardedMessage = message with { TimeToLive = message.TimeToLive - 1 };
-                    messageQueue.Enqueue(forwardedMessage);
+                    state.MessageQueue.Enqueue(forwardedMessage);
                 }
             }
             catch (Exception ex)
@@ -241,14 +275,14 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
         }
     }
 
-    private void CleanupSeenMessages()
+    private void CleanupSeenMessages(MeshState state)
     {
         var threshold = DateTimeOffset.UtcNow.AddMinutes(-5);
-        foreach (var kvp in seenMessages)
+        foreach (var kvp in state.SeenMessages)
         {
             if (kvp.Value < threshold)
             {
-                seenMessages.TryRemove(kvp.Key, out _);
+                state.SeenMessages.TryRemove(kvp.Key, out _);
             }
         }
     }
@@ -256,10 +290,51 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        if (loopCts is not null)
+        foreach (var state in activeMeshes.Values)
         {
-            loopCts.Cancel();
-            loopCts.Dispose();
+            state.Dispose();
+        }
+
+        activeMeshes.Clear();
+    }
+
+    private sealed class MeshState : IDisposable
+    {
+        public ITransportRouter<GossipMessage> TransportRouter { get; }
+        public IInboundMessageQueue<GossipMessage> InboundQueue { get; }
+        public IPeerSelector PeerSelector { get; }
+        public IMessageDispatcher<GossipMessage> Dispatcher { get; }
+
+        public ConcurrentDictionary<Guid, DateTimeOffset> SeenMessages { get; } = new();
+        public ConcurrentQueue<GossipMessage> MessageQueue { get; } = new();
+
+        public CancellationTokenSource? LoopCts { get; set; }
+        public Task? BackgroundLoopTask { get; set; }
+        public Task? InboundLoopTask { get; set; }
+
+        public MeshState(
+            ITransportRouter<GossipMessage> transportRouter,
+            IInboundMessageQueue<GossipMessage> inboundQueue,
+            IPeerSelector peerSelector,
+            IMessageDispatcher<GossipMessage> dispatcher)
+        {
+            TransportRouter = transportRouter;
+            InboundQueue = inboundQueue;
+            PeerSelector = peerSelector;
+            Dispatcher = dispatcher;
+        }
+
+        public void Dispose()
+        {
+            if (LoopCts is not null)
+            {
+                if (!LoopCts.IsCancellationRequested)
+                {
+                    LoopCts.Cancel();
+                }
+
+                LoopCts.Dispose();
+            }
         }
     }
 }

@@ -45,11 +45,11 @@ public static class UdpDiscoveryServiceCollectionExtensions
 
         builder.Services.AddKeyedSingleton<IPeerDiscovery>(builder.MeshId, (sp, key) =>
             new UdpPeerDiscovery(
-                (string)key,
+                (string)key!,
                 sp.GetRequiredService<IOptionsMonitor<UdpDiscoveryOptions>>(),
                 sp.GetRequiredService<IOptionsMonitor<P2pNodeOptions>>(),
                 sp.GetRequiredService<ILogger<UdpPeerDiscovery>>(),
-                sp.GetRequiredKeyedService<IPeerRegistry>(key),
+                sp.GetRequiredService<IPeerRegistry>(),
                 sp.GetRequiredService<ICrdtSerializer>()));
 
         return builder;

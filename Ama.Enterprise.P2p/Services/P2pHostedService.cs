@@ -18,6 +18,7 @@ public sealed class P2pHostedService : IHostedService
 {
     private readonly IServiceProvider serviceProvider;
     private readonly IEnumerable<P2pMeshMetadata> meshes;
+    private readonly IP2pProtocol p2pProtocol;
     private readonly ILogger<P2pHostedService> logger;
 
     /// <summary>
@@ -26,10 +27,12 @@ public sealed class P2pHostedService : IHostedService
     public P2pHostedService(
         IServiceProvider serviceProvider,
         IEnumerable<P2pMeshMetadata> meshes,
+        IP2pProtocol p2pProtocol,
         ILogger<P2pHostedService> logger)
     {
         this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         this.meshes = meshes ?? throw new ArgumentNullException(nameof(meshes));
+        this.p2pProtocol = p2pProtocol ?? throw new ArgumentNullException(nameof(p2pProtocol));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -57,27 +60,21 @@ public sealed class P2pHostedService : IHostedService
                         await queue.WriteAsync(msg, default).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
                 }
             }
-
-            var protocol = serviceProvider.GetKeyedService<IP2pProtocol>(mesh.MeshId);
-            if (protocol is not null)
-            {
-                await protocol.StartAsync(cancellationToken).ConfigureAwait(false);
-            }
         }
+
+        // Start the overarching protocol across all defined meshes
+        await p2pProtocol.StartAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
     public async Task StopAsync(CancellationToken cancellationToken)
     {
+        // Stop the protocol globally first to halt processing
+        await p2pProtocol.StopAsync(cancellationToken).ConfigureAwait(false);
+
         foreach (var mesh in meshes)
         {
             logger.LogInformation("Orchestrating shutdown for P2P mesh network: {MeshId}", mesh.MeshId);
-
-            var protocol = serviceProvider.GetKeyedService<IP2pProtocol>(mesh.MeshId);
-            if (protocol is not null)
-            {
-                await protocol.StopAsync(cancellationToken).ConfigureAwait(false);
-            }
 
             var listeners = serviceProvider.GetKeyedServices<ITransportListener<GossipMessage>>(mesh.MeshId);
             if (listeners is not null)

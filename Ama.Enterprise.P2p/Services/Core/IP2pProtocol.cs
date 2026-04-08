@@ -6,26 +6,27 @@ using System.Threading.Tasks;
 
 /// <summary>
 /// Defines the generic orchestrator for the P2P protocol, managing the lifecycle of the P2P node.
-/// This interface abstracts away the underlying distribution algorithm (e.g., Gossip, Push-Pull, Rumor Mongering).
+/// This interface abstracts away the underlying distribution algorithm (e.g., Gossip, Push-Pull, Rumor Mongering)
+/// and acts universally across all defined meshes.
 /// </summary>
 public interface IP2pProtocol
 {
     /// <summary>
-    /// Starts the P2P protocol, including periodic syncing and listening to incoming messages.
+    /// Starts the P2P protocol across all configured meshes, including periodic syncing and listening to incoming messages.
     /// </summary>
     /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
     /// <returns>A task that represents the asynchronous start operation.</returns>
     Task StartAsync(CancellationToken cancellationToken);
 
     /// <summary>
-    /// Gracefully stops the P2P protocol and underlying network listeners.
+    /// Gracefully stops the P2P protocol and underlying network operations across all configured meshes.
     /// </summary>
     /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
     /// <returns>A task that represents the asynchronous stop operation.</returns>
     Task StopAsync(CancellationToken cancellationToken);
 
     /// <summary>
-    /// Submits a payload to be distributed to the network using the underlying P2P algorithm.
+    /// Submits a payload to be distributed to all active network meshes using the underlying P2P algorithm.
     /// </summary>
     /// <param name="payload">The serialized CRDT or business payload to distribute.</param>
     /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>

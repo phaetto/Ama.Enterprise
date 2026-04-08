@@ -100,21 +100,18 @@ public static class ServiceCollectionExtensions
         builder.Services.AddKeyedSingleton<IInboundMessageQueue<GossipMessage>>(builder.MeshId, (sp, key) =>
             new InboundMessageQueue<GossipMessage>());
 
-        // Core P2P services isolated per MeshId using Keyed DI
-        builder.Services.AddKeyedSingleton<IPeerRegistry>(builder.MeshId, (sp, key) =>
-            new InMemoryPeerRegistry(
-                (string)key!,
-                sp.GetKeyedServices<IPeerTopologyObserver>(key),
-                sp.GetRequiredService<ILogger<InMemoryPeerRegistry>>()));
+        // The Peer Registry is now a global Singleton cross-mesh to ensure node awareness regardless of where peers were discovered.
+        builder.Services.TryAddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
 
         builder.Services.AddKeyedSingleton<IPeerAuthenticator>(builder.MeshId, (sp, key) =>
             new PassThroughPeerAuthenticator(
                 (string)key!, 
                 sp.GetRequiredService<ILogger<PassThroughPeerAuthenticator>>()));
 
+        // Peer Selector is still Keyed per mesh, but injects the global un-keyed IPeerRegistry.
         builder.Services.AddKeyedSingleton<IPeerSelector>(builder.MeshId, (sp, key) =>
             new RandomPeerSelector(
-                sp.GetRequiredKeyedService<IPeerRegistry>(key),
+                sp.GetRequiredService<IPeerRegistry>(),
                 sp.GetRequiredService<ILogger<RandomPeerSelector>>()));
 
         builder.Services.AddKeyedSingleton<IFailureDetector>(builder.MeshId, (sp, key) =>
@@ -147,17 +144,8 @@ public static class ServiceCollectionExtensions
                 sp.GetKeyedServices<IMessageHandler<GossipMessage>>(key),
                 sp.GetRequiredService<ILogger<MessageDispatcher<GossipMessage>>>()));
         
-        // Protocol orchestrator mapped per MeshId
-        builder.Services.AddKeyedSingleton<IP2pProtocol>(builder.MeshId, (sp, key) =>
-            new GossipProtocol(
-                (string)key!,
-                sp.GetRequiredService<IOptionsMonitor<GossipOptions>>(),
-                sp.GetRequiredService<IOptionsMonitor<P2pNodeOptions>>(),
-                sp.GetRequiredKeyedService<ITransportRouter<GossipMessage>>(key),
-                sp.GetRequiredKeyedService<IInboundMessageQueue<GossipMessage>>(key),
-                sp.GetRequiredKeyedService<IPeerSelector>(key),
-                sp.GetRequiredKeyedService<IMessageDispatcher<GossipMessage>>(key),
-                sp.GetRequiredService<ILogger<GossipProtocol>>()));
+        // Protocol orchestrator mapped globally as a single instance executing across all configured meshes
+        builder.Services.TryAddSingleton<IP2pProtocol, GossipProtocol>();
 
         return builder;
     }

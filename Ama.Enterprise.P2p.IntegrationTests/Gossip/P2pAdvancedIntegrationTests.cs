@@ -199,8 +199,8 @@ public sealed class P2pAdvancedIntegrationTests
             endpoint,
             handler,
             provider.GetServices<IHostedService>().OfType<P2pHostedService>().First(),
-            provider.GetRequiredKeyedService<IP2pProtocol>(TestMeshId),
-            provider.GetRequiredKeyedService<IPeerRegistry>(TestMeshId)
+            provider.GetRequiredService<IP2pProtocol>(),
+            provider.GetRequiredService<IPeerRegistry>()
         );
     }
 

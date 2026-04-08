@@ -10,17 +10,15 @@ using Ama.Enterprise.P2p.Models.Core;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Implements an in-memory thread-safe registry for managing known peers and their statuses for a specific mesh.
+/// Implements an in-memory thread-safe registry for managing known peers and their statuses globally across all configured meshes.
 /// </summary>
 /// <remarks>
 /// Initializes a new instance of the <see cref="InMemoryPeerRegistry"/> class.
 /// </remarks>
 public sealed class InMemoryPeerRegistry(
-    string meshId,
     IEnumerable<IPeerTopologyObserver> topologyObservers,
     ILogger<InMemoryPeerRegistry> logger) : IPeerRegistry
 {
-    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
     private readonly IEnumerable<IPeerTopologyObserver> topologyObservers = topologyObservers ?? throw new ArgumentNullException(nameof(topologyObservers));
     private readonly ILogger<InMemoryPeerRegistry> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
@@ -53,12 +51,12 @@ public sealed class InMemoryPeerRegistry(
 
         if (isNew)
         {
-            logger.LogInformation("[{MeshId}] New peer joined the registry: {PeerId}", meshId, node.Id.Value);
+            logger.LogInformation("New peer joined the registry: {PeerId}", node.Id.Value);
             await NotifyObserversAsync(observer => observer.OnPeerJoinedAsync(node, cancellationToken)).ConfigureAwait(false);
         }
         else if (oldStatus.HasValue && oldStatus.Value != status)
         {
-            logger.LogInformation("[{MeshId}] Peer {PeerId} status changed from {OldStatus} to {NewStatus}", meshId, node.Id.Value, oldStatus.Value, status);
+            logger.LogInformation("Peer {PeerId} status changed from {OldStatus} to {NewStatus}", node.Id.Value, oldStatus.Value, status);
             await NotifyObserversAsync(observer => observer.OnPeerStatusChangedAsync(node.Id, status, cancellationToken)).ConfigureAwait(false);
         }
     }
@@ -73,7 +71,7 @@ public sealed class InMemoryPeerRegistry(
 
         if (peers.TryRemove(peerId, out _))
         {
-            logger.LogInformation("[{MeshId}] Peer {PeerId} was removed from the registry.", meshId, peerId.Value);
+            logger.LogInformation("Peer {PeerId} was removed from the registry.", peerId.Value);
             await NotifyObserversAsync(observer => observer.OnPeerDepartedAsync(peerId, cancellationToken)).ConfigureAwait(false);
         }
     }
@@ -108,7 +106,7 @@ public sealed class InMemoryPeerRegistry(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "[{MeshId}] An error occurred while notifying topology observer {ObserverType}.", meshId, observer.GetType().Name);
+                logger.LogError(ex, "An error occurred while notifying topology observer {ObserverType}.", observer.GetType().Name);
             }
         }
     }
