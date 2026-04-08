@@ -1,5 +1,7 @@
 namespace Ama.Enterprise.P2p.Services.Core;
 
+using System.Threading;
+using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
@@ -8,6 +10,13 @@ using Ama.Enterprise.P2p.Models.Core;
 /// <typeparam name="TMessage">The type of the message being transported.</typeparam>
 public interface ITransport<in TMessage>
 {
+    /// <summary>
+    /// Determines whether this transport can handle the specified peer endpoint.
+    /// </summary>
+    /// <param name="endpoint">The peer endpoint to evaluate.</param>
+    /// <returns><c>true</c> if the transport can handle the endpoint; otherwise, <c>false</c>.</returns>
+    bool CanHandle(PeerEndpoint endpoint);
+
     /// <summary>
     /// Sends a protocol message to a specific peer endpoint.
     /// </summary>

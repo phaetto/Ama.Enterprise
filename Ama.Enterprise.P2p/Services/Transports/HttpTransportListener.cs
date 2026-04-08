@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.Services.Gossip;
+namespace Ama.Enterprise.P2p.Services.Transports;
 
 using System;
 using System.IO;
@@ -6,6 +6,7 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
+using Ama.Enterprise.P2p;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;

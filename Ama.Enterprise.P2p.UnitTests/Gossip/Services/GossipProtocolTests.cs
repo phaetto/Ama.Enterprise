@@ -1,5 +1,11 @@
 namespace Ama.Enterprise.P2p.UnitTests.Gossip.Services;
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Threading;
+using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
@@ -7,17 +13,14 @@ using Ama.Enterprise.P2p.Services.Gossip;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
-using System;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
+using Shouldly;
 using Xunit;
 
 public sealed class GossipProtocolTests
 {
     private const string TestMeshId = "TestMesh";
-    private readonly Mock<ITransport<GossipMessage>> transportMock;
-    private readonly Mock<ITransportListener<GossipMessage>> listenerMock;
+    private readonly Mock<ITransportRouter<GossipMessage>> transportRouterMock;
+    private readonly Mock<IInboundMessageQueue<GossipMessage>> inboundQueueMock;
     private readonly Mock<IPeerSelector> peerSelectorMock;
     private readonly Mock<IMessageDispatcher<GossipMessage>> dispatcherMock;
     private readonly Mock<ILogger<GossipProtocol>> loggerMock;
@@ -26,8 +29,8 @@ public sealed class GossipProtocolTests
 
     public GossipProtocolTests()
     {
-        transportMock = new Mock<ITransport<GossipMessage>>();
-        listenerMock = new Mock<ITransportListener<GossipMessage>>();
+        transportRouterMock = new Mock<ITransportRouter<GossipMessage>>();
+        inboundQueueMock = new Mock<IInboundMessageQueue<GossipMessage>>();
         peerSelectorMock = new Mock<IPeerSelector>();
         dispatcherMock = new Mock<IMessageDispatcher<GossipMessage>>();
         loggerMock = new Mock<ILogger<GossipProtocol>>();
@@ -41,31 +44,27 @@ public sealed class GossipProtocolTests
             LocalPeerId = Guid.NewGuid(),
             LocalEndpoint = new HttpPeerEndpoint("localhost", 8080)
         });
+
+        inboundQueueMock.Setup(q => q.ReadAllAsync(It.IsAny<CancellationToken>()))
+            .Returns(EmptyAsyncEnumerable());
     }
 
-    private GossipProtocol CreateProtocol() => new(
-        TestMeshId,
-        gossipOptionsMock.Object,
-        nodeOptionsMock.Object,
-        transportMock.Object,
-        listenerMock.Object,
-        peerSelectorMock.Object,
-        dispatcherMock.Object,
-        loggerMock.Object);
-
     [Fact]
-    public async Task StartAsync_ShouldStartListener()
+    public async Task StartAsync_ShouldStartReadingFromInboundQueue()
     {
         // Arrange
         using var protocol = CreateProtocol();
-        listenerMock.Setup(l => l.StartListeningAsync(It.IsAny<Func<GossipMessage, Task>>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
 
         // Act
         await protocol.StartAsync(CancellationToken.None);
 
+        // Allow async background loops to spin up
+        await Task.Delay(50);
+
         // Assert
-        listenerMock.Verify(l => l.StartListeningAsync(It.IsAny<Func<GossipMessage, Task>>(), It.IsAny<CancellationToken>()), Times.Once);
+        inboundQueueMock.Verify(q => q.ReadAllAsync(It.IsAny<CancellationToken>()), Times.Once);
+
+        await protocol.StopAsync(CancellationToken.None);
     }
 
     [Fact]
@@ -73,9 +72,6 @@ public sealed class GossipProtocolTests
     {
         // Arrange
         using var protocol = CreateProtocol();
-        listenerMock.Setup(l => l.StartListeningAsync(It.IsAny<Func<GossipMessage, Task>>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-            
         var payload = new byte[] { 1, 2, 3 };
 
         await protocol.StartAsync(CancellationToken.None);
@@ -97,8 +93,6 @@ public sealed class GossipProtocolTests
     {
         // Arrange
         using var protocol = CreateProtocol();
-        listenerMock.Setup(l => l.StartListeningAsync(It.IsAny<Func<GossipMessage, Task>>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
             
         var peerNode = new PeerNode(new PeerId(Guid.NewGuid()), new HttpPeerEndpoint("localhost", 8080));
         peerSelectorMock.Setup(ps => ps.GetPeersAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
@@ -112,11 +106,58 @@ public sealed class GossipProtocolTests
         await Task.Delay(150);
 
         // Assert
-        transportMock.Verify(t => t.SendAsync(
+        transportRouterMock.Verify(t => t.SendAsync(
             It.Is<PeerEndpoint>(e => e is HttpPeerEndpoint && ((HttpPeerEndpoint)e).Host == "localhost" && ((HttpPeerEndpoint)e).Port == 8080),
             It.Is<GossipMessage>(m => m.Payload.ToArray().SequenceEqual(new byte[] { 1, 2, 3 })),
             It.IsAny<CancellationToken>()), Times.AtLeastOnce);
 
         await protocol.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task ProcessInboundQueue_ShouldDispatchIncomingMessagesAndForward()
+    {
+        // Arrange
+        var testMessage = new GossipMessage(Guid.NewGuid(), new PeerId(Guid.NewGuid()), 10, new byte[] { 4, 5, 6 });
+        
+        inboundQueueMock.Setup(q => q.ReadAllAsync(It.IsAny<CancellationToken>()))
+            .Returns(YieldSingleMessageAsync(testMessage));
+
+        using var protocol = CreateProtocol();
+
+        // Act
+        await protocol.StartAsync(CancellationToken.None);
+        
+        // Wait for inbound processing loop to pick up the message
+        await Task.Delay(100);
+
+        // Assert
+        dispatcherMock.Verify(d => d.DispatchAsync(
+            It.Is<GossipMessage>(m => m.MessageId == testMessage.MessageId), 
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        await protocol.StopAsync(CancellationToken.None);
+    }
+
+    private GossipProtocol CreateProtocol() => new(
+        TestMeshId,
+        gossipOptionsMock.Object,
+        nodeOptionsMock.Object,
+        transportRouterMock.Object,
+        inboundQueueMock.Object,
+        peerSelectorMock.Object,
+        dispatcherMock.Object,
+        loggerMock.Object);
+
+    private async IAsyncEnumerable<GossipMessage> EmptyAsyncEnumerable([EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await Task.Yield(); 
+        yield break;
+    }
+
+    private async IAsyncEnumerable<GossipMessage> YieldSingleMessageAsync(GossipMessage message, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await Task.Yield();
+        yield return message;
     }
 }

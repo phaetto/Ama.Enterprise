@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.Services.Gossip;
+namespace Ama.Enterprise.P2p.Services.Transports;
 
 using System;
 using System.Net.Http;
@@ -6,6 +6,7 @@ using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
+using Ama.Enterprise.P2p;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
@@ -14,19 +15,30 @@ using Microsoft.Extensions.Logging;
 /// <summary>
 /// Implements outbound gossip transport using HTTP POST requests for a specific mesh context.
 /// </summary>
-/// <remarks>
-/// Initializes a new instance of the <see cref="HttpTransport"/> class.
-/// </remarks>
-public sealed class HttpTransport(
-    string meshId,
-    IHttpClientFactory httpClientFactory,
-    ICrdtSerializer serializer,
-    ILogger<HttpTransport> logger) : ITransport<GossipMessage>
+public sealed class HttpTransport : ITransport<GossipMessage>
 {
-    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-    private readonly IHttpClientFactory httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-    private readonly ILogger<HttpTransport> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly string meshId;
+    private readonly IHttpClientFactory httpClientFactory;
+    private readonly ICrdtSerializer serializer;
+    private readonly ILogger<HttpTransport> logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="HttpTransport"/> class.
+    /// </summary>
+    public HttpTransport(
+        string meshId,
+        IHttpClientFactory httpClientFactory,
+        ICrdtSerializer serializer,
+        ILogger<HttpTransport> logger)
+    {
+        this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
+        this.httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <inheritdoc />
+    public bool CanHandle(PeerEndpoint endpoint) => endpoint is HttpPeerEndpoint;
 
     /// <inheritdoc />
     public async Task SendAsync(PeerEndpoint endpoint, GossipMessage message, CancellationToken cancellationToken)

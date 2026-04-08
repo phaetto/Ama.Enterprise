@@ -7,8 +7,10 @@ using System.Text.Json.Serialization.Metadata;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
+using Ama.Enterprise.P2p.Services;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.Services.Gossip;
+using Ama.Enterprise.P2p.Services.Transports;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -94,6 +96,10 @@ public static class ServiceCollectionExtensions
             builder.Services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", P2pJsonSerializerContext.Default);
         }
 
+        // Internal inbound queuing for isolating protocol and IO bounds
+        builder.Services.AddKeyedSingleton<IInboundMessageQueue<GossipMessage>>(builder.MeshId, (sp, key) =>
+            new InboundMessageQueue<GossipMessage>());
+
         // Core P2P services isolated per MeshId using Keyed DI
         builder.Services.AddKeyedSingleton<IPeerRegistry>(builder.MeshId, (sp, key) =>
             new InMemoryPeerRegistry(
@@ -117,13 +123,16 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<IOptionsMonitor<FailureDetectorOptions>>(),
                 sp.GetRequiredService<ILogger<TimeBasedFailureDetector>>()));
         
-        // Transport and Dispatcher isolated per MeshId
+        // Transports, Listeners, and Routing isolated per MeshId
         builder.Services.AddKeyedSingleton<ITransport<GossipMessage>>(builder.MeshId, (sp, key) =>
             new HttpTransport(
                 (string)key!,
                 sp.GetRequiredService<IHttpClientFactory>(),
                 sp.GetRequiredService<ICrdtSerializer>(),
                 sp.GetRequiredService<ILogger<HttpTransport>>()));
+
+        builder.Services.AddKeyedSingleton<ITransportRouter<GossipMessage>>(builder.MeshId, (sp, key) =>
+            new TransportRouter<GossipMessage>(sp.GetKeyedServices<ITransport<GossipMessage>>(key)));
 
         builder.Services.AddKeyedSingleton<ITransportListener<GossipMessage>>(builder.MeshId, (sp, key) =>
             new HttpTransportListener(
@@ -144,8 +153,8 @@ public static class ServiceCollectionExtensions
                 (string)key!,
                 sp.GetRequiredService<IOptionsMonitor<GossipOptions>>(),
                 sp.GetRequiredService<IOptionsMonitor<P2pNodeOptions>>(),
-                sp.GetRequiredKeyedService<ITransport<GossipMessage>>(key),
-                sp.GetRequiredKeyedService<ITransportListener<GossipMessage>>(key),
+                sp.GetRequiredKeyedService<ITransportRouter<GossipMessage>>(key),
+                sp.GetRequiredKeyedService<IInboundMessageQueue<GossipMessage>>(key),
                 sp.GetRequiredKeyedService<IPeerSelector>(key),
                 sp.GetRequiredKeyedService<IMessageDispatcher<GossipMessage>>(key),
                 sp.GetRequiredService<ILogger<GossipProtocol>>()));

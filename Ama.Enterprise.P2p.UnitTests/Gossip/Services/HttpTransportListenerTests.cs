@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Gossip;
-using Ama.Enterprise.P2p.Services.Gossip;
+using Ama.Enterprise.P2p.Services.Transports;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;

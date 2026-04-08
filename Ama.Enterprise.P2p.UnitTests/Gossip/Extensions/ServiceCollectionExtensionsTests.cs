@@ -12,6 +12,8 @@ using Shouldly;
 using Xunit;
 using System;
 using System.Linq;
+using Ama.Enterprise.P2p.Services.Transports;
+using Ama.Enterprise.P2p.Services;
 
 public sealed class ServiceCollectionExtensionsTests
 {
