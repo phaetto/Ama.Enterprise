@@ -63,7 +63,6 @@ public static class Program
                 options.GossipInterval = TimeSpan.FromMilliseconds(500);
             }).AddUdpPeerDiscovery(options =>
             {
-                // options.LocalPeerId = currentPort;
                 options.MulticastAddress = "239.255.0.1";
                 options.MulticastPort = 8035;
                 options.DiscoveryInterval = TimeSpan.FromSeconds(1);

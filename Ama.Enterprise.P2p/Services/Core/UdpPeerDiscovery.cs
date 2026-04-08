@@ -18,7 +18,8 @@ using Microsoft.Extensions.Options;
 public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposable
 {
     private readonly string meshId;
-    private readonly IOptionsMonitor<UdpDiscoveryOptions> optionsMonitor;
+    private readonly IOptionsMonitor<UdpDiscoveryOptions> discoveryOptionsMonitor;
+    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
     private readonly ILogger<UdpPeerDiscovery> logger;
     private readonly IPeerRegistry peerRegistry;
     private readonly ICrdtSerializer serializer;
@@ -33,20 +34,23 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     /// Initializes a new instance of the <see cref="UdpPeerDiscovery"/> class.
     /// </summary>
     /// <param name="meshId">The mesh context identifier.</param>
-    /// <param name="optionsMonitor">The UDP discovery configuration options monitor.</param>
+    /// <param name="discoveryOptionsMonitor">The UDP discovery configuration options monitor.</param>
+    /// <param name="nodeOptionsMonitor">The global node configuration options monitor.</param>
     /// <param name="logger">The logger instance.</param>
     /// <param name="peerRegistry">The peer registry to populate with discovered nodes.</param>
     /// <param name="serializer">The centralized CRDT serializer.</param>
     /// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
     public UdpPeerDiscovery(
         string meshId,
-        IOptionsMonitor<UdpDiscoveryOptions> optionsMonitor, 
+        IOptionsMonitor<UdpDiscoveryOptions> discoveryOptionsMonitor, 
+        IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor, 
         ILogger<UdpPeerDiscovery> logger,
         IPeerRegistry peerRegistry,
         ICrdtSerializer serializer)
     {
         this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-        this.optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+        this.discoveryOptionsMonitor = discoveryOptionsMonitor ?? throw new ArgumentNullException(nameof(discoveryOptionsMonitor));
+        this.nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
         this.peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
@@ -57,7 +61,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
-        var options = optionsMonitor.Get(meshId);
+        var options = discoveryOptionsMonitor.Get(meshId);
         backgroundTaskCancellationSource = new CancellationTokenSource();
         
         var localIpEndpoint = new IPEndPoint(IPAddress.Any, options.MulticastPort);
@@ -113,15 +117,16 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
-        var options = optionsMonitor.Get(meshId);
+        var options = discoveryOptionsMonitor.Get(meshId);
+        var nodeOptions = nodeOptionsMonitor.Get(meshId);
         var discoveredPeers = new HashSet<PeerNode>();
         
         using var client = new UdpClient(AddressFamily.InterNetwork);
         client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
         client.Client.Bind(new IPEndPoint(IPAddress.Any, 0)); 
         
-        var localId = new PeerId(options.LocalPeerId);
-        var localNode = new PeerNode(localId, options.LocalEndpoint);
+        var localId = new PeerId(nodeOptions.LocalPeerId);
+        var localNode = new PeerNode(localId, nodeOptions.LocalEndpoint);
         
         var requestBytes = serializer.SerializeToBytes(localNode);
         var targetEndpoint = new IPEndPoint(IPAddress.Parse(options.MulticastAddress), options.MulticastPort);
@@ -142,7 +147,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
                 {
                     var node = serializer.DeserializeFromBytes<PeerNode>(payload);
 
-                    if (node.Id.Value != options.LocalPeerId && node.Id.Value != Guid.Empty)
+                    if (node.Id.Value != nodeOptions.LocalPeerId && node.Id.Value != Guid.Empty)
                     {
                         discoveredPeers.Add(node);
                     }
@@ -175,23 +180,23 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     private async Task ListenLoopAsync(CancellationToken token)
     {
         if (listener is null) return;
-        var options = optionsMonitor.Get(meshId);
 
         try
         {
             while (!token.IsCancellationRequested)
             {
                 var result = await listener.ReceiveAsync(token).ConfigureAwait(false);
+                var nodeOptions = nodeOptionsMonitor.Get(meshId);
                 
                 try
                 {
                     var remoteNode = serializer.DeserializeFromBytes<PeerNode>(result.Buffer);
 
-                    if (remoteNode.Id.Value != options.LocalPeerId && remoteNode.Id.Value != Guid.Empty)
+                    if (remoteNode.Id.Value != nodeOptions.LocalPeerId && remoteNode.Id.Value != Guid.Empty)
                     {
                         await peerRegistry.AddOrUpdatePeerAsync(remoteNode, PeerStatus.Active, token).ConfigureAwait(false);
 
-                        var localNode = new PeerNode(new PeerId(options.LocalPeerId), options.LocalEndpoint);
+                        var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), nodeOptions.LocalEndpoint);
                         var responseBytes = serializer.SerializeToBytes(localNode);
                         
                         await listener.SendAsync(responseBytes, responseBytes.Length, result.RemoteEndPoint).ConfigureAwait(false);
@@ -224,7 +229,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
 
         while (!token.IsCancellationRequested)
         {
-            var options = optionsMonitor.Get(meshId);
+            var options = discoveryOptionsMonitor.Get(meshId);
             
             try
             {

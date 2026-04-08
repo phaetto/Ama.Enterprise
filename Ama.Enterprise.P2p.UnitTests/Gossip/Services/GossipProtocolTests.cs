@@ -21,7 +21,8 @@ public sealed class GossipProtocolTests
     private readonly Mock<IPeerSelector> peerSelectorMock;
     private readonly Mock<IMessageDispatcher<GossipMessage>> dispatcherMock;
     private readonly Mock<ILogger<GossipProtocol>> loggerMock;
-    private readonly Mock<IOptionsMonitor<GossipOptions>> optionsMock;
+    private readonly Mock<IOptionsMonitor<GossipOptions>> gossipOptionsMock;
+    private readonly Mock<IOptionsMonitor<P2pNodeOptions>> nodeOptionsMock;
 
     public GossipProtocolTests()
     {
@@ -31,13 +32,21 @@ public sealed class GossipProtocolTests
         dispatcherMock = new Mock<IMessageDispatcher<GossipMessage>>();
         loggerMock = new Mock<ILogger<GossipProtocol>>();
         
-        optionsMock = new Mock<IOptionsMonitor<GossipOptions>>();
-        optionsMock.Setup(o => o.Get(TestMeshId)).Returns(new GossipOptions { GossipInterval = TimeSpan.FromMilliseconds(50), Fanout = 2 });
+        gossipOptionsMock = new Mock<IOptionsMonitor<GossipOptions>>();
+        gossipOptionsMock.Setup(o => o.Get(TestMeshId)).Returns(new GossipOptions { GossipInterval = TimeSpan.FromMilliseconds(50), Fanout = 2 });
+
+        nodeOptionsMock = new Mock<IOptionsMonitor<P2pNodeOptions>>();
+        nodeOptionsMock.Setup(o => o.Get(TestMeshId)).Returns(new P2pNodeOptions 
+        { 
+            LocalPeerId = Guid.NewGuid(),
+            LocalEndpoint = new HttpPeerEndpoint("localhost", 8080)
+        });
     }
 
     private GossipProtocol CreateProtocol() => new(
         TestMeshId,
-        optionsMock.Object,
+        gossipOptionsMock.Object,
+        nodeOptionsMock.Object,
         transportMock.Object,
         listenerMock.Object,
         peerSelectorMock.Object,

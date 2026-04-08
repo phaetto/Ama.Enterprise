@@ -1,7 +1,6 @@
 namespace Ama.Enterprise.P2p.Models.Core;
 
 using System;
-using System.Collections.Generic;
 
 /// <summary>
 /// Configuration options for tuning the behavior of UDP multicast peer discovery.
@@ -28,16 +27,6 @@ public sealed class UdpDiscoveryOptions : IEquatable<UdpDiscoveryOptions>
     /// </summary>
     public TimeSpan DiscoveryInterval { get; set; } = TimeSpan.FromSeconds(1);
 
-    /// <summary>
-    /// Gets or sets the unique identifier of the local peer.
-    /// </summary>
-    public Guid LocalPeerId { get; set; } = Guid.NewGuid();
-
-    /// <summary>
-    /// Gets or sets the protocol-agnostic local endpoint details (e.g., HttpPeerEndpoint) to broadcast to other peers.
-    /// </summary>
-    public PeerEndpoint LocalEndpoint { get; set; } = default!;
-
     /// <inheritdoc />
     public bool Equals(UdpDiscoveryOptions? other)
     {
@@ -54,9 +43,7 @@ public sealed class UdpDiscoveryOptions : IEquatable<UdpDiscoveryOptions>
         return MulticastPort == other.MulticastPort &&
                DiscoveryTimeout.Equals(other.DiscoveryTimeout) &&
                DiscoveryInterval.Equals(other.DiscoveryInterval) &&
-               LocalPeerId.Equals(other.LocalPeerId) &&
-               string.Equals(MulticastAddress, other.MulticastAddress, StringComparison.OrdinalIgnoreCase) &&
-               EqualityComparer<PeerEndpoint>.Default.Equals(LocalEndpoint, other.LocalEndpoint);
+               string.Equals(MulticastAddress, other.MulticastAddress, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <inheritdoc />
@@ -69,8 +56,6 @@ public sealed class UdpDiscoveryOptions : IEquatable<UdpDiscoveryOptions>
             StringComparer.OrdinalIgnoreCase.GetHashCode(MulticastAddress ?? string.Empty),
             MulticastPort,
             DiscoveryTimeout,
-            DiscoveryInterval,
-            LocalPeerId,
-            LocalEndpoint);
+            DiscoveryInterval);
     }
 }

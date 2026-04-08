@@ -24,12 +24,25 @@ public static class ServiceCollectionExtensions
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="meshId">The unique identifier defining this mesh network instance.</param>
+    /// <param name="configureNodeOptions">An action to configure the core node options like identity and endpoint for this mesh.</param>
     /// <returns>A builder to chain protocol and discovery configuration actions.</returns>
-    public static IP2pMeshBuilder AddP2pMesh(this IServiceCollection services, string meshId)
+    public static IP2pMeshBuilder AddP2pMesh(
+        this IServiceCollection services, 
+        string meshId, 
+        Action<P2pNodeOptions>? configureNodeOptions = null)
     {
         if (string.IsNullOrWhiteSpace(meshId))
         {
             throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshId));
+        }
+
+        if (configureNodeOptions is null)
+        {
+            services.Configure<P2pNodeOptions>(meshId, _ => { });
+        }
+        else
+        {
+            services.Configure(meshId, configureNodeOptions);
         }
 
         // Register the overarching hosted service orchestrator only once.
@@ -130,6 +143,7 @@ public static class ServiceCollectionExtensions
             new GossipProtocol(
                 (string)key!,
                 sp.GetRequiredService<IOptionsMonitor<GossipOptions>>(),
+                sp.GetRequiredService<IOptionsMonitor<P2pNodeOptions>>(),
                 sp.GetRequiredKeyedService<ITransport<GossipMessage>>(key),
                 sp.GetRequiredKeyedService<ITransportListener<GossipMessage>>(key),
                 sp.GetRequiredKeyedService<IPeerSelector>(key),

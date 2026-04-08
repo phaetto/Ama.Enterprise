@@ -95,14 +95,20 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
 
         // Add both Gossip Network (which registers core dependencies like IPeerRegistry for the mesh)
         // and Udp Peer Discovery config paired inside the same builder.
-        services.AddP2pMesh(meshId)
-            .AddGossipNetwork(opts => { opts.ListenPort = listenPort; })
+        services.AddP2pMesh(meshId, nodeOptions => 
+            {
+                nodeOptions.LocalPeerId = peerId;
+                nodeOptions.LocalEndpoint = new HttpPeerEndpoint("localhost", listenPort);
+            })
+            .AddGossipNetwork(opts => 
+            { 
+                opts.ListenPort = listenPort; 
+                opts.ListenHost = "localhost"; // Override from '+' to 'localhost' to avoid Access Denied under unprivileged execution on Windows
+            })
             .AddUdpPeerDiscovery(options => 
             {
                 options.MulticastAddress = "239.255.0.1"; 
                 options.MulticastPort = multicastPort;
-                options.LocalPeerId = peerId;
-                options.LocalEndpoint = new HttpPeerEndpoint("localhost", listenPort);
                 options.DiscoveryTimeout = TimeSpan.FromSeconds(3);
             });
 
