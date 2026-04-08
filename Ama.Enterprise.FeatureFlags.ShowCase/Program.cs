@@ -55,22 +55,20 @@ public static class Program
         services.AddFeatureFlagsP2p();
 
         // 2. Add Gossip Network for P2P transport
-        services.AddP2pGossipNetwork(options =>
-        {
-            options.ListenPort = currentPort;
-            options.ListenHost = "localhost";
-            options.GossipInterval = TimeSpan.FromMilliseconds(500);
-        });
-
-        // 3. Add UDP Peer Discovery so nodes automatically find each other in the local network
-        services.AddUdpPeerDiscovery(options =>
-        {
-            options.LocalEndpointPort = currentPort;
-            options.MulticastAddress = "239.255.0.1";
-            options.MulticastPort = 8035;
-            options.DiscoveryInterval = TimeSpan.FromSeconds(1);
-            options.DiscoveryTimeout = TimeSpan.FromSeconds(1);
-        });
+        services.AddP2pMesh("internal")
+            .AddGossipNetwork(options =>
+            {
+                options.ListenPort = currentPort;
+                options.ListenHost = "localhost";
+                options.GossipInterval = TimeSpan.FromMilliseconds(500);
+            }).AddUdpPeerDiscovery(options =>
+            {
+                // options.LocalPeerId = currentPort;
+                options.MulticastAddress = "239.255.0.1";
+                options.MulticastPort = 8035;
+                options.DiscoveryInterval = TimeSpan.FromSeconds(1);
+                options.DiscoveryTimeout = TimeSpan.FromSeconds(1);
+            });
 
         await using var provider = services.BuildServiceProvider();
         var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("ShowCase");

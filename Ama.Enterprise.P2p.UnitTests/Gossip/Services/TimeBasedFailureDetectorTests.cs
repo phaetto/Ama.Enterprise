@@ -1,14 +1,19 @@
 namespace Ama.Enterprise.P2p.UnitTests.Gossip.Services;
 
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Shouldly;
+using Xunit;
 
 public sealed class TimeBasedFailureDetectorTests
 {
+    private const string TestMeshId = "TestMesh";
     private readonly TimeBasedFailureDetector detector;
     private readonly FailureDetectorOptions detectorOptions;
 
@@ -16,12 +21,12 @@ public sealed class TimeBasedFailureDetectorTests
     {
         detectorOptions = new FailureDetectorOptions { HeartbeatInterval = TimeSpan.FromMilliseconds(50) }; // Short interval for testing
         
-        var optionsMock = new Mock<IOptions<FailureDetectorOptions>>();
-        optionsMock.Setup(o => o.Value).Returns(detectorOptions);
+        var optionsMock = new Mock<IOptionsMonitor<FailureDetectorOptions>>();
+        optionsMock.Setup(o => o.Get(TestMeshId)).Returns(detectorOptions);
         
         var loggerMock = new Mock<ILogger<TimeBasedFailureDetector>>();
         
-        detector = new TimeBasedFailureDetector(optionsMock.Object, loggerMock.Object);
+        detector = new TimeBasedFailureDetector(TestMeshId, optionsMock.Object, loggerMock.Object);
     }
 
     [Fact]

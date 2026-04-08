@@ -9,6 +9,7 @@ using Ama.Enterprise.P2p.IntegrationTests.Gossip.Models;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
+using Ama.Enterprise.P2p.Services.Gossip;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -26,6 +27,7 @@ using Xunit;
 public sealed class P2pNetworkIntegrationTests
 {
     private readonly ITestOutputHelper testOutputHelper;
+    private const string TestMeshId = "BasicIntegrationMesh";
 
     public P2pNetworkIntegrationTests(ITestOutputHelper testOutputHelper)
     {
@@ -93,7 +95,7 @@ public sealed class P2pNetworkIntegrationTests
         var messageFromB = nodeB.Handler.ReceivedMessages.FirstOrDefault();
         
         // Emulate an unintended "echo" by explicitly sending the exact same tracked message back to Node B
-        var transport = nodeA.Provider.GetRequiredService<ITransport<GossipMessage>>();
+        var transport = nodeA.Provider.GetRequiredKeyedService<ITransport<GossipMessage>>(TestMeshId);
         await transport.SendAsync(nodeB.Endpoint, messageFromB, cts.Token);
 
         await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
@@ -228,25 +230,26 @@ public sealed class P2pNetworkIntegrationTests
             builder.SetMinimumLevel(LogLevel.Trace);
         });
 
-        services.AddP2pGossipNetwork(options =>
-        {
-            // Bind strictly to localhost so Windows doesn't require Admin rights for HttpListener
-            options.ListenHost = "localhost";
-            options.ListenPort = port;
-            options.GossipInterval = TimeSpan.FromMilliseconds(500); // Super-fast interval strictly for speeding tests
-            options.Fanout = 2;
-            options.DefaultTimeToLive = 5;
-        });
+        services.AddP2pMesh(TestMeshId)
+            .AddGossipNetwork(options =>
+            {
+                // Bind strictly to localhost so Windows doesn't require Admin rights for HttpListener
+                options.ListenHost = "localhost";
+                options.ListenPort = port;
+                options.GossipInterval = TimeSpan.FromMilliseconds(500); // Super-fast interval strictly for speeding tests
+                options.Fanout = 2;
+                options.DefaultTimeToLive = 5;
+            });
 
         var handler = new TestMessageHandler();
         services.AddSingleton(handler);
         
-        // Delegate interface registration to the exact same tracking instance
-        services.AddSingleton<IMessageHandler<GossipMessage>>(sp => sp.GetRequiredService<TestMessageHandler>());
+        // Delegate keyed interface registration to the exact same tracking instance
+        services.AddKeyedSingleton<IMessageHandler<GossipMessage>>(TestMeshId, (sp, key) => sp.GetRequiredService<TestMessageHandler>());
 
         var provider = services.BuildServiceProvider();
 
-        var endpoint = new PeerEndpoint("localhost", port);
+        var endpoint = new HttpPeerEndpoint("localhost", port);
         var peerId = new PeerId(Guid.NewGuid());
 
         return new TestNode(
@@ -254,9 +257,9 @@ public sealed class P2pNetworkIntegrationTests
             peerId,
             endpoint,
             handler,
-            provider.GetRequiredService<IHostedService>(),
-            provider.GetRequiredService<IP2pProtocol>(),
-            provider.GetRequiredService<IPeerRegistry>()
+            provider.GetServices<IHostedService>().OfType<P2pHostedService>().First(),
+            provider.GetRequiredKeyedService<IP2pProtocol>(TestMeshId),
+            provider.GetRequiredKeyedService<IPeerRegistry>(TestMeshId)
         );
     }
 

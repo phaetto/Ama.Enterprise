@@ -42,11 +42,21 @@ public sealed class TableStoragePeerRegistry : IPeerRegistry
     {
         await EnsureTableExistsAsync(cancellationToken).ConfigureAwait(false);
 
+        string host = string.Empty;
+        int port = 0;
+
+        if (node.Endpoint is HttpPeerEndpoint httpEndpoint)
+        {
+            host = httpEndpoint.Host;
+            port = httpEndpoint.Port;
+        }
+
         // Using standard TableEntity (dictionary) avoids reflection and maintains strict AOT compatibility.
         var entity = new TableEntity(partitionKey, node.Id.Value.ToString("N"))
         {
-            { "Host", node.Endpoint.Host },
-            { "Port", node.Endpoint.Port },
+            { "Host", host },
+            { "Port", port },
+            { "EndpointType", node.Endpoint?.GetType().Name ?? "Unknown" },
             { "Status", status.ToString() },
             { "LastSeen", DateTimeOffset.UtcNow }
         };
@@ -121,7 +131,8 @@ public sealed class TableStoragePeerRegistry : IPeerRegistry
 
         var host = entity.GetString("Host") ?? string.Empty;
         var port = entity.GetInt32("Port") ?? 0;
-        var endpoint = new PeerEndpoint(host, port);
+        
+        var endpoint = new HttpPeerEndpoint(host, port);
 
         return new PeerNode(id, endpoint);
     }

@@ -14,6 +14,7 @@ using Ama.Enterprise.P2p.IntegrationTests.Gossip.Models;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
+using Ama.Enterprise.P2p.Services.Gossip;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -26,6 +27,7 @@ using Xunit;
 public sealed class P2pAdvancedIntegrationTests
 {
     private readonly ITestOutputHelper testOutputHelper;
+    private const string TestMeshId = "AdvancedIntegrationMesh";
 
     public P2pAdvancedIntegrationTests(ITestOutputHelper testOutputHelper)
     {
@@ -170,23 +172,25 @@ public sealed class P2pAdvancedIntegrationTests
             builder.SetMinimumLevel(LogLevel.Trace);
         });
 
-        services.AddP2pGossipNetwork(options =>
-        {
-            options.ListenHost = "localhost";
-            options.ListenPort = port;
-            options.GossipInterval = TimeSpan.FromMilliseconds(500); 
-            options.Fanout = 2;
-            options.DefaultTimeToLive = defaultTtl;
-        });
+        services.AddP2pMesh(TestMeshId)
+            .AddGossipNetwork(options =>
+            {
+                options.ListenHost = "localhost";
+                options.ListenPort = port;
+                options.GossipInterval = TimeSpan.FromMilliseconds(500); 
+                options.Fanout = 2;
+                options.DefaultTimeToLive = defaultTtl;
+            });
 
         var handler = new TestMessageHandler();
         services.AddSingleton(handler);
         
-        services.AddSingleton<IMessageHandler<GossipMessage>>(sp => sp.GetRequiredService<TestMessageHandler>());
+        services.AddKeyedSingleton<IMessageHandler<GossipMessage>>(TestMeshId, (sp, key) => sp.GetRequiredService<TestMessageHandler>());
 
         var provider = services.BuildServiceProvider();
 
-        var endpoint = new PeerEndpoint("localhost", port);
+        // Use polymorphic concrete endpoint
+        var endpoint = new HttpPeerEndpoint("localhost", port);
         var peerId = new PeerId(Guid.NewGuid());
 
         return new TestNode(
@@ -194,9 +198,9 @@ public sealed class P2pAdvancedIntegrationTests
             peerId,
             endpoint,
             handler,
-            provider.GetRequiredService<IHostedService>(),
-            provider.GetRequiredService<IP2pProtocol>(),
-            provider.GetRequiredService<IPeerRegistry>()
+            provider.GetServices<IHostedService>().OfType<P2pHostedService>().First(),
+            provider.GetRequiredKeyedService<IP2pProtocol>(TestMeshId),
+            provider.GetRequiredKeyedService<IPeerRegistry>(TestMeshId)
         );
     }
 

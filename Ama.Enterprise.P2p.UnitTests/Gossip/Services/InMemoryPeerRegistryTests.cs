@@ -1,13 +1,18 @@
 namespace Ama.Enterprise.P2p.UnitTests.Gossip.Services;
 
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Shouldly;
+using Xunit;
 
 public sealed class InMemoryPeerRegistryTests
 {
+    private const string TestMeshId = "TestMesh";
     private readonly Mock<IPeerTopologyObserver> observerMock;
     private readonly Mock<ILogger<InMemoryPeerRegistry>> loggerMock;
     private readonly InMemoryPeerRegistry registry;
@@ -16,7 +21,7 @@ public sealed class InMemoryPeerRegistryTests
     {
         observerMock = new Mock<IPeerTopologyObserver>();
         loggerMock = new Mock<ILogger<InMemoryPeerRegistry>>();
-        registry = new InMemoryPeerRegistry([observerMock.Object], loggerMock.Object);
+        registry = new InMemoryPeerRegistry(TestMeshId, [observerMock.Object], loggerMock.Object);
     }
 
     [Fact]
@@ -24,7 +29,7 @@ public sealed class InMemoryPeerRegistryTests
     {
         // Arrange
         var peerId = new PeerId(Guid.NewGuid());
-        var node = new PeerNode(peerId, new PeerEndpoint("localhost", 8080));
+        var node = new PeerNode(peerId, new HttpPeerEndpoint("localhost", 8080));
 
         // Act
         await registry.AddOrUpdatePeerAsync(node, PeerStatus.Active, CancellationToken.None);
@@ -42,7 +47,7 @@ public sealed class InMemoryPeerRegistryTests
     {
         // Arrange
         var peerId = new PeerId(Guid.NewGuid());
-        var node = new PeerNode(peerId, new PeerEndpoint("localhost", 8080));
+        var node = new PeerNode(peerId, new HttpPeerEndpoint("localhost", 8080));
         
         await registry.AddOrUpdatePeerAsync(node, PeerStatus.Active, CancellationToken.None);
         observerMock.Invocations.Clear();
@@ -63,7 +68,7 @@ public sealed class InMemoryPeerRegistryTests
     {
         // Arrange
         var peerId = new PeerId(Guid.NewGuid());
-        var node = new PeerNode(peerId, new PeerEndpoint("localhost", 8080));
+        var node = new PeerNode(peerId, new HttpPeerEndpoint("localhost", 8080));
         
         await registry.AddOrUpdatePeerAsync(node, PeerStatus.Active, CancellationToken.None);
         observerMock.Invocations.Clear();
@@ -83,7 +88,7 @@ public sealed class InMemoryPeerRegistryTests
     {
         // Arrange
         var peerId = new PeerId(Guid.Empty);
-        var node = new PeerNode(peerId, new PeerEndpoint("localhost", 8080));
+        var node = new PeerNode(peerId, new HttpPeerEndpoint("localhost", 8080));
 
         // Act & Assert
         await Should.ThrowAsync<ArgumentException>(async () => 

@@ -1,4 +1,8 @@
 namespace Ama.Enterprise.P2p.Models.Core;
+
+using System;
+using System.Collections.Generic;
+
 /// <summary>
 /// Represents a known peer node in the gossip network, combining its identity and endpoint.
 /// </summary>
@@ -22,13 +26,13 @@ public readonly record struct PeerNode : IEquatable<PeerNode>
     public PeerNode(PeerId id, PeerEndpoint endpoint)
     {
         Id = id;
-        Endpoint = endpoint;
+        Endpoint = endpoint ?? throw new ArgumentNullException(nameof(endpoint));
     }
 
     /// <inheritdoc />
     public bool Equals(PeerNode other)
     {
-        return Id.Equals(other.Id) && Endpoint.Equals(other.Endpoint);
+        return Id.Equals(other.Id) && EqualityComparer<PeerEndpoint>.Default.Equals(Endpoint, other.Endpoint);
     }
 
     /// <inheritdoc />

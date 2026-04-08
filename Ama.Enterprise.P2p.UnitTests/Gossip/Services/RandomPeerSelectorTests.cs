@@ -1,10 +1,15 @@
 namespace Ama.Enterprise.P2p.UnitTests.Gossip.Services;
 
+using System;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Shouldly;
+using Xunit;
 
 public sealed class RandomPeerSelectorTests
 {
@@ -45,7 +50,7 @@ public sealed class RandomPeerSelectorTests
     {
         // Arrange
         var activePeers = Enumerable.Range(1, 5)
-            .Select(_ => new PeerNode(new PeerId(Guid.NewGuid()), new PeerEndpoint("localhost", 8080)))
+            .Select(_ => new PeerNode(new PeerId(Guid.NewGuid()), new HttpPeerEndpoint("localhost", 8080)))
             .ToList();
 
         registryMock.Setup(r => r.GetPeersByStatusAsync(PeerStatus.Active, It.IsAny<CancellationToken>()))
@@ -64,7 +69,7 @@ public sealed class RandomPeerSelectorTests
     {
         // Arrange
         var activePeers = Enumerable.Range(1, 2)
-            .Select(_ => new PeerNode(new PeerId(Guid.NewGuid()), new PeerEndpoint("localhost", 8080)))
+            .Select(_ => new PeerNode(new PeerId(Guid.NewGuid()), new HttpPeerEndpoint("localhost", 8080)))
             .ToList();
 
         registryMock.Setup(r => r.GetPeersByStatusAsync(PeerStatus.Active, It.IsAny<CancellationToken>()))

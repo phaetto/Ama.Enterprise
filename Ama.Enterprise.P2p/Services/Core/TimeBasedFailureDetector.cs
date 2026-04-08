@@ -1,22 +1,26 @@
 namespace Ama.Enterprise.P2p.Services.Core;
 
+using System;
 using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Determines peer health based on the time elapsed since the last received heartbeat,
-/// decoupled from protocol-specific options.
+/// Determines peer health based on the time elapsed since the last received heartbeat, decoupled from protocol-specific options.
 /// </summary>
 /// <remarks>
 /// Initializes a new instance of the <see cref="TimeBasedFailureDetector"/> class.
 /// </remarks>
 public sealed class TimeBasedFailureDetector(
-    IOptions<FailureDetectorOptions> options,
+    string meshId,
+    IOptionsMonitor<FailureDetectorOptions> optionsMonitor,
     ILogger<TimeBasedFailureDetector> logger) : IFailureDetector
 {
-    private readonly IOptions<FailureDetectorOptions> options = options ?? throw new ArgumentNullException(nameof(options));
+    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
+    private readonly IOptionsMonitor<FailureDetectorOptions> optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
     private readonly ILogger<TimeBasedFailureDetector> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     private readonly ConcurrentDictionary<PeerId, DateTimeOffset> lastHeartbeats = new ConcurrentDictionary<PeerId, DateTimeOffset>();
@@ -34,7 +38,7 @@ public sealed class TimeBasedFailureDetector(
             _ => DateTimeOffset.UtcNow,
             (_, _) => DateTimeOffset.UtcNow);
 
-        logger.LogTrace("Recorded heartbeat for peer {PeerId}.", peerId.Value);
+        logger.LogTrace("[{MeshId}] Recorded heartbeat for peer {PeerId}.", meshId, peerId.Value);
 
         return Task.CompletedTask;
     }
@@ -54,10 +58,11 @@ public sealed class TimeBasedFailureDetector(
         }
 
         var timeSinceLastHeartbeat = DateTimeOffset.UtcNow - lastSeen;
-        var heartbeatInterval = options.Value.HeartbeatInterval;
+        var options = optionsMonitor.Get(meshId);
+        var heartbeatInterval = options.HeartbeatInterval;
 
-        var suspectThreshold = TimeSpan.FromTicks(heartbeatInterval.Ticks * options.Value.SuspectThresholdMultiplier);
-        var deadThreshold = TimeSpan.FromTicks(heartbeatInterval.Ticks * options.Value.DeadThresholdMultiplier);
+        var suspectThreshold = TimeSpan.FromTicks(heartbeatInterval.Ticks * options.SuspectThresholdMultiplier);
+        var deadThreshold = TimeSpan.FromTicks(heartbeatInterval.Ticks * options.DeadThresholdMultiplier);
 
         if (timeSinceLastHeartbeat >= deadThreshold)
         {

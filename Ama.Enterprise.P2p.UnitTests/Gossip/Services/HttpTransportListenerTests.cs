@@ -1,5 +1,8 @@
 namespace Ama.Enterprise.P2p.UnitTests.Gossip.Services;
 
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Gossip;
@@ -7,26 +10,30 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Shouldly;
+using Xunit;
 
 public sealed class HttpTransportListenerTests
 {
+    private const string TestMeshId = "TestMesh";
     private readonly Mock<ICrdtSerializer> serializerMock;
     private readonly Mock<ILogger<HttpTransportListener>> loggerMock;
-    private readonly IOptions<GossipOptions> options;
+    private readonly Mock<IOptionsMonitor<GossipOptions>> optionsMock;
 
     public HttpTransportListenerTests()
     {
         serializerMock = new Mock<ICrdtSerializer>();
         loggerMock = new Mock<ILogger<HttpTransportListener>>();
+        optionsMock = new Mock<IOptionsMonitor<GossipOptions>>();
+        
         // Use a dynamic port to avoid conflicting with actual services if this runs fully
-        options = Options.Create(new GossipOptions { ListenPort = 0 }); 
+        optionsMock.Setup(o => o.Get(TestMeshId)).Returns(new GossipOptions { ListenPort = 0 }); 
     }
 
     [Fact]
     public void Constructor_ShouldThrow_WhenOptionsIsNull()
     {
         // Act & Assert
-        Should.Throw<ArgumentNullException>(() => new HttpTransportListener(null!, serializerMock.Object, loggerMock.Object));
+        Should.Throw<ArgumentNullException>(() => new HttpTransportListener(TestMeshId, null!, serializerMock.Object, loggerMock.Object));
     }
 
     [Fact(Skip = "Integration test binding to real OS ports")]
@@ -34,8 +41,10 @@ public sealed class HttpTransportListenerTests
     {
         // Arrange
         // We use port 8080 explicitly for integration skip
-        var localOptions = Options.Create(new GossipOptions { ListenPort = 8080 });
-        using var listener = new HttpTransportListener(localOptions, serializerMock.Object, loggerMock.Object);
+        var localOptionsMock = new Mock<IOptionsMonitor<GossipOptions>>();
+        localOptionsMock.Setup(o => o.Get(TestMeshId)).Returns(new GossipOptions { ListenPort = 8080 });
+        
+        using var listener = new HttpTransportListener(TestMeshId, localOptionsMock.Object, serializerMock.Object, loggerMock.Object);
 
         // Act
         await listener.StartListeningAsync(_ => Task.CompletedTask, CancellationToken.None);

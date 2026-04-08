@@ -1,14 +1,20 @@
 namespace Ama.Enterprise.P2p.UnitTests.Gossip.Services;
 
+using System;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Shouldly;
+using Xunit;
 
 public sealed class MessageDispatcherTests
 {
+    private const string TestMeshId = "TestMesh";
     private readonly Mock<ILogger<MessageDispatcher<GossipMessage>>> loggerMock;
 
     public MessageDispatcherTests()
@@ -20,7 +26,7 @@ public sealed class MessageDispatcherTests
     public void Constructor_ThrowsArgumentNullException_WhenHandlersIsNull()
     {
         // Act
-        var exception = Record.Exception(() => new MessageDispatcher<GossipMessage>(null!, loggerMock.Object));
+        var exception = Record.Exception(() => new MessageDispatcher<GossipMessage>(TestMeshId, null!, loggerMock.Object));
 
         // Assert
         exception.ShouldNotBeNull();
@@ -35,7 +41,7 @@ public sealed class MessageDispatcherTests
         var handlers = Enumerable.Empty<IMessageHandler<GossipMessage>>();
 
         // Act
-        var exception = Record.Exception(() => new MessageDispatcher<GossipMessage>(handlers, null!));
+        var exception = Record.Exception(() => new MessageDispatcher<GossipMessage>(TestMeshId, handlers, null!));
 
         // Assert
         exception.ShouldNotBeNull();
@@ -51,7 +57,7 @@ public sealed class MessageDispatcherTests
         var handler2Mock = new Mock<IMessageHandler<GossipMessage>>();
         
         var handlers = new[] { handler1Mock.Object, handler2Mock.Object };
-        var dispatcher = new MessageDispatcher<GossipMessage>(handlers, loggerMock.Object);
+        var dispatcher = new MessageDispatcher<GossipMessage>(TestMeshId, handlers, loggerMock.Object);
 
         var message = CreateSampleMessage();
         var cancellationToken = CancellationToken.None;
@@ -76,7 +82,7 @@ public sealed class MessageDispatcherTests
         var successfulHandlerMock = new Mock<IMessageHandler<GossipMessage>>();
         
         var handlers = new[] { failingHandlerMock.Object, successfulHandlerMock.Object };
-        var dispatcher = new MessageDispatcher<GossipMessage>(handlers, loggerMock.Object);
+        var dispatcher = new MessageDispatcher<GossipMessage>(TestMeshId, handlers, loggerMock.Object);
 
         var message = CreateSampleMessage();
         var cancellationToken = CancellationToken.None;
@@ -95,7 +101,7 @@ public sealed class MessageDispatcherTests
     {
         // Arrange
         var handlers = Enumerable.Empty<IMessageHandler<GossipMessage>>();
-        var dispatcher = new MessageDispatcher<GossipMessage>(handlers, loggerMock.Object);
+        var dispatcher = new MessageDispatcher<GossipMessage>(TestMeshId, handlers, loggerMock.Object);
 
         var message = CreateSampleMessage();
         var cancellationToken = CancellationToken.None;
@@ -113,7 +119,7 @@ public sealed class MessageDispatcherTests
         // Arrange
         var handlerMock = new Mock<IMessageHandler<GossipMessage>>();
         var handlers = new[] { handlerMock.Object };
-        var dispatcher = new MessageDispatcher<GossipMessage>(handlers, loggerMock.Object);
+        var dispatcher = new MessageDispatcher<GossipMessage>(TestMeshId, handlers, loggerMock.Object);
 
         var message = CreateSampleMessage();
         using var cts = new CancellationTokenSource();

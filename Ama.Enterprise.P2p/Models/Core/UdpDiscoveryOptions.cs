@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.Models.Core;
 
 using System;
+using System.Collections.Generic;
 
 /// <summary>
 /// Configuration options for tuning the behavior of UDP multicast peer discovery.
@@ -33,14 +34,9 @@ public sealed class UdpDiscoveryOptions : IEquatable<UdpDiscoveryOptions>
     public Guid LocalPeerId { get; set; } = Guid.NewGuid();
 
     /// <summary>
-    /// Gets or sets the host address where the local peer is listening for standard gossip communication.
+    /// Gets or sets the protocol-agnostic local endpoint details (e.g., HttpPeerEndpoint) to broadcast to other peers.
     /// </summary>
-    public string LocalEndpointHost { get; set; } = "localhost";
-
-    /// <summary>
-    /// Gets or sets the port where the local peer is listening for standard gossip communication.
-    /// </summary>
-    public int LocalEndpointPort { get; set; } = 8080;
+    public PeerEndpoint LocalEndpoint { get; set; } = default!;
 
     /// <inheritdoc />
     public bool Equals(UdpDiscoveryOptions? other)
@@ -59,9 +55,8 @@ public sealed class UdpDiscoveryOptions : IEquatable<UdpDiscoveryOptions>
                DiscoveryTimeout.Equals(other.DiscoveryTimeout) &&
                DiscoveryInterval.Equals(other.DiscoveryInterval) &&
                LocalPeerId.Equals(other.LocalPeerId) &&
-               LocalEndpointPort == other.LocalEndpointPort &&
                string.Equals(MulticastAddress, other.MulticastAddress, StringComparison.OrdinalIgnoreCase) &&
-               string.Equals(LocalEndpointHost, other.LocalEndpointHost, StringComparison.OrdinalIgnoreCase);
+               EqualityComparer<PeerEndpoint>.Default.Equals(LocalEndpoint, other.LocalEndpoint);
     }
 
     /// <inheritdoc />
@@ -76,7 +71,6 @@ public sealed class UdpDiscoveryOptions : IEquatable<UdpDiscoveryOptions>
             DiscoveryTimeout,
             DiscoveryInterval,
             LocalPeerId,
-            StringComparer.OrdinalIgnoreCase.GetHashCode(LocalEndpointHost ?? string.Empty),
-            LocalEndpointPort);
+            LocalEndpoint);
     }
 }

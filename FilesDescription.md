@@ -27,16 +27,18 @@
 | `$/Ama.Enterprise.CRDT.BlazorApp/wwwroot/sample-data/weather.json` | No description provided. |
 | `$/Ama.Enterprise.CRDT.BlazorApp/wwwroot/service-worker.js` | No description provided. |
 | `$/Ama.Enterprise.CRDT.BlazorApp/wwwroot/service-worker.published.js` | No description provided. |
+| `$/Ama.Enterprise.CRDT.MessagePack/Ama.Enterprise.CRDT.MessagePack.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.OpenTelemetry/Ama.Enterprise.CRDT.OpenTelemetry.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.TableStorage/Ama.Enterprise.CRDT.TableStorage.csproj` | No description provided. |
+| `$/Ama.Enterprise.CRDT.TableStorage/todo.txt` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Testing/Ama.Enterprise.CRDT.Testing.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.UI/Ama.Enterprise.CRDT.UI.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT/Ama.Enterprise.CRDT.csproj` | No description provided. |
+| `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Ama.Enterprise.FeatureFlags.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj` | Showcase console application project displaying P2P feature flags integration, AOT readiness, and UDP cluster discovery. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Main entry point containing an interactive UI for observing and interacting with distributed feature flags via gossip synchronization. |
 | `$/Ama.Enterprise.FeatureFlags.UnitTests/Ama.Enterprise.FeatureFlags.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags.UnitTests/Extensions/ServiceCollectionExtensionsTests.cs` | Unit tests covering the Dependency Injection registration extensions for feature flags and its P2P components. |
-| `$/Ama.Enterprise.FeatureFlags.UnitTests/Services/FeatureFlagClusterManagerTests.cs` | Unit tests validating local state mutations and DVV state requirements using the CRDT patcher/applicator decorators. |
 | `$/Ama.Enterprise.FeatureFlags.UnitTests/Services/MemoryJournalTests.cs` | Unit tests enforcing bounded historical operation access and trimming inside the feature flags in-memory journal. |
 | `$/Ama.Enterprise.FeatureFlags.UnitTests/Services/P2p/FeatureFlagAntiEntropyServiceTests.cs` | Unit tests for the background service that intermittently broadcasts local anti-entropy state over gossip. |
 | `$/Ama.Enterprise.FeatureFlags.UnitTests/Services/P2p/FeatureFlagGossipHandlerTests.cs` | Unit tests ensuring generic payload parsing and integration of remote P2P gossip into the native feature flags CRDT pipeline. |
@@ -88,9 +90,13 @@
 | `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/TimeBasedFailureDetectorTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Ama.Enterprise.P2p.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p/Constants.cs` | Global constants for the P2P module, including protocol versions and payload size limits. |
+| `$/Ama.Enterprise.P2p/Extensions/IP2pMeshBuilder.cs` | Interface for building and configuring specific Keyed DI mesh profiles. |
+| `$/Ama.Enterprise.P2p/Extensions/P2pMeshBuilder.cs` | Implementation of `IP2pMeshBuilder` handling multi-mesh dependency injection tracking. |
 | `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Extension methods for setting up P2P DI configuration and options registration. |
 | `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Registration logic configuring Dependency Injection specifically targeting the UDP peer discovery sub-components and background services. |
 | `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
+| `$/Ama.Enterprise.P2p/Models/Core/HttpPeerEndpoint.cs` | Concrete HTTP-based network endpoint inheriting from the polymorphic `PeerEndpoint`. |
+| `$/Ama.Enterprise.P2p/Models/Core/P2pMeshMetadata.cs` | Metadata record registering a specific mesh identifier into the global dependency container for orchestration. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerEndpoint.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerId.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerNode.cs` | No description provided. |
@@ -102,7 +108,6 @@
 | `$/Ama.Enterprise.P2p/Services/Core/IFailureDetector.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IMessageDispatcher.cs` | Generic interface routing incoming protocol messages to registered handlers. |
 | `$/Ama.Enterprise.P2p/Services/Core/IMessageHandler.cs` | Generic interface defining a domain-level consumer for P2P messages. |
-| `$/Ama.Enterprise.P2p/Services/Core/IMessageSerializer.cs` | Obsolete generic message serializer interface, superseded by ICrdtSerializer. |
 | `$/Ama.Enterprise.P2p/Services/Core/IP2pProtocol.cs` | Generic interface defining the orchestrator for the P2P protocol, abstracting algorithms like Gossip. |
 | `$/Ama.Enterprise.P2p/Services/Core/IP2pTelemetry.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerAuthenticator.cs` | No description provided. |
@@ -122,9 +127,7 @@
 | `$/Ama.Enterprise.P2p/Services/Gossip/GossipProtocol.cs` | Re-architected implementation of IGossipProtocol targeting generic transport and dispatch interfaces. |
 | `$/Ama.Enterprise.P2p/Services/Gossip/HttpTransport.cs` | Implements outbound gossip transport via HTTP, now leveraging ICrdtSerializer. |
 | `$/Ama.Enterprise.P2p/Services/Gossip/HttpTransportListener.cs` | Implements inbound gossip listener via HttpListener, utilizing ICrdtSerializer. |
-| `$/Ama.Enterprise.P2p/Services/Gossip/IGossipProtocol.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Gossip/P2pHostedService.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Services/Gossip/SystemTextJsonGossipSerializer.cs` | Obsolete SystemTextJson implementation, superseded by ICrdtSerializer. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/PropertyInfoUsageAnalyzerTests.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/SystemConvertUsageAnalyzerTests.cs` | No description provided. |

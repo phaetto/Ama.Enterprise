@@ -1,13 +1,17 @@
 namespace Ama.Enterprise.P2p.Extensions;
 
 using System;
+using System.Linq;
+using System.Net.Http;
 using System.Text.Json.Serialization.Metadata;
+using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.Services.Gossip;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
@@ -16,63 +20,122 @@ using Microsoft.Extensions.Options;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the core interfaces and options required for the P2P Gossip protocol.
+    /// Initiates the registration of a new P2P mesh network profile under the given identifier.
     /// </summary>
-    /// <param name="services">The service collection to add the registrations to.</param>
-    /// <param name="configureOptions">An action to configure the gossip options.</param>
-    /// <returns>The updated service collection.</returns>
-    /// <exception cref="ArgumentNullException">Thrown if <paramref name="services"/> is null.</exception>
-    public static IServiceCollection AddP2pGossipNetwork(
-        this IServiceCollection services, 
-        Action<GossipOptions>? configureOptions = null)
+    /// <param name="services">The service collection.</param>
+    /// <param name="meshId">The unique identifier defining this mesh network instance.</param>
+    /// <returns>A builder to chain protocol and discovery configuration actions.</returns>
+    public static IP2pMeshBuilder AddP2pMesh(this IServiceCollection services, string meshId)
     {
-        if (services is null)
+        if (string.IsNullOrWhiteSpace(meshId))
         {
-            throw new ArgumentNullException(nameof(services));
+            throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshId));
         }
 
+        // Register the overarching hosted service orchestrator only once.
+        // AddHostedService uses TryAddEnumerable internally, so it is safe and idempotent to call multiple times.
+        services.AddHostedService<P2pHostedService>();
+
+        // Register the metadata so the hosted service knows which meshes to boot.
+        services.AddSingleton(new P2pMeshMetadata(meshId));
+
+        return new P2pMeshBuilder(services, meshId);
+    }
+
+    /// <summary>
+    /// Registers the core interfaces and HTTP Transport required for the P2P Gossip protocol under the current mesh context.
+    /// </summary>
+    /// <param name="builder">The mesh builder instance.</param>
+    /// <param name="configureOptions">An action to configure the gossip options for this mesh.</param>
+    /// <returns>The updated mesh builder.</returns>
+    public static IP2pMeshBuilder AddGossipNetwork(
+        this IP2pMeshBuilder builder, 
+        Action<GossipOptions>? configureOptions = null)
+    {
         if (configureOptions is null)
         {
-            services.Configure<GossipOptions>(_ => { });
+            builder.Services.Configure<GossipOptions>(builder.MeshId, _ => { });
         }
         else
         {
-            services.Configure(configureOptions);
+            builder.Services.Configure(builder.MeshId, configureOptions);
         }
 
-        // Map GossipInterval down to the new generic failure detector
-        services.AddOptions<FailureDetectorOptions>()
-            .Configure<IOptions<GossipOptions>>((failureOptions, gossipOptions) =>
+        // Map GossipInterval down to the named generic failure detector options
+        builder.Services.AddOptions<FailureDetectorOptions>(builder.MeshId)
+            .Configure<IOptionsMonitor<GossipOptions>>((failureOptions, gossipOptionsMonitor) =>
             {
-                if (gossipOptions?.Value is not null)
+                var gossipOptions = gossipOptionsMonitor.Get(builder.MeshId);
+                if (gossipOptions is not null)
                 {
-                    failureOptions.HeartbeatInterval = gossipOptions.Value.GossipInterval;
+                    failureOptions.HeartbeatInterval = gossipOptions.GossipInterval;
                 }
             });
 
-        // Register HttpClient specific to the P2P transport
-        services.AddHttpClient("P2pTransport");
+        // Register global HttpClient if not already present. It is idempotent.
+        builder.Services.AddHttpClient("P2pTransport");
 
-        // Register P2P JSON Context to be combined by Ama.CRDT options context
-        services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", P2pJsonSerializerContext.Default);
+        // Conditionally register P2P JSON Context to avoid duplicate generic enumerations for System.Text.Json context merging
+        if (!builder.Services.Any(s => s.ServiceType == typeof(IJsonTypeInfoResolver) && s.ServiceKey as string == "Ama.CRDT" && s.ImplementationInstance == P2pJsonSerializerContext.Default))
+        {
+            builder.Services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", P2pJsonSerializerContext.Default);
+        }
 
-        // Core P2P services
-        services.TryAddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
-        services.TryAddSingleton<IPeerAuthenticator, PassThroughPeerAuthenticator>();
-        services.TryAddSingleton<IPeerSelector, RandomPeerSelector>();
-        services.TryAddSingleton<IFailureDetector, TimeBasedFailureDetector>();
-        
-        // Transport and Dispatcher
-        services.TryAddSingleton<ITransport<GossipMessage>, HttpTransport>();
-        services.TryAddSingleton<ITransportListener<GossipMessage>, HttpTransportListener>();
-        services.TryAddSingleton<IMessageDispatcher<GossipMessage>, MessageDispatcher<GossipMessage>>();
-        
-        // Protocol orchestrator mapped to the generic IP2pProtocol interface
-        services.TryAddSingleton<IP2pProtocol, GossipProtocol>();
-        
-        // Hosted service to manage background lifecycle within the generic host
-        services.AddHostedService<P2pHostedService>();
+        // Core P2P services isolated per MeshId using Keyed DI
+        builder.Services.AddKeyedSingleton<IPeerRegistry>(builder.MeshId, (sp, key) =>
+            new InMemoryPeerRegistry(
+                (string)key!,
+                sp.GetKeyedServices<IPeerTopologyObserver>(key),
+                sp.GetRequiredService<ILogger<InMemoryPeerRegistry>>()));
 
-        return services;
+        builder.Services.AddKeyedSingleton<IPeerAuthenticator>(builder.MeshId, (sp, key) =>
+            new PassThroughPeerAuthenticator(
+                (string)key!, 
+                sp.GetRequiredService<ILogger<PassThroughPeerAuthenticator>>()));
+
+        builder.Services.AddKeyedSingleton<IPeerSelector>(builder.MeshId, (sp, key) =>
+            new RandomPeerSelector(
+                sp.GetRequiredKeyedService<IPeerRegistry>(key),
+                sp.GetRequiredService<ILogger<RandomPeerSelector>>()));
+
+        builder.Services.AddKeyedSingleton<IFailureDetector>(builder.MeshId, (sp, key) =>
+            new TimeBasedFailureDetector(
+                (string)key!,
+                sp.GetRequiredService<IOptionsMonitor<FailureDetectorOptions>>(),
+                sp.GetRequiredService<ILogger<TimeBasedFailureDetector>>()));
+        
+        // Transport and Dispatcher isolated per MeshId
+        builder.Services.AddKeyedSingleton<ITransport<GossipMessage>>(builder.MeshId, (sp, key) =>
+            new HttpTransport(
+                (string)key!,
+                sp.GetRequiredService<IHttpClientFactory>(),
+                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredService<ILogger<HttpTransport>>()));
+
+        builder.Services.AddKeyedSingleton<ITransportListener<GossipMessage>>(builder.MeshId, (sp, key) =>
+            new HttpTransportListener(
+                (string)key!,
+                sp.GetRequiredService<IOptionsMonitor<GossipOptions>>(),
+                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredService<ILogger<HttpTransportListener>>()));
+
+        builder.Services.AddKeyedSingleton<IMessageDispatcher<GossipMessage>>(builder.MeshId, (sp, key) =>
+            new MessageDispatcher<GossipMessage>(
+                (string)key!,
+                sp.GetKeyedServices<IMessageHandler<GossipMessage>>(key),
+                sp.GetRequiredService<ILogger<MessageDispatcher<GossipMessage>>>()));
+        
+        // Protocol orchestrator mapped per MeshId
+        builder.Services.AddKeyedSingleton<IP2pProtocol>(builder.MeshId, (sp, key) =>
+            new GossipProtocol(
+                (string)key!,
+                sp.GetRequiredService<IOptionsMonitor<GossipOptions>>(),
+                sp.GetRequiredKeyedService<ITransport<GossipMessage>>(key),
+                sp.GetRequiredKeyedService<ITransportListener<GossipMessage>>(key),
+                sp.GetRequiredKeyedService<IPeerSelector>(key),
+                sp.GetRequiredKeyedService<IMessageDispatcher<GossipMessage>>(key),
+                sp.GetRequiredService<ILogger<GossipProtocol>>()));
+
+        return builder;
     }
 }

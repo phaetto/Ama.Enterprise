@@ -1,6 +1,10 @@
 namespace Ama.Enterprise.P2p.UnitTests.Gossip.Services;
 
+using System;
 using System.Net;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
@@ -9,9 +13,11 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Moq.Protected;
 using Shouldly;
+using Xunit;
 
 public sealed class HttpTransportTests
 {
+    private const string TestMeshId = "TestMesh";
     private readonly Mock<IHttpClientFactory> httpClientFactoryMock;
     private readonly Mock<ICrdtSerializer> serializerMock;
     private readonly Mock<ILogger<HttpTransport>> loggerMock;
@@ -29,8 +35,8 @@ public sealed class HttpTransportTests
     public async Task SendAsync_ShouldPostSerializedMessageToEndpoint()
     {
         // Arrange
-        var transport = new HttpTransport(httpClientFactoryMock.Object, serializerMock.Object, loggerMock.Object);
-        var endpoint = new PeerEndpoint("192.168.1.10", 9000);
+        var transport = new HttpTransport(TestMeshId, httpClientFactoryMock.Object, serializerMock.Object, loggerMock.Object);
+        var endpoint = new HttpPeerEndpoint("192.168.1.10", 9000);
         var message = new GossipMessage(Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, new byte[] { 42 });
         var serializedBytes = new byte[] { 0x01, 0x02 };
 
@@ -66,8 +72,8 @@ public sealed class HttpTransportTests
     public async Task SendAsync_ShouldThrow_WhenEndpointHostIsEmpty()
     {
         // Arrange
-        var transport = new HttpTransport(httpClientFactoryMock.Object, serializerMock.Object, loggerMock.Object);
-        var endpoint = new PeerEndpoint(string.Empty, 9000);
+        var transport = new HttpTransport(TestMeshId, httpClientFactoryMock.Object, serializerMock.Object, loggerMock.Object);
+        var endpoint = new HttpPeerEndpoint(string.Empty, 9000);
         var message = new GossipMessage(Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, new byte[] { 42 });
 
         // Act & Assert

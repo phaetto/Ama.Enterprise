@@ -4,7 +4,9 @@ using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.IntegrationTests.Attributes;
 using Ama.Enterprise.P2p.IntegrationTests.Extensions;
+using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
+using Ama.Enterprise.P2p.Services.Gossip;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -50,6 +52,7 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
         var node3 = CreateDiscoveryNode(nodeId3, port3, multicastPort);
 
         // Start all nodes so their UDP background listeners bind and become active
+        // By calling StartAsync on the P2pHostedService orchestrator, it cascades StartAsync to the tied UdpPeerDiscovery instance
         await node1.HostedService.StartAsync(cancellationSource.Token);
         await node2.HostedService.StartAsync(cancellationSource.Token);
         await node3.HostedService.StartAsync(cancellationSource.Token);
@@ -88,28 +91,28 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
             builder.SetMinimumLevel(LogLevel.Trace);
         });
 
-        // Add the missing required IPeerRegistry for the UdpPeerDiscovery service
-        services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
+        var meshId = "UdpTestMesh";
 
-        services.AddUdpPeerDiscovery(options => 
-        {
-            // Use local loopback compatible multicast group for testing environments
-            options.MulticastAddress = "239.255.0.1"; 
-            options.MulticastPort = multicastPort;
-            options.LocalPeerId = peerId;
-            options.LocalEndpointHost = "localhost";
-            options.LocalEndpointPort = listenPort;
-            options.DiscoveryTimeout = TimeSpan.FromSeconds(3);
-        });
+        // Add both Gossip Network (which registers core dependencies like IPeerRegistry for the mesh)
+        // and Udp Peer Discovery config paired inside the same builder.
+        services.AddP2pMesh(meshId)
+            .AddGossipNetwork(opts => { opts.ListenPort = listenPort; })
+            .AddUdpPeerDiscovery(options => 
+            {
+                options.MulticastAddress = "239.255.0.1"; 
+                options.MulticastPort = multicastPort;
+                options.LocalPeerId = peerId;
+                options.LocalEndpoint = new HttpPeerEndpoint("localhost", listenPort);
+                options.DiscoveryTimeout = TimeSpan.FromSeconds(3);
+            });
 
         var provider = services.BuildServiceProvider();
         serviceProviders.Add(provider);
 
-        var discovery = provider.GetRequiredService<IPeerDiscovery>();
+        var discovery = provider.GetRequiredKeyedService<IPeerDiscovery>(meshId);
         
-        // Retrieve specifically the UDP background listener service
-        var hostedService = provider.GetServices<IHostedService>()
-            .First(s => s is UdpPeerDiscovery);
+        // Retrieve the centralized P2P hosted service that orchestrates all configured meshes
+        var hostedService = provider.GetServices<IHostedService>().OfType<P2pHostedService>().First();
 
         return (discovery, hostedService);
     }

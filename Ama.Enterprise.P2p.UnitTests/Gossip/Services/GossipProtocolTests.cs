@@ -7,15 +7,21 @@ using Ama.Enterprise.P2p.Services.Gossip;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using System;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Xunit;
 
 public sealed class GossipProtocolTests
 {
+    private const string TestMeshId = "TestMesh";
     private readonly Mock<ITransport<GossipMessage>> transportMock;
     private readonly Mock<ITransportListener<GossipMessage>> listenerMock;
     private readonly Mock<IPeerSelector> peerSelectorMock;
     private readonly Mock<IMessageDispatcher<GossipMessage>> dispatcherMock;
     private readonly Mock<ILogger<GossipProtocol>> loggerMock;
-    private readonly IOptions<GossipOptions> options;
+    private readonly Mock<IOptionsMonitor<GossipOptions>> optionsMock;
 
     public GossipProtocolTests()
     {
@@ -24,11 +30,14 @@ public sealed class GossipProtocolTests
         peerSelectorMock = new Mock<IPeerSelector>();
         dispatcherMock = new Mock<IMessageDispatcher<GossipMessage>>();
         loggerMock = new Mock<ILogger<GossipProtocol>>();
-        options = Options.Create(new GossipOptions { GossipInterval = TimeSpan.FromMilliseconds(50), Fanout = 2 });
+        
+        optionsMock = new Mock<IOptionsMonitor<GossipOptions>>();
+        optionsMock.Setup(o => o.Get(TestMeshId)).Returns(new GossipOptions { GossipInterval = TimeSpan.FromMilliseconds(50), Fanout = 2 });
     }
 
     private GossipProtocol CreateProtocol() => new(
-        options,
+        TestMeshId,
+        optionsMock.Object,
         transportMock.Object,
         listenerMock.Object,
         peerSelectorMock.Object,
@@ -82,7 +91,7 @@ public sealed class GossipProtocolTests
         listenerMock.Setup(l => l.StartListeningAsync(It.IsAny<Func<GossipMessage, Task>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
             
-        var peerNode = new PeerNode(new PeerId(Guid.NewGuid()), new PeerEndpoint("localhost", 8080));
+        var peerNode = new PeerNode(new PeerId(Guid.NewGuid()), new HttpPeerEndpoint("localhost", 8080));
         peerSelectorMock.Setup(ps => ps.GetPeersAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { peerNode });
 
@@ -95,7 +104,7 @@ public sealed class GossipProtocolTests
 
         // Assert
         transportMock.Verify(t => t.SendAsync(
-            It.Is<PeerEndpoint>(e => e.Host == "localhost" && e.Port == 8080),
+            It.Is<PeerEndpoint>(e => e is HttpPeerEndpoint && ((HttpPeerEndpoint)e).Host == "localhost" && ((HttpPeerEndpoint)e).Port == 8080),
             It.Is<GossipMessage>(m => m.Payload.ToArray().SequenceEqual(new byte[] { 1, 2, 3 })),
             It.IsAny<CancellationToken>()), Times.AtLeastOnce);
 

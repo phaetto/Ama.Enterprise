@@ -1,5 +1,8 @@
 namespace Ama.Enterprise.P2p.Services.Core;
 
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 using Microsoft.Extensions.Logging;
 
@@ -9,8 +12,9 @@ using Microsoft.Extensions.Logging;
 /// <remarks>
 /// Initializes a new instance of the <see cref="PassThroughPeerAuthenticator"/> class.
 /// </remarks>
-public sealed class PassThroughPeerAuthenticator(ILogger<PassThroughPeerAuthenticator> logger) : IPeerAuthenticator
+public sealed class PassThroughPeerAuthenticator(string meshId, ILogger<PassThroughPeerAuthenticator> logger) : IPeerAuthenticator
 {
+    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
     private readonly ILogger<PassThroughPeerAuthenticator> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
@@ -21,7 +25,7 @@ public sealed class PassThroughPeerAuthenticator(ILogger<PassThroughPeerAuthenti
             throw new ArgumentException("Peer ID cannot be empty.", nameof(node));
         }
 
-        logger.LogDebug("Auto-authenticating peer {PeerId} via pass-through strategy.", node.Id.Value);
+        logger.LogDebug("[{MeshId}] Auto-authenticating peer {PeerId} via pass-through strategy.", meshId, node.Id.Value);
 
         return Task.FromResult(true);
     }

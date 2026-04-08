@@ -1,20 +1,24 @@
 namespace Ama.Enterprise.P2p.Services.Core;
 
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Implements the generic message dispatcher, routing incoming protocol messages to all registered domain handlers.
+/// Implements the generic message dispatcher, routing incoming protocol messages to all registered domain handlers for the mesh.
 /// </summary>
 /// <typeparam name="TMessage">The type of the message being dispatched.</typeparam>
 /// <remarks>
 /// Initializes a new instance of the <see cref="MessageDispatcher{TMessage}"/> class.
 /// </remarks>
-/// <param name="handlers">The collection of registered message handlers.</param>
-/// <param name="logger">The logger instance.</param>
 public sealed class MessageDispatcher<TMessage>(
+    string meshId,
     IEnumerable<IMessageHandler<TMessage>> handlers,
     ILogger<MessageDispatcher<TMessage>> logger) : IMessageDispatcher<TMessage>
 {
+    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
     private readonly IEnumerable<IMessageHandler<TMessage>> handlers = handlers ?? throw new ArgumentNullException(nameof(handlers));
     private readonly ILogger<MessageDispatcher<TMessage>> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
@@ -30,12 +34,12 @@ public sealed class MessageDispatcher<TMessage>(
             }
             catch (OperationCanceledException)
             {
-                logger.LogInformation("Message dispatching was canceled.");
+                logger.LogInformation("[{MeshId}] Message dispatching was canceled.", meshId);
                 throw;
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error occurred in handler {HandlerType} while processing message.", handler.GetType().Name);
+                logger.LogError(ex, "[{MeshId}] Error occurred in handler {HandlerType} while processing message.", meshId, handler.GetType().Name);
             }
         }
     }

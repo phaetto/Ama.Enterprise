@@ -1,10 +1,15 @@
 namespace Ama.Enterprise.P2p.Services.Core;
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Selects a randomized subset of active peers, primarily suited for Epidemic/Gossip distributions.
+/// Selects a randomized subset of active peers from a specific mesh, primarily suited for Epidemic/Gossip distributions.
 /// </summary>
 /// <remarks>
 /// Initializes a new instance of the <see cref="RandomPeerSelector"/> class.

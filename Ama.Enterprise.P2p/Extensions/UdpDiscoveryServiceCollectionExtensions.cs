@@ -1,31 +1,34 @@
 namespace Ama.Enterprise.P2p.Extensions;
 
 using System;
+using System.Linq;
 using System.Text.Json.Serialization.Metadata;
+using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Extension methods for registering UDP multicast peer discovery components.
+/// Extension methods for registering UDP multicast peer discovery components tied to a specific mesh profile.
 /// </summary>
 public static class UdpDiscoveryServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the UDP peer discovery services and options.
+    /// Registers the UDP peer discovery services and options under the current mesh context.
     /// </summary>
-    /// <param name="services">The service collection to add the registrations to.</param>
+    /// <param name="builder">The mesh builder instance.</param>
     /// <param name="configureOptions">An action to configure the UDP discovery options.</param>
-    /// <returns>The updated service collection.</returns>
+    /// <returns>The updated mesh builder.</returns>
     /// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
-    public static IServiceCollection AddUdpPeerDiscovery(
-        this IServiceCollection services,
+    public static IP2pMeshBuilder AddUdpPeerDiscovery(
+        this IP2pMeshBuilder builder,
         Action<UdpDiscoveryOptions> configureOptions)
     {
-        if (services is null)
+        if (builder is null)
         {
-            throw new ArgumentNullException(nameof(services));
+            throw new ArgumentNullException(nameof(builder));
         }
 
         if (configureOptions is null)
@@ -33,20 +36,21 @@ public static class UdpDiscoveryServiceCollectionExtensions
             throw new ArgumentNullException(nameof(configureOptions));
         }
 
-        services.Configure(configureOptions);
+        builder.Services.Configure(builder.MeshId, configureOptions);
 
-        // Register UDP Discovery JSON Context to be combined by Ama.CRDT options context
-        services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", UdpDiscoveryJsonContext.Default);
+        if (!builder.Services.Any(s => s.ServiceType == typeof(IJsonTypeInfoResolver) && s.ServiceKey as string == "Ama.CRDT" && s.ImplementationInstance == UdpDiscoveryJsonContext.Default))
+        {
+            builder.Services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", UdpDiscoveryJsonContext.Default);
+        }
 
-        // Register the singleton instance so it can be retrieved as both the discovery interface and the hosted service.
-        services.TryAddSingleton<UdpPeerDiscovery>();
-        
-        services.TryAddSingleton<IPeerDiscovery>(serviceProvider => 
-            serviceProvider.GetRequiredService<UdpPeerDiscovery>());
-            
-        services.AddHostedService(serviceProvider => 
-            serviceProvider.GetRequiredService<UdpPeerDiscovery>());
+        builder.Services.AddKeyedSingleton<IPeerDiscovery>(builder.MeshId, (sp, key) =>
+            new UdpPeerDiscovery(
+                (string)key,
+                sp.GetRequiredService<IOptionsMonitor<UdpDiscoveryOptions>>(),
+                sp.GetRequiredService<ILogger<UdpPeerDiscovery>>(),
+                sp.GetRequiredKeyedService<IPeerRegistry>(key),
+                sp.GetRequiredService<ICrdtSerializer>()));
 
-        return services;
+        return builder;
     }
 }

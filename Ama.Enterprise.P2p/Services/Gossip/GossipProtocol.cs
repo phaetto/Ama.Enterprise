@@ -13,21 +13,23 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Orchestrates the Gossip protocol, managing the background sync loop,
+/// Orchestrates the Gossip protocol for a specific mesh, managing the background sync loop,
 /// message deduplication, and delegating to generic transport and dispatcher services.
 /// </summary>
 /// <remarks>
 /// Initializes a new instance of the <see cref="GossipProtocol"/> class.
 /// </remarks>
 public sealed class GossipProtocol(
-    IOptions<GossipOptions> options,
+    string meshId,
+    IOptionsMonitor<GossipOptions> optionsMonitor,
     ITransport<GossipMessage> transport,
     ITransportListener<GossipMessage> listener,
     IPeerSelector peerSelector,
     IMessageDispatcher<GossipMessage> dispatcher,
     ILogger<GossipProtocol> logger) : IP2pProtocol, IDisposable
 {
-    private readonly IOptions<GossipOptions> options = options ?? throw new ArgumentNullException(nameof(options));
+    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
+    private readonly IOptionsMonitor<GossipOptions> optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
     private readonly ITransport<GossipMessage> transport = transport ?? throw new ArgumentNullException(nameof(transport));
     private readonly ITransportListener<GossipMessage> listener = listener ?? throw new ArgumentNullException(nameof(listener));
     private readonly IPeerSelector peerSelector = peerSelector ?? throw new ArgumentNullException(nameof(peerSelector));
@@ -43,7 +45,7 @@ public sealed class GossipProtocol(
     /// <inheritdoc />
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        logger.LogInformation("Starting Gossip Protocol...");
+        logger.LogInformation("[{MeshId}] Starting Gossip Protocol...", meshId);
 
         loopCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -51,13 +53,13 @@ public sealed class GossipProtocol(
 
         backgroundLoopTask = Task.Run(() => GossipLoopAsync(loopCts.Token), loopCts.Token);
 
-        logger.LogInformation("Gossip Protocol started successfully.");
+        logger.LogInformation("[{MeshId}] Gossip Protocol started successfully.", meshId);
     }
 
     /// <inheritdoc />
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        logger.LogInformation("Stopping Gossip Protocol...");
+        logger.LogInformation("[{MeshId}] Stopping Gossip Protocol...", meshId);
 
         if (loopCts is not null)
         {
@@ -72,13 +74,10 @@ public sealed class GossipProtocol(
             {
                 await backgroundLoopTask.ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
-            {
-                // Expected during graceful shutdown
-            }
+            catch (OperationCanceledException) { }
         }
 
-        logger.LogInformation("Gossip Protocol stopped.");
+        logger.LogInformation("[{MeshId}] Gossip Protocol stopped.", meshId);
     }
 
     /// <inheritdoc />
@@ -94,21 +93,19 @@ public sealed class GossipProtocol(
             throw new ArgumentException($"Payload exceeds maximum size of {Constants.MaximumPayloadSizeBytes} bytes.", nameof(payload));
         }
 
+        var options = optionsMonitor.Get(meshId);
+
         var message = new GossipMessage(
             Guid.NewGuid(),
             localPeerId,
-            options.Value.DefaultTimeToLive,
+            options.DefaultTimeToLive,
             payload);
 
-        logger.LogDebug("Broadcasting new message {MessageId} locally.", message.MessageId);
+        logger.LogDebug("[{MeshId}] Broadcasting new message {MessageId} locally.", meshId, message.MessageId);
 
-        // Mark as seen so we don't process our own broadcast if it echoes back
         seenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow);
-
-        // Queue for gossip
         messageQueue.Enqueue(message);
 
-        // Dispatch locally as well so the local node processes the operation
         return dispatcher.DispatchAsync(message, cancellationToken);
     }
 
@@ -118,7 +115,8 @@ public sealed class GossipProtocol(
         {
             try
             {
-                await Task.Delay(options.Value.GossipInterval, cancellationToken).ConfigureAwait(false);
+                var options = optionsMonitor.Get(meshId);
+                await Task.Delay(options.GossipInterval, cancellationToken).ConfigureAwait(false);
 
                 await PerformGossipTickAsync(cancellationToken).ConfigureAwait(false);
                 
@@ -126,31 +124,24 @@ public sealed class GossipProtocol(
             }
             catch (OperationCanceledException)
             {
-                break; // Exit gracefully
+                break;
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "An error occurred during the gossip tick.");
+                logger.LogError(ex, "[{MeshId}] An error occurred during the gossip tick.", meshId);
             }
         }
     }
 
     private async Task PerformGossipTickAsync(CancellationToken cancellationToken)
     {
-        if (messageQueue.IsEmpty)
-        {
-            return; // Nothing to gossip
-        }
+        if (messageQueue.IsEmpty) return;
 
-        // Fetching generic peers
-        var peers = (await peerSelector.GetPeersAsync(options.Value.Fanout, cancellationToken).ConfigureAwait(false)).ToList();
+        var options = optionsMonitor.Get(meshId);
+        var peers = (await peerSelector.GetPeersAsync(options.Fanout, cancellationToken).ConfigureAwait(false)).ToList();
         
-        if (peers.Count == 0)
-        {
-            return; // No peers available
-        }
+        if (peers.Count == 0) return;
 
-        // Dequeue current snapshot of messages to forward
         var messagesToForward = new List<GossipMessage>();
         while (messageQueue.TryDequeue(out var msg))
         {
@@ -163,7 +154,6 @@ public sealed class GossipProtocol(
         {
             foreach (var message in messagesToForward)
             {
-                // Assign to local variables to prevent closure capture issues inside the Task loop
                 var currentPeer = peer;
                 var currentMessage = message;
 
@@ -175,13 +165,12 @@ public sealed class GossipProtocol(
                     }
                     catch (Exception ex)
                     {
-                        logger.LogWarning(ex, "Failed to send message {MessageId} to peer {PeerEndpoint}.", currentMessage.MessageId, currentPeer.Endpoint.Host);
+                        logger.LogWarning(ex, "[{MeshId}] Failed to send message {MessageId} to peer endpoint.", meshId, currentMessage.MessageId);
                     }
                 }, cancellationToken));
             }
         }
 
-        // Await all parallel transport tasks rather than blocking the gossip queue serially
         await Task.WhenAll(sendTasks).ConfigureAwait(false);
     }
 
@@ -189,17 +178,15 @@ public sealed class GossipProtocol(
     {
         if (seenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow))
         {
-            logger.LogDebug("Received new gossip message {MessageId} from {SenderId}. TTL: {Ttl}", message.MessageId, message.SenderId.Value, message.TimeToLive);
+            logger.LogDebug("[{MeshId}] Received new gossip message {MessageId} from {SenderId}. TTL: {Ttl}", meshId, message.MessageId, message.SenderId.Value, message.TimeToLive);
 
             try
             {
-                // Dispatch to local business logic
                 if (loopCts is not null)
                 {
                     await dispatcher.DispatchAsync(message, loopCts.Token).ConfigureAwait(false);
                 }
 
-                // Decrement TTL and enqueue for further gossiping if still valid
                 if (message.TimeToLive > 1)
                 {
                     var forwardedMessage = message with { TimeToLive = message.TimeToLive - 1 };
@@ -208,14 +195,14 @@ public sealed class GossipProtocol(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error processing incoming message {MessageId}.", message.MessageId);
+                logger.LogError(ex, "[{MeshId}] Error processing incoming message {MessageId}.", meshId, message.MessageId);
             }
         }
     }
 
     private void CleanupSeenMessages()
     {
-        var threshold = DateTimeOffset.UtcNow.AddMinutes(-5); // Arbitrary expiry for seen messages
+        var threshold = DateTimeOffset.UtcNow.AddMinutes(-5);
         foreach (var kvp in seenMessages)
         {
             if (kvp.Value < threshold)
