@@ -59,6 +59,7 @@
 | `$/Ama.Enterprise.FeatureFlags/Services/MemoryJournal.cs` | Thread-safe memory journal for CRDT operations in the feature flags module. |
 | `$/Ama.Enterprise.FeatureFlags/Services/P2p/FeatureFlagAntiEntropyService.cs` | Background service that intermittently broadcasts the native replica state over Gossip to trigger feature flag sync across peers. |
 | `$/Ama.Enterprise.FeatureFlags/Services/P2p/FeatureFlagGossipHandler.cs` | Message handler implementing P2P logic to parse payload wrappers and execute CRDT anti-entropy sync locally. |
+| `$/Ama.Enterprise.FeatureFlags/Services/P2p/FeatureFlagTopologyObserver.cs` | Implementation of `IPeerTopologyObserver` that triggers an immediate DVV synchronization when connecting to the first peer in the P2P cluster. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Ama.Enterprise.P2p.IntegrationTests.csproj` | Integration tests project for validating P2P networking components via HTTP loopbacks. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Architecture/VersioningArchitectureTests.cs` | Architectural tests that parse the CI/CD deployment files ensuring specific deployed versions always possess explicit test coverage. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Attributes/IntegrationFactAttribute.cs` | Custom xUnit `FactAttribute` providing a centralized toggle to enable or disable all integration tests. |

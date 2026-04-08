@@ -3,13 +3,11 @@ namespace Ama.Enterprise.FeatureFlags.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Ama.CRDT.Attributes;
 using Ama.CRDT.Attributes.Strategies;
 
 /// <summary>
 /// The root state for the feature flags.
 /// </summary>
-[PartitionKey(nameof(Id))]
 public sealed class FeatureFlagState : IEquatable<FeatureFlagState>
 {
     /// <summary>

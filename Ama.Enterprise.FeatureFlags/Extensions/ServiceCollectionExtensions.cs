@@ -75,10 +75,14 @@ public static class ServiceCollectionExtensions
             throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshId));
         }
 
-        services.AddCrdtJsonTypeInfoResolver(FeatureFlagP2pJsonContext.Default);
+        services.AddCrdt()
+                .AddCrdtJsonTypeInfoResolver(FeatureFlagP2pJsonContext.Default);
         
         // Register the gossip handler using Keyed DI restricted to the specified mesh network
         services.AddKeyedSingleton<IMessageHandler<GossipMessage>, FeatureFlagGossipHandler>(meshId);
+        
+        // Register the topology observer to trigger immediate sync on first peer connection
+        services.AddSingleton<IPeerTopologyObserver, FeatureFlagTopologyObserver>();
         
         services.AddHostedService<FeatureFlagAntiEntropyService>();
 

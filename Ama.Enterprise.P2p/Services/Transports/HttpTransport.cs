@@ -93,8 +93,11 @@ public sealed class HttpTransport : ITransport<GossipMessage>
             var allPeers = await peerRegistry.GetAllPeersAsync(cancellationToken).ConfigureAwait(false);
             var deadPeer = allPeers.FirstOrDefault(p => p.Endpoint.Equals(endpoint));
 
-            logger.LogInformation("[{MeshId}] Automatically removing unreachable peer {PeerId}.", meshId, deadPeer.Id);
-            await peerRegistry.RemovePeerAsync(deadPeer.Id, cancellationToken).ConfigureAwait(false);
+            if (deadPeer != null)
+            {
+                logger.LogInformation("[{MeshId}] Automatically removing unreachable peer {PeerId}.", meshId, deadPeer.Id);
+                await peerRegistry.RemovePeerAsync(deadPeer.Id, cancellationToken).ConfigureAwait(false);
+            }
 
             throw;
         }

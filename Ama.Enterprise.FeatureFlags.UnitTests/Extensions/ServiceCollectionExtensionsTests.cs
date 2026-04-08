@@ -13,6 +13,8 @@ using Xunit;
 
 public sealed class ServiceCollectionExtensionsTests
 {
+    private const string TestMeshId = "TestMesh";
+
     [Fact]
     public void AddFeatureFlags_ShouldThrowArgumentNullException_WhenServicesIsNull()
     {
@@ -36,7 +38,7 @@ public sealed class ServiceCollectionExtensionsTests
     public void AddFeatureFlagsP2p_ShouldThrowArgumentNullException_WhenServicesIsNull()
     {
         IServiceCollection services = null!;
-        Should.Throw<ArgumentNullException>(() => services.AddFeatureFlagsP2p());
+        Should.Throw<ArgumentNullException>(() => services.AddFeatureFlagsP2p(TestMeshId));
     }
 
     [Fact]
@@ -44,7 +46,7 @@ public sealed class ServiceCollectionExtensionsTests
     {
         var services = new ServiceCollection();
         
-        services.AddFeatureFlagsP2p();
+        services.AddFeatureFlagsP2p(TestMeshId);
 
         services.ShouldContain(s => s.ServiceType == typeof(IMessageHandler<GossipMessage>));
         services.ShouldContain(s => s.ServiceType == typeof(IHostedService) && s.ImplementationType == typeof(FeatureFlagAntiEntropyService));
