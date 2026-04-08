@@ -20,6 +20,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     private readonly string meshId;
     private readonly IOptionsMonitor<UdpDiscoveryOptions> discoveryOptionsMonitor;
     private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
+    private readonly PeerEndpoint localEndpoint;
     private readonly ILogger<UdpPeerDiscovery> logger;
     private readonly IPeerRegistry peerRegistry;
     private readonly ICrdtSerializer serializer;
@@ -36,6 +37,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     /// <param name="meshId">The mesh context identifier.</param>
     /// <param name="discoveryOptionsMonitor">The UDP discovery configuration options monitor.</param>
     /// <param name="nodeOptionsMonitor">The global node configuration options monitor.</param>
+    /// <param name="localEndpoint">The local network endpoint to advertise.</param>
     /// <param name="logger">The logger instance.</param>
     /// <param name="peerRegistry">The peer registry to populate with discovered nodes.</param>
     /// <param name="serializer">The centralized CRDT serializer.</param>
@@ -44,6 +46,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
         string meshId,
         IOptionsMonitor<UdpDiscoveryOptions> discoveryOptionsMonitor, 
         IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor, 
+        PeerEndpoint localEndpoint,
         ILogger<UdpPeerDiscovery> logger,
         IPeerRegistry peerRegistry,
         ICrdtSerializer serializer)
@@ -51,6 +54,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
         this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
         this.discoveryOptionsMonitor = discoveryOptionsMonitor ?? throw new ArgumentNullException(nameof(discoveryOptionsMonitor));
         this.nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
+        this.localEndpoint = localEndpoint ?? throw new ArgumentNullException(nameof(localEndpoint));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
         this.peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
@@ -126,7 +130,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
         client.Client.Bind(new IPEndPoint(IPAddress.Any, 0)); 
         
         var localId = new PeerId(nodeOptions.LocalPeerId);
-        var localNode = new PeerNode(localId, nodeOptions.LocalEndpoint);
+        var localNode = new PeerNode(localId, localEndpoint);
         
         var requestBytes = serializer.SerializeToBytes(localNode);
         var targetEndpoint = new IPEndPoint(IPAddress.Parse(options.MulticastAddress), options.MulticastPort);
@@ -196,7 +200,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
                     {
                         await peerRegistry.AddOrUpdatePeerAsync(remoteNode, PeerStatus.Active, token).ConfigureAwait(false);
 
-                        var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), nodeOptions.LocalEndpoint);
+                        var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), localEndpoint);
                         var responseBytes = serializer.SerializeToBytes(localNode);
                         
                         await listener.SendAsync(responseBytes, responseBytes.Length, result.RemoteEndPoint).ConfigureAwait(false);

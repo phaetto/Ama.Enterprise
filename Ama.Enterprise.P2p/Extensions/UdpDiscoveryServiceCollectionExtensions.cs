@@ -48,6 +48,7 @@ public static class UdpDiscoveryServiceCollectionExtensions
                 (string)key!,
                 sp.GetRequiredService<IOptionsMonitor<UdpDiscoveryOptions>>(),
                 sp.GetRequiredService<IOptionsMonitor<P2pNodeOptions>>(),
+                sp.GetRequiredKeyedService<PeerEndpoint>(key),
                 sp.GetRequiredService<ILogger<UdpPeerDiscovery>>(),
                 sp.GetRequiredService<IPeerRegistry>(),
                 sp.GetRequiredService<ICrdtSerializer>()));

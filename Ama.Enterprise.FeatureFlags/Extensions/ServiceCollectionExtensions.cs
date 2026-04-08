@@ -63,15 +63,23 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Adds P2P networking support for the feature flags system to synchronize across nodes.
     /// </summary>
-    public static IServiceCollection AddFeatureFlagsP2p(this IServiceCollection services)
+    public static IServiceCollection AddFeatureFlagsP2p(this IServiceCollection services, string meshId)
     {
         if (services == null)
         {
             throw new ArgumentNullException(nameof(services));
         }
 
+        if (string.IsNullOrWhiteSpace(meshId))
+        {
+            throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshId));
+        }
+
         services.AddCrdtJsonTypeInfoResolver(FeatureFlagP2pJsonContext.Default);
-        services.AddSingleton<IMessageHandler<GossipMessage>, FeatureFlagGossipHandler>();
+        
+        // Register the gossip handler using Keyed DI restricted to the specified mesh network
+        services.AddKeyedSingleton<IMessageHandler<GossipMessage>, FeatureFlagGossipHandler>(meshId);
+        
         services.AddHostedService<FeatureFlagAntiEntropyService>();
 
         return services;

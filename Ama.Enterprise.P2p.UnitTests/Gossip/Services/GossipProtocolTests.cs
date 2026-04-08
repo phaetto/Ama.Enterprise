@@ -43,8 +43,7 @@ public sealed class GossipProtocolTests
         nodeOptionsMock = new Mock<IOptionsMonitor<P2pNodeOptions>>();
         nodeOptionsMock.Setup(o => o.Get(TestMeshId)).Returns(new P2pNodeOptions 
         { 
-            LocalPeerId = Guid.NewGuid(),
-            LocalEndpoint = new HttpPeerEndpoint("localhost", 8080)
+            LocalPeerId = Guid.NewGuid()
         });
 
         inboundQueueMock.Setup(q => q.ReadAllAsync(It.IsAny<CancellationToken>()))

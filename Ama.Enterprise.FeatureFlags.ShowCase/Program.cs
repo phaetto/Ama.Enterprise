@@ -52,7 +52,7 @@ public static class Program
             options.ReplicaId = replicaId;
             options.ActiveSyncEnabled = true;
         });
-        services.AddFeatureFlagsP2p();
+        services.AddFeatureFlagsP2p("internal");
 
         // 2. Add Gossip Network for P2P transport
         services

@@ -13,11 +13,6 @@ public sealed class P2pNodeOptions : IEquatable<P2pNodeOptions>
     /// </summary>
     public Guid LocalPeerId { get; set; } = Guid.NewGuid();
 
-    /// <summary>
-    /// Gets or sets the protocol-agnostic local endpoint details to share with other peers.
-    /// </summary>
-    public PeerEndpoint LocalEndpoint { get; set; } = default!;
-
     /// <inheritdoc />
     public bool Equals(P2pNodeOptions? other)
     {
@@ -31,8 +26,7 @@ public sealed class P2pNodeOptions : IEquatable<P2pNodeOptions>
             return true;
         }
 
-        return LocalPeerId.Equals(other.LocalPeerId) &&
-               EqualityComparer<PeerEndpoint>.Default.Equals(LocalEndpoint, other.LocalEndpoint);
+        return LocalPeerId.Equals(other.LocalPeerId);
     }
 
     /// <inheritdoc />
@@ -41,6 +35,6 @@ public sealed class P2pNodeOptions : IEquatable<P2pNodeOptions>
     /// <inheritdoc />
     public override int GetHashCode()
     {
-        return HashCode.Combine(LocalPeerId, LocalEndpoint);
+        return HashCode.Combine(LocalPeerId);
     }
 }

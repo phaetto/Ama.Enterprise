@@ -98,7 +98,6 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
         services.AddP2pMesh(meshId, nodeOptions => 
             {
                 nodeOptions.LocalPeerId = peerId;
-                nodeOptions.LocalEndpoint = new HttpPeerEndpoint("localhost", listenPort);
             })
             .AddGossipNetwork(opts => 
             { 

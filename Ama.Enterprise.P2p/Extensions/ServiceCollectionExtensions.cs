@@ -96,6 +96,17 @@ public static class ServiceCollectionExtensions
             builder.Services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", P2pJsonSerializerContext.Default);
         }
 
+        // Register dynamic mesh endpoint for communication based on GossipOptions
+        builder.Services.AddKeyedSingleton<PeerEndpoint>(builder.MeshId, (sp, key) =>
+        {
+            var gossipOptions = sp.GetRequiredService<IOptionsMonitor<GossipOptions>>().Get((string)key!);
+            var host = string.Equals(gossipOptions.ListenHost, "+", StringComparison.OrdinalIgnoreCase) 
+                ? "localhost" 
+                : gossipOptions.ListenHost;
+                
+            return new HttpPeerEndpoint(host, gossipOptions.ListenPort);
+        });
+
         // Internal inbound queuing for isolating protocol and IO bounds
         builder.Services.AddKeyedSingleton<IInboundMessageQueue<GossipMessage>>(builder.MeshId, (sp, key) =>
             new InboundMessageQueue<GossipMessage>());
