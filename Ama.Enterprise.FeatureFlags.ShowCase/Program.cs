@@ -56,9 +56,7 @@ public static class Program
 
         // 2. Add Gossip Network for P2P transport
         services
-            .AddP2pMesh("internal", options =>
-            {
-            })
+            .AddP2pMesh("internal")
             .AddGossipNetwork(options =>
             {
                 options.ListenPort = currentPort;

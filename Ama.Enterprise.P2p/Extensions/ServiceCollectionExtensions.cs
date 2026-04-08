@@ -137,6 +137,7 @@ public static class ServiceCollectionExtensions
                 (string)key!,
                 sp.GetRequiredService<IHttpClientFactory>(),
                 sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredService<IPeerRegistry>(),
                 sp.GetRequiredService<ILogger<HttpTransport>>()));
 
         builder.Services.AddKeyedSingleton<ITransportRouter<GossipMessage>>(builder.MeshId, (sp, key) =>

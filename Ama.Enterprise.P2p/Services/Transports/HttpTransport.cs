@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.Services.Transports;
 
 using System;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading;
@@ -20,6 +21,7 @@ public sealed class HttpTransport : ITransport<GossipMessage>
     private readonly string meshId;
     private readonly IHttpClientFactory httpClientFactory;
     private readonly ICrdtSerializer serializer;
+    private readonly IPeerRegistry peerRegistry;
     private readonly ILogger<HttpTransport> logger;
 
     /// <summary>
@@ -29,11 +31,13 @@ public sealed class HttpTransport : ITransport<GossipMessage>
         string meshId,
         IHttpClientFactory httpClientFactory,
         ICrdtSerializer serializer,
+        IPeerRegistry peerRegistry,
         ILogger<HttpTransport> logger)
     {
         this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
         this.httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+        this.peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -77,7 +81,22 @@ public sealed class HttpTransport : ITransport<GossipMessage>
 
         logger.LogTrace("[{MeshId}] Sending message {MessageId} to {Url}", meshId, message.MessageId, url);
 
-        using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+        try
+        {
+            using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TimeoutException)
+        {
+            logger.LogWarning(ex, "[{MeshId}] Transport failure when communicating with {Url}. Removing peer from registry.", meshId, url);
+            
+            var allPeers = await peerRegistry.GetAllPeersAsync(cancellationToken).ConfigureAwait(false);
+            var deadPeer = allPeers.FirstOrDefault(p => p.Endpoint.Equals(endpoint));
+
+            logger.LogInformation("[{MeshId}] Automatically removing unreachable peer {PeerId}.", meshId, deadPeer.Id);
+            await peerRegistry.RemovePeerAsync(deadPeer.Id, cancellationToken).ConfigureAwait(false);
+
+            throw;
+        }
     }
 }

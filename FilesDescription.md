@@ -92,7 +92,7 @@
 | `$/Ama.Enterprise.P2p/Constants.cs` | Global constants for the P2P module, including protocol versions and payload size limits. |
 | `$/Ama.Enterprise.P2p/Extensions/IP2pMeshBuilder.cs` | Interface for building and configuring specific Keyed DI mesh profiles. |
 | `$/Ama.Enterprise.P2p/Extensions/P2pMeshBuilder.cs` | Implementation of `IP2pMeshBuilder` handling multi-mesh dependency injection tracking. |
-| `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | DI extension methods for setting up P2P configurations, now including queues, routers, and composite transports. |
+| `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | DI extension methods configuring P2P Gossip protocol components. Updated `HttpTransport` registration to inject `IPeerRegistry` dependency. |
 | `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Registration logic configuring Dependency Injection specifically targeting the UDP peer discovery sub-components and background services. |
 | `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
 | `$/Ama.Enterprise.P2p/Models/Core/HttpPeerEndpoint.cs` | Concrete HTTP-based network endpoint inheriting from the polymorphic `PeerEndpoint`. |
@@ -132,7 +132,7 @@
 | `$/Ama.Enterprise.P2p/Services/Core/UdpPeerDiscovery.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Gossip/GossipProtocol.cs` | Gossip orchestrator decoupled from network listeners, communicating via inbound queues and outbound routers. |
 | `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Services/Transports/HttpTransport.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Services/Transports/HttpTransport.cs` | Outbound HTTP-based transport implementation that dynamically resolves targets. Updated to automatically remove dead peers from the registry upon persistent connection or communication timeouts. |
 | `$/Ama.Enterprise.P2p/Services/Transports/HttpTransportListener.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/PropertyInfoUsageAnalyzerTests.cs` | No description provided. |
