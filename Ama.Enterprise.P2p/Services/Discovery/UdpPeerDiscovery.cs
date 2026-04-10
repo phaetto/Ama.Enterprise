@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.Services.Core;
+namespace Ama.Enterprise.P2p.Services.Discovery;
 
 using System;
 using System.Collections.Generic;
@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
+using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;

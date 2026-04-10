@@ -77,17 +77,12 @@
 | `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagClusterManager.cs` | Interface for the feature flag cluster manager. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Ama.Enterprise.P2p.IntegrationTests.csproj` | Integration tests project for validating P2P networking components via HTTP loopbacks. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Architecture/VersioningArchitectureTests.cs` | Architectural tests that parse the CI/CD deployment files ensuring specific deployed versions always possess explicit test coverage. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Attributes/IntegrationFactAttribute.cs` | Custom xUnit `FactAttribute` providing a centralized toggle to enable or disable all integration tests. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Attributes/TestedProtocolVersionAttribute.cs` | Custom attribute utilized by structural reflection tests to declare protocol versions explicitly covered by a method. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Extensions/XunitLoggingBuilderExtensions.cs` | Extension methods to register xUnit logger in ILoggingBuilder. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/Handlers/TestMessageHandler.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/Models/TestNode.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pAdvancedIntegrationTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pNetworkIntegrationTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pVersioningIntegrationTests.cs` | Integration tests verifying backwards compatibility and explicit deployment protocol versioning constraints. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/UdpPeerDiscoveryIntegrationTests.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Logging/XunitLogger.cs` | Custom ILogger implementation for routing logs to xUnit's ITestOutputHelper. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Logging/XunitLoggerProvider.cs` | Provider for creating XunitLogger instances. |
 | `$/Ama.Enterprise.P2p.TableStorage/Ama.Enterprise.P2p.TableStorage.csproj` | Serverless-focused Azure Table Storage integration for P2P state management. |
 | `$/Ama.Enterprise.P2p.TableStorage/Extensions/ServiceCollectionExtensions.cs` | DI extension methods for registering the Table Storage peer registry. |
 | `$/Ama.Enterprise.P2p.TableStorage/Models/TableStorageRegistryOptions.cs` | Configuration options for the Table Storage peer registry. |
@@ -160,6 +155,8 @@
 | `$/Ama.Enterprise.P2p/Services/Core/TransportRouter.cs` | Composite transport router that delegates sending messages to the correct specific transport implementation. |
 | `$/Ama.Enterprise.P2p/Services/Core/UdpDiscoveryJsonContext.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/UdpPeerDiscovery.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Services/Discovery/UdpDiscoveryJsonContext.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerDiscovery.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Gossip/GossipProtocol.cs` | Gossip orchestrator decoupled from network listeners, communicating via inbound queues and outbound routers. |
 | `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Transports/HttpTransport.cs` | Outbound HTTP-based transport implementation that dynamically resolves targets. Updated to automatically remove dead peers from the registry upon persistent connection or communication timeouts. |

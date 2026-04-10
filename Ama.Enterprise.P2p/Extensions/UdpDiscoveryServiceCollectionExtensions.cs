@@ -6,6 +6,7 @@ using System.Text.Json.Serialization.Metadata;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
+using Ama.Enterprise.P2p.Services.Discovery;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
