@@ -10,6 +10,7 @@ using Ama.Enterprise.P2p.Models.Core;
 [JsonSerializable(typeof(PeerNode))]
 [JsonSerializable(typeof(PeerEndpoint))]
 [JsonSerializable(typeof(HttpPeerEndpoint))]
+[JsonSerializable(typeof(WebRtcPeerEndpoint))]
 public partial class P2pJsonSerializerContext : JsonSerializerContext
 {
 }

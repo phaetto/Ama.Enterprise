@@ -9,4 +9,5 @@ using System.Text.Json.Serialization;
 /// </summary>
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
 [JsonDerivedType(typeof(HttpPeerEndpoint), "http")]
+[JsonDerivedType(typeof(WebRtcPeerEndpoint), "webrtc")]
 public abstract record PeerEndpoint : IEquatable<PeerEndpoint>;

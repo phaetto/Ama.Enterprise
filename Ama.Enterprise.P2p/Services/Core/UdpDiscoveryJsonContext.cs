@@ -9,6 +9,7 @@ using Ama.Enterprise.P2p.Models.Core;
 [JsonSerializable(typeof(PeerNode))]
 [JsonSerializable(typeof(PeerEndpoint))]
 [JsonSerializable(typeof(HttpPeerEndpoint))]
+[JsonSerializable(typeof(WebRtcPeerEndpoint))]
 internal sealed partial class UdpDiscoveryJsonContext : JsonSerializerContext
 {
 }
