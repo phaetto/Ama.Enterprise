@@ -12,6 +12,7 @@ using Ama.CRDT.Models;
 [JsonSerializable(typeof(CrdtOperation[]))]
 [JsonSerializable(typeof(CrdtOperation))]
 [JsonSerializable(typeof(DottedVersionVector))]
+[JsonSerializable(typeof(CrdtSnapshotMessage))]
 public sealed partial class DistributedCrdtP2pJsonContext : JsonSerializerContext
 {
 }

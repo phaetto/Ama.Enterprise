@@ -19,15 +19,18 @@ using Microsoft.Extensions.Logging;
 public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
 {
     private readonly DistributedCrdtScopeProvider scopeProvider;
+    private readonly IClusterStateTracker clusterTracker;
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<CrdtGossipHandler> logger;
 
     public CrdtGossipHandler(
         DistributedCrdtScopeProvider scopeProvider,
+        IClusterStateTracker clusterTracker,
         ICrdtSerializer serializer,
         ILogger<CrdtGossipHandler> logger)
     {
         this.scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
+        this.clusterTracker = clusterTracker ?? throw new ArgumentNullException(nameof(clusterTracker));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -72,6 +75,10 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
         {
             await ProcessOperationsAsync(targetDoc, wrapper, cancellationToken).ConfigureAwait(false);
         }
+        else if (wrapper.MessageType == "CrdtSnapshot")
+        {
+            await ProcessSnapshotAsync(targetDoc, wrapper, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private async Task ProcessStateSyncAsync(IDistributedCrdtDocument targetDoc, CrdtMessageWrapper wrapper, CancellationToken cancellationToken)
@@ -87,9 +94,17 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
                 return;
             }
 
-            var missingOps = await targetDoc.GetMissingOperationsAsync(syncMsg.ReplicaId, syncMsg.State, cancellationToken).ConfigureAwait(false);
+            // Immediately track the globally reported DVV for background mathematically secure truncation trimming maps natively
+            clusterTracker.UpdatePeerState(syncMsg.ReplicaId, syncMsg.State);
+
+            var (missingOps, snapshotRequired) = await targetDoc.GetMissingOperationsAsync(syncMsg.ReplicaId, syncMsg.State, cancellationToken).ConfigureAwait(false);
             
-            if (missingOps.Count > 0)
+            if (snapshotRequired)
+            {
+                logger.LogWarning("Journal bounds structurally trimmed. Cannot securely map logical operations matching replica {ReplicaId} requirements for document {DocumentId}. Automatically triggering complete state-based snapshot.", syncMsg.ReplicaId, targetDoc.DocumentId);
+                await targetDoc.ProvideSnapshotAsync(syncMsg.ReplicaId, cancellationToken).ConfigureAwait(false);
+            }
+            else if (missingOps.Count > 0)
             {
                 logger.LogDebug("Sending {Count} missing operations for document {DocumentId} to replica {ReplicaId}", missingOps.Count, targetDoc.DocumentId, syncMsg.ReplicaId);
                 
@@ -126,6 +141,31 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to process incoming CrdtOps message for document {DocumentId}.", targetDoc.DocumentId);
+        }
+    }
+
+    private async Task ProcessSnapshotAsync(IDistributedCrdtDocument targetDoc, CrdtMessageWrapper wrapper, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var resMsg = serializer.DeserializeFromBytes<CrdtSnapshotMessage>(wrapper.Payload!);
+            var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+
+            if (resMsg.ReplicaId == replicaContext.ReplicaId)
+            {
+                return;
+            }
+
+            logger.LogInformation("Receiving full state network snapshot explicitly bridging synchronization deficit for document {DocumentId}.", targetDoc.DocumentId);
+            
+            // Map explicitly overarching tracking vectors effectively natively bridging states cleanly
+            clusterTracker.UpdatePeerState(resMsg.ReplicaId, resMsg.GlobalState);
+            
+            await targetDoc.MergeSnapshotAsync(resMsg.SnapshotData, resMsg.GlobalState, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to safely process full state snapshot payload correctly for document {DocumentId}.", targetDoc.DocumentId);
         }
     }
 }

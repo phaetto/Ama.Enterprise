@@ -7,12 +7,12 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
-using Ama.CRDT.Services.Journaling;
 
 /// <summary>
-/// Thread-safe in-memory journal for CRDT operations.
+/// Thread-safe in-memory unified storage and journal for CRDT operations.
+/// Provides a default ephemeral implementation for systems not requiring persistent storage.
 /// </summary>
-public sealed class MemoryJournal : ICrdtOperationJournal
+public sealed class MemoryCrdtStorage : IDistributedCrdtStorage
 {
     private readonly List<JournaledOperation> operations = new();
     private readonly object syncRoot = new();
@@ -84,9 +84,7 @@ public sealed class MemoryJournal : ICrdtOperationJournal
         await Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Trims operations that are strictly older than the global minimum version vector.
-    /// </summary>
+    /// <inheritdoc />
     public void Trim(IReadOnlyDictionary<string, long> gmvv)
     {
         if (gmvv == null) throw new ArgumentNullException(nameof(gmvv));
@@ -98,4 +96,23 @@ public sealed class MemoryJournal : ICrdtOperationJournal
                 op.Operation.GlobalClock <= minKnown);
         }
     }
+
+    /// <inheritdoc />
+    public Task TrimAsync(IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default)
+    {
+        Trim(globalMinimumVersionVector);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task<DottedVersionVector?> LoadGlobalVersionVectorAsync(string replicaId, CancellationToken cancellationToken = default) => Task.FromResult<DottedVersionVector?>(null);
+
+    /// <inheritdoc />
+    public Task SaveGlobalVersionVectorAsync(string replicaId, DottedVersionVector globalVersionVector, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    /// <inheritdoc />
+    public Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new() => Task.FromResult<CrdtDocument<TState>?>(null);
+
+    /// <inheritdoc />
+    public Task SaveDocumentAsync<TState>(string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new() => Task.CompletedTask;
 }

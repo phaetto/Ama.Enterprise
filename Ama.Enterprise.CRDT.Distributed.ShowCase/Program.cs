@@ -49,9 +49,8 @@ public static class Program
             builder.AddProvider(new LockedConsoleLoggerProvider());
         });
 
-        // Register Showcase file-based CRDT State implementations directly mapped into DI eagerly natively
-        services.AddSingleton<IDistributedCrdtGlobalStorage, ShowCaseGlobalStorage>();
-        services.AddSingleton(typeof(IDistributedCrdtStorage<>), typeof(ShowCaseDocumentStorage<>));
+        // Register Showcase file-based unified CRDT storage explicitly to override memory fallbacks
+        services.AddSingleton<IDistributedCrdtStorage, ShowCaseCrdtStorage>();
 
         // Add core CRDT distributed services and scope
         services.AddDistributedCrdtCore(options =>

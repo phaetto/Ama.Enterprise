@@ -1,7 +1,9 @@
 namespace Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using Ama.CRDT.Models;
+using Ama.CRDT.Services.Journaling;
 
 /// <summary>
 /// AOT JSON serialization context for the showcase multi-CRDT models.
@@ -12,6 +14,8 @@ using Ama.CRDT.Models;
 [JsonSerializable(typeof(DeviceStatus))]
 [JsonSerializable(typeof(CrdtDocument<TaskListState>))]
 [JsonSerializable(typeof(CrdtDocument<FleetState>))]
+[JsonSerializable(typeof(List<JournaledOperation>))]
+[JsonSerializable(typeof(JournaledOperation))]
 public sealed partial class ShowCaseJsonContext : JsonSerializerContext
 {
 }

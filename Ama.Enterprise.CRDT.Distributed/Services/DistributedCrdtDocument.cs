@@ -28,8 +28,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly IVersionVectorSyncService syncService;
     private readonly IServiceProvider serviceProvider;
     private readonly ICrdtSerializer serializer;
-    private readonly IDistributedCrdtStorage<TState>? storage;
-    private readonly IDistributedCrdtGlobalStorage? globalStorage;
+    private readonly IDistributedCrdtStorage storage;
     private readonly ILogger<DistributedCrdtDocument<TState>> logger;
     private readonly bool activeSyncEnabled;
     private readonly object syncRoot = new();
@@ -53,15 +52,12 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         IOptions<DistributedCrdtOptions> options,
         IServiceProvider serviceProvider,
         ICrdtSerializer serializer,
-        IEnumerable<IDistributedCrdtStorage<TState>> storageProviders,
-        IEnumerable<IDistributedCrdtGlobalStorage> globalStorages,
+        IDistributedCrdtStorage storage,
         ILogger<DistributedCrdtDocument<TState>> logger)
     {
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
         if (metadataManager == null) throw new ArgumentNullException(nameof(metadataManager));
         if (options == null) throw new ArgumentNullException(nameof(options));
-        if (storageProviders == null) throw new ArgumentNullException(nameof(storageProviders));
-        if (globalStorages == null) throw new ArgumentNullException(nameof(globalStorages));
         
         DocumentId = documentId;
         this.replicaContext = replicaContext ?? throw new ArgumentNullException(nameof(replicaContext));
@@ -70,8 +66,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         this.syncService = syncService ?? throw new ArgumentNullException(nameof(syncService));
         this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-        this.storage = storageProviders.FirstOrDefault();
-        this.globalStorage = globalStorages.FirstOrDefault();
+        this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         this.activeSyncEnabled = options.Value.ActiveSyncEnabled;
@@ -84,25 +79,22 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// <inheritdoc />
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        if (storage != null)
+        try
         {
-            try
+            var storedDoc = await storage.LoadDocumentAsync<TState>(DocumentId, cancellationToken).ConfigureAwait(false);
+            if (storedDoc != null)
             {
-                var storedDoc = await storage.LoadAsync(DocumentId, cancellationToken).ConfigureAwait(false);
-                if (storedDoc != null)
+                lock (syncRoot)
                 {
-                    lock (syncRoot)
-                    {
-                        Document = storedDoc.Value;
-                    }
-                    StateChanged?.Invoke(this, EventArgs.Empty);
-                    logger.LogInformation("Successfully loaded initial state for document {DocumentId} from persistent storage.", DocumentId);
+                    Document = storedDoc.Value;
                 }
+                StateChanged?.Invoke(this, EventArgs.Empty);
+                logger.LogInformation("Successfully loaded initial state for document {DocumentId} from persistent storage.", DocumentId);
             }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to load initial state for document {DocumentId} from persistent storage.", DocumentId);
-            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to load initial state for document {DocumentId} from persistent storage.", DocumentId);
         }
     }
 
@@ -122,28 +114,22 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             Document = result.Document;
         }
 
-        if (globalStorage != null)
+        try
         {
-            try
-            {
-                await globalStorage.SaveGlobalVersionVectorAsync(replicaContext.ReplicaId, replicaContext.GlobalVersionVector, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to persist global version vector to storage after local patch on document {DocumentId}.", DocumentId);
-            }
+            await storage.SaveGlobalVersionVectorAsync(replicaContext.ReplicaId, replicaContext.GlobalVersionVector, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to persist global version vector to storage after local patch on document {DocumentId}.", DocumentId);
         }
 
-        if (storage != null)
+        try
         {
-            try
-            {
-                await storage.SaveAsync(DocumentId, Document, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to persist document {DocumentId} state to storage after local patch.", DocumentId);
-            }
+            await storage.SaveDocumentAsync(DocumentId, Document, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to persist document {DocumentId} state to storage after local patch.", DocumentId);
         }
 
         StateChanged?.Invoke(this, EventArgs.Empty);
@@ -175,7 +161,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<CrdtOperation>> GetMissingOperationsAsync(string remoteReplicaId, DottedVersionVector remoteState, CancellationToken cancellationToken = default)
+    public async Task<(IReadOnlyList<CrdtOperation> Operations, bool SnapshotRequired)> GetMissingOperationsAsync(string remoteReplicaId, DottedVersionVector remoteState, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(remoteReplicaId)) throw new ArgumentException("Remote replica ID cannot be null or empty.", nameof(remoteReplicaId));
         if (remoteState == null) throw new ArgumentNullException(nameof(remoteState));
@@ -185,21 +171,74 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         if (!requirement.IsBehind)
         {
-            return Array.Empty<CrdtOperation>();
+            return (Array.Empty<CrdtOperation>(), false);
         }
 
-        var operations = new List<CrdtOperation>();
+        var allJournaledOps = new List<JournaledOperation>();
         var missingOpsStream = journalManager.GetMissingOperationsAsync(requirement, cancellationToken);
 
         await foreach (var jOp in missingOpsStream.ConfigureAwait(false))
         {
-            if (jOp.DocumentId == DocumentId)
+            allJournaledOps.Add(jOp);
+        }
+
+        bool journalTruncated = false;
+
+        if (requirement.RequirementsByOrigin != null)
+        {
+            foreach (var kvp in requirement.RequirementsByOrigin)
             {
-                operations.Add(jOp.Operation);
+                var origin = kvp.Key;
+                var req = kvp.Value;
+
+                if (req.TargetContiguousVersion < req.SourceContiguousVersion)
+                {
+                    long firstRequiredClock = req.TargetContiguousVersion + 1;
+                    
+                    while (req.TargetKnownDots != null && req.TargetKnownDots.Contains(firstRequiredClock) && firstRequiredClock <= req.SourceContiguousVersion)
+                    {
+                        firstRequiredClock++;
+                    }
+
+                    if (firstRequiredClock <= req.SourceContiguousVersion)
+                    {
+                        bool hasRequired = allJournaledOps.Any(o => o.Operation.ReplicaId == origin && o.Operation.GlobalClock == firstRequiredClock);
+                        if (!hasRequired)
+                        {
+                            journalTruncated = true;
+                            break;
+                        }
+                    }
+                }
+                
+                if (!journalTruncated && req.SourceMissingDots != null && req.SourceMissingDots.Count > 0)
+                {
+                    foreach (var dot in req.SourceMissingDots)
+                    {
+                        bool hasRequiredDot = allJournaledOps.Any(o => o.Operation.ReplicaId == origin && o.Operation.GlobalClock == dot);
+                        if (!hasRequiredDot)
+                        {
+                            journalTruncated = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (journalTruncated) break;
             }
         }
 
-        return operations;
+        if (journalTruncated)
+        {
+            return (Array.Empty<CrdtOperation>(), true);
+        }
+
+        var documentOperations = allJournaledOps
+            .Where(jOp => jOp.DocumentId == DocumentId)
+            .Select(jOp => jOp.Operation)
+            .ToList();
+
+        return (documentOperations, false);
     }
 
     /// <inheritdoc />
@@ -230,31 +269,30 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             Document = result.Document;
         }
 
-        if (globalStorage != null)
+        try
         {
-            try
-            {
-                await globalStorage.SaveGlobalVersionVectorAsync(replicaContext.ReplicaId, replicaContext.GlobalVersionVector, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to persist global version vector to storage after remote operations synchronization on document {DocumentId}.", DocumentId);
-            }
+            await storage.SaveGlobalVersionVectorAsync(replicaContext.ReplicaId, replicaContext.GlobalVersionVector, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to persist global version vector to storage after remote operations synchronization on document {DocumentId}.", DocumentId);
         }
 
-        if (storage != null)
+        try
         {
-            try
-            {
-                await storage.SaveAsync(DocumentId, Document, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to persist document {DocumentId} state to storage after remote operations synchronization.", DocumentId);
-            }
+            await storage.SaveDocumentAsync(DocumentId, Document, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to persist document {DocumentId} state to storage after remote operations synchronization.", DocumentId);
         }
 
         StateChanged?.Invoke(this, EventArgs.Empty);
+
+        // Intentionally completely removed the aggressive local Trimming mechanism here.
+        // A single peer syncing operations must NOT actively delete those operations utilizing its own local bounds.
+        // If it trims locally, other peers requiring those specific historic operations across different timings will encounter hard truncation gaps, natively spiraling network snapshots continuously.
+        // Trimming effectively requires an independent process evaluating the actual multi-node GMVV mapping bounds actively.
     }
 
     /// <inheritdoc />
@@ -277,6 +315,101 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to broadcast state for document {DocumentId}.", DocumentId);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task ProvideSnapshotAsync(string targetReplicaId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            CrdtDocument<TState> currentDoc;
+            DottedVersionVector globalState;
+
+            lock (syncRoot)
+            {
+                currentDoc = Document;
+                globalState = GetLocalState(); // Extract explicit overarching Global Bounds
+            }
+
+            var snapshotData = serializer.SerializeToBytes(currentDoc);
+            var resMsg = new CrdtSnapshotMessage(replicaContext.ReplicaId, snapshotData, globalState); // Bind explicitly separate matrices safely
+            var payload = serializer.SerializeToBytes(resMsg);
+
+            var wrapper = new CrdtMessageWrapper(DocumentId, "CrdtSnapshot", payload);
+            var finalBytes = serializer.SerializeToBytes(wrapper);
+
+            var p2pProtocol = serviceProvider.GetRequiredService<IP2pProtocol>();
+            await p2pProtocol.BroadcastAsync(finalBytes, cancellationToken).ConfigureAwait(false); 
+            
+            logger.LogInformation("Broadcasted complete document snapshot fallback payload correctly for document {DocumentId} directly addressing DVV log truncation.", DocumentId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to broadcast snapshot payload mapping for document {DocumentId}.", DocumentId);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task MergeSnapshotAsync(byte[] snapshotData, DottedVersionVector globalState, CancellationToken cancellationToken = default)
+    {
+        if (snapshotData == null || snapshotData.Length == 0) return;
+
+        try
+        {
+            var snapshotDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(snapshotData);
+
+            lock (syncRoot)
+            {
+                Document = snapshotDoc;
+                
+                // Crucial alignment: Overwrite explicitly tracked encompassing P2P tracking vectors effectively matching the provider natively.
+                foreach (var kvp in globalState.Versions)
+                {
+                    if (!replicaContext.GlobalVersionVector.Versions.TryGetValue(kvp.Key, out var currentVersion) || kvp.Value > currentVersion)
+                    {
+                        replicaContext.GlobalVersionVector.Versions[kvp.Key] = kvp.Value;
+                    }
+                }
+                
+                foreach (var kvp in globalState.Dots)
+                {
+                    if (!replicaContext.GlobalVersionVector.Dots.TryGetValue(kvp.Key, out var currentDots))
+                    {
+                        currentDots = new HashSet<long>();
+                        replicaContext.GlobalVersionVector.Dots[kvp.Key] = currentDots;
+                    }
+                    foreach (var dot in kvp.Value)
+                    {
+                        currentDots.Add(dot);
+                    }
+                }
+            }
+
+            try
+            {
+                await storage.SaveGlobalVersionVectorAsync(replicaContext.ReplicaId, replicaContext.GlobalVersionVector, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to persist global version vector to storage after snapshot alignment for document {DocumentId}.", DocumentId);
+            }
+
+            try
+            {
+                await storage.SaveDocumentAsync(DocumentId, Document, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to persist document {DocumentId} state to storage after snapshot application.", DocumentId);
+            }
+
+            StateChanged?.Invoke(this, EventArgs.Empty);
+            logger.LogInformation("Successfully merged global state snapshot completely fulfilling initialization log gaps mapping document {DocumentId}.", DocumentId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to process snapshot merger logic bridging states natively for document {DocumentId}.", DocumentId);
         }
     }
 

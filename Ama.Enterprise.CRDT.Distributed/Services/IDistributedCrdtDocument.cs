@@ -31,8 +31,9 @@ public interface IDistributedCrdtDocument
 
     /// <summary>
     /// Calculates what operations are needed by a remote replica to catch up to this node's state.
+    /// Returns the missing operations and a boolean flag indicating if the localized journal has been trimmed beyond the remote state, natively requiring a full snapshot payload instead.
     /// </summary>
-    Task<IReadOnlyList<CrdtOperation>> GetMissingOperationsAsync(string remoteReplicaId, DottedVersionVector remoteState, CancellationToken cancellationToken = default);
+    Task<(IReadOnlyList<CrdtOperation> Operations, bool SnapshotRequired)> GetMissingOperationsAsync(string remoteReplicaId, DottedVersionVector remoteState, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Applies incoming operations retrieved from a remote replica to the local document state.
@@ -43,6 +44,16 @@ public interface IDistributedCrdtDocument
     /// Manually broadcasts the entire local synchronization state vector (DVV) to the cluster.
     /// </summary>
     Task BroadcastStateAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Serializes the current local state and broadcasts it as a snapshot to the network after detecting an unrecoverable journal truncation gap.
+    /// </summary>
+    Task ProvideSnapshotAsync(string targetReplicaId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Applies a completely materialized snapshot payload seamlessly superseding local structure dependencies alongside explicitly targeted overarching global bounds explicitly.
+    /// </summary>
+    Task MergeSnapshotAsync(byte[] snapshotData, DottedVersionVector globalState, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

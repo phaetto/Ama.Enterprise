@@ -39,6 +39,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetManager.cs` | Implementation handling intentions and queries for the fleet document. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/IFleetManager.cs` | Interface for managing the distributed fleet status CRDT document. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ITaskManager.cs` | Interface for managing the distributed task list CRDT document. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseCrdtStorage.cs` | End-to-end localized storage mechanism inherently persisting multiple document streams directly resolving active DVV bounds completely. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseDocumentStorage.cs` | Local JSON file-based document storage implementation capturing root application state uniquely via DI. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseGlobalStorage.cs` | Local JSON file-based storage implementation correctly persisting the Global DVV mapped dynamically for the node locally. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/TaskManager.cs` | Implementation handling intentions and queries for the task list document. |
@@ -47,19 +48,27 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | DI orchestrations wiring generalized models alongside user-mapped state components explicitly targeted into backend meshes correctly. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtMessageWrapper.cs` | Envelope wrapper mapping generic messages targeting specifically identified CRDT documents across the network topology. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtOperationsMessage.cs` | Transmission model conveying replicated CRDT intent patches targeted asynchronously natively across active nodes. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtSnapshotMessage.cs` | Message payload containing a complete materialized CRDT document snapshot, used as a fallback synchronization mechanism when log truncation gaps are detected. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtSnapshotRequestMessage.cs` | Request message broadcasted by a new replica to obtain a full document snapshot from active peers. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtSnapshotResponseMessage.cs` | Response message containing a full serialized CRDT document snapshot to bootstrap an empty replica. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtStateSyncMessage.cs` | Structure carrying generic synchronization states explicitly formatted across anti-entropy operations representing document DVV. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtOptions.cs` | Standardized internal options configurations outlining shared active sync behavior maps inherently integrated into any document type. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtP2pJsonContext.cs` | Global baseline AOT-centric System.Text.Json generation models resolving native P2P exchanges without resorting to reflection explicitly. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/ClusterStateTracker.cs` | Thread-safe implementation storing exactly mapped global synchronization states for active P2P connections. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtInitializationService.cs` | Hosted service responsible for aggressively initializing all registered distributed CRDT documents upon application startup before anti-entropy algorithms activate. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Highly encapsulated multi-tenant document processor ensuring CRDT intents securely resolve without conflicting external thread actions correctly. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Highly encapsulated multi-tenant document processor inherently orchestrating internal storage safely against proactive journal trimming triggered gracefully across syncing algorithms. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeProvider.cs` | Scoped singleton holding global reference handles bridging inbound P2P traffic strictly alongside active internal event listeners gracefully. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/IClusterStateTracker.cs` | Tracks the last known synchronization bounds (Global Dotted Version Vectors) for all connected peers to enable mathematically safe journal trimming. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtDocument.cs` | Generalized interface declarations governing multi-document pooling mechanics interacting directly with core internal router algorithms natively. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtGlobalStorage.cs` | Generic interface establishing bounds for optional persistence stores strictly hooking onto the global Replica Version Vector lifecycle. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtStorage.cs` | Generic interface exposing hooks for implementing custom persistent storage backends to locally save and restore CRDT document boundaries transparently. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtStorage.cs` | Generic interface exposing unified persistence mechanisms for distributed CRDT documents securely extending robust asynchronous DVV mapped journal trimming. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/MemoryCrdtStorage.cs` | Ephemeral implementation effectively providing default active storage correctly fulfilling unified backend protocol actions directly resolving async mapped trims natively. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/MemoryJournal.cs` | Thread-safe, abstract operation buffer logging uncommitted or recently committed CRDT patches for immediate anti-entropy retrieval. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtAntiEntropyService.cs` | Hosted background orchestrator cyclically synchronizing each registered document pipeline actively throughout connected meshes implicitly. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtGossipHandler.cs` | Intercepts universally generated P2P traffic and translates payload envelopes to corresponding localized document routing handlers. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtJournalTrimmingService.cs` | Background service that aggregates network-wide synchronization bounds and safely executes distributed log truncations using the Global Minimum Version Vector. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtTopologyObserver.cs` | Observes internal transport listeners and triggers aggressive DVV baseline synchronization maps dynamically against freshly bound peers securely. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/StorageJournalForwarder.cs` | Injects localized implementations mapping directly back into underlying internal storage architectures acting strictly as the interface wrapper over globally active pipelines. |
 | `$/Ama.Enterprise.CRDT.MessagePack/Ama.Enterprise.CRDT.MessagePack.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.OpenTelemetry/Ama.Enterprise.CRDT.OpenTelemetry.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.TableStorage/Ama.Enterprise.CRDT.TableStorage.csproj` | No description provided. |

@@ -10,6 +10,7 @@ using Ama.Enterprise.CRDT.Distributed.Services.P2p;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 /// <summary>
 /// Extension methods for registering completely generic distributed CRDT state logic.
@@ -35,7 +36,11 @@ public static class ServiceCollectionExtensions
         services.AddCrdt()
                 .AddCrdtJsonTypeInfoResolver(DistributedCrdtP2pJsonContext.Default);
 
-        services.AddCrdtJournaling<MemoryJournal>();
+        // Register default memory storage only if a custom one hasn't been provided previously
+        services.TryAddSingleton<IDistributedCrdtStorage, MemoryCrdtStorage>();
+
+        // Wire up the forwarder so that the underlying pipeline seamlessly uses the unified storage interface
+        services.AddCrdtJournaling<StorageJournalForwarder>();
 
         services.AddCrdtApplicatorDecorator<JournalingApplicatorDecorator>(DecoratorBehavior.After);
         services.AddCrdtPatcherDecorator<JournalingPatcherDecorator>(DecoratorBehavior.After);
@@ -43,8 +48,14 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<DistributedCrdtScopeProvider>();
         
+        // Register internal tracking singletons strictly matching background orchestration loops explicitly
+        services.AddSingleton<IClusterStateTracker, ClusterStateTracker>();
+        
         // Ensures documents initialize their states from their registered persistence providers eagerly on startup
         services.AddHostedService<CrdtInitializationService>();
+
+        // Adds the newly engineered background trimmer executing safe operations removals mapping mathematically against active cluster topologies dynamically securely
+        services.AddHostedService<CrdtJournalTrimmingService>();
 
         return services;
     }

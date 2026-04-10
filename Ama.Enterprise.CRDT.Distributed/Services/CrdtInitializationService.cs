@@ -39,7 +39,7 @@ public sealed class CrdtInitializationService : IHostedService
         try
         {
             var options = rootServiceProvider.GetRequiredService<IOptions<DistributedCrdtOptions>>().Value;
-            var globalStorage = rootServiceProvider.GetService<IDistributedCrdtGlobalStorage>();
+            var globalStorage = rootServiceProvider.GetService<IDistributedCrdtStorage>();
 
             // 1. Initialize the global Dotted Version Vector scope tracking mechanism properly
             if (globalStorage != null)
