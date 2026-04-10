@@ -11,17 +11,25 @@ using Ama.CRDT.Models;
 public sealed class ClusterStateTracker : IClusterStateTracker
 {
     private readonly Dictionary<string, DottedVersionVector> peerStates = new();
+    private readonly Dictionary<string, string> networkIdToReplicaId = new();
     private readonly object syncRoot = new();
 
     /// <inheritdoc />
-    public void UpdatePeerState(string peerReplicaId, DottedVersionVector globalState)
+    public void UpdatePeerState(string peerReplicaId, string peerId, DottedVersionVector globalState)
     {
         if (string.IsNullOrWhiteSpace(peerReplicaId)) throw new ArgumentException("Peer Replica ID cannot be null or empty.", nameof(peerReplicaId));
+        if (string.IsNullOrWhiteSpace(peerId)) throw new ArgumentException("Peer ID cannot be null or empty.", nameof(peerId));
         if (globalState == null) throw new ArgumentNullException(nameof(globalState));
 
         lock (syncRoot)
         {
+            if (networkIdToReplicaId.TryGetValue(peerId, out var oldReplicaId) && oldReplicaId != peerReplicaId)
+            {
+                peerStates.Remove(oldReplicaId);
+            }
+            
             peerStates[peerReplicaId] = globalState;
+            networkIdToReplicaId[peerId] = peerReplicaId;
         }
     }
 
@@ -35,13 +43,17 @@ public sealed class ClusterStateTracker : IClusterStateTracker
     }
 
     /// <inheritdoc />
-    public void RemovePeerState(string peerReplicaId)
+    public void RemovePeerByNetworkId(string peerId)
     {
-        if (string.IsNullOrWhiteSpace(peerReplicaId)) throw new ArgumentException("Peer Replica ID cannot be null or empty.", nameof(peerReplicaId));
+        if (string.IsNullOrWhiteSpace(peerId)) throw new ArgumentException("Peer ID cannot be null or empty.", nameof(peerId));
 
         lock (syncRoot)
         {
-            peerStates.Remove(peerReplicaId);
+            if (networkIdToReplicaId.TryGetValue(peerId, out var replicaId))
+            {
+                peerStates.Remove(replicaId);
+                networkIdToReplicaId.Remove(peerId);
+            }
         }
     }
 }

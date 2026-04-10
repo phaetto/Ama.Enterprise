@@ -1,9 +1,6 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services;
 
-using System;
 using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 using Ama.CRDT.Models;
 
 /// <summary>
@@ -16,8 +13,9 @@ public interface IClusterStateTracker
     /// Updates the tracked boundaries securely matching the explicitly extracted explicit global synchronizations seamlessly.
     /// </summary>
     /// <param name="peerReplicaId">The remote peer node replica identifier.</param>
+    /// <param name="peerId">The remote network peer identifier.</param>
     /// <param name="globalState">The most recent bounds broadcasted matching underlying global structural maps natively.</param>
-    void UpdatePeerState(string peerReplicaId, DottedVersionVector globalState);
+    void UpdatePeerState(string peerReplicaId, string peerId, DottedVersionVector globalState);
 
     /// <summary>
     /// Retrieves a complete snapshot containing every currently connected peer mapped implicitly alongside native state parameters actively safely.
@@ -25,8 +23,8 @@ public interface IClusterStateTracker
     IReadOnlyList<DottedVersionVector> GetClusterStates();
 
     /// <summary>
-    /// Removes a disconnected peer from the explicitly mapped underlying sequence boundaries explicitly securely.
+    /// Removes a disconnected peer from the explicitly mapped underlying sequence boundaries explicitly securely using its network ID.
     /// </summary>
-    /// <param name="peerReplicaId">The remote peer node replica identifier.</param>
-    void RemovePeerState(string peerReplicaId);
+    /// <param name="peerId">The remote network peer identifier.</param>
+    void RemovePeerByNetworkId(string peerId);
 }

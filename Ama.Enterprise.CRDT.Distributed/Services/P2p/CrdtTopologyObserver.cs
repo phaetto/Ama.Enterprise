@@ -60,7 +60,7 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver
         {
             var stringId = peerId.Value.ToString();
             logger.LogInformation("Removing detached peer {PeerId} from active underlying GMVV tracker matrices.", stringId);
-            clusterTracker.RemovePeerState(stringId);
+            clusterTracker.RemovePeerByNetworkId(stringId);
         }
         return Task.CompletedTask;
     }
@@ -74,7 +74,7 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver
             {
                 var stringId = peerId.Value.ToString();
                 logger.LogInformation("Cleaning up dead offline peer {PeerId} mapping natively adjusting cluster tracking states.", stringId);
-                clusterTracker.RemovePeerState(stringId);
+                clusterTracker.RemovePeerByNetworkId(stringId);
             }
         }
         return Task.CompletedTask;
