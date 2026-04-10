@@ -1,7 +1,6 @@
 namespace Ama.Enterprise.P2p.Models.Core;
 
 using System;
-using System.Collections.Generic;
 
 /// <summary>
 /// Configuration options for tuning the core node identity across the P2P mesh.

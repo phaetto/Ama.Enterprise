@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.IntegrationTests.Attributes;
+namespace Ama.Enterprise.UnitTests.Attributes;
 
 using System;
 

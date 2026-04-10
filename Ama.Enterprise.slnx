@@ -8,6 +8,8 @@
     <Project Path="Ama.Enterprise.CRDT.BlazorApp/Ama.Enterprise.CRDT.BlazorApp.csproj" Id="8fb88a8e-60af-420c-8cc2-1cdd1d967720" />
   </Folder>
   <Folder Name="/EndProducts/">
+    <Project Path="Ama.Enterprise.CRDT.OpenTelemetry/Ama.Enterprise.CRDT.OpenTelemetry.csproj" Id="c43db689-b047-4d09-ba26-ca88479ac36f" />
+    <Project Path="Ama.Enterprise.CRDT.Testing/Ama.Enterprise.CRDT.Testing.csproj" Id="e30d8fc4-45a1-447c-bfb3-64761c771cb4" />
     <Project Path="Ama.Enterprise.FeatureFlags.IntegrationTests/Ama.Enterprise.FeatureFlags.IntegrationTests.csproj" Id="da1f1950-e20a-435a-9bbb-63d942458072" />
     <Project Path="Ama.Enterprise.FeatureFlags.UnitTests/Ama.Enterprise.FeatureFlags.UnitTests.csproj" Id="d74539b1-a59f-40bc-81d1-e33de4e85be7" />
     <Project Path="Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj" Id="f29896b4-f84b-45fb-8742-3496884d770e" />
@@ -27,8 +29,7 @@
     <File Path="LICENCE" />
   </Folder>
   <Folder Name="/Tooling/">
-    <Project Path="Ama.Enterprise.CRDT.OpenTelemetry/Ama.Enterprise.CRDT.OpenTelemetry.csproj" Id="c43db689-b047-4d09-ba26-ca88479ac36f" />
-    <Project Path="Ama.Enterprise.CRDT.Testing/Ama.Enterprise.CRDT.Testing.csproj" Id="e30d8fc4-45a1-447c-bfb3-64761c771cb4" />
+    <Project Path="Ama.Enterprise.UnitTests/Ama.Enterprise.UnitTests.csproj" Id="9bf82d30-d760-4e80-976f-f0e53086c9bd" />
   </Folder>
   <Project Path="Ama.Enterprise.CRDT.Distributed.IntegrationTests/Ama.Enterprise.CRDT.Distributed.IntegrationTests.csproj" Id="723052c7-e569-4f76-a331-cb2c00551502" />
   <Project Path="Ama.Enterprise.CRDT.Distributed.UnitTests/Ama.Enterprise.CRDT.Distributed.UnitTests.csproj" Id="2048c2a6-0842-4d57-a42e-94919ded6fa4" />

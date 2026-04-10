@@ -12,7 +12,6 @@ using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 using System;
-using System.Linq;
 using Ama.Enterprise.P2p.Services.Transports;
 using Ama.Enterprise.P2p.Services;
 

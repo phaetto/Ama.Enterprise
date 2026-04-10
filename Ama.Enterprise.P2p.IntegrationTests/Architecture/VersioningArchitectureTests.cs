@@ -5,8 +5,9 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
-using Ama.Enterprise.P2p.IntegrationTests.Attributes;
+using Ama.Enterprise.UnitTests.Attributes;
 using Shouldly;
+using Xunit;
 
 /// <summary>
 /// Architectural tests ensuring versioning consistency between deployment scripts and test coverage.

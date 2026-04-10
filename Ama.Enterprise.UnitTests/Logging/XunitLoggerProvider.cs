@@ -1,7 +1,7 @@
-namespace Ama.Enterprise.P2p.IntegrationTests.Logging;
+namespace Ama.Enterprise.UnitTests.Logging;
 
-using System;
 using Microsoft.Extensions.Logging;
+using System;
 
 /// <summary>
 /// Provider for creating XunitLogger instances.

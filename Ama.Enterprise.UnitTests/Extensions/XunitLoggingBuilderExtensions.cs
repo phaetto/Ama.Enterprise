@@ -1,7 +1,7 @@
-namespace Ama.Enterprise.P2p.IntegrationTests.Extensions;
+namespace Ama.Enterprise.UnitTests.Extensions;
 
 using System;
-using Ama.Enterprise.P2p.IntegrationTests.Logging;
+using Ama.Enterprise.UnitTests.Logging;
 using Microsoft.Extensions.Logging;
 
 /// <summary>

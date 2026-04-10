@@ -2,8 +2,8 @@ namespace Ama.Enterprise.P2p.IntegrationTests.Gossip;
 
 using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;
-using Ama.Enterprise.P2p.IntegrationTests.Attributes;
-using Ama.Enterprise.P2p.IntegrationTests.Extensions;
+using Ama.Enterprise.UnitTests.Attributes;
+using Ama.Enterprise.UnitTests.Extensions;
 using Ama.Enterprise.P2p.IntegrationTests.Gossip.Handlers;
 using Ama.Enterprise.P2p.IntegrationTests.Gossip.Models;
 using Ama.Enterprise.P2p.Models.Core;
