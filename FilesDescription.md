@@ -102,6 +102,7 @@
 | `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Ama.Enterprise.P2p.WebRTC.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Extensions/ServiceCollectionExtensionsTests.cs` | Structural tests verifying proper dependency injection registration across the P2P mesh logic utilizing WebRTC specifically. |
 | `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Services/WebRtcTransportIntegrationTests.cs` | End-to-end integration tests verifying functional WebRTC SDP handshake synchronization and STUN connection mechanisms safely. Skipped by default. |
+| `$/Ama.Enterprise.P2p.WebRTC.TableStorage/Ama.Enterprise.P2p.WebRTC.TableStorage.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.WebRTC/Ama.Enterprise.P2p.WebRTC.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.WebRTC/Extensions/ServiceCollectionExtensions.cs` | WebRTC dependency injection pipeline configuring underlying STUN models mapping transports securely alongside base generic Gossip meshes natively. |
 | `$/Ama.Enterprise.P2p.WebRTC/Models/WebRtcHandshakeMessage.cs` | In-band signaling structure notifying explicitly local identity topologies securely through initialized WebRTC channels safely. |
@@ -153,8 +154,6 @@
 | `$/Ama.Enterprise.P2p/Services/Core/RandomPeerSelector.cs` | Implementation of IPeerSelector utilizing random distribution selection. |
 | `$/Ama.Enterprise.P2p/Services/Core/TimeBasedFailureDetector.cs` | Implementation of IFailureDetector using abstract heartbeats decoupled from specific protocol options. |
 | `$/Ama.Enterprise.P2p/Services/Core/TransportRouter.cs` | Composite transport router that delegates sending messages to the correct specific transport implementation. |
-| `$/Ama.Enterprise.P2p/Services/Core/UdpDiscoveryJsonContext.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Services/Core/UdpPeerDiscovery.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpDiscoveryJsonContext.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerDiscovery.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Gossip/GossipProtocol.cs` | Gossip orchestrator decoupled from network listeners, communicating via inbound queues and outbound routers. |
