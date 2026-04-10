@@ -20,7 +20,7 @@ public sealed class DistributedCrdtOptions
     public bool ActiveSyncEnabled { get; set; }
 
     /// <summary>
-    /// Gets or sets the interval in seconds at which the background checkpoint service periodically saves the in-memory state to persistent storage.
+    /// Gets or sets the interval in seconds at which the background checkpoint service periodically saves the in-memory state to persistent storage and trims the journal bounds explicitly securely.
     /// Defaults to 30 seconds.
     /// </summary>
     public int CheckpointIntervalSeconds { get; set; } = 30;
@@ -36,16 +36,4 @@ public sealed class DistributedCrdtOptions
     /// Defaults to 15 seconds.
     /// </summary>
     public int AntiEntropyIntervalSeconds { get; set; } = 15;
-
-    /// <summary>
-    /// Gets or sets the initial delay in seconds before the journal trimming service executes its first pass.
-    /// Defaults to 30 seconds.
-    /// </summary>
-    public int JournalTrimmingInitialDelaySeconds { get; set; } = 30;
-
-    /// <summary>
-    /// Gets or sets the interval in seconds between mathematically safe journal trimming evaluations.
-    /// Defaults to 45 seconds.
-    /// </summary>
-    public int JournalTrimmingIntervalSeconds { get; set; } = 45;
 }

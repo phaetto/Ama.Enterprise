@@ -57,7 +57,8 @@ public interface IDistributedCrdtDocument
     Task MergeSnapshotAsync(byte[] snapshotData, DottedVersionVector globalState, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Asynchronously saves the current in-memory document state and global version vector bounds to persistent storage.
+    /// Asynchronously saves the current in-memory document state to persistent storage natively.
+    /// Does not directly manage overarching DVV mapping updates natively avoiding structural write-ahead gaps securely.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous checkpoint operation.</returns>

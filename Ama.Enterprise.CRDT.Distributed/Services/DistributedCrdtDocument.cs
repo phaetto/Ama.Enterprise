@@ -20,7 +20,7 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Generic document manager responsible for maintaining consistency and routing P2P actions for a specific CRDT tree.
 /// </summary>
-public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<TState> where TState : class, IDistributedCrdtState, new()
+public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<TState>, IDisposable where TState : class, IDistributedCrdtState, new()
 {
     private readonly ReplicaContext replicaContext;
     private readonly IAsyncCrdtApplicator applicator;
@@ -31,7 +31,12 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly IDistributedCrdtStorage storage;
     private readonly ILogger<DistributedCrdtDocument<TState>> logger;
     private readonly bool activeSyncEnabled;
+    
+    // Fast synchronous lock for atomic reference/flag swapping
     private readonly object syncRoot = new();
+    
+    // Asynchronous lock guaranteeing strictly serialized patch/operation pipelines to completely prevent Lost Update anomalies
+    private readonly SemaphoreSlim modificationLock = new(1, 1);
     
     private volatile bool isDirty;
 
@@ -90,10 +95,19 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             var storedDoc = await storage.LoadDocumentAsync<TState>(DocumentId, cancellationToken).ConfigureAwait(false);
             if (storedDoc != null)
             {
-                lock (syncRoot)
+                await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
                 {
-                    Document = storedDoc.Value;
+                    lock (syncRoot)
+                    {
+                        Document = storedDoc.Value;
+                    }
                 }
+                finally
+                {
+                    modificationLock.Release();
+                }
+
                 StateChanged?.Invoke(this, EventArgs.Empty);
                 logger.LogInformation("Successfully loaded initial state for document {DocumentId} from persistent storage.", DocumentId);
             }
@@ -107,18 +121,26 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// <inheritdoc />
     public async Task ApplyPatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default)
     {
-        CrdtDocument<TState> currentDoc;
-        lock (syncRoot)
+        await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            currentDoc = Document;
+            CrdtDocument<TState> currentDoc;
+            lock (syncRoot)
+            {
+                currentDoc = Document;
+            }
+
+            var result = await applicator.ApplyPatchAsync(currentDoc, patch).ConfigureAwait(false);
+
+            lock (syncRoot)
+            {
+                Document = result.Document;
+                isDirty = true;
+            }
         }
-
-        var result = await applicator.ApplyPatchAsync(currentDoc, patch).ConfigureAwait(false);
-
-        lock (syncRoot)
+        finally
         {
-            Document = result.Document;
-            isDirty = true;
+            modificationLock.Release();
         }
 
         StateChanged?.Invoke(this, EventArgs.Empty);
@@ -136,14 +158,20 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     public DottedVersionVector GetLocalState()
     {
         var sourceDvv = replicaContext.GlobalVersionVector;
-
-        // Clone to prevent cross-thread modification errors during serialization mappings
-        var copiedVersions = new Dictionary<string, long>(sourceDvv.Versions);
+        var copiedVersions = new Dictionary<string, long>();
         var copiedDots = new Dictionary<string, ISet<long>>();
-        
-        foreach (var kvp in sourceDvv.Dots)
+
+        // Lock to natively prevent cross-thread collection modification errors during serialization mappings
+        lock (sourceDvv)
         {
-            copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
+            foreach (var kvp in sourceDvv.Versions)
+            {
+                copiedVersions[kvp.Key] = kvp.Value;
+            }
+            foreach (var kvp in sourceDvv.Dots)
+            {
+                copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
+            }
         }
 
         return new DottedVersionVector(copiedVersions, copiedDots);
@@ -236,27 +264,35 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         if (operations == null) throw new ArgumentNullException(nameof(operations));
         if (operations.Count == 0) return;
 
-        CrdtDocument<TState> currentDoc;
-        lock (syncRoot)
+        await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            currentDoc = Document;
-        }
-
-        async IAsyncEnumerable<JournaledOperation> GetStreamAsync()
-        {
-            foreach (var op in operations)
+            CrdtDocument<TState> currentDoc;
+            lock (syncRoot)
             {
-                yield return new JournaledOperation(DocumentId, op);
+                currentDoc = Document;
             }
-            await Task.CompletedTask;
+
+            async IAsyncEnumerable<JournaledOperation> GetStreamAsync()
+            {
+                foreach (var op in operations)
+                {
+                    yield return new JournaledOperation(DocumentId, op);
+                }
+                await Task.CompletedTask;
+            }
+
+            var result = await applicator.ApplyOperationsAsync(currentDoc, GetStreamAsync()).ConfigureAwait(false);
+
+            lock (syncRoot)
+            {
+                Document = result.Document;
+                isDirty = true;
+            }
         }
-
-        var result = await applicator.ApplyOperationsAsync(currentDoc, GetStreamAsync()).ConfigureAwait(false);
-
-        lock (syncRoot)
+        finally
         {
-            Document = result.Document;
-            isDirty = true;
+            modificationLock.Release();
         }
 
         StateChanged?.Invoke(this, EventArgs.Empty);
@@ -293,14 +329,24 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             CrdtDocument<TState> currentDoc;
             DottedVersionVector globalState;
 
-            lock (syncRoot)
+            // Strict Pipeline lock ensures extraction of Document and DVV cannot be horizontally torn by concurrent active patches organically
+            await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                currentDoc = Document;
-                globalState = GetLocalState(); // Extract explicit overarching Global Bounds
+                lock (syncRoot)
+                {
+                    currentDoc = Document;
+                }
+                
+                globalState = GetLocalState(); 
+            }
+            finally
+            {
+                modificationLock.Release();
             }
 
             var snapshotData = serializer.SerializeToBytes(currentDoc);
-            var resMsg = new CrdtSnapshotMessage(replicaContext.ReplicaId, snapshotData, globalState); // Bind explicitly separate matrices safely
+            var resMsg = new CrdtSnapshotMessage(replicaContext.ReplicaId, snapshotData, globalState);
             var payload = serializer.SerializeToBytes(resMsg);
 
             var wrapper = new CrdtMessageWrapper(DocumentId, "CrdtSnapshot", payload);
@@ -309,7 +355,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             var p2pProtocol = serviceProvider.GetRequiredService<IP2pProtocol>();
             await p2pProtocol.BroadcastAsync(finalBytes, cancellationToken).ConfigureAwait(false); 
             
-            logger.LogInformation("Broadcasted complete document snapshot fallback payload correctly for document {DocumentId} directly addressing DVV log truncation.", DocumentId);
+            logger.LogInformation("Broadcasted complete structurally safe document snapshot fallback payload correctly for document {DocumentId}.", DocumentId);
         }
         catch (Exception ex)
         {
@@ -318,52 +364,99 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     }
 
     /// <inheritdoc />
-    public Task MergeSnapshotAsync(byte[] snapshotData, DottedVersionVector globalState, CancellationToken cancellationToken = default)
+    public async Task MergeSnapshotAsync(byte[] snapshotData, DottedVersionVector globalState, CancellationToken cancellationToken = default)
     {
-        if (snapshotData == null || snapshotData.Length == 0) return Task.CompletedTask;
+        if (snapshotData == null || snapshotData.Length == 0) return;
 
         try
         {
             var snapshotDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(snapshotData);
 
-            lock (syncRoot)
+            await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                Document = snapshotDoc;
+                // 1. Defend against "Destructive Overwrite" by isolating locally generated offline operations not known by the incoming snapshot natively.
+                var localState = GetLocalState();
+                var requirement = syncService.CalculateRequirement("snapshot", globalState, replicaContext.ReplicaId, localState);
                 
+                var missingLocalOps = new List<CrdtOperation>();
+                if (requirement.IsBehind)
+                {
+                    var missingOpsStream = journalManager.GetMissingOperationsAsync(requirement, cancellationToken);
+                    await foreach (var jOp in missingOpsStream.ConfigureAwait(false))
+                    {
+                        if (jOp.DocumentId == DocumentId)
+                        {
+                            missingLocalOps.Add(jOp.Operation);
+                        }
+                    }
+                }
+
+                // 2. Base mapping starts cleanly matching incoming fallback exactly
+                CrdtDocument<TState> mergedDoc = snapshotDoc;
+                
+                // 3. Re-apply any structurally isolated operations directly over the snapshot restoring local offline continuity smoothly
+                if (missingLocalOps.Count > 0)
+                {
+                    async IAsyncEnumerable<JournaledOperation> GetStreamAsync()
+                    {
+                        foreach (var op in missingLocalOps)
+                        {
+                            yield return new JournaledOperation(DocumentId, op);
+                        }
+                        await Task.CompletedTask;
+                    }
+                    
+                    var result = await applicator.ApplyOperationsAsync(mergedDoc, GetStreamAsync()).ConfigureAwait(false);
+                    mergedDoc = result.Document;
+                    
+                    logger.LogInformation("Safely re-integrated {Count} local isolated offline operations perfectly mapping over the inbound snapshot base protecting offline continuity for document {DocumentId}.", missingLocalOps.Count, DocumentId);
+                }
+
+                // 4. Commit fully protected mathematically merged architecture organically
+                lock (syncRoot)
+                {
+                    Document = mergedDoc;
+                    isDirty = true;
+                }
+
                 // Crucial alignment: Overwrite explicitly tracked encompassing P2P tracking vectors effectively matching the provider natively.
-                foreach (var kvp in globalState.Versions)
+                lock (replicaContext.GlobalVersionVector)
                 {
-                    if (!replicaContext.GlobalVersionVector.Versions.TryGetValue(kvp.Key, out var currentVersion) || kvp.Value > currentVersion)
+                    foreach (var kvp in globalState.Versions)
                     {
-                        replicaContext.GlobalVersionVector.Versions[kvp.Key] = kvp.Value;
+                        if (!replicaContext.GlobalVersionVector.Versions.TryGetValue(kvp.Key, out var currentVersion) || kvp.Value > currentVersion)
+                        {
+                            replicaContext.GlobalVersionVector.Versions[kvp.Key] = kvp.Value;
+                        }
+                    }
+                    
+                    foreach (var kvp in globalState.Dots)
+                    {
+                        if (!replicaContext.GlobalVersionVector.Dots.TryGetValue(kvp.Key, out var currentDots))
+                        {
+                            currentDots = new HashSet<long>();
+                            replicaContext.GlobalVersionVector.Dots[kvp.Key] = currentDots;
+                        }
+                        foreach (var dot in kvp.Value)
+                        {
+                            currentDots.Add(dot);
+                        }
                     }
                 }
-                
-                foreach (var kvp in globalState.Dots)
-                {
-                    if (!replicaContext.GlobalVersionVector.Dots.TryGetValue(kvp.Key, out var currentDots))
-                    {
-                        currentDots = new HashSet<long>();
-                        replicaContext.GlobalVersionVector.Dots[kvp.Key] = currentDots;
-                    }
-                    foreach (var dot in kvp.Value)
-                    {
-                        currentDots.Add(dot);
-                    }
-                }
-                
-                isDirty = true;
+            }
+            finally
+            {
+                modificationLock.Release();
             }
 
             StateChanged?.Invoke(this, EventArgs.Empty);
-            logger.LogInformation("Successfully merged global state snapshot completely fulfilling initialization log gaps mapping document {DocumentId}.", DocumentId);
+            logger.LogInformation("Successfully merged global state snapshot securely mapping initialization log gaps explicitly ensuring continuity for document {DocumentId}.", DocumentId);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to process snapshot merger logic bridging states natively for document {DocumentId}.", DocumentId);
+            logger.LogError(ex, "Failed to safely process snapshot merger logic bridging states natively for document {DocumentId}.", DocumentId);
         }
-        
-        return Task.CompletedTask;
     }
 
     /// <inheritdoc />
@@ -375,29 +468,29 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
 
         CrdtDocument<TState> currentDoc;
-        DottedVersionVector currentDvv;
 
         lock (syncRoot)
         {
             currentDoc = Document;
-            currentDvv = GetLocalState();
+            // Acknowledge the dirty state prior to asynchronous I/O to prevent 
+            // concurrent writes during saving from being permanently ignored.
+            isDirty = false; 
         }
 
         try
         {
-            await storage.SaveGlobalVersionVectorAsync(replicaContext.ReplicaId, currentDvv, cancellationToken).ConfigureAwait(false);
+            // Intentionally bubble exceptions so orchestrator safely aborts overarching global log modifications natively avoiding write ahead gaps securely
             await storage.SaveDocumentAsync(DocumentId, currentDoc, cancellationToken).ConfigureAwait(false);
-            
-            lock (syncRoot)
-            {
-                isDirty = false;
-            }
-            
             logger.LogDebug("Successfully saved checkpoint to persistent storage for document {DocumentId}.", DocumentId);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            logger.LogError(ex, "Failed to periodically persist checkpoint state to storage for document {DocumentId}.", DocumentId);
+            lock (syncRoot)
+            {
+                // Revert flag on failure so the orchestrator attempts mapping it again logically on the next loop cleanly
+                isDirty = true;
+            }
+            throw;
         }
     }
 
@@ -418,5 +511,11 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         {
             logger.LogError(ex, "Failed to broadcast active sync operation for document {DocumentId}.", DocumentId);
         }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        modificationLock.Dispose();
     }
 }

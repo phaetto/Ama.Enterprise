@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.CRDT.Models;
 using Ama.CRDT.Services;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,7 +14,7 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Hosted service responsible for initializing all registered distributed CRDT documents upon application startup.
-/// This ensures that persistent storage providers are given the opportunity to load saved state before the network meshes sync.
+/// This ensures that persistent storage providers load saved states directly into securely maintained memory scopes seamlessly.
 /// </summary>
 public sealed class CrdtInitializationService : IHostedService
 {
@@ -41,19 +42,31 @@ public sealed class CrdtInitializationService : IHostedService
             var options = rootServiceProvider.GetRequiredService<IOptions<DistributedCrdtOptions>>().Value;
             var globalStorage = rootServiceProvider.GetService<IDistributedCrdtStorage>();
 
-            // 1. Initialize the global Dotted Version Vector scope tracking mechanism properly
+            // 1. Initialize the global Dotted Version Vector scope tracking mechanism properly in-place
             if (globalStorage != null)
             {
                 var savedDvv = await globalStorage.LoadGlobalVersionVectorAsync(options.ReplicaId, cancellationToken).ConfigureAwait(false);
                 if (savedDvv != null)
                 {
-                    var scopeFactory = rootServiceProvider.GetRequiredService<ICrdtScopeFactory>();
+                    var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
                     
-                    // Re-instantiate directly via the scoped factory mechanism mapping the populated payload dynamically
-                    var newScope = scopeFactory.CreateScope(options.ReplicaId, savedDvv);
-                    scopeProvider.ReplaceScope(newScope);
+                    // Safely mutate the existing context natively explicitly avoiding catastrophic scope replacement anomalies
+                    lock (replicaContext.GlobalVersionVector)
+                    {
+                        replicaContext.GlobalVersionVector.Versions.Clear();
+                        foreach (var kvp in savedDvv.Versions)
+                        {
+                            replicaContext.GlobalVersionVector.Versions[kvp.Key] = kvp.Value;
+                        }
+
+                        replicaContext.GlobalVersionVector.Dots.Clear();
+                        foreach (var kvp in savedDvv.Dots)
+                        {
+                            replicaContext.GlobalVersionVector.Dots[kvp.Key] = new HashSet<long>(kvp.Value);
+                        }
+                    }
                     
-                    logger.LogInformation("Successfully re-initialized CRDT scope with restored global Dotted Version Vector for replica {ReplicaId}.", options.ReplicaId);
+                    logger.LogInformation("Successfully re-initialized in-place CRDT global Dotted Version Vector bounds natively for replica {ReplicaId}.", options.ReplicaId);
                 }
             }
 
@@ -65,11 +78,11 @@ public sealed class CrdtInitializationService : IHostedService
                 await document.InitializeAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            logger.LogInformation("Distributed CRDT documents successfully initialized from persistent storage providers.");
+            logger.LogInformation("Distributed CRDT documents successfully initialized structurally from persistent storage providers.");
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "An error occurred while initializing distributed CRDT documents and global state.");
+            logger.LogError(ex, "An error occurred while seamlessly initializing distributed CRDT documents and global state.");
         }
     }
 

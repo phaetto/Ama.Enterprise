@@ -54,11 +54,8 @@ public static class ServiceCollectionExtensions
         // Ensures documents initialize their states from their registered persistence providers eagerly on startup
         services.AddHostedService<CrdtInitializationService>();
 
-        // Orchestrates periodic saves ensuring underlying snapshots seamlessly offload persistent writes out-of-band directly
+        // Orchestrates periodic saves ensuring underlying snapshots seamlessly offload persistent writes out-of-band directly alongside combined secure journal trimming bounds
         services.AddHostedService<CrdtCheckpointService>();
-
-        // Adds the newly engineered background trimmer executing safe operations removals mapping mathematically against active cluster topologies dynamically securely
-        services.AddHostedService<CrdtJournalTrimmingService>();
 
         return services;
     }
