@@ -12,7 +12,7 @@
 			<PrivateAssets>all</PrivateAssets>
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
-		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.3.0" />
+		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.4.0" />
 		<PackageReference Include="Moq" Version="4.20.72" />
 		<PackageReference Include="Shouldly" Version="4.3.0" />
 		<PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
@@ -27,7 +27,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Ama.CRDT" Version="3.1.260406-ci1209" />
+		<PackageReference Include="Ama.CRDT" Version="3.1.260409-ci0958" />
 	</ItemGroup>
 
 	<ItemGroup>
