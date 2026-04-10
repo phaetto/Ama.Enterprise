@@ -8,5 +8,5 @@ public interface IDistributedCrdtState
     /// <summary>
     /// Gets the singleton identifier resolving this exact document structure dynamically across the P2P synchronization topology.
     /// </summary>
-    string DocumentId { get; }
+    string Id { get; }
 }

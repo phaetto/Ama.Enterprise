@@ -12,7 +12,7 @@ using Ama.Enterprise.CRDT.Distributed.Models;
 public sealed class FleetState : IEquatable<FleetState>, IDistributedCrdtState
 {
     /// <inheritdoc />
-    public string DocumentId { get; init; } = Constants.FleetDocumentId;
+    public string Id { get; init; } = Constants.FleetDocumentId;
 
     /// <summary>
     /// Gets or sets the devices mapped by their identifier.
@@ -25,7 +25,7 @@ public sealed class FleetState : IEquatable<FleetState>, IDistributedCrdtState
     {
         if (other is null) return false;
         if (ReferenceEquals(this, other)) return true;
-        if (DocumentId != other.DocumentId) return false;
+        if (Id != other.Id) return false;
         if (Devices.Count != other.Devices.Count) return false;
 
         foreach (var kvp in Devices)
@@ -44,7 +44,7 @@ public sealed class FleetState : IEquatable<FleetState>, IDistributedCrdtState
     public override int GetHashCode()
     {
         var hash = new HashCode();
-        hash.Add(DocumentId);
+        hash.Add(Id);
         
         foreach (var kvp in Devices.OrderBy(k => k.Key))
         {

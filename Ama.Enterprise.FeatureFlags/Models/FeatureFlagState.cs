@@ -12,7 +12,7 @@ using Ama.Enterprise.CRDT.Distributed.Models;
 public sealed class FeatureFlagState : IEquatable<FeatureFlagState>, IDistributedCrdtState
 {
     /// <inheritdoc />
-    public string DocumentId { get; init; } = "feature-flags-singleton";
+    public string Id { get; init; } = "feature-flags-singleton";
 
     /// <summary>
     /// A map of feature flags where the key is the flag name.
@@ -26,7 +26,7 @@ public sealed class FeatureFlagState : IEquatable<FeatureFlagState>, IDistribute
         if (other is null) return false;
         if (ReferenceEquals(this, other)) return true;
         
-        if (DocumentId != other.DocumentId) return false;
+        if (Id != other.Id) return false;
         if (Flags.Count != other.Flags.Count) return false;
 
         foreach (var kvp in Flags)
@@ -45,7 +45,7 @@ public sealed class FeatureFlagState : IEquatable<FeatureFlagState>, IDistribute
     public override int GetHashCode()
     {
         var hash = new HashCode();
-        hash.Add(DocumentId);
+        hash.Add(Id);
         
         foreach (var kvp in Flags.OrderBy(k => k.Key))
         {

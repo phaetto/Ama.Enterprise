@@ -69,7 +69,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         this.activeSyncEnabled = options.Value.ActiveSyncEnabled;
 
         var initialState = new TState();
-        DocumentId = initialState.DocumentId;
+        DocumentId = initialState.Id;
         
         if (string.IsNullOrWhiteSpace(DocumentId))
         {
