@@ -4,16 +4,15 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Ama.CRDT.Attributes.Strategies;
+using Ama.Enterprise.CRDT.Distributed.Models;
 
 /// <summary>
 /// Root CRDT document model representing fleet devices status.
 /// </summary>
-public sealed class FleetState : IEquatable<FleetState>
+public sealed class FleetState : IEquatable<FleetState>, IDistributedCrdtState
 {
-    /// <summary>
-    /// Gets the singleton identifier for the fleet document.
-    /// </summary>
-    public string Id { get; init; } = "fleet-singleton";
+    /// <inheritdoc />
+    public string DocumentId { get; init; } = Constants.FleetDocumentId;
 
     /// <summary>
     /// Gets or sets the devices mapped by their identifier.
@@ -26,7 +25,7 @@ public sealed class FleetState : IEquatable<FleetState>
     {
         if (other is null) return false;
         if (ReferenceEquals(this, other)) return true;
-        if (Id != other.Id) return false;
+        if (DocumentId != other.DocumentId) return false;
         if (Devices.Count != other.Devices.Count) return false;
 
         foreach (var kvp in Devices)
@@ -45,7 +44,7 @@ public sealed class FleetState : IEquatable<FleetState>
     public override int GetHashCode()
     {
         var hash = new HashCode();
-        hash.Add(Id);
+        hash.Add(DocumentId);
         
         foreach (var kvp in Devices.OrderBy(k => k.Key))
         {

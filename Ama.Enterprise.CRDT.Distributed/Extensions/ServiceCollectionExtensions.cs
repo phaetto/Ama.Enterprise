@@ -63,15 +63,14 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Registers a specific application domain model as a universally distributed CRDT document handled within the pipeline.
     /// </summary>
-    public static IServiceCollection AddDistributedDocument<TState>(this IServiceCollection services, string documentId) where TState : class, new()
+    public static IServiceCollection AddDistributedDocument<TState>(this IServiceCollection services) where TState : class, IDistributedCrdtState, new()
     {
         if (services == null) throw new ArgumentNullException(nameof(services));
-        if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
 
-        // Register the typed document resolver within the generic scope
+        // Register the typed document resolver within the generic scope natively extracting its identity securely from the interface boundaries
         services.AddScoped<IDistributedCrdtDocument<TState>>(sp =>
         {
-            return ActivatorUtilities.CreateInstance<DistributedCrdtDocument<TState>>(sp, documentId);
+            return ActivatorUtilities.CreateInstance<DistributedCrdtDocument<TState>>(sp);
         });
 
         // Forward the specific registration mapping to the generic iterable pool used by backend processors

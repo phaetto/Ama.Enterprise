@@ -66,12 +66,12 @@ public static class Program
                 .AddCrdtSerializableType<TaskItem>("task-item")
                 .AddCrdtSerializableType<DeviceStatus>("device-status");
 
-        // Document 1: Task List mapping
-        services.AddDistributedDocument<TaskListState>("task-list-doc");
+        // Document 1: Task List mapping mapped tightly via new IDistributedCrdtState constraints
+        services.AddDistributedDocument<TaskListState>();
         services.AddScoped<ITaskManager, TaskManager>();
 
-        // Document 2: Fleet Status mapping
-        services.AddDistributedDocument<FleetState>("fleet-doc");
+        // Document 2: Fleet Status mapping mapped tightly via new IDistributedCrdtState constraints
+        services.AddDistributedDocument<FleetState>();
         services.AddScoped<IFleetManager, FleetManager>();
 
         // Register the background multi-document orchestration and route inbound intents from the network

@@ -30,12 +30,12 @@
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/Ama.Enterprise.CRDT.Distributed.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Ama.Enterprise.CRDT.Distributed.ShowCase.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/DeviceStatus.cs` | Data structure representing the status of an IoT device. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/FleetState.cs` | Root CRDT document model representing fleet devices status. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/FleetState.cs` | Root CRDT document model representing fleet devices status, updated to inherit `IDistributedCrdtState`. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/ShowCaseCrdtAotContext.cs` | CRDT AOT reflection context mapping types used by the showcase documents. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/ShowCaseJsonContext.cs` | AOT JSON context for the showcase multi-CRDT models. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskItem.cs` | Data structure representing an individual task item. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskListState.cs` | Root CRDT document model representing a task list. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Updated interactive console app showcasing multiple distributed CRDT documents mapping to AOT context correctly. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskListState.cs` | Root CRDT document model representing a task list, updated to inherit `IDistributedCrdtState`. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Refactored internal DI boundaries correctly utilizing explicitly mapped Document IDs safely decoupled from mapping logic. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetManager.cs` | Implementation handling intentions and queries for the fleet document. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/IFleetManager.cs` | Interface for managing the distributed fleet status CRDT document. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ITaskManager.cs` | Interface for managing the distributed task list CRDT document. |
@@ -45,7 +45,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/TaskManager.cs` | Implementation handling intentions and queries for the task list document. |
 | `$/Ama.Enterprise.CRDT.Distributed.UnitTests/Ama.Enterprise.CRDT.Distributed.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj` | No description provided. |
-| `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | DI orchestrations wiring generalized models alongside user-mapped state components explicitly targeted into backend meshes correctly. |
+| `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | Updated `AddDistributedDocument` DI registration to securely enforce `IDistributedCrdtState` boundaries implicitly mapped through parameters strictly. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtMessageWrapper.cs` | Envelope wrapper mapping generic messages targeting specifically identified CRDT documents across the network topology. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtOperationsMessage.cs` | Transmission model conveying replicated CRDT intent patches targeted asynchronously natively across active nodes. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtSnapshotMessage.cs` | Message payload containing a complete materialized CRDT document snapshot, used as a fallback synchronization mechanism when log truncation gaps are detected. |
@@ -54,12 +54,13 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtStateSyncMessage.cs` | Structure carrying generic synchronization states explicitly formatted across anti-entropy operations representing document DVV. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtOptions.cs` | Standardized internal options configurations outlining shared active sync behavior maps inherently integrated into any document type. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtP2pJsonContext.cs` | Global baseline AOT-centric System.Text.Json generation models resolving native P2P exchanges without resorting to reflection explicitly. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/IDistributedCrdtState.cs` | Imposes a centralized generic constraint on root CRDT state models to inherently map their own synchronization identifiers. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ClusterStateTracker.cs` | Thread-safe implementation storing exactly mapped global synchronization states for active P2P connections. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtInitializationService.cs` | Hosted service responsible for aggressively initializing all registered distributed CRDT documents upon application startup before anti-entropy algorithms activate. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Highly encapsulated multi-tenant document processor inherently orchestrating internal storage safely against proactive journal trimming triggered gracefully across syncing algorithms. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Updated to extract the DocumentId securely from the explicitly injected generic IDistributedCrdtState constraint correctly without constructors. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeProvider.cs` | Scoped singleton holding global reference handles bridging inbound P2P traffic strictly alongside active internal event listeners gracefully. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IClusterStateTracker.cs` | Tracks the last known synchronization bounds (Global Dotted Version Vectors) for all connected peers to enable mathematically safe journal trimming. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtDocument.cs` | Generalized interface declarations governing multi-document pooling mechanics interacting directly with core internal router algorithms natively. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtDocument.cs` | Updated with generic constraints requiring TState to implement IDistributedCrdtState to remove magic strings. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtGlobalStorage.cs` | Generic interface establishing bounds for optional persistence stores strictly hooking onto the global Replica Version Vector lifecycle. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtStorage.cs` | Generic interface exposing unified persistence mechanisms for distributed CRDT documents securely extending robust asynchronous DVV mapped journal trimming. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/MemoryCrdtStorage.cs` | Ephemeral implementation effectively providing default active storage correctly fulfilling unified backend protocol actions directly resolving async mapped trims natively. |
@@ -81,10 +82,10 @@
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Main entry point containing an interactive UI for observing and interacting with distributed feature flags via gossip synchronization. |
 | `$/Ama.Enterprise.FeatureFlags.UnitTests/Ama.Enterprise.FeatureFlags.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj` | No description provided. |
-| `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | DI extension methods for registering the feature flags module. |
+| `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | Refactored parameterless DI registration securely matching updated interface bindings natively. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlag.cs` | Data structure representing a single feature flag. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagOptions.cs` | Configuration options for the feature flags module, including the CRDT ReplicaId mapping. |
-| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagState.cs` | Root CRDT document model containing the state of all feature flags. |
+| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagState.cs` | Explicitly inherits `IDistributedCrdtState` and maps generic constraints bridging properties dynamically. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsCrdtAotContext.cs` | AOT context for the feature flags models. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsJsonContext.cs` | JSON context for the feature flags models. |
 | `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagClusterManager.cs` | Implementation of the feature flag cluster manager using DVV sync. |

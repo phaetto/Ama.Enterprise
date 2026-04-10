@@ -4,16 +4,15 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Ama.CRDT.Attributes.Strategies;
+using Ama.Enterprise.CRDT.Distributed.Models;
 
 /// <summary>
 /// Root CRDT document model representing a task list.
 /// </summary>
-public sealed class TaskListState : IEquatable<TaskListState>
+public sealed class TaskListState : IEquatable<TaskListState>, IDistributedCrdtState
 {
-    /// <summary>
-    /// Gets the singleton identifier for the task list document.
-    /// </summary>
-    public string Id { get; init; } = "task-list-singleton";
+    /// <inheritdoc />
+    public string DocumentId { get; init; } = Constants.TaskListDocumentId;
 
     /// <summary>
     /// Gets or sets the tasks mapped by their identifier.
@@ -26,7 +25,7 @@ public sealed class TaskListState : IEquatable<TaskListState>
     {
         if (other is null) return false;
         if (ReferenceEquals(this, other)) return true;
-        if (Id != other.Id) return false;
+        if (DocumentId != other.DocumentId) return false;
         if (Tasks.Count != other.Tasks.Count) return false;
 
         foreach (var kvp in Tasks)
@@ -45,7 +44,7 @@ public sealed class TaskListState : IEquatable<TaskListState>
     public override int GetHashCode()
     {
         var hash = new HashCode();
-        hash.Add(Id);
+        hash.Add(DocumentId);
         
         foreach (var kvp in Tasks.OrderBy(k => k.Key))
         {

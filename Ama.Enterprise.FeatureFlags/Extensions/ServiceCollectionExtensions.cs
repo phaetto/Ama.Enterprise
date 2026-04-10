@@ -47,8 +47,8 @@ public static class ServiceCollectionExtensions
 
         services.AddCrdtSerializableType<FeatureFlag>("feature-flag");
 
-        // Map domain generic types inside the centralized document pool
-        services.AddDistributedDocument<FeatureFlagState>("feature-flags-singleton");
+        // Map domain generic types inside the centralized document pool securely via explicitly inherited constraints
+        services.AddDistributedDocument<FeatureFlagState>();
 
         // Register the business logic domain wrapper scoped exactly to the CRDT hierarchy
         services.AddScoped<IFeatureFlagClusterManager, FeatureFlagClusterManager>();

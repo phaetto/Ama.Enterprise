@@ -4,16 +4,15 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Ama.CRDT.Attributes.Strategies;
+using Ama.Enterprise.CRDT.Distributed.Models;
 
 /// <summary>
 /// The root state for the feature flags.
 /// </summary>
-public sealed class FeatureFlagState : IEquatable<FeatureFlagState>
+public sealed class FeatureFlagState : IEquatable<FeatureFlagState>, IDistributedCrdtState
 {
-    /// <summary>
-    /// Gets the singleton document identifier.
-    /// </summary>
-    public string Id { get; init; } = "feature-flags-singleton";
+    /// <inheritdoc />
+    public string DocumentId { get; init; } = "feature-flags-singleton";
 
     /// <summary>
     /// A map of feature flags where the key is the flag name.
@@ -27,7 +26,7 @@ public sealed class FeatureFlagState : IEquatable<FeatureFlagState>
         if (other is null) return false;
         if (ReferenceEquals(this, other)) return true;
         
-        if (Id != other.Id) return false;
+        if (DocumentId != other.DocumentId) return false;
         if (Flags.Count != other.Flags.Count) return false;
 
         foreach (var kvp in Flags)
@@ -46,7 +45,7 @@ public sealed class FeatureFlagState : IEquatable<FeatureFlagState>
     public override int GetHashCode()
     {
         var hash = new HashCode();
-        hash.Add(Id);
+        hash.Add(DocumentId);
         
         foreach (var kvp in Flags.OrderBy(k => k.Key))
         {

@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
+using Ama.Enterprise.CRDT.Distributed.Models;
 
 /// <summary>
 /// Defines the generic, non-typed interface for a distributed CRDT document manager.
@@ -59,7 +60,7 @@ public interface IDistributedCrdtDocument
 /// <summary>
 /// Defines the generic typed interface for a distributed CRDT document manager handling a specific domain model.
 /// </summary>
-public interface IDistributedCrdtDocument<TState> : IDistributedCrdtDocument where TState : class, new()
+public interface IDistributedCrdtDocument<TState> : IDistributedCrdtDocument where TState : class, IDistributedCrdtState, new()
 {
     /// <summary>
     /// Triggered when the inner document state has structurally changed (either via local intent or remote operations).
