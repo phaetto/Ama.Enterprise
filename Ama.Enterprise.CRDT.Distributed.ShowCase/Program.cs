@@ -12,6 +12,7 @@ using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 using Ama.Enterprise.CRDT.Distributed.ShowCase.Services;
 using Ama.Enterprise.P2p.Extensions;
+using Ama.Enterprise.P2p.Models.Gossip;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -77,10 +78,14 @@ public static class Program
             .AddP2pMesh("internal")
             .AddGossipNetwork(options =>
             {
+                options.GossipInterval = TimeSpan.FromMilliseconds(500);
+            })
+            .AddHttpTransport<GossipMessage>(options =>
+            {
                 options.ListenPort = currentPort;
                 options.ListenHost = "localhost";
-                options.GossipInterval = TimeSpan.FromMilliseconds(500);
-            }).AddUdpPeerDiscovery(options =>
+            })
+            .AddUdpPeerDiscovery(options =>
             {
                 options.MulticastAddress = "239.255.0.2"; // Separate multicast channel to avoid feature flags showcase collisions
                 options.MulticastPort = 8036;

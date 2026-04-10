@@ -11,6 +11,7 @@ using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.Services.Transports;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 using Moq.Protected;
 using Shouldly;
@@ -19,18 +20,22 @@ using Xunit;
 public sealed class HttpTransportTests
 {
     private const string TestMeshId = "TestMesh";
+    private readonly Mock<IOptionsMonitor<HttpTransportOptions>> optionsMock;
     private readonly Mock<IHttpClientFactory> httpClientFactoryMock;
     private readonly Mock<ICrdtSerializer> serializerMock;
     private readonly Mock<IPeerRegistry> peerRegistryMock;
-    private readonly Mock<ILogger<HttpTransport>> loggerMock;
+    private readonly Mock<ILogger<HttpTransport<GossipMessage>>> loggerMock;
     private readonly Mock<HttpMessageHandler> httpMessageHandlerMock;
 
     public HttpTransportTests()
     {
+        optionsMock = new Mock<IOptionsMonitor<HttpTransportOptions>>();
+        optionsMock.Setup(o => o.Get(TestMeshId)).Returns(new HttpTransportOptions { PathPrefix = "/p2p/gossip/" });
+        
         httpClientFactoryMock = new Mock<IHttpClientFactory>();
         serializerMock = new Mock<ICrdtSerializer>();
         peerRegistryMock = new Mock<IPeerRegistry>();
-        loggerMock = new Mock<ILogger<HttpTransport>>();
+        loggerMock = new Mock<ILogger<HttpTransport<GossipMessage>>>();
         httpMessageHandlerMock = new Mock<HttpMessageHandler>();
     }
 
@@ -38,7 +43,7 @@ public sealed class HttpTransportTests
     public async Task SendAsync_ShouldPostSerializedMessageToEndpoint()
     {
         // Arrange
-        var transport = new HttpTransport(TestMeshId, httpClientFactoryMock.Object, serializerMock.Object, peerRegistryMock.Object, loggerMock.Object);
+        var transport = new HttpTransport<GossipMessage>(TestMeshId, optionsMock.Object, httpClientFactoryMock.Object, serializerMock.Object, peerRegistryMock.Object, loggerMock.Object);
         var endpoint = new HttpPeerEndpoint("192.168.1.10", 9000);
         var message = new GossipMessage(Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, new byte[] { 42 });
         var serializedBytes = new byte[] { 0x01, 0x02 };
@@ -51,7 +56,7 @@ public sealed class HttpTransportTests
                 ItExpr.Is<HttpRequestMessage>(req => 
                     req.Method == HttpMethod.Post && 
                     req.RequestUri != null &&
-                    req.RequestUri.ToString() == "http://192.168.1.10:9000/p2p/gossip"),
+                    req.RequestUri.ToString() == "http://192.168.1.10:9000/p2p/gossip/"),
                 ItExpr.IsAny<CancellationToken>()
             )
             .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
@@ -75,7 +80,7 @@ public sealed class HttpTransportTests
     public async Task SendAsync_ShouldThrow_WhenEndpointHostIsEmpty()
     {
         // Arrange
-        var transport = new HttpTransport(TestMeshId, httpClientFactoryMock.Object, serializerMock.Object, peerRegistryMock.Object, loggerMock.Object);
+        var transport = new HttpTransport<GossipMessage>(TestMeshId, optionsMock.Object, httpClientFactoryMock.Object, serializerMock.Object, peerRegistryMock.Object, loggerMock.Object);
         var endpoint = new HttpPeerEndpoint(string.Empty, 9000);
         var message = new GossipMessage(Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, new byte[] { 42 });
 

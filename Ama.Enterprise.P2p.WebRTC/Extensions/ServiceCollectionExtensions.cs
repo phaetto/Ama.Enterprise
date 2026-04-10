@@ -2,7 +2,6 @@ namespace Ama.Enterprise.P2p.WebRTC.Extensions;
 
 using System;
 using Ama.Enterprise.P2p.Extensions;
-using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.WebRTC.Models;
@@ -20,10 +19,11 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Registers standalone WebRTC transport services binding actively underneath the current mesh context identifiers properly.
     /// </summary>
+    /// <typeparam name="TMessage">The type of the generic message traversing via the transport bounds.</typeparam>
     /// <param name="builder">The mesh builder configuration instance pipeline.</param>
     /// <param name="configureOptions">An action specifying isolated STUN/TURN rules mapping appropriately.</param>
     /// <returns>The fully hydrated updated mesh builder.</returns>
-    public static IP2pMeshBuilder AddWebRtcTransport(
+    public static IP2pMeshBuilder AddWebRtcTransport<TMessage>(
         this IP2pMeshBuilder builder,
         Action<WebRtcOptions>? configureOptions = null)
     {
@@ -58,20 +58,20 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredKeyedService<WebRtcConnectionManager>(key));
 
         // Inject dynamic transport routers capturing WebRtc endpoint variations seamlessly
-        builder.Services.AddKeyedSingleton<ITransport<GossipMessage>>(builder.MeshId, (sp, key) =>
-            new WebRtcTransport(
+        builder.Services.AddKeyedSingleton<ITransport<TMessage>>(builder.MeshId, (sp, key) =>
+            new WebRtcTransport<TMessage>(
                 (string)key!,
                 sp.GetRequiredKeyedService<IWebRtcConnectionManager>(key),
                 sp.GetRequiredService<ICrdtSerializer>(),
-                sp.GetRequiredService<ILogger<WebRtcTransport>>()));
+                sp.GetRequiredService<ILogger<WebRtcTransport<TMessage>>>()));
 
         // Inject inbound transport listener tracking deeply routed RTCPeer connections continuously 
-        builder.Services.AddKeyedSingleton<ITransportListener<GossipMessage>>(builder.MeshId, (sp, key) =>
-            new WebRtcTransportListener(
+        builder.Services.AddKeyedSingleton<ITransportListener<TMessage>>(builder.MeshId, (sp, key) =>
+            new WebRtcTransportListener<TMessage>(
                 (string)key!,
                 sp.GetRequiredKeyedService<IWebRtcConnectionManager>(key),
                 sp.GetRequiredService<ICrdtSerializer>(),
-                sp.GetRequiredService<ILogger<WebRtcTransportListener>>()));
+                sp.GetRequiredService<ILogger<WebRtcTransportListener<TMessage>>>()));
 
         return builder;
     }

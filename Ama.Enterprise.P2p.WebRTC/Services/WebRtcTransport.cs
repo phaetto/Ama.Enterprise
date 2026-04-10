@@ -5,28 +5,28 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
-using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Implements outbound gossip transport dynamically mapping messages across isolated WebRTC Data Channels.
+/// Implements outbound generic transport dynamically mapping messages across isolated WebRTC Data Channels.
 /// </summary>
-public sealed class WebRtcTransport : ITransport<GossipMessage>
+/// <typeparam name="TMessage">The type of the generic message traversing via the transport bounds.</typeparam>
+public sealed class WebRtcTransport<TMessage> : ITransport<TMessage>
 {
     private readonly string meshId;
     private readonly IWebRtcConnectionManager connectionManager;
     private readonly ICrdtSerializer serializer;
-    private readonly ILogger<WebRtcTransport> logger;
+    private readonly ILogger<WebRtcTransport<TMessage>> logger;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="WebRtcTransport"/> class.
+    /// Initializes a new instance of the <see cref="WebRtcTransport{TMessage}"/> class.
     /// </summary>
     public WebRtcTransport(
         string meshId,
         IWebRtcConnectionManager connectionManager,
         ICrdtSerializer serializer,
-        ILogger<WebRtcTransport> logger)
+        ILogger<WebRtcTransport<TMessage>> logger)
     {
         this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
         this.connectionManager = connectionManager ?? throw new ArgumentNullException(nameof(connectionManager));
@@ -38,7 +38,7 @@ public sealed class WebRtcTransport : ITransport<GossipMessage>
     public bool CanHandle(PeerEndpoint endpoint) => endpoint is WebRtcPeerEndpoint;
 
     /// <inheritdoc />
-    public Task SendAsync(PeerEndpoint endpoint, GossipMessage message, CancellationToken cancellationToken)
+    public Task SendAsync(PeerEndpoint endpoint, TMessage message, CancellationToken cancellationToken)
     {
         if (endpoint is not WebRtcPeerEndpoint webrtcEndpoint)
         {

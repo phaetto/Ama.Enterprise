@@ -1,4 +1,7 @@
 namespace Ama.Enterprise.P2p.Models.Gossip;
+
+using System;
+
 /// <summary>
 /// Configuration options for tuning the behavior of the gossip protocol.
 /// </summary>
@@ -19,17 +22,6 @@ public sealed class GossipOptions : IEquatable<GossipOptions>
     /// </summary>
     public int DefaultTimeToLive { get; set; } = 10;
 
-    /// <summary>
-    /// Gets or sets the host address to bind to for incoming connections. 
-    /// Defaults to "+" (all interfaces). Use "localhost" to avoid requiring Admin rights on Windows during local testing.
-    /// </summary>
-    public string ListenHost { get; set; } = "+";
-
-    /// <summary>
-    /// Gets or sets the network port to listen on for incoming connections.
-    /// </summary>
-    public int ListenPort { get; set; } = 8080;
-
     /// <inheritdoc />
     public bool Equals(GossipOptions? other)
     {
@@ -38,9 +30,7 @@ public sealed class GossipOptions : IEquatable<GossipOptions>
         
         return GossipInterval.Equals(other.GossipInterval) && 
                Fanout == other.Fanout && 
-               DefaultTimeToLive == other.DefaultTimeToLive && 
-               ListenPort == other.ListenPort &&
-               string.Equals(ListenHost, other.ListenHost, StringComparison.OrdinalIgnoreCase);
+               DefaultTimeToLive == other.DefaultTimeToLive;
     }
 
     /// <inheritdoc />
@@ -49,9 +39,7 @@ public sealed class GossipOptions : IEquatable<GossipOptions>
         return HashCode.Combine(
             GossipInterval, 
             Fanout, 
-            DefaultTimeToLive, 
-            ListenPort, 
-            StringComparer.OrdinalIgnoreCase.GetHashCode(ListenHost ?? string.Empty));
+            DefaultTimeToLive);
     }
 
     /// <inheritdoc />

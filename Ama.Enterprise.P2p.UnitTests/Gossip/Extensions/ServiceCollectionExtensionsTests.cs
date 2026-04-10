@@ -2,6 +2,7 @@ namespace Ama.Enterprise.P2p.UnitTests.Gossip.Extensions;
 
 using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;
+using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.Services.Gossip;
@@ -32,17 +33,24 @@ public sealed class ServiceCollectionExtensionsTests
             .AddGossipNetwork(options =>
             {
                 options.Fanout = 5;
+            })
+            .AddHttpTransport<GossipMessage>(options =>
+            {
                 options.ListenPort = 12345;
             });
 
         var provider = services.BuildServiceProvider();
 
         // Assert
-        var optionsMonitor = provider.GetRequiredService<IOptionsMonitor<GossipOptions>>();
-        var options = optionsMonitor.Get(TestMeshId);
+        var gossipOptionsMonitor = provider.GetRequiredService<IOptionsMonitor<GossipOptions>>();
+        var gossipOptions = gossipOptionsMonitor.Get(TestMeshId);
         
-        options.Fanout.ShouldBe(5);
-        options.ListenPort.ShouldBe(12345);
+        gossipOptions.Fanout.ShouldBe(5);
+
+        var httpOptionsMonitor = provider.GetRequiredService<IOptionsMonitor<HttpTransportOptions>>();
+        var httpOptions = httpOptionsMonitor.Get(TestMeshId);
+
+        httpOptions.ListenPort.ShouldBe(12345);
 
         // Core singletons un-keyed
         provider.GetRequiredService<IPeerRegistry>().ShouldBeOfType<InMemoryPeerRegistry>();
@@ -52,8 +60,8 @@ public sealed class ServiceCollectionExtensionsTests
         provider.GetRequiredKeyedService<IPeerAuthenticator>(TestMeshId).ShouldBeOfType<PassThroughPeerAuthenticator>();
         provider.GetRequiredKeyedService<IPeerSelector>(TestMeshId).ShouldBeOfType<RandomPeerSelector>();
         provider.GetRequiredKeyedService<IFailureDetector>(TestMeshId).ShouldBeOfType<TimeBasedFailureDetector>();
-        provider.GetRequiredKeyedService<ITransport<GossipMessage>>(TestMeshId).ShouldBeOfType<HttpTransport>();
-        provider.GetRequiredKeyedService<ITransportListener<GossipMessage>>(TestMeshId).ShouldBeOfType<HttpTransportListener>();
+        provider.GetRequiredKeyedService<ITransport<GossipMessage>>(TestMeshId).ShouldBeOfType<HttpTransport<GossipMessage>>();
+        provider.GetRequiredKeyedService<ITransportListener<GossipMessage>>(TestMeshId).ShouldBeOfType<HttpTransportListener<GossipMessage>>();
         provider.GetRequiredKeyedService<IMessageDispatcher<GossipMessage>>(TestMeshId).ShouldBeOfType<MessageDispatcher<GossipMessage>>();
 
         var hostedServices = provider.GetServices<IHostedService>();

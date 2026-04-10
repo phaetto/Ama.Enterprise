@@ -233,12 +233,16 @@ public sealed class P2pNetworkIntegrationTests
         services.AddP2pMesh(TestMeshId)
             .AddGossipNetwork(options =>
             {
-                // Bind strictly to localhost so Windows doesn't require Admin rights for HttpListener
-                options.ListenHost = "localhost";
-                options.ListenPort = port;
                 options.GossipInterval = TimeSpan.FromMilliseconds(500); // Super-fast interval strictly for speeding tests
                 options.Fanout = 2;
                 options.DefaultTimeToLive = 5;
+            })
+            .AddHttpTransport<GossipMessage>(options =>
+            {
+                // Bind strictly to localhost so Windows doesn't require Admin rights for HttpListener
+                options.ListenHost = "localhost";
+                options.ListenPort = port;
+                options.PathPrefix = "/p2p/gossip/";
             });
 
         var handler = new TestMessageHandler();

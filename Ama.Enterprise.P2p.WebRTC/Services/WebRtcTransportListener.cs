@@ -4,30 +4,30 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
-using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Implements generalized inbound gossip queue listeners hooked inherently directly to the Data Channel bindings.
+/// Implements generalized inbound data queue listeners hooked inherently directly to the Data Channel bindings.
 /// </summary>
-public sealed class WebRtcTransportListener : ITransportListener<GossipMessage>, IDisposable
+/// <typeparam name="TMessage">The generic type of network message bridging scopes natively.</typeparam>
+public sealed class WebRtcTransportListener<TMessage> : ITransportListener<TMessage>, IDisposable
 {
     private readonly string meshId;
     private readonly IWebRtcConnectionManager connectionManager;
     private readonly ICrdtSerializer serializer;
-    private readonly ILogger<WebRtcTransportListener> logger;
+    private readonly ILogger<WebRtcTransportListener<TMessage>> logger;
     
-    private Func<GossipMessage, Task>? onMessageReceivedCallback;
+    private Func<TMessage, Task>? onMessageReceivedCallback;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="WebRtcTransportListener"/> class.
+    /// Initializes a new instance of the <see cref="WebRtcTransportListener{TMessage}"/> class.
     /// </summary>
     public WebRtcTransportListener(
         string meshId,
         IWebRtcConnectionManager connectionManager,
         ICrdtSerializer serializer,
-        ILogger<WebRtcTransportListener> logger)
+        ILogger<WebRtcTransportListener<TMessage>> logger)
     {
         this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
         this.connectionManager = connectionManager ?? throw new ArgumentNullException(nameof(connectionManager));
@@ -36,13 +36,13 @@ public sealed class WebRtcTransportListener : ITransportListener<GossipMessage>,
     }
 
     /// <inheritdoc />
-    public Task StartListeningAsync(Func<GossipMessage, Task> onMessageReceived, CancellationToken cancellationToken)
+    public Task StartListeningAsync(Func<TMessage, Task> onMessageReceived, CancellationToken cancellationToken)
     {
         this.onMessageReceivedCallback = onMessageReceived ?? throw new ArgumentNullException(nameof(onMessageReceived));
         
         connectionManager.OnMessageReceived += OnConnectionManagerMessageReceived;
         
-        logger.LogInformation("[{MeshId}] Started listening for integrated WebRTC gossip messages.", meshId);
+        logger.LogInformation("[{MeshId}] Started listening for integrated WebRTC generic messages.", meshId);
 
         return Task.CompletedTask;
     }
@@ -52,7 +52,7 @@ public sealed class WebRtcTransportListener : ITransportListener<GossipMessage>,
     {
         connectionManager.OnMessageReceived -= OnConnectionManagerMessageReceived;
         
-        logger.LogInformation("[{MeshId}] Stopped listening for integrated WebRTC gossip messages.", meshId);
+        logger.LogInformation("[{MeshId}] Stopped listening for integrated WebRTC generic messages.", meshId);
 
         return Task.CompletedTask;
     }
@@ -63,15 +63,15 @@ public sealed class WebRtcTransportListener : ITransportListener<GossipMessage>,
 
         try
         {
-            var message = serializer.DeserializeFromBytes<GossipMessage>(payload);
+            var message = serializer.DeserializeFromBytes<TMessage>(payload);
 
-            if (message.MessageId != Guid.Empty)
+            if (message is not null)
             {
                 await onMessageReceivedCallback(message).ConfigureAwait(false);
             }
             else
             {
-                logger.LogWarning("[{MeshId}] Received invalid or malformed gossip message over WebRTC from connection {ConnectionId}.", meshId, connectionId);
+                logger.LogWarning("[{MeshId}] Received invalid or malformed general message over WebRTC from connection {ConnectionId}.", meshId, connectionId);
             }
         }
         catch (Exception ex)

@@ -9,32 +9,36 @@ using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p;
 using Ama.Enterprise.P2p.Models.Core;
-using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Implements outbound gossip transport using HTTP POST requests for a specific mesh context.
+/// Implements generalized outbound transport using HTTP POST requests for a specific mesh context.
 /// </summary>
-public sealed class HttpTransport : ITransport<GossipMessage>
+/// <typeparam name="TMessage">The type of the message being transported.</typeparam>
+public sealed class HttpTransport<TMessage> : ITransport<TMessage>
 {
     private readonly string meshId;
+    private readonly IOptionsMonitor<HttpTransportOptions> optionsMonitor;
     private readonly IHttpClientFactory httpClientFactory;
     private readonly ICrdtSerializer serializer;
     private readonly IPeerRegistry peerRegistry;
-    private readonly ILogger<HttpTransport> logger;
+    private readonly ILogger<HttpTransport<TMessage>> logger;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="HttpTransport"/> class.
+    /// Initializes a new instance of the <see cref="HttpTransport{TMessage}"/> class.
     /// </summary>
     public HttpTransport(
         string meshId,
+        IOptionsMonitor<HttpTransportOptions> optionsMonitor,
         IHttpClientFactory httpClientFactory,
         ICrdtSerializer serializer,
         IPeerRegistry peerRegistry,
-        ILogger<HttpTransport> logger)
+        ILogger<HttpTransport<TMessage>> logger)
     {
         this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
+        this.optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         this.httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
@@ -45,7 +49,7 @@ public sealed class HttpTransport : ITransport<GossipMessage>
     public bool CanHandle(PeerEndpoint endpoint) => endpoint is HttpPeerEndpoint;
 
     /// <inheritdoc />
-    public async Task SendAsync(PeerEndpoint endpoint, GossipMessage message, CancellationToken cancellationToken)
+    public async Task SendAsync(PeerEndpoint endpoint, TMessage message, CancellationToken cancellationToken)
     {
         if (endpoint is not HttpPeerEndpoint httpEndpoint)
         {
@@ -63,7 +67,9 @@ public sealed class HttpTransport : ITransport<GossipMessage>
             throw new ArgumentOutOfRangeException(nameof(endpoint), "Endpoint port must be between 1 and 65535.");
         }
 
-        var url = $"http://{httpEndpoint.Host}:{httpEndpoint.Port}/p2p/gossip";
+        var options = optionsMonitor.Get(meshId);
+        var path = options.PathPrefix.TrimStart('/');
+        var url = $"http://{httpEndpoint.Host}:{httpEndpoint.Port}/{path}";
         
         using var client = httpClientFactory.CreateClient("P2pTransport");
         client.Timeout = TimeSpan.FromSeconds(5);
@@ -79,7 +85,7 @@ public sealed class HttpTransport : ITransport<GossipMessage>
 
         request.Headers.Add("X-P2P-Protocol-Version", Constants.ProtocolVersion);
 
-        logger.LogTrace("[{MeshId}] Sending message {MessageId} to {Url}", meshId, message.MessageId, url);
+        logger.LogTrace("[{MeshId}] Sending generalized message to {Url}", meshId, url);
 
         try
         {

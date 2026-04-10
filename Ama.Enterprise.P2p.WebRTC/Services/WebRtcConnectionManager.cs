@@ -51,7 +51,7 @@ public sealed class WebRtcConnectionManager : IWebRtcConnectionManager, IWebRtcI
     {
         var connectionId = Guid.NewGuid();
         var pc = CreatePeerConnection(connectionId);
-        var dc = await pc.createDataChannel("gossip").ConfigureAwait(false);
+        var dc = await pc.createDataChannel("p2p-data").ConfigureAwait(false);
         
         var state = new PeerConnectionState(pc, dc);
         connections.TryAdd(connectionId, state);
@@ -83,7 +83,7 @@ public sealed class WebRtcConnectionManager : IWebRtcConnectionManager, IWebRtcI
 
         pc.ondatachannel += (dc) =>
         {
-            if (dc.label == "gossip")
+            if (dc.label == "p2p-data")
             {
                 state.DataChannel = dc;
                 BindDataChannelEvents(connectionId, dc);

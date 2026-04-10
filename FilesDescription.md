@@ -123,6 +123,7 @@
 | `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Registration logic configuring Dependency Injection specifically targeting the UDP peer discovery sub-components and background services. |
 | `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
 | `$/Ama.Enterprise.P2p/Models/Core/HttpPeerEndpoint.cs` | Concrete HTTP-based network endpoint inheriting from the polymorphic `PeerEndpoint`. |
+| `$/Ama.Enterprise.P2p/Models/Core/HttpTransportOptions.cs` | Configuration options for the HTTP transport layer, fully decoupled from protocol-specific rules like Gossip natively resolving endpoints safely. |
 | `$/Ama.Enterprise.P2p/Models/Core/P2pMeshMetadata.cs` | Metadata record registering a specific mesh identifier into the global dependency container for orchestration. |
 | `$/Ama.Enterprise.P2p/Models/Core/P2pNodeOptions.cs` | Centralized generic configuration options holding the core node identity (ID and Endpoint) for the P2P Mesh. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerEndpoint.cs` | No description provided. |

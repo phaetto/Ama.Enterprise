@@ -7,33 +7,31 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p;
-using Ama.Enterprise.P2p.Models.Gossip;
+using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Implements inbound gossip listener using an <see cref="HttpListener"/> scoped to a given mesh identifier.
+/// Implements generalized inbound listener using an <see cref="HttpListener"/> scoped to a given mesh identifier.
 /// </summary>
-/// <remarks>
-/// Initializes a new instance of the <see cref="HttpTransportListener"/> class.
-/// </remarks>
-public sealed class HttpTransportListener(
+/// <typeparam name="TMessage">The generic type of message payloads traversing the transport layer.</typeparam>
+public sealed class HttpTransportListener<TMessage>(
     string meshId,
-    IOptionsMonitor<GossipOptions> optionsMonitor,
+    IOptionsMonitor<HttpTransportOptions> optionsMonitor,
     ICrdtSerializer serializer,
-    ILogger<HttpTransportListener> logger) : ITransportListener<GossipMessage>, IDisposable
+    ILogger<HttpTransportListener<TMessage>> logger) : ITransportListener<TMessage>, IDisposable
 {
     private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-    private readonly IOptionsMonitor<GossipOptions> optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+    private readonly IOptionsMonitor<HttpTransportOptions> optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
     private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-    private readonly ILogger<HttpTransportListener> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ILogger<HttpTransportListener<TMessage>> logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private HttpListener? httpListener;
     private CancellationTokenSource? listenerCts;
     private Task? listeningTask;
 
     /// <inheritdoc />
-    public Task StartListeningAsync(Func<GossipMessage, Task> onMessageReceived, CancellationToken cancellationToken)
+    public Task StartListeningAsync(Func<TMessage, Task> onMessageReceived, CancellationToken cancellationToken)
     {
         if (onMessageReceived is null)
         {
@@ -46,14 +44,15 @@ public sealed class HttpTransportListener(
         var options = optionsMonitor.Get(meshId);
         var host = string.IsNullOrWhiteSpace(options.ListenHost) ? "+" : options.ListenHost;
         var port = options.ListenPort;
-        var prefix = $"http://{host}:{port}/p2p/gossip/";
+        var path = options.PathPrefix.EndsWith("/") ? options.PathPrefix : options.PathPrefix + "/";
+        var prefix = $"http://{host}:{port}{path}";
         
         httpListener.Prefixes.Add(prefix);
 
         try
         {
             httpListener.Start();
-            logger.LogInformation("[{MeshId}] Listening for HTTP gossip messages on {Prefix}", meshId, prefix);
+            logger.LogInformation("[{MeshId}] Listening for generic HTTP messages on {Prefix}", meshId, prefix);
         }
         catch (HttpListenerException ex)
         {
@@ -85,10 +84,10 @@ public sealed class HttpTransportListener(
             catch (OperationCanceledException) { }
         }
         
-        logger.LogInformation("[{MeshId}] Gossip listener stopped.", meshId);
+        logger.LogInformation("[{MeshId}] Transport listener stopped.", meshId);
     }
 
-    private async Task ListenLoopAsync(Func<GossipMessage, Task> onMessageReceived, CancellationToken cancellationToken)
+    private async Task ListenLoopAsync(Func<TMessage, Task> onMessageReceived, CancellationToken cancellationToken)
     {
         if (httpListener is null) return;
 
@@ -110,7 +109,7 @@ public sealed class HttpTransportListener(
         }
     }
 
-    private async Task ProcessRequestAsync(HttpListenerContext context, Func<GossipMessage, Task> onMessageReceived, CancellationToken cancellationToken)
+    private async Task ProcessRequestAsync(HttpListenerContext context, Func<TMessage, Task> onMessageReceived, CancellationToken cancellationToken)
     {
         try
         {
@@ -133,7 +132,7 @@ public sealed class HttpTransportListener(
             if (incomingVersion.Major != localVersion.Major)
             {
                 logger.LogWarning(
-                    "[{MeshId}] Rejected incoming gossip message due to protocol major version mismatch. Local: {LocalVersion}, Incoming: {IncomingVersion}", 
+                    "[{MeshId}] Rejected incoming message due to protocol major version mismatch. Local: {LocalVersion}, Incoming: {IncomingVersion}", 
                     meshId, localVersion, incomingVersion);
                 context.Response.StatusCode = (int)HttpStatusCode.HttpVersionNotSupported;
                 return;
@@ -143,16 +142,16 @@ public sealed class HttpTransportListener(
             await context.Request.InputStream.CopyToAsync(memoryStream, cancellationToken).ConfigureAwait(false);
             
             var payload = memoryStream.ToArray();
-            var message = serializer.DeserializeFromBytes<GossipMessage>(payload);
+            var message = serializer.DeserializeFromBytes<TMessage>(payload);
 
-            if (message.MessageId != Guid.Empty) 
+            if (message is not null) 
             {
                 await onMessageReceived(message).ConfigureAwait(false);
                 context.Response.StatusCode = (int)HttpStatusCode.Accepted;
             }
             else
             {
-                logger.LogWarning("[{MeshId}] Failed to deserialize incoming gossip message. Invalid format.", meshId);
+                logger.LogWarning("[{MeshId}] Failed to deserialize incoming generic message. Invalid format.", meshId);
                 context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
             }
         }

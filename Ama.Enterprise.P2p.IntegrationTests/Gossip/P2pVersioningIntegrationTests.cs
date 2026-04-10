@@ -80,14 +80,14 @@ public sealed class P2pVersioningIntegrationTests
         using var request = new HttpRequestMessage(HttpMethod.Post, "http://localhost:8211/p2p/gossip/");
         request.Headers.Add("X-P2P-Protocol-Version", compatibleVersion.ToString());
         
-        // We submit an empty JSON object payload. Since deserializing "{}" will yield a default Guid for the mandatory MessageId,
-        // the endpoint will return a 400 BadRequest. This confirms we bypassed the 505 HttpVersionNotSupported check successfully.
+        // We submit an empty JSON object payload. Since it successfully bypasses the 505 HttpVersionNotSupported check,
+        // the generic endpoint will accept it and return 202 Accepted.
         request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
 
         using var response = await client.SendAsync(request, cts.Token);
 
         // Verify it was NOT rejected for protocol version mismatch
-        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.BadRequest);
+        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.Accepted);
     }
 
     [IntegrationFact]
@@ -110,12 +110,14 @@ public sealed class P2pVersioningIntegrationTests
         using var request = new HttpRequestMessage(HttpMethod.Post, "http://localhost:8212/p2p/gossip/");
         request.Headers.Add("X-P2P-Protocol-Version", deployedVersion.ToString());
         
+        // We submit an empty JSON object payload. Since it successfully bypasses the 505 HttpVersionNotSupported check,
+        // the generic endpoint will accept it and return 202 Accepted.
         request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
 
         using var response = await client.SendAsync(request, cts.Token);
 
-        // Verify it passed the protocol verification and rejected just the dummy payload
-        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.BadRequest);
+        // Verify it passed the protocol verification and was accepted
+        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.Accepted);
     }
 
     private TestNode CreateTestNode(int port)
@@ -133,11 +135,15 @@ public sealed class P2pVersioningIntegrationTests
         services.AddP2pMesh(TestMeshId)
             .AddGossipNetwork(options =>
             {
-                options.ListenHost = "localhost";
-                options.ListenPort = port;
                 options.GossipInterval = TimeSpan.FromMilliseconds(500); 
                 options.Fanout = 2;
                 options.DefaultTimeToLive = 5;
+            })
+            .AddHttpTransport<GossipMessage>(options =>
+            {
+                options.ListenHost = "localhost";
+                options.ListenPort = port;
+                options.PathPrefix = "/p2p/gossip/";
             });
 
         var handler = new TestMessageHandler();

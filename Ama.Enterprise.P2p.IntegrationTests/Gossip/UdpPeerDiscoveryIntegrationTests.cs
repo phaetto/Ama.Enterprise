@@ -5,6 +5,7 @@ using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.IntegrationTests.Attributes;
 using Ama.Enterprise.P2p.IntegrationTests.Extensions;
 using Ama.Enterprise.P2p.Models.Core;
+using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -99,10 +100,12 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
             {
                 nodeOptions.LocalPeerId = peerId;
             })
-            .AddGossipNetwork(opts => 
+            .AddGossipNetwork()
+            .AddHttpTransport<GossipMessage>(opts => 
             { 
                 opts.ListenPort = listenPort; 
                 opts.ListenHost = "localhost"; // Override from '+' to 'localhost' to avoid Access Denied under unprivileged execution on Windows
+                opts.PathPrefix = "/p2p/gossip/";
             })
             .AddUdpPeerDiscovery(options => 
             {

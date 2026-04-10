@@ -47,18 +47,65 @@ public static class ServiceCollectionExtensions
             services.Configure(meshId, configureNodeOptions);
         }
 
-        // Register the overarching hosted service orchestrator only once.
-        // AddHostedService uses TryAddEnumerable internally, so it is safe and idempotent to call multiple times.
         services.AddHostedService<P2pHostedService>();
-
-        // Register the metadata so the hosted service knows which meshes to boot.
         services.AddSingleton(new P2pMeshMetadata(meshId));
 
         return new P2pMeshBuilder(services, meshId);
     }
 
     /// <summary>
-    /// Registers the core interfaces and HTTP Transport required for the P2P Gossip protocol under the current mesh context.
+    /// Registers the core HTTP transport mechanisms mapped flexibly across generalized endpoints securely.
+    /// </summary>
+    /// <typeparam name="TMessage">The primary network message type resolving throughout the local scope correctly.</typeparam>
+    /// <param name="builder">The mesh builder instance.</param>
+    /// <param name="configureOptions">An action specifying HttpTransport overrides naturally explicitly.</param>
+    /// <returns>The updated mesh builder.</returns>
+    public static IP2pMeshBuilder AddHttpTransport<TMessage>(
+        this IP2pMeshBuilder builder,
+        Action<HttpTransportOptions>? configureOptions = null)
+    {
+        if (configureOptions is null)
+        {
+            builder.Services.Configure<HttpTransportOptions>(builder.MeshId, _ => { });
+        }
+        else
+        {
+            builder.Services.Configure(builder.MeshId, configureOptions);
+        }
+
+        builder.Services.AddHttpClient("P2pTransport");
+
+        builder.Services.AddKeyedSingleton<PeerEndpoint>(builder.MeshId, (sp, key) =>
+        {
+            var options = sp.GetRequiredService<IOptionsMonitor<HttpTransportOptions>>().Get((string)key!);
+            var host = string.Equals(options.ListenHost, "+", StringComparison.OrdinalIgnoreCase) 
+                ? "localhost" 
+                : options.ListenHost;
+                
+            return new HttpPeerEndpoint(host, options.ListenPort);
+        });
+
+        builder.Services.AddKeyedSingleton<ITransport<TMessage>>(builder.MeshId, (sp, key) =>
+            new HttpTransport<TMessage>(
+                (string)key!,
+                sp.GetRequiredService<IOptionsMonitor<HttpTransportOptions>>(),
+                sp.GetRequiredService<IHttpClientFactory>(),
+                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredService<IPeerRegistry>(),
+                sp.GetRequiredService<ILogger<HttpTransport<TMessage>>>()));
+
+        builder.Services.AddKeyedSingleton<ITransportListener<TMessage>>(builder.MeshId, (sp, key) =>
+            new HttpTransportListener<TMessage>(
+                (string)key!,
+                sp.GetRequiredService<IOptionsMonitor<HttpTransportOptions>>(),
+                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredService<ILogger<HttpTransportListener<TMessage>>>()));
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers the core interfaces required for the P2P Gossip protocol under the current mesh context.
     /// </summary>
     /// <param name="builder">The mesh builder instance.</param>
     /// <param name="configureOptions">An action to configure the gossip options for this mesh.</param>
@@ -76,7 +123,6 @@ public static class ServiceCollectionExtensions
             builder.Services.Configure(builder.MeshId, configureOptions);
         }
 
-        // Map GossipInterval down to the named generic failure detector options
         builder.Services.AddOptions<FailureDetectorOptions>(builder.MeshId)
             .Configure<IOptionsMonitor<GossipOptions>>((failureOptions, gossipOptionsMonitor) =>
             {
@@ -87,31 +133,14 @@ public static class ServiceCollectionExtensions
                 }
             });
 
-        // Register global HttpClient if not already present. It is idempotent.
-        builder.Services.AddHttpClient("P2pTransport");
-
-        // Conditionally register P2P JSON Context to avoid duplicate generic enumerations for System.Text.Json context merging
         if (!builder.Services.Any(s => s.ServiceType == typeof(IJsonTypeInfoResolver) && s.ServiceKey as string == "Ama.CRDT" && s.ImplementationInstance == P2pJsonSerializerContext.Default))
         {
             builder.Services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", P2pJsonSerializerContext.Default);
         }
 
-        // Register dynamic mesh endpoint for communication based on GossipOptions
-        builder.Services.AddKeyedSingleton<PeerEndpoint>(builder.MeshId, (sp, key) =>
-        {
-            var gossipOptions = sp.GetRequiredService<IOptionsMonitor<GossipOptions>>().Get((string)key!);
-            var host = string.Equals(gossipOptions.ListenHost, "+", StringComparison.OrdinalIgnoreCase) 
-                ? "localhost" 
-                : gossipOptions.ListenHost;
-                
-            return new HttpPeerEndpoint(host, gossipOptions.ListenPort);
-        });
-
-        // Internal inbound queuing for isolating protocol and IO bounds
         builder.Services.AddKeyedSingleton<IInboundMessageQueue<GossipMessage>>(builder.MeshId, (sp, key) =>
             new InboundMessageQueue<GossipMessage>());
 
-        // The Peer Registry is now a global Singleton cross-mesh to ensure node awareness regardless of where peers were discovered.
         builder.Services.TryAddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
 
         builder.Services.AddKeyedSingleton<IPeerAuthenticator>(builder.MeshId, (sp, key) =>
@@ -119,7 +148,6 @@ public static class ServiceCollectionExtensions
                 (string)key!, 
                 sp.GetRequiredService<ILogger<PassThroughPeerAuthenticator>>()));
 
-        // Peer Selector is still Keyed per mesh, but injects the global un-keyed IPeerRegistry.
         builder.Services.AddKeyedSingleton<IPeerSelector>(builder.MeshId, (sp, key) =>
             new RandomPeerSelector(
                 sp.GetRequiredService<IPeerRegistry>(),
@@ -131,24 +159,8 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<IOptionsMonitor<FailureDetectorOptions>>(),
                 sp.GetRequiredService<ILogger<TimeBasedFailureDetector>>()));
         
-        // Transports, Listeners, and Routing isolated per MeshId
-        builder.Services.AddKeyedSingleton<ITransport<GossipMessage>>(builder.MeshId, (sp, key) =>
-            new HttpTransport(
-                (string)key!,
-                sp.GetRequiredService<IHttpClientFactory>(),
-                sp.GetRequiredService<ICrdtSerializer>(),
-                sp.GetRequiredService<IPeerRegistry>(),
-                sp.GetRequiredService<ILogger<HttpTransport>>()));
-
         builder.Services.AddKeyedSingleton<ITransportRouter<GossipMessage>>(builder.MeshId, (sp, key) =>
             new TransportRouter<GossipMessage>(sp.GetKeyedServices<ITransport<GossipMessage>>(key)));
-
-        builder.Services.AddKeyedSingleton<ITransportListener<GossipMessage>>(builder.MeshId, (sp, key) =>
-            new HttpTransportListener(
-                (string)key!,
-                sp.GetRequiredService<IOptionsMonitor<GossipOptions>>(),
-                sp.GetRequiredService<ICrdtSerializer>(),
-                sp.GetRequiredService<ILogger<HttpTransportListener>>()));
 
         builder.Services.AddKeyedSingleton<IMessageDispatcher<GossipMessage>>(builder.MeshId, (sp, key) =>
             new MessageDispatcher<GossipMessage>(
@@ -156,7 +168,6 @@ public static class ServiceCollectionExtensions
                 sp.GetKeyedServices<IMessageHandler<GossipMessage>>(key),
                 sp.GetRequiredService<ILogger<MessageDispatcher<GossipMessage>>>()));
         
-        // Protocol orchestrator mapped globally as a single instance executing across all configured meshes
         builder.Services.TryAddSingleton<IP2pProtocol, GossipProtocol>();
 
         return builder;
