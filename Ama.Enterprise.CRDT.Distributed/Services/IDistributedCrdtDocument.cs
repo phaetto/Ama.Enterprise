@@ -55,6 +55,13 @@ public interface IDistributedCrdtDocument
     /// Applies a completely materialized snapshot payload seamlessly superseding local structure dependencies alongside explicitly targeted overarching global bounds explicitly.
     /// </summary>
     Task MergeSnapshotAsync(byte[] snapshotData, DottedVersionVector globalState, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Asynchronously saves the current in-memory document state and global version vector bounds to persistent storage.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous checkpoint operation.</returns>
+    Task CheckpointAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>

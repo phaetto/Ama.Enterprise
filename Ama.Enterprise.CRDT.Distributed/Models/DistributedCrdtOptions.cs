@@ -18,4 +18,10 @@ public sealed class DistributedCrdtOptions
     /// bypassing the regular anti-entropy delay.
     /// </summary>
     public bool ActiveSyncEnabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets the interval in seconds at which the background checkpoint service periodically saves the in-memory state to persistent storage.
+    /// Defaults to 30 seconds.
+    /// </summary>
+    public int CheckpointIntervalSeconds { get; set; } = 30;
 }

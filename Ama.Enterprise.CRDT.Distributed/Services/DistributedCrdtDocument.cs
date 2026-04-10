@@ -32,6 +32,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly ILogger<DistributedCrdtDocument<TState>> logger;
     private readonly bool activeSyncEnabled;
     private readonly object syncRoot = new();
+    
+    private volatile bool isDirty;
 
     /// <inheritdoc />
     public string DocumentId { get; }
@@ -116,24 +118,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         lock (syncRoot)
         {
             Document = result.Document;
-        }
-
-        try
-        {
-            await storage.SaveGlobalVersionVectorAsync(replicaContext.ReplicaId, replicaContext.GlobalVersionVector, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Failed to persist global version vector to storage after local patch on document {DocumentId}.", DocumentId);
-        }
-
-        try
-        {
-            await storage.SaveDocumentAsync(DocumentId, Document, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Failed to persist document {DocumentId} state to storage after local patch.", DocumentId);
+            isDirty = true;
         }
 
         StateChanged?.Invoke(this, EventArgs.Empty);
@@ -271,32 +256,10 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         lock (syncRoot)
         {
             Document = result.Document;
-        }
-
-        try
-        {
-            await storage.SaveGlobalVersionVectorAsync(replicaContext.ReplicaId, replicaContext.GlobalVersionVector, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Failed to persist global version vector to storage after remote operations synchronization on document {DocumentId}.", DocumentId);
-        }
-
-        try
-        {
-            await storage.SaveDocumentAsync(DocumentId, Document, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Failed to persist document {DocumentId} state to storage after remote operations synchronization.", DocumentId);
+            isDirty = true;
         }
 
         StateChanged?.Invoke(this, EventArgs.Empty);
-
-        // Intentionally completely removed the aggressive local Trimming mechanism here.
-        // A single peer syncing operations must NOT actively delete those operations utilizing its own local bounds.
-        // If it trims locally, other peers requiring those specific historic operations across different timings will encounter hard truncation gaps, natively spiraling network snapshots continuously.
-        // Trimming effectively requires an independent process evaluating the actual multi-node GMVV mapping bounds actively.
     }
 
     /// <inheritdoc />
@@ -355,9 +318,9 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     }
 
     /// <inheritdoc />
-    public async Task MergeSnapshotAsync(byte[] snapshotData, DottedVersionVector globalState, CancellationToken cancellationToken = default)
+    public Task MergeSnapshotAsync(byte[] snapshotData, DottedVersionVector globalState, CancellationToken cancellationToken = default)
     {
-        if (snapshotData == null || snapshotData.Length == 0) return;
+        if (snapshotData == null || snapshotData.Length == 0) return Task.CompletedTask;
 
         try
         {
@@ -388,24 +351,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                         currentDots.Add(dot);
                     }
                 }
-            }
-
-            try
-            {
-                await storage.SaveGlobalVersionVectorAsync(replicaContext.ReplicaId, replicaContext.GlobalVersionVector, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to persist global version vector to storage after snapshot alignment for document {DocumentId}.", DocumentId);
-            }
-
-            try
-            {
-                await storage.SaveDocumentAsync(DocumentId, Document, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to persist document {DocumentId} state to storage after snapshot application.", DocumentId);
+                
+                isDirty = true;
             }
 
             StateChanged?.Invoke(this, EventArgs.Empty);
@@ -414,6 +361,43 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to process snapshot merger logic bridging states natively for document {DocumentId}.", DocumentId);
+        }
+        
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public async Task CheckpointAsync(CancellationToken cancellationToken = default)
+    {
+        if (!isDirty)
+        {
+            return;
+        }
+
+        CrdtDocument<TState> currentDoc;
+        DottedVersionVector currentDvv;
+
+        lock (syncRoot)
+        {
+            currentDoc = Document;
+            currentDvv = GetLocalState();
+        }
+
+        try
+        {
+            await storage.SaveGlobalVersionVectorAsync(replicaContext.ReplicaId, currentDvv, cancellationToken).ConfigureAwait(false);
+            await storage.SaveDocumentAsync(DocumentId, currentDoc, cancellationToken).ConfigureAwait(false);
+            
+            lock (syncRoot)
+            {
+                isDirty = false;
+            }
+            
+            logger.LogDebug("Successfully saved checkpoint to persistent storage for document {DocumentId}.", DocumentId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to periodically persist checkpoint state to storage for document {DocumentId}.", DocumentId);
         }
     }
 
