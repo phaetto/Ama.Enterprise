@@ -1,8 +1,8 @@
-namespace Ama.Enterprise.FeatureFlags.Services;
+namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System;
 using Ama.CRDT.Services;
-using Ama.Enterprise.FeatureFlags.Models;
+using Ama.Enterprise.CRDT.Distributed.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
@@ -11,14 +11,14 @@ using Microsoft.Extensions.Options;
 /// Ensures that all components (UI loops, background services, incoming network handlers) 
 /// interact with the exact same in-memory state and ReplicaContext.
 /// </summary>
-public sealed class FeatureFlagCrdtScopeProvider : IDisposable
+public sealed class DistributedCrdtScopeProvider : IDisposable
 {
     /// <summary>
     /// Gets the long-lived CRDT scope.
     /// </summary>
     public IServiceScope Scope { get; }
 
-    public FeatureFlagCrdtScopeProvider(ICrdtScopeFactory crdtScopeFactory, IOptions<FeatureFlagOptions> options)
+    public DistributedCrdtScopeProvider(ICrdtScopeFactory crdtScopeFactory, IOptions<DistributedCrdtOptions> options)
     {
         if (crdtScopeFactory == null)
         {

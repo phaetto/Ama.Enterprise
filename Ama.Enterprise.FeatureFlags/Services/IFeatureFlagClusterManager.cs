@@ -4,11 +4,10 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Ama.CRDT.Models;
 using Ama.Enterprise.FeatureFlags.Models;
 
 /// <summary>
-/// Manages the local feature flag state and synchronizes with the cluster using DVV.
+/// Domain wrapper interfacing explicitly with generic distributed state elements to govern application feature toggles natively.
 /// </summary>
 public interface IFeatureFlagClusterManager
 {
@@ -18,32 +17,17 @@ public interface IFeatureFlagClusterManager
     event EventHandler? StateChanged;
 
     /// <summary>
-    /// Gets the current read-only state of feature flags.
+    /// Gets the current read-only state map dictionary populated from replicated topology.
     /// </summary>
     IReadOnlyDictionary<string, FeatureFlag> GetFlags();
 
     /// <summary>
-    /// Updates or adds a feature flag.
+    /// Upserts a distributed feature toggle explicitly into the replicated log tracking state convergence.
     /// </summary>
     Task SetFlagAsync(string name, bool isEnabled, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Removes a feature flag.
+    /// Deletes a feature toggle and marks tombstoned intentions across anti-entropy exchanges natively.
     /// </summary>
     Task RemoveFlagAsync(string name, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Gets the current local Dotted Version Vector representing the state of this replica.
-    /// </summary>
-    DottedVersionVector GetLocalState();
-
-    /// <summary>
-    /// Calculates what operations are needed by a remote replica to catch up with this replica.
-    /// </summary>
-    Task<IReadOnlyList<CrdtOperation>> GetMissingOperationsAsync(string remoteReplicaId, DottedVersionVector remoteState, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Applies operations received from another replica to the local feature flags state.
-    /// </summary>
-    Task ApplyOperationsAsync(IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default);
 }

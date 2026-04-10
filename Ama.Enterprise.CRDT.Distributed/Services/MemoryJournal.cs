@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.FeatureFlags.Services;
+namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System;
 using System.Collections.Generic;

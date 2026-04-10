@@ -27,6 +27,22 @@
 | `$/Ama.Enterprise.CRDT.BlazorApp/wwwroot/sample-data/weather.json` | No description provided. |
 | `$/Ama.Enterprise.CRDT.BlazorApp/wwwroot/service-worker.js` | No description provided. |
 | `$/Ama.Enterprise.CRDT.BlazorApp/wwwroot/service-worker.published.js` | No description provided. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Ama.Enterprise.CRDT.Distributed.ShowCase.csproj` | No description provided. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | No description provided. |
+| `$/Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj` | No description provided. |
+| `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | DI orchestrations wiring generalized models alongside user-mapped state components explicitly targeted into backend meshes correctly. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtMessageWrapper.cs` | Envelope wrapper mapping generic messages targeting specifically identified CRDT documents across the network topology. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtOperationsMessage.cs` | Transmission model conveying replicated CRDT intent patches targeted asynchronously natively across active nodes. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtStateSyncMessage.cs` | Structure carrying generic synchronization states explicitly formatted across anti-entropy operations representing document DVV. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtOptions.cs` | Standardized internal options configurations outlining shared active sync behavior maps inherently integrated into any document type. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtP2pJsonContext.cs` | Global baseline AOT-centric System.Text.Json generation models resolving native P2P exchanges without resorting to reflection explicitly. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Highly encapsulated multi-tenant document processor ensuring CRDT intents securely resolve without conflicting external thread actions correctly. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeProvider.cs` | Scoped singleton holding global reference handles bridging inbound P2P traffic strictly alongside active internal event listeners gracefully. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtDocument.cs` | Generalized interface declarations governing multi-document pooling mechanics interacting directly with core internal router algorithms natively. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/MemoryJournal.cs` | Thread-safe, abstract operation buffer logging uncommitted or recently committed CRDT patches for immediate anti-entropy retrieval. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtAntiEntropyService.cs` | Hosted background orchestrator cyclically synchronizing each registered document pipeline actively throughout connected meshes implicitly. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtGossipHandler.cs` | Intercepts universally generated P2P traffic and translates payload envelopes to corresponding localized document routing handlers. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtTopologyObserver.cs` | Observes internal transport listeners and triggers aggressive DVV baseline synchronization maps dynamically against freshly bound peers securely. |
 | `$/Ama.Enterprise.CRDT.MessagePack/Ama.Enterprise.CRDT.MessagePack.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.OpenTelemetry/Ama.Enterprise.CRDT.OpenTelemetry.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.TableStorage/Ama.Enterprise.CRDT.TableStorage.csproj` | No description provided. |
@@ -106,7 +122,6 @@
 | `$/Ama.Enterprise.P2p/Models/Core/UdpDiscoveryOptions.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Gossip/GossipMessage.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Gossip/GossipOptions.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Models/Gossip/P2pJsonSerializerContext.cs` | AOT-friendly JSON context for P2P models, automatically loaded by ICrdtSerializer. |
 | `$/Ama.Enterprise.P2p/Models/P2pJsonSerializerContext.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IFailureDetector.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IInboundMessageQueue.cs` | Defines an internal queue for decoupling inbound network listeners from the protocol logic. |

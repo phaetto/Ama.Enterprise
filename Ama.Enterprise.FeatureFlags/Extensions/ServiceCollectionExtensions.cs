@@ -2,18 +2,14 @@ namespace Ama.Enterprise.FeatureFlags.Extensions;
 
 using System;
 using Ama.CRDT.Extensions;
-using Ama.CRDT.Models;
-using Ama.CRDT.Services.Decorators;
+using Ama.Enterprise.CRDT.Distributed.Extensions;
+using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.FeatureFlags.Models;
-using Ama.Enterprise.FeatureFlags.Models.P2p;
 using Ama.Enterprise.FeatureFlags.Services;
-using Ama.Enterprise.FeatureFlags.Services.P2p;
-using Ama.Enterprise.P2p.Models.Gossip;
-using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
-/// Extensions for registering feature flags CRDT components.
+/// Extensions for registering feature flags CRDT components leveraging the distributed CRDT core.
 /// </summary>
 public static class ServiceCollectionExtensions
 {
@@ -27,34 +23,34 @@ public static class ServiceCollectionExtensions
             throw new ArgumentNullException(nameof(services));
         }
 
-        if (configure != null)
-        {
-            services.Configure(configure);
-        }
-        else
-        {
-            services.Configure<FeatureFlagOptions>(_ => { });
-        }
+        // Apply configuration mappings natively maintaining backwards compatibility
+        services.Configure<FeatureFlagOptions>(configure ?? (_ => { }));
 
-        // Register CRDT models specifically for feature flags
+        Action<DistributedCrdtOptions> distConfig = dist =>
+        {
+            if (configure != null)
+            {
+                var ffOpts = new FeatureFlagOptions();
+                configure(ffOpts);
+                dist.ReplicaId = ffOpts.ReplicaId;
+                dist.ActiveSyncEnabled = ffOpts.ActiveSyncEnabled;
+            }
+        };
+
+        // Bootstrap generic core dependencies
+        services.AddDistributedCrdtCore(distConfig);
+
+        // Register CRDT models specifically for feature flags domain
         services.AddCrdt()
                 .AddCrdtJsonTypeInfoResolver(FeatureFlagsJsonContext.Default)
                 .AddCrdtAotContext<FeatureFlagsCrdtAotContext>();
 
         services.AddCrdtSerializableType<FeatureFlag>("feature-flag");
 
-        // Register the shared MemoryJournal as a singleton simulation for V1
-        services.AddCrdtJournaling<MemoryJournal>();
+        // Map domain generic types inside the centralized document pool
+        services.AddDistributedDocument<FeatureFlagState>("feature-flags-singleton");
 
-        // Attach decorators for automatic journaling and compaction
-        services.AddCrdtApplicatorDecorator<JournalingApplicatorDecorator>(DecoratorBehavior.After);
-        services.AddCrdtPatcherDecorator<JournalingPatcherDecorator>(DecoratorBehavior.After);
-        services.AddCrdtApplicatorDecorator<CompactingApplicatorDecorator>(DecoratorBehavior.After);
-
-        // Register the singleton scope provider to hold the ReplicaContext alive
-        services.AddSingleton<FeatureFlagCrdtScopeProvider>();
-
-        // Register the cluster manager
+        // Register the business logic domain wrapper scoped exactly to the CRDT hierarchy
         services.AddScoped<IFeatureFlagClusterManager, FeatureFlagClusterManager>();
 
         return services;
@@ -75,16 +71,8 @@ public static class ServiceCollectionExtensions
             throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshId));
         }
 
-        services.AddCrdt()
-                .AddCrdtJsonTypeInfoResolver(FeatureFlagP2pJsonContext.Default);
-        
-        // Register the gossip handler using Keyed DI restricted to the specified mesh network
-        services.AddKeyedSingleton<IMessageHandler<GossipMessage>, FeatureFlagGossipHandler>(meshId);
-        
-        // Register the topology observer to trigger immediate sync on first peer connection
-        services.AddSingleton<IPeerTopologyObserver, FeatureFlagTopologyObserver>();
-        
-        services.AddHostedService<FeatureFlagAntiEntropyService>();
+        // Delegate routing orchestrations and background services completely to the distributed core
+        services.AddDistributedCrdtP2p(meshId);
 
         return services;
     }

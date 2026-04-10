@@ -1,11 +1,6 @@
 namespace Ama.Enterprise.FeatureFlags.ShowCase;
 
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
+using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.FeatureFlags.Extensions;
 using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Services;
@@ -13,6 +8,12 @@ using Ama.Enterprise.P2p.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 /// <summary>
 /// Showcase entry point for demonstrating P2P Feature Flags across local console processes.
@@ -74,7 +75,7 @@ public static class Program
         var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("ShowCase");
         
         // Resolve the centralized scope provider to ensure all parts of the application share the same CRDT State
-        var scopeProvider = provider.GetRequiredService<FeatureFlagCrdtScopeProvider>();
+        var scopeProvider = provider.GetRequiredService<DistributedCrdtScopeProvider>();
         var clusterManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
         
         // Background services typically remain resolved from the root provider as singletons
