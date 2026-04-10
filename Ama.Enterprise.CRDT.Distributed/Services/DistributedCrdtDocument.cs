@@ -50,6 +50,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     public event EventHandler? StateChanged;
 
     public DistributedCrdtDocument(
+        TState initialState,
         ReplicaContext replicaContext,
         IAsyncCrdtApplicator applicator,
         IJournalManager journalManager,
@@ -63,6 +64,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     {
         if (metadataManager == null) throw new ArgumentNullException(nameof(metadataManager));
         if (options == null) throw new ArgumentNullException(nameof(options));
+        if (initialState == null) throw new ArgumentNullException(nameof(initialState));
         
         this.replicaContext = replicaContext ?? throw new ArgumentNullException(nameof(replicaContext));
         this.applicator = applicator ?? throw new ArgumentNullException(nameof(applicator));
@@ -75,7 +77,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         this.activeSyncEnabled = options.Value.ActiveSyncEnabled;
 
-        var initialState = new TState();
         DocumentId = initialState.Id;
         
         if (string.IsNullOrWhiteSpace(DocumentId))

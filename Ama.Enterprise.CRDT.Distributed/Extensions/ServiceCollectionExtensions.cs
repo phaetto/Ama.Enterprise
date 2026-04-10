@@ -62,19 +62,30 @@ public static class ServiceCollectionExtensions
 
     /// <summary>
     /// Registers a specific application domain model as a universally distributed CRDT document handled within the pipeline.
+    /// Supports registering multiple documents of the same type by providing explicit initialized states.
     /// </summary>
-    public static IServiceCollection AddDistributedDocument<TState>(this IServiceCollection services) where TState : class, IDistributedCrdtState, new()
+    public static IServiceCollection AddDistributedDocument<TState>(this IServiceCollection services, TState? initialState = null) where TState : class, IDistributedCrdtState, new()
     {
         if (services == null) throw new ArgumentNullException(nameof(services));
 
-        // Register the typed document resolver within the generic scope natively extracting its identity securely from the interface boundaries
-        services.AddScoped<IDistributedCrdtDocument<TState>>(sp =>
+        var state = initialState ?? new TState();
+
+        if (string.IsNullOrWhiteSpace(state.Id))
         {
-            return ActivatorUtilities.CreateInstance<DistributedCrdtDocument<TState>>(sp);
+            throw new InvalidOperationException($"The provided state for '{typeof(TState).Name}' must have a valid non-empty Id.");
+        }
+
+        // Register the typed document resolver via Keyed DI to explicitly support multiple documents of the same type safely
+        services.AddKeyedScoped<IDistributedCrdtDocument<TState>>(state.Id, (sp, key) =>
+        {
+            return ActivatorUtilities.CreateInstance<DistributedCrdtDocument<TState>>(sp, state);
         });
 
-        // Forward the specific registration mapping to the generic iterable pool used by backend processors
-        services.AddScoped<IDistributedCrdtDocument>(sp => sp.GetRequiredService<IDistributedCrdtDocument<TState>>());
+        // Register default non-keyed resolution for standard single-document usages natively (resolves to the last registered by default)
+        services.AddScoped<IDistributedCrdtDocument<TState>>(sp => sp.GetRequiredKeyedService<IDistributedCrdtDocument<TState>>(state.Id));
+
+        // Forward the specific registration mapping to the generic iterable pool used by backend processors natively tracking all mappings
+        services.AddScoped<IDistributedCrdtDocument>(sp => sp.GetRequiredKeyedService<IDistributedCrdtDocument<TState>>(state.Id));
 
         return services;
     }

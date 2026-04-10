@@ -45,7 +45,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/TaskManager.cs` | Implementation handling intentions and queries for the task list document. |
 | `$/Ama.Enterprise.CRDT.Distributed.UnitTests/Ama.Enterprise.CRDT.Distributed.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj` | No description provided. |
-| `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | Updated DI logic to remove obsolete individual trimming service registrations natively. |
+| `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | Updated DI logic to securely register CRDT state initializers natively supporting mapping explicitly initialized instances through Keyed scopes, efficiently handling multi-document deployments with matching generic types gracefully. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtMessageWrapper.cs` | Envelope wrapper mapping generic messages targeting specifically identified CRDT documents across the network topology. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtOperationsMessage.cs` | Transmission model conveying replicated CRDT intent patches targeted asynchronously natively across active nodes. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtSnapshotMessage.cs` | Message payload containing a complete materialized CRDT document snapshot, used as a fallback synchronization mechanism when log truncation gaps are detected. |
@@ -58,7 +58,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ClusterStateTracker.cs` | Thread-safe implementation storing exactly mapped global synchronization states for active P2P connections. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtCheckpointService.cs` | Locked snapshot cloning process inherently protecting underlying background iterations against live collection modifications organically avoiding crashes. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtInitializationService.cs` | Refactored explicitly to safely mutate the inherently shared scope context natively in-place, closing the split-brain scope disconnect bug gracefully avoiding destroyed instances. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Secured `ProvideSnapshotAsync` against architectural "Torn Reads" slicing reference mismatches during high-load concurrency payloads natively. Implemented mathematical local operation extraction directly protecting offline continuity dynamically against "Destructive Overwrites" ensuring zero data-loss bounds bridging snapshots securely. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Upgraded DI initialization constructors natively resolving an explicitly provided base document instance effectively decoupled from static zero-parameter instantiation correctly mapping customized identifier IDs safely. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeProvider.cs` | Secured inherently by removing dangerous `ReplaceScope` logic guaranteeing instances reliably outlive P2P network threads uniformly natively. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IClusterStateTracker.cs` | Tracks the last known synchronization bounds (Global Dotted Version Vectors) for all connected peers to enable mathematically safe journal trimming. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtDocument.cs` | Updated XML documentation defining strict boundary constraints matching securely structured I/O orchestration inherently. |
