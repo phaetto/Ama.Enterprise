@@ -218,20 +218,43 @@ public sealed class WebRtcConnectionManager : IWebRtcConnectionManager, IWebRtcI
             }
         };
 
-        dc.onopen += () =>
+        bool handshakeSent = false;
+        object handshakeLock = new object();
+
+        void SendHandshake()
         {
-            logger.LogInformation("[{MeshId}] WebRTC data channel opened for connection {ConnectionId}. Sending handshake.", meshId, connectionId);
+            lock (handshakeLock)
+            {
+                if (handshakeSent) return;
+                handshakeSent = true;
+            }
+
+            logger.LogInformation("[{MeshId}] WebRTC data channel ready for connection {ConnectionId}. Sending handshake.", meshId, connectionId);
             
-            var nodeOptions = nodeOptionsMonitor.Get(meshId);
-            var handshake = new WebRtcHandshakeMessage { PeerId = nodeOptions.LocalPeerId };
-            
-            var jsonBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(handshake, WebRtcJsonContext.Default.WebRtcHandshakeMessage);
-            var buffer = new byte[jsonBytes.Length + 1];
-            buffer[0] = 0xFF; // Handshake prefix
-            jsonBytes.CopyTo(buffer, 1);
-            
-            dc.send(buffer);
-        };
+            try
+            {
+                var nodeOptions = nodeOptionsMonitor.Get(meshId);
+                var handshake = new WebRtcHandshakeMessage { PeerId = nodeOptions.LocalPeerId };
+                
+                var jsonBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(handshake, WebRtcJsonContext.Default.WebRtcHandshakeMessage);
+                var buffer = new byte[jsonBytes.Length + 1];
+                buffer[0] = 0xFF; // Handshake prefix
+                jsonBytes.CopyTo(buffer, 1);
+                
+                dc.send(buffer);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "[{MeshId}] Failed to send handshake on WebRTC connection {ConnectionId}.", meshId, connectionId);
+            }
+        }
+
+        dc.onopen += SendHandshake;
+
+        if (dc.readyState == RTCDataChannelState.open)
+        {
+            SendHandshake();
+        }
     }
 
     private async Task<string> WaitForIceGatheringAsync(RTCPeerConnection pc, CancellationToken cancellationToken)
