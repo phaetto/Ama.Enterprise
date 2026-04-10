@@ -3,8 +3,8 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 using System;
 using Ama.CRDT.Services;
 using Ama.Enterprise.CRDT.Distributed.Models;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
 /// Singleton provider that maintains the long-lived CRDT scope for the local replica.
@@ -13,10 +13,22 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed class DistributedCrdtScopeProvider : IDisposable
 {
+    private IServiceScope scope;
+    private readonly object syncRoot = new();
+
     /// <summary>
     /// Gets the long-lived CRDT scope.
     /// </summary>
-    public IServiceScope Scope { get; }
+    public IServiceScope Scope 
+    {
+        get
+        {
+            lock (syncRoot)
+            {
+                return scope;
+            }
+        }
+    }
 
     public DistributedCrdtScopeProvider(ICrdtScopeFactory crdtScopeFactory, IOptions<DistributedCrdtOptions> options)
     {
@@ -30,11 +42,29 @@ public sealed class DistributedCrdtScopeProvider : IDisposable
             throw new ArgumentNullException(nameof(options));
         }
 
-        Scope = crdtScopeFactory.CreateScope(options.Value.ReplicaId);
+        scope = crdtScopeFactory.CreateScope(options.Value.ReplicaId);
+    }
+
+    /// <summary>
+    /// Replaces the current active scope securely. Used inherently by the initialization routines 
+    /// when restoring global states explicitly via the scope factory.
+    /// </summary>
+    public void ReplaceScope(IServiceScope newScope)
+    {
+        if (newScope == null) throw new ArgumentNullException(nameof(newScope));
+
+        lock (syncRoot)
+        {
+            scope.Dispose();
+            scope = newScope;
+        }
     }
 
     public void Dispose()
     {
-        Scope.Dispose();
+        lock (syncRoot)
+        {
+            scope?.Dispose();
+        }
     }
 }

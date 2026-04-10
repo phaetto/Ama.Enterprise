@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Net.NetworkInformation;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Extensions;
@@ -33,7 +34,7 @@ public static class Program
     {
         if (args.Length == 0 || !int.TryParse(args[0], out currentPort))
         {
-            currentPort = 8080 + Random.Shared.Next(0, 1000);
+            currentPort = GetNextAvailablePort(8100);
         }
 
         var replicaId = $"node-{currentPort}";
@@ -47,6 +48,10 @@ public static class Program
             builder.ClearProviders();
             builder.AddProvider(new LockedConsoleLoggerProvider());
         });
+
+        // Register Showcase file-based CRDT State implementations directly mapped into DI eagerly natively
+        services.AddSingleton<IDistributedCrdtGlobalStorage, ShowCaseGlobalStorage>();
+        services.AddSingleton(typeof(IDistributedCrdtStorage<>), typeof(ShowCaseDocumentStorage<>));
 
         // Add core CRDT distributed services and scope
         services.AddDistributedCrdtCore(options =>
@@ -97,8 +102,6 @@ public static class Program
         var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("ShowCase");
         
         var scopeProvider = provider.GetRequiredService<DistributedCrdtScopeProvider>();
-        var taskManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<ITaskManager>();
-        var fleetManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IFleetManager>();
         
         var hostedServices = provider.GetServices<IHostedService>().ToList();
         
@@ -110,18 +113,23 @@ public static class Program
             cts.Cancel();
         };
 
-        // UI refresh triggers bounded to specific documents structural change notifications
-        taskManager.StateChanged += (sender, eventArgs) => DrawState(taskManager.GetTasks(), fleetManager.GetDevices());
-        fleetManager.StateChanged += (sender, eventArgs) => DrawState(taskManager.GetTasks(), fleetManager.GetDevices());
-
         try
         {
             logger.LogInformation("Starting Multi-CRDT showcase node on port {Port}...", currentPort);
 
+            // Hosted Services handle the Scope initialization and storage loading mappings securely
             foreach (var service in hostedServices)
             {
                 await service.StartAsync(cts.Token).ConfigureAwait(false);
             }
+
+            // Once the scope is initialized globally from storage, grab the active Document Managers appropriately
+            var taskManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<ITaskManager>();
+            var fleetManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IFleetManager>();
+
+            // UI refresh triggers bounded to specific documents structural change notifications
+            taskManager.StateChanged += (sender, eventArgs) => DrawState(taskManager.GetTasks(), fleetManager.GetDevices());
+            fleetManager.StateChanged += (sender, eventArgs) => DrawState(taskManager.GetTasks(), fleetManager.GetDevices());
 
             DrawMenu();
             DrawState(taskManager.GetTasks(), fleetManager.GetDevices());
@@ -217,7 +225,7 @@ public static class Program
 
     private static void CloneProcess(ILogger logger)
     {
-        var nextPort = 8080 + Random.Shared.Next(0, 1000);
+        var nextPort = GetNextAvailablePort(currentPort + 1);
         var processPath = Environment.ProcessPath;
 
         if (string.IsNullOrEmpty(processPath))
@@ -296,6 +304,24 @@ public static class Program
         {
             Console.WriteLine(message);
         }
+    }
+
+    private static int GetNextAvailablePort(int startingPort)
+    {
+        var ipGlobalProperties = IPGlobalProperties.GetIPGlobalProperties();
+        
+        var activeTcpPorts = ipGlobalProperties.GetActiveTcpListeners().Select(l => l.Port);
+        var activeUdpPorts = ipGlobalProperties.GetActiveUdpListeners().Select(l => l.Port);
+
+        var activePorts = activeTcpPorts.Concat(activeUdpPorts).ToHashSet();
+
+        var port = startingPort;
+        while (activePorts.Contains(port))
+        {
+            port++;
+        }
+
+        return port;
     }
 
     private sealed class LockedConsoleLoggerProvider : ILoggerProvider

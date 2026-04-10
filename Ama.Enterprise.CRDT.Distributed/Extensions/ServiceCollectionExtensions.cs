@@ -42,6 +42,9 @@ public static class ServiceCollectionExtensions
         services.AddCrdtApplicatorDecorator<CompactingApplicatorDecorator>(DecoratorBehavior.After);
 
         services.AddSingleton<DistributedCrdtScopeProvider>();
+        
+        // Ensures documents initialize their states from their registered persistence providers eagerly on startup
+        services.AddHostedService<CrdtInitializationService>();
 
         return services;
     }

@@ -18,6 +18,13 @@ public interface IDistributedCrdtDocument
     string DocumentId { get; }
 
     /// <summary>
+    /// Initializes the document, loading initial state from persistent storage if configured natively.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task InitializeAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets the current local Dotted Version Vector representing the exact synchronization state.
     /// </summary>
     DottedVersionVector GetLocalState();

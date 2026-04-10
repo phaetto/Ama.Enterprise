@@ -2,6 +2,7 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Extensions;
@@ -27,6 +28,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly IVersionVectorSyncService syncService;
     private readonly IServiceProvider serviceProvider;
     private readonly ICrdtSerializer serializer;
+    private readonly IDistributedCrdtStorage<TState>? storage;
+    private readonly IDistributedCrdtGlobalStorage? globalStorage;
     private readonly ILogger<DistributedCrdtDocument<TState>> logger;
     private readonly bool activeSyncEnabled;
     private readonly object syncRoot = new();
@@ -50,11 +53,15 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         IOptions<DistributedCrdtOptions> options,
         IServiceProvider serviceProvider,
         ICrdtSerializer serializer,
+        IEnumerable<IDistributedCrdtStorage<TState>> storageProviders,
+        IEnumerable<IDistributedCrdtGlobalStorage> globalStorages,
         ILogger<DistributedCrdtDocument<TState>> logger)
     {
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
         if (metadataManager == null) throw new ArgumentNullException(nameof(metadataManager));
         if (options == null) throw new ArgumentNullException(nameof(options));
+        if (storageProviders == null) throw new ArgumentNullException(nameof(storageProviders));
+        if (globalStorages == null) throw new ArgumentNullException(nameof(globalStorages));
         
         DocumentId = documentId;
         this.replicaContext = replicaContext ?? throw new ArgumentNullException(nameof(replicaContext));
@@ -63,6 +70,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         this.syncService = syncService ?? throw new ArgumentNullException(nameof(syncService));
         this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+        this.storage = storageProviders.FirstOrDefault();
+        this.globalStorage = globalStorages.FirstOrDefault();
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         this.activeSyncEnabled = options.Value.ActiveSyncEnabled;
@@ -70,6 +79,31 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         var initialState = new TState();
         var metadata = metadataManager.Initialize(initialState);
         Document = new CrdtDocument<TState>(initialState, metadata);
+    }
+
+    /// <inheritdoc />
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        if (storage != null)
+        {
+            try
+            {
+                var storedDoc = await storage.LoadAsync(DocumentId, cancellationToken).ConfigureAwait(false);
+                if (storedDoc != null)
+                {
+                    lock (syncRoot)
+                    {
+                        Document = storedDoc.Value;
+                    }
+                    StateChanged?.Invoke(this, EventArgs.Empty);
+                    logger.LogInformation("Successfully loaded initial state for document {DocumentId} from persistent storage.", DocumentId);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to load initial state for document {DocumentId} from persistent storage.", DocumentId);
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -86,6 +120,30 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         lock (syncRoot)
         {
             Document = result.Document;
+        }
+
+        if (globalStorage != null)
+        {
+            try
+            {
+                await globalStorage.SaveGlobalVersionVectorAsync(replicaContext.ReplicaId, replicaContext.GlobalVersionVector, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to persist global version vector to storage after local patch on document {DocumentId}.", DocumentId);
+            }
+        }
+
+        if (storage != null)
+        {
+            try
+            {
+                await storage.SaveAsync(DocumentId, Document, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to persist document {DocumentId} state to storage after local patch.", DocumentId);
+            }
         }
 
         StateChanged?.Invoke(this, EventArgs.Empty);
@@ -170,6 +228,30 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         lock (syncRoot)
         {
             Document = result.Document;
+        }
+
+        if (globalStorage != null)
+        {
+            try
+            {
+                await globalStorage.SaveGlobalVersionVectorAsync(replicaContext.ReplicaId, replicaContext.GlobalVersionVector, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to persist global version vector to storage after remote operations synchronization on document {DocumentId}.", DocumentId);
+            }
+        }
+
+        if (storage != null)
+        {
+            try
+            {
+                await storage.SaveAsync(DocumentId, Document, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to persist document {DocumentId} state to storage after remote operations synchronization.", DocumentId);
+            }
         }
 
         StateChanged?.Invoke(this, EventArgs.Empty);
