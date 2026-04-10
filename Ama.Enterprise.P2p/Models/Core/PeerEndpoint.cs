@@ -2,12 +2,11 @@ namespace Ama.Enterprise.P2p.Models.Core;
 
 using System;
 using System.Text.Json.Serialization;
+using Ama.Enterprise.P2p.Models.Transports;
 
 /// <summary>
 /// Represents the abstract base network address where a peer can be reached.
-/// Designed for polymorphism to support HTTP, WebRTC, and other future transport paradigms.
 /// </summary>
-[JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
-[JsonDerivedType(typeof(HttpPeerEndpoint), "http")]
-[JsonDerivedType(typeof(WebRtcPeerEndpoint), "webrtc")]
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "$type", IgnoreUnrecognizedTypeDiscriminators = true, UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
+[JsonDerivedType(typeof(HttpPeerEndpoint), "http-peer-endpoint")]
 public abstract record PeerEndpoint : IEquatable<PeerEndpoint>;

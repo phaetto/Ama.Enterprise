@@ -1,6 +1,7 @@
-namespace Ama.Enterprise.P2p.Models.Core;
+namespace Ama.Enterprise.P2p.WebRTC.Models;
 
 using System;
+using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
 /// Represents a WebRTC data channel connection endpoint.

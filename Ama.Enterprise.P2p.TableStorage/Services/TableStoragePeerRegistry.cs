@@ -10,6 +10,7 @@ using Microsoft.Extensions.Options;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.TableStorage.Models;
+using Ama.Enterprise.P2p.Models.Transports;
 
 /// <summary>
 /// Implements an AOT-friendly, durable peer registry backed by Azure Table Storage.

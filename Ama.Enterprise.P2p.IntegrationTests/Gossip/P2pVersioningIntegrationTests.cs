@@ -21,6 +21,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
+using Ama.Enterprise.P2p.Models.Transports;
 
 /// <summary>
 /// Integration tests verifying backwards compatibility and protocol versioning constraints.

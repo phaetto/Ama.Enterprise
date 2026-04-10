@@ -2,7 +2,6 @@ namespace Ama.Enterprise.P2p.UnitTests.Gossip.Extensions;
 
 using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;
-using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.Services.Gossip;
@@ -14,6 +13,7 @@ using Xunit;
 using System;
 using Ama.Enterprise.P2p.Services.Transports;
 using Ama.Enterprise.P2p.Services;
+using Ama.Enterprise.P2p.Models.Transports;
 
 public sealed class ServiceCollectionExtensionsTests
 {

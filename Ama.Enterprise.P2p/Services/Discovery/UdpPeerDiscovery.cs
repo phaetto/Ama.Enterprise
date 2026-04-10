@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
+using Ama.Enterprise.P2p.Models.Discovery;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -157,9 +158,10 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
                         discoveredPeers.Add(node);
                     }
                 }
-                catch
+                catch(Exception ex)
                 {
                     // Ignore parsing errors from alien network packets
+                    logger.LogTrace(ex, "[{MeshId}] An error occurred while deserializing UDP discovery responses.", meshId);
                 }
             }
         }
@@ -207,7 +209,11 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
                         await listener.SendAsync(responseBytes, responseBytes.Length, result.RemoteEndPoint).ConfigureAwait(false);
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    // Ignore parsing errors from alien network packets
+                    logger.LogTrace(ex, "[{MeshId}] An error occurred while serializing UDP discovery responses.", meshId);
+                }
             }
         }
         catch (OperationCanceledException) { }

@@ -7,7 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p;
-using Ama.Enterprise.P2p.Models.Core;
+using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -98,9 +98,34 @@ public sealed class HttpTransportListener<TMessage>(
                 var context = await httpListener.GetContextAsync().ConfigureAwait(false);
                 _ = Task.Run(() => ProcessRequestAsync(context, onMessageReceived, cancellationToken), cancellationToken);
             }
-            catch (HttpListenerException) when (cancellationToken.IsCancellationRequested || !httpListener.IsListening)
+            catch (ObjectDisposedException)
             {
+                // The listener was safely disposed, break the loop without throwing an error
                 break;
+            }
+            catch (HttpListenerException ex)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                bool isListening = false;
+                try
+                {
+                    isListening = httpListener.IsListening;
+                }
+                catch (ObjectDisposedException)
+                {
+                    break;
+                }
+
+                if (!isListening)
+                {
+                    break;
+                }
+
+                logger.LogError(ex, "[{MeshId}] HTTP listener error while accepting incoming request.", meshId);
             }
             catch (Exception ex)
             {
@@ -177,10 +202,18 @@ public sealed class HttpTransportListener<TMessage>(
 
         if (httpListener is not null)
         {
-            if (httpListener.IsListening)
+            try
             {
-                httpListener.Stop();
+                if (httpListener.IsListening)
+                {
+                    httpListener.Stop();
+                }
             }
+            catch (ObjectDisposedException)
+            {
+                // Ignore if it was already disposed
+            }
+            
             httpListener.Close();
         }
     }

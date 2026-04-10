@@ -75,8 +75,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// <inheritdoc />
     public async Task ApplyPatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default)
     {
-        if (patch == null) throw new ArgumentNullException(nameof(patch));
-
         CrdtDocument<TState> currentDoc;
         lock (syncRoot)
         {

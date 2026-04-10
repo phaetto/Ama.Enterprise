@@ -1,4 +1,6 @@
-namespace Ama.Enterprise.P2p.Models.Core;
+namespace Ama.Enterprise.P2p.Models.Transports;
+
+using Ama.Enterprise.P2p.Models.Core;
 
 using System;
 

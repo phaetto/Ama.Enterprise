@@ -20,6 +20,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Shouldly;
 using Xunit;
+using Ama.Enterprise.P2p.Models.Transports;
 
 /// <summary>
 /// Contains advanced integration tests focusing on edge cases, high concurrency, and specific network topologies.

@@ -1,6 +1,11 @@
 namespace Ama.Enterprise.P2p.WebRTC.Extensions;
 
 using System;
+using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
+using Ama.CRDT.Extensions;
+using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
@@ -9,7 +14,6 @@ using Ama.Enterprise.P2p.WebRTC.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Ama.CRDT.Services.Serialization;
 
 /// <summary>
 /// Extension methods for securely registering cross-platform WebRTC transport components deeply integrated onto any configured P2P mesh logic explicitly.
@@ -40,6 +44,41 @@ public static class ServiceCollectionExtensions
         {
             builder.Services.Configure(builder.MeshId, configureOptions);
         }
+
+        // Register STJ AOT Context for WebRTC models into the CRDT mesh context safely
+        if (!builder.Services.Any(s => s.ServiceType == typeof(IJsonTypeInfoResolver) && (string?)s.ServiceKey == "Ama.CRDT" && s.ImplementationInstance == WebRtcJsonContext.Default))
+        {
+            builder.Services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", WebRtcJsonContext.Default);
+        }
+
+        // Map the internal serializer tracking identifier directly matching derived AOT definitions
+        builder.Services.AddCrdtSerializableType<WebRtcPeerEndpoint>("webrtc-peer-endpoint");
+
+        // Explicitly inject the cross-assembly polymorphism modifier safely for strictly native AOT compilation behaviors
+        builder.Services.Configure<JsonSerializerOptions>(options =>
+        {
+            if (options.TypeInfoResolver is not null)
+            {
+                options.TypeInfoResolver = options.TypeInfoResolver.WithAddedModifier(ti =>
+                {
+                    if (ti.Type == typeof(PeerEndpoint))
+                    {
+                        ti.PolymorphismOptions ??= new JsonPolymorphismOptions
+                        {
+                            TypeDiscriminatorPropertyName = "$type",
+                            IgnoreUnrecognizedTypeDiscriminators = true,
+                            UnknownDerivedTypeHandling = System.Text.Json.Serialization.JsonUnknownDerivedTypeHandling.FallBackToBaseType
+                        };
+
+                        // Prevent duplicated derivations upon multiple identical scoped registrations
+                        if (!ti.PolymorphismOptions.DerivedTypes.Any(dt => dt.DerivedType == typeof(WebRtcPeerEndpoint)))
+                        {
+                            ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(WebRtcPeerEndpoint), "webrtc-peer-endpoint"));
+                        }
+                    }
+                });
+            }
+        });
 
         // Add the primary connection manager handling invitation lifecycle capabilities dynamically
         builder.Services.AddKeyedSingleton<WebRtcConnectionManager>(builder.MeshId, (sp, key) =>

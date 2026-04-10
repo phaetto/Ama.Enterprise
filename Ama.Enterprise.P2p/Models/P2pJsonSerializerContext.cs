@@ -2,6 +2,7 @@ namespace Ama.Enterprise.P2p.Models.Gossip;
 
 using System.Text.Json.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
+using Ama.Enterprise.P2p.Models.Transports;
 
 /// <summary>
 /// AOT-friendly JSON context for P2P models.
@@ -10,7 +11,6 @@ using Ama.Enterprise.P2p.Models.Core;
 [JsonSerializable(typeof(PeerNode))]
 [JsonSerializable(typeof(PeerEndpoint))]
 [JsonSerializable(typeof(HttpPeerEndpoint))]
-[JsonSerializable(typeof(WebRtcPeerEndpoint))]
 public partial class P2pJsonSerializerContext : JsonSerializerContext
 {
 }

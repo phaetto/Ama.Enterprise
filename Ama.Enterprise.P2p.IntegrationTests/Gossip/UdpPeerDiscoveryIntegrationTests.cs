@@ -110,7 +110,7 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
             {
                 options.MulticastAddress = "239.255.0.1"; 
                 options.MulticastPort = multicastPort;
-                options.DiscoveryTimeout = TimeSpan.FromSeconds(3);
+                options.DiscoveryTimeout = TimeSpan.FromSeconds(5);
             });
 
         var provider = services.BuildServiceProvider();

@@ -104,10 +104,11 @@
 | `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Services/WebRtcTransportIntegrationTests.cs` | End-to-end integration tests verifying functional WebRTC SDP handshake synchronization and STUN connection mechanisms safely. Skipped by default. |
 | `$/Ama.Enterprise.P2p.WebRTC.TableStorage/Ama.Enterprise.P2p.WebRTC.TableStorage.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.WebRTC/Ama.Enterprise.P2p.WebRTC.csproj` | No description provided. |
-| `$/Ama.Enterprise.P2p.WebRTC/Extensions/ServiceCollectionExtensions.cs` | WebRTC dependency injection pipeline configuring underlying STUN models mapping transports securely alongside base generic Gossip meshes natively. |
+| `$/Ama.Enterprise.P2p.WebRTC/Extensions/ServiceCollectionExtensions.cs` | WebRTC dependency injection pipeline configuring underlying STUN models mapping transports securely alongside base generic Gossip meshes natively, heavily updated to inject dynamic cross-assembly JSON polymorphism resolvers. |
 | `$/Ama.Enterprise.P2p.WebRTC/Models/WebRtcHandshakeMessage.cs` | In-band signaling structure notifying explicitly local identity topologies securely through initialized WebRTC channels safely. |
 | `$/Ama.Enterprise.P2p.WebRTC/Models/WebRtcJsonContext.cs` | Baseline STJ context generation tracking dynamically WebRTC handshake protocols completely. |
 | `$/Ama.Enterprise.P2p.WebRTC/Models/WebRtcOptions.cs` | Configuration structure holding explicit ICE servers natively bound to AOT-friendly serialization mappings. |
+| `$/Ama.Enterprise.P2p.WebRTC/Models/WebRtcPeerEndpoint.cs` | WebRTC data channel connection endpoint identifying uniquely scoped connection states securely. |
 | `$/Ama.Enterprise.P2p.WebRTC/Services/IWebRtcConnectionManager.cs` | Interface isolating abstract signaling scopes natively exposing Data Channel inbound references. |
 | `$/Ama.Enterprise.P2p.WebRTC/Services/IWebRtcInvitationService.cs` | Generic mechanism exchanging SDP structures seamlessly representing localized peer invitations dynamically cross boundaries appropriately. |
 | `$/Ama.Enterprise.P2p.WebRTC/Services/WebRtcConnectionManager.cs` | Internal hosted implementation managing explicitly SIPSorcery RTCPeer connections directly bound within localized mesh scopes correctly. |
@@ -120,19 +121,18 @@
 | `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | DI extension methods configuring P2P Gossip protocol components. Updated `HttpTransport` registration to inject `IPeerRegistry` dependency. |
 | `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Registration logic configuring Dependency Injection specifically targeting the UDP peer discovery sub-components and background services. |
 | `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
-| `$/Ama.Enterprise.P2p/Models/Core/HttpPeerEndpoint.cs` | Concrete HTTP-based network endpoint inheriting from the polymorphic `PeerEndpoint`. |
-| `$/Ama.Enterprise.P2p/Models/Core/HttpTransportOptions.cs` | Configuration options for the HTTP transport layer, fully decoupled from protocol-specific rules like Gossip natively resolving endpoints safely. |
 | `$/Ama.Enterprise.P2p/Models/Core/P2pMeshMetadata.cs` | Metadata record registering a specific mesh identifier into the global dependency container for orchestration. |
 | `$/Ama.Enterprise.P2p/Models/Core/P2pNodeOptions.cs` | Centralized generic configuration options holding the core node identity (ID and Endpoint) for the P2P Mesh. |
-| `$/Ama.Enterprise.P2p/Models/Core/PeerEndpoint.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Models/Core/PeerEndpoint.cs` | Abstract base record for peer endpoints, explicitly configured with JSON polymorphic attributes natively mapping same-assembly derivatives to support standard AOT serialization. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerId.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerNode.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerStatus.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Models/Core/UdpDiscoveryOptions.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Models/Core/WebRtcPeerEndpoint.cs` | WebRTC data channel connection endpoint identifying uniquely scoped connection states securely. |
+| `$/Ama.Enterprise.P2p/Models/Discovery/UdpDiscoveryOptions.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Gossip/GossipMessage.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Gossip/GossipOptions.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/P2pJsonSerializerContext.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Models/Transports/HttpPeerEndpoint.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Models/Transports/HttpTransportOptions.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IFailureDetector.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IInboundMessageQueue.cs` | Defines an internal queue for decoupling inbound network listeners from the protocol logic. |
 | `$/Ama.Enterprise.P2p/Services/Core/IMessageDispatcher.cs` | Generic interface routing incoming protocol messages to registered handlers. |

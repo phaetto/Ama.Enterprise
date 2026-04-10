@@ -20,6 +20,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
+using Ama.Enterprise.P2p.Models.Transports;
 
 /// <summary>
 /// Contains complex integration tests validating actual TCP/HTTP binding, protocol cycles, and payload distributions.
