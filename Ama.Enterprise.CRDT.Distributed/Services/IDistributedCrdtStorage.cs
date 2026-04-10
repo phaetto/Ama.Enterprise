@@ -55,4 +55,12 @@ public interface IDistributedCrdtStorage : ICrdtOperationJournal
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous trim operation.</returns>
     Task TrimAsync(IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Retrieves all currently persisted operations from the journal. 
+    /// Used during initialization to replay uncheckpointed operations protecting against data loss securely.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>An asynchronous stream of all journaled operations.</returns>
+    IAsyncEnumerable<JournaledOperation> GetAllJournaledOperationsAsync(CancellationToken cancellationToken = default);
 }

@@ -8,7 +8,6 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
-using Ama.CRDT.Services.Journaling;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
@@ -182,6 +181,19 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         lock (syncRoot) { snapshot = journal.ToList(); }
 
         foreach (var op in snapshot.Where(o => o.Operation.ReplicaId == originReplicaId && clocks.Contains(o.Operation.GlobalClock)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return op;
+        }
+        await Task.CompletedTask;
+    }
+
+    public async IAsyncEnumerable<JournaledOperation> GetAllJournaledOperationsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        List<JournaledOperation> snapshot;
+        lock (syncRoot) { snapshot = journal.ToList(); }
+
+        foreach (var op in snapshot)
         {
             cancellationToken.ThrowIfCancellationRequested();
             yield return op;

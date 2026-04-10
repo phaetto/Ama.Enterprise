@@ -105,6 +105,24 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage
     }
 
     /// <inheritdoc />
+    public async IAsyncEnumerable<JournaledOperation> GetAllJournaledOperationsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        List<JournaledOperation> snapshot;
+        lock (syncRoot) 
+        { 
+            snapshot = operations.ToList(); 
+        }
+
+        foreach (var op in snapshot)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return op;
+        }
+
+        await Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
     public Task<DottedVersionVector?> LoadGlobalVersionVectorAsync(string replicaId, CancellationToken cancellationToken = default) => Task.FromResult<DottedVersionVector?>(null);
 
     /// <inheritdoc />

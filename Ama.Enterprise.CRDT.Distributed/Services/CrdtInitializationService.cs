@@ -2,6 +2,7 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
@@ -78,7 +79,36 @@ public sealed class CrdtInitializationService : IHostedService
                 await document.InitializeAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            logger.LogInformation("Distributed CRDT documents successfully initialized structurally from persistent storage providers.");
+            // 3. Replay uncheckpointed WAL operations perfectly mapping local state back seamlessly
+            if (globalStorage != null)
+            {
+                IDictionary<string, List<CrdtOperation>> operationsByDoc = new Dictionary<string, List<CrdtOperation>>();
+                
+                await foreach (var jOp in globalStorage.GetAllJournaledOperationsAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    if (!operationsByDoc.TryGetValue(jOp.DocumentId, out var opList))
+                    {
+                        opList = new List<CrdtOperation>();
+                        operationsByDoc[jOp.DocumentId] = opList;
+                    }
+                    opList.Add(jOp.Operation);
+                }
+
+                if (operationsByDoc.Count > 0)
+                {
+                    logger.LogInformation("Replaying {Count} journaled operations across documents to securely restore uncheckpointed state seamlessly.", operationsByDoc.Values.Sum(l => l.Count));
+                    
+                    foreach (var document in documents)
+                    {
+                        if (operationsByDoc.TryGetValue(document.DocumentId, out var docOps))
+                        {
+                            await document.ApplyOperationsAsync(docOps, cancellationToken).ConfigureAwait(false);
+                        }
+                    }
+                }
+            }
+
+            logger.LogInformation("Distributed CRDT documents successfully initialized structurally from persistent storage providers and journal.");
         }
         catch (Exception ex)
         {

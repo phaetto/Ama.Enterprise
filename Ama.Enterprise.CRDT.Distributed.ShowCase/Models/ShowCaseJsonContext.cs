@@ -3,7 +3,6 @@ namespace Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using Ama.CRDT.Models;
-using Ama.CRDT.Services.Journaling;
 
 /// <summary>
 /// AOT JSON serialization context for the showcase multi-CRDT models.
