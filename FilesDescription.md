@@ -27,8 +27,20 @@
 | `$/Ama.Enterprise.CRDT.BlazorApp/wwwroot/sample-data/weather.json` | No description provided. |
 | `$/Ama.Enterprise.CRDT.BlazorApp/wwwroot/service-worker.js` | No description provided. |
 | `$/Ama.Enterprise.CRDT.BlazorApp/wwwroot/service-worker.published.js` | No description provided. |
+| `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/Ama.Enterprise.CRDT.Distributed.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Ama.Enterprise.CRDT.Distributed.ShowCase.csproj` | No description provided. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | No description provided. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/DeviceStatus.cs` | Data structure representing the status of an IoT device. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/FleetState.cs` | Root CRDT document model representing fleet devices status. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/ShowCaseCrdtAotContext.cs` | CRDT AOT reflection context mapping types used by the showcase documents. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/ShowCaseJsonContext.cs` | AOT JSON context for the showcase multi-CRDT models. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskItem.cs` | Data structure representing an individual task item. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskListState.cs` | Root CRDT document model representing a task list. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Updated interactive console app showcasing multiple distributed CRDT documents mapping to AOT context correctly. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetManager.cs` | Implementation handling intentions and queries for the fleet document. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/IFleetManager.cs` | Interface for managing the distributed fleet status CRDT document. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ITaskManager.cs` | Interface for managing the distributed task list CRDT document. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/TaskManager.cs` | Implementation handling intentions and queries for the task list document. |
+| `$/Ama.Enterprise.CRDT.Distributed.UnitTests/Ama.Enterprise.CRDT.Distributed.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | DI orchestrations wiring generalized models alongside user-mapped state components explicitly targeted into backend meshes correctly. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtMessageWrapper.cs` | Envelope wrapper mapping generic messages targeting specifically identified CRDT documents across the network topology. |
@@ -54,10 +66,6 @@
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj` | Showcase console application project displaying P2P feature flags integration, AOT readiness, and UDP cluster discovery. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Main entry point containing an interactive UI for observing and interacting with distributed feature flags via gossip synchronization. |
 | `$/Ama.Enterprise.FeatureFlags.UnitTests/Ama.Enterprise.FeatureFlags.UnitTests.csproj` | No description provided. |
-| `$/Ama.Enterprise.FeatureFlags.UnitTests/Extensions/ServiceCollectionExtensionsTests.cs` | Unit tests covering the Dependency Injection registration extensions for feature flags and its P2P components. |
-| `$/Ama.Enterprise.FeatureFlags.UnitTests/Services/MemoryJournalTests.cs` | Unit tests enforcing bounded historical operation access and trimming inside the feature flags in-memory journal. |
-| `$/Ama.Enterprise.FeatureFlags.UnitTests/Services/P2p/FeatureFlagAntiEntropyServiceTests.cs` | Unit tests for the background service that intermittently broadcasts local anti-entropy state over gossip. |
-| `$/Ama.Enterprise.FeatureFlags.UnitTests/Services/P2p/FeatureFlagGossipHandlerTests.cs` | Unit tests ensuring generic payload parsing and integration of remote P2P gossip into the native feature flags CRDT pipeline. |
 | `$/Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | DI extension methods for registering the feature flags module. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlag.cs` | Data structure representing a single feature flag. |
@@ -65,17 +73,8 @@
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagState.cs` | Root CRDT document model containing the state of all feature flags. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsCrdtAotContext.cs` | AOT context for the feature flags models. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsJsonContext.cs` | JSON context for the feature flags models. |
-| `$/Ama.Enterprise.FeatureFlags/Models/P2p/FeatureFlagMessageWrapper.cs` | Envelope wrapper for feature flag messages sent over the P2P network. |
-| `$/Ama.Enterprise.FeatureFlags/Models/P2p/FeatureFlagOperationsMessage.cs` | DTO containing missing CRDT operations transmitted in response to an anti-entropy state sync. |
-| `$/Ama.Enterprise.FeatureFlags/Models/P2p/FeatureFlagP2pJsonContext.cs` | System.Text.Json AOT serialization context for P2P feature flag data transmission models. |
-| `$/Ama.Enterprise.FeatureFlags/Models/P2p/FeatureFlagStateSyncMessage.cs` | DTO carrying the Dotted Version Vector for anti-entropy synchronization over P2P. |
 | `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagClusterManager.cs` | Implementation of the feature flag cluster manager using DVV sync. |
-| `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagCrdtScopeProvider.cs` | Singleton provider that maintains the long-lived CRDT scope for the local replica, ensuring consistent in-memory state. |
 | `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagClusterManager.cs` | Interface for the feature flag cluster manager. |
-| `$/Ama.Enterprise.FeatureFlags/Services/MemoryJournal.cs` | Thread-safe memory journal for CRDT operations in the feature flags module. |
-| `$/Ama.Enterprise.FeatureFlags/Services/P2p/FeatureFlagAntiEntropyService.cs` | Background service that intermittently broadcasts the native replica state over Gossip to trigger feature flag sync across peers. |
-| `$/Ama.Enterprise.FeatureFlags/Services/P2p/FeatureFlagGossipHandler.cs` | Message handler implementing P2P logic to parse payload wrappers and execute CRDT anti-entropy sync locally. |
-| `$/Ama.Enterprise.FeatureFlags/Services/P2p/FeatureFlagTopologyObserver.cs` | Implementation of `IPeerTopologyObserver` that triggers an immediate DVV synchronization when connecting to the first peer in the P2P cluster. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Ama.Enterprise.P2p.IntegrationTests.csproj` | Integration tests project for validating P2P networking components via HTTP loopbacks. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Architecture/VersioningArchitectureTests.cs` | Architectural tests that parse the CI/CD deployment files ensuring specific deployed versions always possess explicit test coverage. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Attributes/IntegrationFactAttribute.cs` | Custom xUnit `FactAttribute` providing a centralized toggle to enable or disable all integration tests. |
