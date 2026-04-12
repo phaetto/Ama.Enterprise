@@ -71,6 +71,13 @@ public interface IDistributedCrdtDocument
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     Task EvictReplicaAsync(string replicaId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Resets the internal CRDT metadata completely, used explicitly when forced to re-bootstrap identity following a cluster tombstone eviction gracefully strictly resolving amnesia states appropriately effectively naturally explicitly safely.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task ResetLocalStateAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>

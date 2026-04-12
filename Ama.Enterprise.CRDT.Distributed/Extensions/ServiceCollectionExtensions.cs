@@ -11,6 +11,7 @@ using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Extension methods for registering completely generic distributed CRDT state logic.
@@ -24,14 +25,27 @@ public static class ServiceCollectionExtensions
     {
         if (services == null) throw new ArgumentNullException(nameof(services));
 
+        var optionsBuilder = services.AddOptions<DistributedCrdtOptions>();
+
         if (configure != null)
         {
-            services.Configure(configure);
+            optionsBuilder.Configure(configure);
         }
-        else
-        {
-            services.Configure<DistributedCrdtOptions>(_ => { });
-        }
+
+        // Validate the options rigorously to prevent systemic oscillations and side effects
+        // effectively bounded by strictly validated topology rules.
+        optionsBuilder
+            .Validate(options => options.CheckpointIntervalSeconds > 0, 
+                "CheckpointIntervalSeconds must be greater than zero.")
+            .Validate(options => options.AntiEntropyIntervalSeconds > 0, 
+                "AntiEntropyIntervalSeconds must be greater than zero.")
+            .Validate(options => options.AntiEntropyInitialDelaySeconds >= 0, 
+                "AntiEntropyInitialDelaySeconds cannot be negative.")
+            .Validate(options => options.PeerEvictionTtlSeconds == 0 || options.PeerEvictionTtlSeconds >= options.AntiEntropyIntervalSeconds * 3, 
+                "PeerEvictionTtlSeconds must be at least 3 times the AntiEntropyIntervalSeconds to prevent peer topology oscillation.")
+            .Validate(options => options.PeerEvictionTtlSeconds == 0 || options.PeerEvictionTtlSeconds >= options.CheckpointIntervalSeconds, 
+                "PeerEvictionTtlSeconds must be greater than or equal to the CheckpointIntervalSeconds as evictions are processed during checkpoint cycles.")
+            .ValidateOnStart();
 
         services.AddCrdt()
                 .AddCrdtJsonTypeInfoResolver(DistributedCrdtP2pJsonContext.Default);

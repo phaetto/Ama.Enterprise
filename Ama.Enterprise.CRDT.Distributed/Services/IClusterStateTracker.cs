@@ -24,15 +24,37 @@ public interface IClusterStateTracker
     IReadOnlyList<DottedVersionVector> GetClusterStates();
 
     /// <summary>
-    /// Removes a disconnected peer from the explicitly mapped underlying sequence boundaries explicitly securely using its network ID.
+    /// Safely unmaps a disconnected network peer ID without causing CRDT amnesia. 
+    /// The CRDT state remains preserved until the TTL expires allowing for safe offline recovery.
     /// </summary>
     /// <param name="peerId">The remote network peer identifier.</param>
     void RemovePeerByNetworkId(string peerId);
 
     /// <summary>
-    /// Identifies and removes peers that have not updated their state within the specified Time-To-Live (TTL) limit.
+    /// Permanently tombstones a replica, tracking its ID so any future incoming messages from it are categorically rejected
+    /// enforcing strict cluster continuity and preventing split-brain amnesia anomalies natively.
+    /// </summary>
+    /// <param name="replicaId">The identifier of the replica to tombstone.</param>
+    void TombstoneReplica(string replicaId);
+
+    /// <summary>
+    /// Instantly tombstones a peer based on its network ID, typically used during graceful P2P departures.
+    /// </summary>
+    /// <param name="peerId">The remote network peer identifier.</param>
+    /// <returns>The CRDT Replica ID if a mapping existed; otherwise, null.</returns>
+    string? TombstonePeerByNetworkId(string peerId);
+
+    /// <summary>
+    /// Checks whether the specified replica identifier has been explicitly tombstoned by the cluster.
+    /// </summary>
+    /// <param name="replicaId">The replica identifier to check.</param>
+    /// <returns><c>true</c> if tombstoned; otherwise, <c>false</c>.</returns>
+    bool IsReplicaTombstoned(string replicaId);
+
+    /// <summary>
+    /// Identifies and tombstones peers that have not updated their state within the specified Time-To-Live (TTL) limit natively avoiding network amnesia edge cases.
     /// </summary>
     /// <param name="ttl">The time-to-live duration determining expiration.</param>
-    /// <returns>A list of replica identifiers that were evicted.</returns>
-    IReadOnlyList<string> GetAndRemoveExpiredPeers(TimeSpan ttl);
+    /// <returns>A list of replica identifiers that were actively tombstoned.</returns>
+    IReadOnlyList<string> GetAndTombstoneExpiredPeers(TimeSpan ttl);
 }

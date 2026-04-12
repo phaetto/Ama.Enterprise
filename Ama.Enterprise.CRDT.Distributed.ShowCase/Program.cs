@@ -57,6 +57,8 @@ public static class Program
         {
             options.ReplicaId = replicaId;
             options.ActiveSyncEnabled = true;
+            options.PeerEvictionTtlSeconds = 20;
+            options.CheckpointIntervalSeconds = 10;
         });
 
         // Register the showcase JSON AOT and CRDT AOT contexts directly into the generic CRDT pipeline

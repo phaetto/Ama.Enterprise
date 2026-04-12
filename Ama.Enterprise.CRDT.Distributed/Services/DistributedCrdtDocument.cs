@@ -437,6 +437,27 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <inheritdoc />
+    public async Task ResetLocalStateAsync(CancellationToken cancellationToken = default)
+    {
+        await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            lock (syncRoot)
+            {
+                metadataManager.Reset(Document);
+                isDirty = true;
+            }
+        }
+        finally
+        {
+            modificationLock.Release();
+        }
+
+        StateChanged?.Invoke(this, EventArgs.Empty);
+        logger.LogInformation("Successfully reset local document metadata and state for Document {DocumentId} following identity re-bootstrap.", DocumentId);
+    }
+
     private async Task BroadcastOperationAsync(CrdtOperation operation, CancellationToken cancellationToken)
     {
         try

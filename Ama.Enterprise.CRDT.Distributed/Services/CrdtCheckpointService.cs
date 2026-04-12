@@ -70,15 +70,17 @@ public sealed class CrdtCheckpointService : BackgroundService
                 if (options.Value.PeerEvictionTtlSeconds > 0)
                 {
                     var evictionTtl = TimeSpan.FromSeconds(options.Value.PeerEvictionTtlSeconds);
-                    var expiredPeers = clusterTracker.GetAndRemoveExpiredPeers(evictionTtl);
+                    
+                    // Replicas evicted this way are tombstoned correctly inherently preventing causal structural amnesia gracefully
+                    var tombstonedPeers = clusterTracker.GetAndTombstoneExpiredPeers(evictionTtl);
 
-                    if (expiredPeers.Count > 0)
+                    if (tombstonedPeers.Count > 0)
                     {
-                        logger.LogInformation("Evicting {Count} dead peers based on TTL threshold ({TtlSeconds}s).", expiredPeers.Count, options.Value.PeerEvictionTtlSeconds);
+                        logger.LogInformation("Tombstoned {Count} dead peers based on TTL threshold ({TtlSeconds}s) preventing network log bound halts.", tombstonedPeers.Count, options.Value.PeerEvictionTtlSeconds);
 
                         foreach (var document in documents)
                         {
-                            foreach (var peerId in expiredPeers)
+                            foreach (var peerId in tombstonedPeers)
                             {
                                 await document.EvictReplicaAsync(peerId, stoppingToken).ConfigureAwait(false);
                             }
@@ -87,7 +89,7 @@ public sealed class CrdtCheckpointService : BackgroundService
                         var sourceDvvForEviction = replicaContext.GlobalVersionVector;
                         lock (sourceDvvForEviction)
                         {
-                            var cleanedDvv = syncService.RemoveEvictedReplicas(sourceDvvForEviction, expiredPeers);
+                            var cleanedDvv = syncService.RemoveEvictedReplicas(sourceDvvForEviction, tombstonedPeers);
                             
                             sourceDvvForEviction.Versions.Clear();
                             foreach (var kvp in cleanedDvv.Versions)

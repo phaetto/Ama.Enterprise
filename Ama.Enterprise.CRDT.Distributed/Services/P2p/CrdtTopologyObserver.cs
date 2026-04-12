@@ -4,6 +4,10 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.CRDT.Models;
+using Ama.CRDT.Services;
+using Ama.CRDT.Services.Versioning;
+using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -54,15 +58,54 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver
     }
 
     /// <inheritdoc />
-    public Task OnPeerDepartedAsync(PeerId peerId, CancellationToken cancellationToken)
+    public async Task OnPeerDepartedAsync(PeerId peerId, CancellationToken cancellationToken)
     {
         if (peerId.Value != Guid.Empty)
         {
             var stringId = peerId.Value.ToString();
-            logger.LogInformation("Removing detached peer {PeerId} from active underlying GMVV tracker matrices.", stringId);
-            clusterTracker.RemovePeerByNetworkId(stringId);
+            logger.LogInformation("Peer {PeerId} gracefully departed. Instantly tombstoning it to free GMVV tracking limits securely.", stringId);
+            
+            var replicaId = clusterTracker.TombstonePeerByNetworkId(stringId);
+
+            if (!string.IsNullOrEmpty(replicaId))
+            {
+                try
+                {
+                    var documents = scopeProvider.Scope.ServiceProvider.GetRequiredService<IEnumerable<IDistributedCrdtDocument>>();
+                    foreach (var document in documents)
+                    {
+                        await document.EvictReplicaAsync(replicaId, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+                    var syncService = scopeProvider.Scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
+
+                    lock (replicaContext.GlobalVersionVector)
+                    {
+                        var cleanedDvv = syncService.RemoveEvictedReplicas(replicaContext.GlobalVersionVector, new[] { replicaId });
+                        
+                        replicaContext.GlobalVersionVector.Versions.Clear();
+                        foreach (var kvp in cleanedDvv.Versions)
+                        {
+                            replicaContext.GlobalVersionVector.Versions[kvp.Key] = kvp.Value;
+                        }
+                        
+                        replicaContext.GlobalVersionVector.Dots.Clear();
+                        if (cleanedDvv.Dots != null)
+                        {
+                            foreach (var kvp in cleanedDvv.Dots)
+                            {
+                                replicaContext.GlobalVersionVector.Dots[kvp.Key] = kvp.Value;
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Failed to properly clean underlying CRDT limits and DVV boundaries during an instant graceful peer departure.");
+                }
+            }
         }
-        return Task.CompletedTask;
     }
 
     /// <inheritdoc />
@@ -73,7 +116,9 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver
             if (peerId.Value != Guid.Empty)
             {
                 var stringId = peerId.Value.ToString();
-                logger.LogInformation("Cleaning up dead offline peer {PeerId} mapping natively adjusting cluster tracking states.", stringId);
+                logger.LogInformation("Peer {PeerId} marked as Dead (network drop). Unmapping network ID but explicitly preserving CRDT state to allow safe offline reconnect without forcing identity re-bootstraps.", stringId);
+                
+                // Intentionally DO NOT tombstone here to prevent data loss. The background TTL service will clean it if it doesn't return.
                 clusterTracker.RemovePeerByNetworkId(stringId);
             }
         }

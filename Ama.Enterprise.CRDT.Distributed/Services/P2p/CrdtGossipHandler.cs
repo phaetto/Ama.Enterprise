@@ -60,7 +60,14 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
             return;
         }
 
-        var documents = scopeProvider.Scope.ServiceProvider.GetRequiredService<IEnumerable<IDistributedCrdtDocument>>();
+        var documents = scopeProvider.Scope.ServiceProvider.GetRequiredService<IEnumerable<IDistributedCrdtDocument>>().ToList();
+        
+        if (wrapper.MessageType == "CrdtEviction")
+        {
+            await ProcessEvictionRejectionAsync(documents, wrapper, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         var targetDoc = documents.FirstOrDefault(d => d.DocumentId == wrapper.DocumentId);
 
         if (targetDoc == null)
@@ -87,6 +94,13 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
         try
         {
             var syncMsg = serializer.DeserializeFromBytes<CrdtStateSyncMessage>(wrapper.Payload!);
+            
+            if (syncMsg.ReplicaId != null && clusterTracker.IsReplicaTombstoned(syncMsg.ReplicaId))
+            {
+                await RejectEvictedReplicaAsync(targetDoc, syncMsg.ReplicaId, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
             var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
             var p2pProtocol = scopeProvider.Scope.ServiceProvider.GetRequiredService<IP2pProtocol>();
 
@@ -98,18 +112,18 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
             // Immediately track the globally reported DVV for background mathematically secure truncation trimming maps natively
             clusterTracker.UpdatePeerState(syncMsg.ReplicaId, senderId.Value.ToString(), syncMsg.State);
 
-            var (missingOps, snapshotRequired) = await targetDoc.GetMissingOperationsAsync(syncMsg.ReplicaId, syncMsg.State, cancellationToken).ConfigureAwait(false);
+            var missingOpsResult = await targetDoc.GetMissingOperationsAsync(syncMsg.ReplicaId, syncMsg.State, cancellationToken).ConfigureAwait(false);
             
-            if (snapshotRequired)
+            if (missingOpsResult.SnapshotRequired)
             {
                 logger.LogWarning("Journal bounds structurally trimmed. Cannot securely map logical operations matching replica {ReplicaId} requirements for document {DocumentId}. Automatically triggering complete state-based snapshot.", syncMsg.ReplicaId, targetDoc.DocumentId);
                 await targetDoc.ProvideSnapshotAsync(syncMsg.ReplicaId, cancellationToken).ConfigureAwait(false);
             }
-            else if (missingOps.Count > 0)
+            else if (missingOpsResult.Operations.Count > 0)
             {
-                logger.LogDebug("Sending {Count} missing operations for document {DocumentId} to replica {ReplicaId}", missingOps.Count, targetDoc.DocumentId, syncMsg.ReplicaId);
+                logger.LogDebug("Sending {Count} missing operations for document {DocumentId} to replica {ReplicaId}", missingOpsResult.Operations.Count, targetDoc.DocumentId, syncMsg.ReplicaId);
                 
-                var opsMsg = new CrdtOperationsMessage(replicaContext.ReplicaId, missingOps.ToArray());
+                var opsMsg = new CrdtOperationsMessage(replicaContext.ReplicaId, missingOpsResult.Operations.ToArray());
                 var opsPayload = serializer.SerializeToBytes(opsMsg);
                 
                 var replyWrapper = new CrdtMessageWrapper(targetDoc.DocumentId, "CrdtOps", opsPayload);
@@ -130,6 +144,12 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
         {
             var opsMsg = serializer.DeserializeFromBytes<CrdtOperationsMessage>(wrapper.Payload!);
             
+            if (opsMsg.ReplicaId != null && clusterTracker.IsReplicaTombstoned(opsMsg.ReplicaId))
+            {
+                await RejectEvictedReplicaAsync(targetDoc, opsMsg.ReplicaId, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
             if (opsMsg.Operations == null || opsMsg.Operations.Length == 0)
             {
                 return;
@@ -150,6 +170,13 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
         try
         {
             var resMsg = serializer.DeserializeFromBytes<CrdtSnapshotMessage>(wrapper.Payload!);
+            
+            if (resMsg.ReplicaId != null && clusterTracker.IsReplicaTombstoned(resMsg.ReplicaId))
+            {
+                await RejectEvictedReplicaAsync(targetDoc, resMsg.ReplicaId, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
             var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
 
             if (resMsg.ReplicaId == replicaContext.ReplicaId)
@@ -168,5 +195,72 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
         {
             logger.LogError(ex, "Failed to safely process full state snapshot payload correctly for document {DocumentId}.", targetDoc.DocumentId);
         }
+    }
+
+    private async Task ProcessEvictionRejectionAsync(IEnumerable<IDistributedCrdtDocument> documents, CrdtMessageWrapper wrapper, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var rejectionMsg = serializer.DeserializeFromBytes<CrdtEvictionRejectionMessage>(wrapper.Payload!);
+            var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+
+            if (rejectionMsg.EvictedReplicaId == replicaContext.ReplicaId)
+            {
+                logger.LogCritical("CRITICAL: This replica ({ReplicaId}) has been permanently tombstoned by the cluster. Re-bootstrapping identity completely to prevent split-brain amnesia anomalies.", replicaContext.ReplicaId);
+                
+                // Extract current ID and strip any previously appended re-bootstrap GUID suffix to prevent the string from growing indefinitely.
+                var currentId = replicaContext.ReplicaId ?? string.Empty;
+                var lastUnderscore = currentId.LastIndexOf('_');
+                
+                // A Guid string formatted with "N" is 32 characters long
+                var prefix = (lastUnderscore >= 0 && currentId.Length - lastUnderscore - 1 == 32)
+                    ? currentId[..lastUnderscore]
+                    : currentId;
+
+                // Re-bootstrap identity securely natively mitigating split-brain anomalies accurately perfectly thoroughly naturally cleanly correctly explicitly structurally.
+                replicaContext.ReplicaId = string.IsNullOrEmpty(prefix) 
+                    ? Guid.NewGuid().ToString("N") 
+                    : $"{prefix}_{Guid.NewGuid():N}";
+                
+                logger.LogCritical("CRITICAL: This replica is now known as: {ReplicaId}", replicaContext.ReplicaId);
+                
+                lock (replicaContext.GlobalVersionVector)
+                {
+                    replicaContext.GlobalVersionVector.Versions.Clear();
+                    
+                    if (replicaContext.GlobalVersionVector.Dots != null)
+                    {
+                        replicaContext.GlobalVersionVector.Dots.Clear();
+                    }
+                }
+
+                // Flush all local documents and enforce clean state naturally ensuring overarching global logic structurally flawlessly perfectly
+                foreach (var doc in documents)
+                {
+                    await doc.ResetLocalStateAsync(cancellationToken).ConfigureAwait(false);
+                    
+                    // Broadcast empty DVV so cluster naturally sends back a full merged snapshot over anti-entropy gracefully natively cleanly
+                    await doc.BroadcastStateAsync(cancellationToken).ConfigureAwait(false);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to successfully execute identity re-bootstrap from an eviction rejection message mapping accurately.");
+        }
+    }
+
+    private async Task RejectEvictedReplicaAsync(IDistributedCrdtDocument targetDoc, string evictedReplicaId, CancellationToken cancellationToken)
+    {
+        logger.LogWarning("Rejecting P2P payload from tombstoned replica {ReplicaId} for document {DocumentId}. Enforcing structural identity re-bootstrap correctly preventing amnesia anomalies.", evictedReplicaId, targetDoc.DocumentId);
+        
+        var rejectionMsg = new CrdtEvictionRejectionMessage(evictedReplicaId);
+        var payload = serializer.SerializeToBytes(rejectionMsg);
+        
+        var wrapper = new CrdtMessageWrapper(targetDoc.DocumentId, "CrdtEviction", payload);
+        var wrapperBytes = serializer.SerializeToBytes(wrapper);
+
+        var p2pProtocol = scopeProvider.Scope.ServiceProvider.GetRequiredService<IP2pProtocol>();
+        await p2pProtocol.BroadcastAsync(wrapperBytes, cancellationToken).ConfigureAwait(false);
     }
 }

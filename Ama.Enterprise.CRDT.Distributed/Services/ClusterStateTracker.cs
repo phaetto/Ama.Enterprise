@@ -12,6 +12,7 @@ public sealed class ClusterStateTracker : IClusterStateTracker
 {
     private readonly Dictionary<string, PeerStateEntry> peerStates = new();
     private readonly Dictionary<string, string> networkIdToReplicaId = new();
+    private readonly HashSet<string> tombstonedReplicas = new();
     private readonly object syncRoot = new();
 
     /// <inheritdoc />
@@ -49,16 +50,65 @@ public sealed class ClusterStateTracker : IClusterStateTracker
 
         lock (syncRoot)
         {
-            if (networkIdToReplicaId.TryGetValue(peerId, out var replicaId))
+            // ONLY unmap the network routing. We intentionally DO NOT remove the replica from `peerStates` here!
+            // If we remove the CRDT state early, the GMVV will trim the journal and cause amnesia for offline peers.
+            // The state remains safely bounded until `GetAndTombstoneExpiredPeers` handles the TTL timeout inherently.
+            networkIdToReplicaId.Remove(peerId);
+        }
+    }
+
+    /// <inheritdoc />
+    public void TombstoneReplica(string replicaId)
+    {
+        if (string.IsNullOrWhiteSpace(replicaId)) return;
+        
+        lock (syncRoot)
+        {
+            tombstonedReplicas.Add(replicaId);
+            peerStates.Remove(replicaId);
+            
+            var keysToRemove = networkIdToReplicaId
+                .Where(x => x.Value == replicaId)
+                .Select(x => x.Key)
+                .ToList();
+                
+            foreach (var key in keysToRemove)
             {
-                peerStates.Remove(replicaId);
-                networkIdToReplicaId.Remove(peerId);
+                networkIdToReplicaId.Remove(key);
             }
         }
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<string> GetAndRemoveExpiredPeers(TimeSpan ttl)
+    public string? TombstonePeerByNetworkId(string peerId)
+    {
+        if (string.IsNullOrWhiteSpace(peerId)) return null;
+
+        lock (syncRoot)
+        {
+            if (networkIdToReplicaId.TryGetValue(peerId, out var replicaId))
+            {
+                TombstoneReplica(replicaId);
+                return replicaId;
+            }
+        }
+
+        return null;
+    }
+
+    /// <inheritdoc />
+    public bool IsReplicaTombstoned(string replicaId)
+    {
+        if (string.IsNullOrWhiteSpace(replicaId)) return false;
+
+        lock (syncRoot)
+        {
+            return tombstonedReplicas.Contains(replicaId);
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> GetAndTombstoneExpiredPeers(TimeSpan ttl)
     {
         var now = DateTime.UtcNow;
         var expiredReplicas = new List<string>();
@@ -75,17 +125,7 @@ public sealed class ClusterStateTracker : IClusterStateTracker
 
             foreach (var replicaId in expiredReplicas)
             {
-                peerStates.Remove(replicaId);
-                
-                var keysToRemove = networkIdToReplicaId
-                    .Where(x => x.Value == replicaId)
-                    .Select(x => x.Key)
-                    .ToList();
-                    
-                foreach (var key in keysToRemove)
-                {
-                    networkIdToReplicaId.Remove(key);
-                }
+                TombstoneReplica(replicaId);
             }
         }
 
