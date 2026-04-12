@@ -125,15 +125,20 @@
 | `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Extensions/ServiceCollectionExtensionsTests.cs` | Structural tests verifying proper dependency injection registration across the P2P mesh logic utilizing WebRTC specifically. |
 | `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Services/WebRtcTransportIntegrationTests.cs` | End-to-end integration tests verifying functional WebRTC SDP handshake synchronization and STUN connection mechanisms safely. Skipped by default. |
 | `$/Ama.Enterprise.P2p.WebRTC.TableStorage/Ama.Enterprise.P2p.WebRTC.TableStorage.csproj` | No description provided. |
+| `$/Ama.Enterprise.P2p.WebRTC.TableStorage/Extensions/ServiceCollectionExtensions.cs` | Registration logic configuring Dependency Injection specifically targeting the Table Storage WebRTC signaling hosted services natively. |
+| `$/Ama.Enterprise.P2p.WebRTC.TableStorage/Extensions/TableStorageSignalingModelExtensions.cs` | Extension methods explicitly mapping TableEntity structures avoiding reflection natively safely. |
+| `$/Ama.Enterprise.P2p.WebRTC.TableStorage/Models/TableStorageSignalingOptions.cs` | Configuration structure mapping Azure Table Storage endpoints and polling timers cleanly for out-of-band SDP exchange. |
+| `$/Ama.Enterprise.P2p.WebRTC.TableStorage/Models/WebRtcSignalingModel.cs` | Strongly typed representation of a WebRTC signaling table entity correctly decoupled from reflection explicitly. |
+| `$/Ama.Enterprise.P2p.WebRTC.TableStorage/Services/TableStorageSignalingService.cs` | Background hosted service periodically polling Azure Table Storage to automatically distribute and appropriately answer WebRTC SDP invitations explicitly. Updated to securely use explicit mapping via AOT-compliant strongly typed models natively. |
 | `$/Ama.Enterprise.P2p.WebRTC/Ama.Enterprise.P2p.WebRTC.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.WebRTC/Extensions/ServiceCollectionExtensions.cs` | WebRTC dependency injection pipeline configuring underlying STUN models mapping transports securely alongside base generic Gossip meshes natively, heavily updated to inject dynamic cross-assembly JSON polymorphism resolvers. |
 | `$/Ama.Enterprise.P2p.WebRTC/Models/WebRtcHandshakeMessage.cs` | In-band signaling structure notifying explicitly local identity topologies securely through initialized WebRTC channels safely. |
 | `$/Ama.Enterprise.P2p.WebRTC/Models/WebRtcJsonContext.cs` | Baseline STJ context generation tracking dynamically WebRTC handshake protocols completely. |
 | `$/Ama.Enterprise.P2p.WebRTC/Models/WebRtcOptions.cs` | Configuration structure holding explicit ICE servers natively bound to AOT-friendly serialization mappings. |
 | `$/Ama.Enterprise.P2p.WebRTC/Models/WebRtcPeerEndpoint.cs` | WebRTC data channel connection endpoint identifying uniquely scoped connection states securely. |
-| `$/Ama.Enterprise.P2p.WebRTC/Services/IWebRtcConnectionManager.cs` | Interface isolating abstract signaling scopes natively exposing Data Channel inbound references. |
+| `$/Ama.Enterprise.P2p.WebRTC/Services/IWebRtcConnectionManager.cs` | Interface isolating abstract signaling scopes natively exposing Data Channel inbound references. Updated to explicitly expose WebRTC connection state changes targeting UI subscriptions securely. |
 | `$/Ama.Enterprise.P2p.WebRTC/Services/IWebRtcInvitationService.cs` | Generic mechanism exchanging SDP structures seamlessly representing localized peer invitations dynamically cross boundaries appropriately. |
-| `$/Ama.Enterprise.P2p.WebRTC/Services/WebRtcConnectionManager.cs` | Internal hosted implementation managing explicitly SIPSorcery RTCPeer connections directly bound within localized mesh scopes correctly. |
+| `$/Ama.Enterprise.P2p.WebRTC/Services/WebRtcConnectionManager.cs` | Internal hosted implementation managing explicitly SIPSorcery RTCPeer connections directly bound within localized mesh scopes correctly. Modified to natively broadcast `OnConnectionStateChanged` events tracking explicitly connected/disconnected lifecycles. |
 | `$/Ama.Enterprise.P2p.WebRTC/Services/WebRtcTransport.cs` | WebRTC specific implementation handling outbound gossip structures safely wrapping targeted connection payloads. |
 | `$/Ama.Enterprise.P2p.WebRTC/Services/WebRtcTransportListener.cs` | WebRTC specific listener registering seamlessly asynchronous bindings effectively targeting decentralized peer streams globally. |
 | `$/Ama.Enterprise.P2p/Ama.Enterprise.P2p.csproj` | No description provided. |

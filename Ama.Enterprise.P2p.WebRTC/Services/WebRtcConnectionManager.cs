@@ -29,6 +29,9 @@ public sealed class WebRtcConnectionManager : IWebRtcConnectionManager, IWebRtcI
     /// <inheritdoc />
     public event Func<Guid, byte[], Task>? OnMessageReceived;
 
+    /// <inheritdoc />
+    public event Action<Guid, string>? OnConnectionStateChanged;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="WebRtcConnectionManager"/> class.
     /// </summary>
@@ -165,6 +168,10 @@ public sealed class WebRtcConnectionManager : IWebRtcConnectionManager, IWebRtcI
         pc.onconnectionstatechange += (state) => 
         {
             logger.LogDebug("[{MeshId}] WebRTC connection {ConnectionId} state changed: {State}", meshId, connectionId, state);
+            
+            // Broadcast connection state strictly to attached UI interfaces natively
+            OnConnectionStateChanged?.Invoke(connectionId, state.ToString());
+
             if (state == RTCPeerConnectionState.closed || state == RTCPeerConnectionState.failed)
             {
                 if (connections.TryRemove(connectionId, out var removedState))

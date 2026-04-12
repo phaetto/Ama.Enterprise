@@ -15,6 +15,12 @@ public interface IWebRtcConnectionManager
     event Func<Guid, byte[], Task>? OnMessageReceived;
 
     /// <summary>
+    /// Event triggered when the underlying WebRTC connection state changes (e.g., connecting, connected, failed).
+    /// Provides the connection ID and the string representation of the RTC peer connection state.
+    /// </summary>
+    event Action<Guid, string>? OnConnectionStateChanged;
+
+    /// <summary>
     /// Sends a payload over the specified WebRTC data channel implicitly handling handshake prefixes.
     /// </summary>
     /// <param name="connectionId">The local connection identifier tracking the remote peer.</param>
