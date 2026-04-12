@@ -91,8 +91,10 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage
 
         lock (syncRoot)
         {
+            // By utilizing a negation check on TryGetValue, we inherently eradicate any orphaned operations entirely 
+            // naturally safely protecting the structure from memory leaks tied strictly to perfectly tombstoned peers natively.
             operations.RemoveAll(op => 
-                gmvv.TryGetValue(op.Operation.ReplicaId, out var minKnown) && 
+                !gmvv.TryGetValue(op.Operation.ReplicaId, out var minKnown) || 
                 op.Operation.GlobalClock <= minKnown);
         }
     }

@@ -7,8 +7,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services;
 using Ama.CRDT.Services.Versioning;
+using Ama.Enterprise.CRDT.Distributed.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Implementation of the generic CRDT eviction service natively abstracting logic bridging evictions structurally efficiently explicitly efficiently.
@@ -71,6 +73,7 @@ public sealed class CrdtEvictionService : ICrdtEvictionService
     {
         var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
         var documents = scopeProvider.Scope.ServiceProvider.GetRequiredService<IEnumerable<IDistributedCrdtDocument>>().ToList();
+        var options = scopeProvider.Scope.ServiceProvider.GetRequiredService<IOptions<DistributedCrdtOptions>>().Value;
 
         logger.LogCritical("CRITICAL: This replica ({ReplicaId}) has been permanently tombstoned by the cluster. Re-bootstrapping identity completely to prevent split-brain amnesia anomalies.", replicaContext.ReplicaId);
         
@@ -84,6 +87,9 @@ public sealed class CrdtEvictionService : ICrdtEvictionService
         replicaContext.ReplicaId = string.IsNullOrEmpty(prefix) 
             ? Guid.NewGuid().ToString("N") 
             : $"{prefix}_{Guid.NewGuid():N}";
+            
+        // Sync the options ReplicaId with the new context ReplicaId correctly bridging updates natively seamlessly.
+        options.ReplicaId = replicaContext.ReplicaId;
         
         logger.LogCritical("CRITICAL: This replica is now known as: {ReplicaId}", replicaContext.ReplicaId);
         
@@ -99,7 +105,7 @@ public sealed class CrdtEvictionService : ICrdtEvictionService
 
         foreach (var doc in documents)
         {
-            await doc.ResetLocalStateAsync(cancellationToken).ConfigureAwait(false);
+            await doc.ResetLocalStateAsync(currentId, cancellationToken).ConfigureAwait(false);
             await doc.BroadcastStateAsync(cancellationToken).ConfigureAwait(false);
         }
         

@@ -61,27 +61,19 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver
     }
 
     /// <inheritdoc />
-    public async Task OnPeerDepartedAsync(PeerId peerId, CancellationToken cancellationToken)
+    public Task OnPeerDepartedAsync(PeerId peerId, CancellationToken cancellationToken)
     {
         if (peerId.Value != Guid.Empty)
         {
             var stringId = peerId.Value.ToString();
-            logger.LogInformation("Peer {PeerId} gracefully departed. Instantly tombstoning it to free GMVV tracking limits securely.", stringId);
+            logger.LogInformation("Peer {PeerId} gracefully departed. Unmapping network ID but explicitly preserving CRDT state strictly tracking limits avoiding destructive restart bounds successfully efficiently protecting structurally avoiding identity re-bootstraps.", stringId);
             
-            var replicaId = clusterTracker.TombstonePeerByNetworkId(stringId);
-
-            if (!string.IsNullOrEmpty(replicaId))
-            {
-                try
-                {
-                    await evictionService.EvictPeersAsync(new[] { replicaId }, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Failed to properly clean underlying CRDT limits and DVV boundaries during an instant graceful peer departure.");
-                }
-            }
+            // Intentionally DO NOT tombstone here to prevent massive cluster amnesia anomalies during rolling restarts natively gracefully efficiently.
+            // The background TTL expiration threshold handles actual dead nodes securely preventing structural damage accurately effectively safely explicitly seamlessly correctly natively seamlessly.
+            clusterTracker.RemovePeerByNetworkId(stringId);
         }
+        
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc />

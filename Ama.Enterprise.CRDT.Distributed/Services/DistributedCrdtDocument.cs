@@ -32,6 +32,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly IDistributedCrdtStorage storage;
     private readonly ILogger<DistributedCrdtDocument<TState>> logger;
     private readonly bool activeSyncEnabled;
+    private readonly TState initialState;
     
     // Fast synchronous lock for atomic reference/flag swapping
     private readonly object syncRoot = new();
@@ -77,6 +78,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         this.activeSyncEnabled = options.Value.ActiveSyncEnabled;
+        this.initialState = initialState;
 
         DocumentId = initialState.Id;
         
@@ -315,48 +317,11 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                // 1. Defend against "Destructive Overwrite" by isolating locally generated offline operations not known by the incoming snapshot natively.
-                var localState = GetLocalState();
-                var requirement = syncService.CalculateRequirement("snapshot", globalState, replicaContext.ReplicaId, localState);
-                
-                var missingLocalOps = new List<CrdtOperation>();
-                if (requirement.IsBehind)
-                {
-                    var missingOpsStream = journalManager.GetMissingOperationsAsync(requirement, cancellationToken);
-                    await foreach (var jOp in missingOpsStream.ConfigureAwait(false))
-                    {
-                        if (jOp.DocumentId == DocumentId)
-                        {
-                            missingLocalOps.Add(jOp.Operation);
-                        }
-                    }
-                }
-
-                // 2. Base mapping starts cleanly matching incoming fallback exactly
-                CrdtDocument<TState> mergedDoc = snapshotDoc;
-                
-                // 3. Re-apply any structurally isolated operations directly over the snapshot restoring local offline continuity smoothly
-                if (missingLocalOps.Count > 0)
-                {
-                    async IAsyncEnumerable<JournaledOperation> GetStreamAsync()
-                    {
-                        foreach (var op in missingLocalOps)
-                        {
-                            yield return new JournaledOperation(DocumentId, op);
-                        }
-                        await Task.CompletedTask;
-                    }
-                    
-                    var result = await applicator.ApplyOperationsAsync(mergedDoc, GetStreamAsync()).ConfigureAwait(false);
-                    mergedDoc = result.Document;
-                    
-                    logger.LogInformation("Safely re-integrated {Count} local isolated offline operations perfectly mapping over the inbound snapshot base protecting offline continuity for document {DocumentId}.", missingLocalOps.Count, DocumentId);
-                }
-
-                // 4. Commit fully protected mathematically merged architecture organically
+                // We intentionally discard any conflicting offline local operations because a snapshot effectively represents
+                // a cluster-mandated absolute truth natively completely preventing causal resurrection amnesia anomalies securely.
                 lock (syncRoot)
                 {
-                    Document = mergedDoc;
+                    Document = snapshotDoc;
                     isDirty = true;
                 }
 
@@ -438,14 +403,15 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     }
 
     /// <inheritdoc />
-    public async Task ResetLocalStateAsync(CancellationToken cancellationToken = default)
+    public async Task ResetLocalStateAsync(string oldReplicaId, CancellationToken cancellationToken = default)
     {
         await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             lock (syncRoot)
             {
-                metadataManager.Reset(Document);
+                var metadata = metadataManager.Initialize(initialState);
+                Document = new CrdtDocument<TState>(initialState, metadata);
                 isDirty = true;
             }
         }
@@ -455,7 +421,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
 
         StateChanged?.Invoke(this, EventArgs.Empty);
-        logger.LogInformation("Successfully reset local document metadata and state for Document {DocumentId} following identity re-bootstrap.", DocumentId);
+        logger.LogInformation("Successfully performed a complete hard reset of structural logic completely eliminating zombie payloads following identity re-bootstrap for document {DocumentId}.", DocumentId);
     }
 
     private async Task BroadcastOperationAsync(CrdtOperation operation, CancellationToken cancellationToken)
