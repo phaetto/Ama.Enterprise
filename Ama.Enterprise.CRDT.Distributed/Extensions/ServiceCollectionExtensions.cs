@@ -64,6 +64,7 @@ public static class ServiceCollectionExtensions
         
         // Register internal tracking singletons strictly matching background orchestration loops explicitly
         services.AddSingleton<IClusterStateTracker, ClusterStateTracker>();
+        services.AddSingleton<ICrdtEvictionService, CrdtEvictionService>();
         
         // Ensures documents initialize their states from their registered persistence providers eagerly on startup
         services.AddHostedService<CrdtInitializationService>();

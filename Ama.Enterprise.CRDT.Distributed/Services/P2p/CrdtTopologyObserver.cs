@@ -21,16 +21,19 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver
 {
     private readonly DistributedCrdtScopeProvider scopeProvider;
     private readonly IClusterStateTracker clusterTracker;
+    private readonly ICrdtEvictionService evictionService;
     private readonly ILogger<CrdtTopologyObserver> logger;
     private int hasConnected;
 
     public CrdtTopologyObserver(
         DistributedCrdtScopeProvider scopeProvider,
         IClusterStateTracker clusterTracker,
+        ICrdtEvictionService evictionService,
         ILogger<CrdtTopologyObserver> logger)
     {
         this.scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
         this.clusterTracker = clusterTracker ?? throw new ArgumentNullException(nameof(clusterTracker));
+        this.evictionService = evictionService ?? throw new ArgumentNullException(nameof(evictionService));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -71,34 +74,7 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver
             {
                 try
                 {
-                    var documents = scopeProvider.Scope.ServiceProvider.GetRequiredService<IEnumerable<IDistributedCrdtDocument>>();
-                    foreach (var document in documents)
-                    {
-                        await document.EvictReplicaAsync(replicaId, cancellationToken).ConfigureAwait(false);
-                    }
-
-                    var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
-                    var syncService = scopeProvider.Scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
-
-                    lock (replicaContext.GlobalVersionVector)
-                    {
-                        var cleanedDvv = syncService.RemoveEvictedReplicas(replicaContext.GlobalVersionVector, new[] { replicaId });
-                        
-                        replicaContext.GlobalVersionVector.Versions.Clear();
-                        foreach (var kvp in cleanedDvv.Versions)
-                        {
-                            replicaContext.GlobalVersionVector.Versions[kvp.Key] = kvp.Value;
-                        }
-                        
-                        replicaContext.GlobalVersionVector.Dots.Clear();
-                        if (cleanedDvv.Dots != null)
-                        {
-                            foreach (var kvp in cleanedDvv.Dots)
-                            {
-                                replicaContext.GlobalVersionVector.Dots[kvp.Key] = kvp.Value;
-                            }
-                        }
-                    }
+                    await evictionService.EvictPeersAsync(new[] { replicaId }, cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {

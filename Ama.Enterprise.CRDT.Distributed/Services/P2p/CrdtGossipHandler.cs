@@ -22,17 +22,20 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
     private readonly DistributedCrdtScopeProvider scopeProvider;
     private readonly IClusterStateTracker clusterTracker;
     private readonly ICrdtSerializer serializer;
+    private readonly ICrdtEvictionService evictionService;
     private readonly ILogger<CrdtGossipHandler> logger;
 
     public CrdtGossipHandler(
         DistributedCrdtScopeProvider scopeProvider,
         IClusterStateTracker clusterTracker,
         ICrdtSerializer serializer,
+        ICrdtEvictionService evictionService,
         ILogger<CrdtGossipHandler> logger)
     {
         this.scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
         this.clusterTracker = clusterTracker ?? throw new ArgumentNullException(nameof(clusterTracker));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+        this.evictionService = evictionService ?? throw new ArgumentNullException(nameof(evictionService));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -60,14 +63,13 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
             return;
         }
 
-        var documents = scopeProvider.Scope.ServiceProvider.GetRequiredService<IEnumerable<IDistributedCrdtDocument>>().ToList();
-        
         if (wrapper.MessageType == "CrdtEviction")
         {
-            await ProcessEvictionRejectionAsync(documents, wrapper, cancellationToken).ConfigureAwait(false);
+            await ProcessEvictionRejectionAsync(wrapper, cancellationToken).ConfigureAwait(false);
             return;
         }
 
+        var documents = scopeProvider.Scope.ServiceProvider.GetRequiredService<IEnumerable<IDistributedCrdtDocument>>().ToList();
         var targetDoc = documents.FirstOrDefault(d => d.DocumentId == wrapper.DocumentId);
 
         if (targetDoc == null)
@@ -197,7 +199,7 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
         }
     }
 
-    private async Task ProcessEvictionRejectionAsync(IEnumerable<IDistributedCrdtDocument> documents, CrdtMessageWrapper wrapper, CancellationToken cancellationToken)
+    private async Task ProcessEvictionRejectionAsync(CrdtMessageWrapper wrapper, CancellationToken cancellationToken)
     {
         try
         {
@@ -206,42 +208,7 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
 
             if (rejectionMsg.EvictedReplicaId == replicaContext.ReplicaId)
             {
-                logger.LogCritical("CRITICAL: This replica ({ReplicaId}) has been permanently tombstoned by the cluster. Re-bootstrapping identity completely to prevent split-brain amnesia anomalies.", replicaContext.ReplicaId);
-                
-                // Extract current ID and strip any previously appended re-bootstrap GUID suffix to prevent the string from growing indefinitely.
-                var currentId = replicaContext.ReplicaId ?? string.Empty;
-                var lastUnderscore = currentId.LastIndexOf('_');
-                
-                // A Guid string formatted with "N" is 32 characters long
-                var prefix = (lastUnderscore >= 0 && currentId.Length - lastUnderscore - 1 == 32)
-                    ? currentId[..lastUnderscore]
-                    : currentId;
-
-                // Re-bootstrap identity securely natively mitigating split-brain anomalies accurately perfectly thoroughly naturally cleanly correctly explicitly structurally.
-                replicaContext.ReplicaId = string.IsNullOrEmpty(prefix) 
-                    ? Guid.NewGuid().ToString("N") 
-                    : $"{prefix}_{Guid.NewGuid():N}";
-                
-                logger.LogCritical("CRITICAL: This replica is now known as: {ReplicaId}", replicaContext.ReplicaId);
-                
-                lock (replicaContext.GlobalVersionVector)
-                {
-                    replicaContext.GlobalVersionVector.Versions.Clear();
-                    
-                    if (replicaContext.GlobalVersionVector.Dots != null)
-                    {
-                        replicaContext.GlobalVersionVector.Dots.Clear();
-                    }
-                }
-
-                // Flush all local documents and enforce clean state naturally ensuring overarching global logic structurally flawlessly perfectly
-                foreach (var doc in documents)
-                {
-                    await doc.ResetLocalStateAsync(cancellationToken).ConfigureAwait(false);
-                    
-                    // Broadcast empty DVV so cluster naturally sends back a full merged snapshot over anti-entropy gracefully natively cleanly
-                    await doc.BroadcastStateAsync(cancellationToken).ConfigureAwait(false);
-                }
+                await evictionService.RebootLocalIdentityAsync(cancellationToken).ConfigureAwait(false);
             }
         }
         catch (Exception ex)

@@ -24,6 +24,7 @@ public sealed class CrdtCheckpointService : BackgroundService
     private readonly IClusterStateTracker clusterTracker;
     private readonly IDistributedCrdtStorage storage;
     private readonly IVersionVectorSyncService syncService;
+    private readonly ICrdtEvictionService evictionService;
     private readonly IOptions<DistributedCrdtOptions> options;
     private readonly ILogger<CrdtCheckpointService> logger;
 
@@ -32,6 +33,7 @@ public sealed class CrdtCheckpointService : BackgroundService
         IClusterStateTracker clusterTracker,
         IDistributedCrdtStorage storage,
         IVersionVectorSyncService syncService,
+        ICrdtEvictionService evictionService,
         IOptions<DistributedCrdtOptions> options,
         ILogger<CrdtCheckpointService> logger)
     {
@@ -39,6 +41,7 @@ public sealed class CrdtCheckpointService : BackgroundService
         this.clusterTracker = clusterTracker ?? throw new ArgumentNullException(nameof(clusterTracker));
         this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
         this.syncService = syncService ?? throw new ArgumentNullException(nameof(syncService));
+        this.evictionService = evictionService ?? throw new ArgumentNullException(nameof(evictionService));
         this.options = options ?? throw new ArgumentNullException(nameof(options));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -77,35 +80,7 @@ public sealed class CrdtCheckpointService : BackgroundService
                     if (tombstonedPeers.Count > 0)
                     {
                         logger.LogInformation("Tombstoned {Count} dead peers based on TTL threshold ({TtlSeconds}s) preventing network log bound halts.", tombstonedPeers.Count, options.Value.PeerEvictionTtlSeconds);
-
-                        foreach (var document in documents)
-                        {
-                            foreach (var peerId in tombstonedPeers)
-                            {
-                                await document.EvictReplicaAsync(peerId, stoppingToken).ConfigureAwait(false);
-                            }
-                        }
-
-                        var sourceDvvForEviction = replicaContext.GlobalVersionVector;
-                        lock (sourceDvvForEviction)
-                        {
-                            var cleanedDvv = syncService.RemoveEvictedReplicas(sourceDvvForEviction, tombstonedPeers);
-                            
-                            sourceDvvForEviction.Versions.Clear();
-                            foreach (var kvp in cleanedDvv.Versions)
-                            {
-                                sourceDvvForEviction.Versions[kvp.Key] = kvp.Value;
-                            }
-                            
-                            sourceDvvForEviction.Dots.Clear();
-                            if (cleanedDvv.Dots != null)
-                            {
-                                foreach (var kvp in cleanedDvv.Dots)
-                                {
-                                    sourceDvvForEviction.Dots[kvp.Key] = kvp.Value;
-                                }
-                            }
-                        }
+                        await evictionService.EvictPeersAsync(tombstonedPeers, stoppingToken).ConfigureAwait(false);
                     }
                 }
 

@@ -57,7 +57,7 @@ public static class Program
         {
             options.ReplicaId = replicaId;
             options.ActiveSyncEnabled = true;
-            options.PeerEvictionTtlSeconds = 20;
+            options.PeerEvictionTtlSeconds = 45;
             options.CheckpointIntervalSeconds = 10;
         });
 
