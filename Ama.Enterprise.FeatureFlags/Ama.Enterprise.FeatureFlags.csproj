@@ -31,7 +31,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Ama.CRDT" Version="3.1.260409-ci0958" />
+		<PackageReference Include="Ama.CRDT" Version="3.1.260412-ci0728" />
 	</ItemGroup>
 
 	<ItemGroup>

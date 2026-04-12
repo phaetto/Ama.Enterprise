@@ -10,7 +10,7 @@ using Ama.CRDT.Models;
 /// </summary>
 public sealed class ClusterStateTracker : IClusterStateTracker
 {
-    private readonly Dictionary<string, DottedVersionVector> peerStates = new();
+    private readonly Dictionary<string, PeerStateEntry> peerStates = new();
     private readonly Dictionary<string, string> networkIdToReplicaId = new();
     private readonly object syncRoot = new();
 
@@ -28,7 +28,7 @@ public sealed class ClusterStateTracker : IClusterStateTracker
                 peerStates.Remove(oldReplicaId);
             }
             
-            peerStates[peerReplicaId] = globalState;
+            peerStates[peerReplicaId] = new PeerStateEntry(globalState, DateTime.UtcNow);
             networkIdToReplicaId[peerId] = peerReplicaId;
         }
     }
@@ -38,7 +38,7 @@ public sealed class ClusterStateTracker : IClusterStateTracker
     {
         lock (syncRoot)
         {
-            return peerStates.Values.ToList();
+            return peerStates.Values.Select(v => v.State).ToList();
         }
     }
 
@@ -54,6 +54,63 @@ public sealed class ClusterStateTracker : IClusterStateTracker
                 peerStates.Remove(replicaId);
                 networkIdToReplicaId.Remove(peerId);
             }
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> GetAndRemoveExpiredPeers(TimeSpan ttl)
+    {
+        var now = DateTime.UtcNow;
+        var expiredReplicas = new List<string>();
+
+        lock (syncRoot)
+        {
+            foreach (var kvp in peerStates)
+            {
+                if (now - kvp.Value.LastSeen > ttl)
+                {
+                    expiredReplicas.Add(kvp.Key);
+                }
+            }
+
+            foreach (var replicaId in expiredReplicas)
+            {
+                peerStates.Remove(replicaId);
+                
+                var keysToRemove = networkIdToReplicaId
+                    .Where(x => x.Value == replicaId)
+                    .Select(x => x.Key)
+                    .ToList();
+                    
+                foreach (var key in keysToRemove)
+                {
+                    networkIdToReplicaId.Remove(key);
+                }
+            }
+        }
+
+        return expiredReplicas;
+    }
+
+    private readonly record struct PeerStateEntry : IEquatable<PeerStateEntry>
+    {
+        public DottedVersionVector State { get; }
+        public DateTime LastSeen { get; }
+
+        public PeerStateEntry(DottedVersionVector state, DateTime lastSeen)
+        {
+            State = state ?? throw new ArgumentNullException(nameof(state));
+            LastSeen = lastSeen;
+        }
+
+        public bool Equals(PeerStateEntry other)
+        {
+            return LastSeen == other.LastSeen && Equals(State, other.State);
+        }
+
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(State, LastSeen);
         }
     }
 }

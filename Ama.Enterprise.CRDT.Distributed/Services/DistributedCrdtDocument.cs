@@ -26,6 +26,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly IAsyncCrdtApplicator applicator;
     private readonly IJournalManager journalManager;
     private readonly IVersionVectorSyncService syncService;
+    private readonly ICrdtMetadataManager metadataManager;
     private readonly IServiceProvider serviceProvider;
     private readonly ICrdtSerializer serializer;
     private readonly IDistributedCrdtStorage storage;
@@ -62,7 +63,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         IDistributedCrdtStorage storage,
         ILogger<DistributedCrdtDocument<TState>> logger)
     {
-        if (metadataManager == null) throw new ArgumentNullException(nameof(metadataManager));
         if (options == null) throw new ArgumentNullException(nameof(options));
         if (initialState == null) throw new ArgumentNullException(nameof(initialState));
         
@@ -70,6 +70,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         this.applicator = applicator ?? throw new ArgumentNullException(nameof(applicator));
         this.journalManager = journalManager ?? throw new ArgumentNullException(nameof(journalManager));
         this.syncService = syncService ?? throw new ArgumentNullException(nameof(syncService));
+        this.metadataManager = metadataManager ?? throw new ArgumentNullException(nameof(metadataManager));
         this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
@@ -159,27 +160,16 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     public DottedVersionVector GetLocalState()
     {
         var sourceDvv = replicaContext.GlobalVersionVector;
-        var copiedVersions = new Dictionary<string, long>();
-        var copiedDots = new Dictionary<string, ISet<long>>();
 
         // Lock to natively prevent cross-thread collection modification errors during serialization mappings
         lock (sourceDvv)
         {
-            foreach (var kvp in sourceDvv.Versions)
-            {
-                copiedVersions[kvp.Key] = kvp.Value;
-            }
-            foreach (var kvp in sourceDvv.Dots)
-            {
-                copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
-            }
+            return sourceDvv.DeepClone();
         }
-
-        return new DottedVersionVector(copiedVersions, copiedDots);
     }
 
     /// <inheritdoc />
-    public async Task<(IReadOnlyList<CrdtOperation> Operations, bool SnapshotRequired)> GetMissingOperationsAsync(string remoteReplicaId, DottedVersionVector remoteState, CancellationToken cancellationToken = default)
+    public async Task<MissingOperationsResult> GetMissingOperationsAsync(string remoteReplicaId, DottedVersionVector remoteState, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(remoteReplicaId)) throw new ArgumentException("Remote replica ID cannot be null or empty.", nameof(remoteReplicaId));
         if (remoteState == null) throw new ArgumentNullException(nameof(remoteState));
@@ -189,74 +179,23 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         if (!requirement.IsBehind)
         {
-            return (Array.Empty<CrdtOperation>(), false);
+            return new MissingOperationsResult(Array.Empty<CrdtOperation>(), false);
         }
 
-        var allJournaledOps = new List<JournaledOperation>();
         var missingOpsStream = journalManager.GetMissingOperationsAsync(requirement, cancellationToken);
+        var syncResult = await syncService.EvaluateJournalCompletionAsync(missingOpsStream, requirement, cancellationToken).ConfigureAwait(false);
 
-        await foreach (var jOp in missingOpsStream.ConfigureAwait(false))
+        if (syncResult.SnapshotRequired)
         {
-            allJournaledOps.Add(jOp);
+            return new MissingOperationsResult(Array.Empty<CrdtOperation>(), true);
         }
 
-        bool journalTruncated = false;
-
-        if (requirement.RequirementsByOrigin != null)
-        {
-            foreach (var kvp in requirement.RequirementsByOrigin)
-            {
-                var origin = kvp.Key;
-                var req = kvp.Value;
-
-                if (req.TargetContiguousVersion < req.SourceContiguousVersion)
-                {
-                    long firstRequiredClock = req.TargetContiguousVersion + 1;
-                    
-                    while (req.TargetKnownDots != null && req.TargetKnownDots.Contains(firstRequiredClock) && firstRequiredClock <= req.SourceContiguousVersion)
-                    {
-                        firstRequiredClock++;
-                    }
-
-                    if (firstRequiredClock <= req.SourceContiguousVersion)
-                    {
-                        bool hasRequired = allJournaledOps.Any(o => o.Operation.ReplicaId == origin && o.Operation.GlobalClock == firstRequiredClock);
-                        if (!hasRequired)
-                        {
-                            journalTruncated = true;
-                            break;
-                        }
-                    }
-                }
-                
-                if (!journalTruncated && req.SourceMissingDots != null && req.SourceMissingDots.Count > 0)
-                {
-                    foreach (var dot in req.SourceMissingDots)
-                    {
-                        bool hasRequiredDot = allJournaledOps.Any(o => o.Operation.ReplicaId == origin && o.Operation.GlobalClock == dot);
-                        if (!hasRequiredDot)
-                        {
-                            journalTruncated = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (journalTruncated) break;
-            }
-        }
-
-        if (journalTruncated)
-        {
-            return (Array.Empty<CrdtOperation>(), true);
-        }
-
-        var documentOperations = allJournaledOps
+        var documentOperations = syncResult.Operations
             .Where(jOp => jOp.DocumentId == DocumentId)
             .Select(jOp => jOp.Operation)
             .ToList();
 
-        return (documentOperations, false);
+        return new MissingOperationsResult(documentOperations, false);
     }
 
     /// <inheritdoc />
@@ -424,26 +363,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 // Crucial alignment: Overwrite explicitly tracked encompassing P2P tracking vectors effectively matching the provider natively.
                 lock (replicaContext.GlobalVersionVector)
                 {
-                    foreach (var kvp in globalState.Versions)
-                    {
-                        if (!replicaContext.GlobalVersionVector.Versions.TryGetValue(kvp.Key, out var currentVersion) || kvp.Value > currentVersion)
-                        {
-                            replicaContext.GlobalVersionVector.Versions[kvp.Key] = kvp.Value;
-                        }
-                    }
-                    
-                    foreach (var kvp in globalState.Dots)
-                    {
-                        if (!replicaContext.GlobalVersionVector.Dots.TryGetValue(kvp.Key, out var currentDots))
-                        {
-                            currentDots = new HashSet<long>();
-                            replicaContext.GlobalVersionVector.Dots[kvp.Key] = currentDots;
-                        }
-                        foreach (var dot in kvp.Value)
-                        {
-                            currentDots.Add(dot);
-                        }
-                    }
+                    replicaContext.GlobalVersionVector.Merge(globalState);
                 }
             }
             finally
@@ -493,6 +413,28 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             }
             throw;
         }
+    }
+
+    /// <inheritdoc />
+    public async Task EvictReplicaAsync(string replicaId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
+
+        await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            lock (syncRoot)
+            {
+                metadataManager.EvictReplica(Document, replicaId);
+                isDirty = true;
+            }
+        }
+        finally
+        {
+            modificationLock.Release();
+        }
+
+        StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private async Task BroadcastOperationAsync(CrdtOperation operation, CancellationToken cancellationToken)

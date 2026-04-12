@@ -32,9 +32,9 @@ public interface IDistributedCrdtDocument
 
     /// <summary>
     /// Calculates what operations are needed by a remote replica to catch up to this node's state.
-    /// Returns the missing operations and a boolean flag indicating if the localized journal has been trimmed beyond the remote state, natively requiring a full snapshot payload instead.
+    /// Returns the natively defined operation data structure representing journal payloads appropriately seamlessly mapped natively.
     /// </summary>
-    Task<(IReadOnlyList<CrdtOperation> Operations, bool SnapshotRequired)> GetMissingOperationsAsync(string remoteReplicaId, DottedVersionVector remoteState, CancellationToken cancellationToken = default);
+    Task<MissingOperationsResult> GetMissingOperationsAsync(string remoteReplicaId, DottedVersionVector remoteState, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Applies incoming operations retrieved from a remote replica to the local document state.
@@ -63,6 +63,14 @@ public interface IDistributedCrdtDocument
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous checkpoint operation.</returns>
     Task CheckpointAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Evicts the state and metadata of a specific peer replica from this document's internal tracker securely.
+    /// </summary>
+    /// <param name="replicaId">The identifier of the remote replica to evict.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task EvictReplicaAsync(string replicaId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

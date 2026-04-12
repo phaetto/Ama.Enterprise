@@ -36,4 +36,10 @@ public sealed class DistributedCrdtOptions
     /// Defaults to 15 seconds.
     /// </summary>
     public int AntiEntropyIntervalSeconds { get; set; } = 15;
+
+    /// <summary>
+    /// Gets or sets the Time-To-Live (TTL) in seconds before a peer is considered dead and its state is evicted from the local cluster map and document metadata.
+    /// Defaults to 0 (is disabled). Set to an int (something long like TimeSpan.FromDays(7).TotalSeconds) to enable peer eviction in volatile networks.
+    /// </summary>
+    public int PeerEvictionTtlSeconds { get; set; } = 0;
 }

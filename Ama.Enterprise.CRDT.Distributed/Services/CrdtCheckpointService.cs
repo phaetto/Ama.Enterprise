@@ -2,6 +2,7 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
@@ -64,7 +65,48 @@ public sealed class CrdtCheckpointService : BackgroundService
             try
             {
                 var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+                var documents = scopeProvider.Scope.ServiceProvider.GetRequiredService<IEnumerable<IDistributedCrdtDocument>>().ToList();
                 
+                if (options.Value.PeerEvictionTtlSeconds > 0)
+                {
+                    var evictionTtl = TimeSpan.FromSeconds(options.Value.PeerEvictionTtlSeconds);
+                    var expiredPeers = clusterTracker.GetAndRemoveExpiredPeers(evictionTtl);
+
+                    if (expiredPeers.Count > 0)
+                    {
+                        logger.LogInformation("Evicting {Count} dead peers based on TTL threshold ({TtlSeconds}s).", expiredPeers.Count, options.Value.PeerEvictionTtlSeconds);
+
+                        foreach (var document in documents)
+                        {
+                            foreach (var peerId in expiredPeers)
+                            {
+                                await document.EvictReplicaAsync(peerId, stoppingToken).ConfigureAwait(false);
+                            }
+                        }
+
+                        var sourceDvvForEviction = replicaContext.GlobalVersionVector;
+                        lock (sourceDvvForEviction)
+                        {
+                            var cleanedDvv = syncService.RemoveEvictedReplicas(sourceDvvForEviction, expiredPeers);
+                            
+                            sourceDvvForEviction.Versions.Clear();
+                            foreach (var kvp in cleanedDvv.Versions)
+                            {
+                                sourceDvvForEviction.Versions[kvp.Key] = kvp.Value;
+                            }
+                            
+                            sourceDvvForEviction.Dots.Clear();
+                            if (cleanedDvv.Dots != null)
+                            {
+                                foreach (var kvp in cleanedDvv.Dots)
+                                {
+                                    sourceDvvForEviction.Dots[kvp.Key] = kvp.Value;
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // 1. Capture a safe, isolated snapshot of the current local DVV so we don't trim operations we haven't flushed to disk yet
                 var sourceDvv = replicaContext.GlobalVersionVector;
                 var copiedVersions = new Dictionary<string, long>();
@@ -86,7 +128,6 @@ public sealed class CrdtCheckpointService : BackgroundService
                 var safelyPersistedDvv = new DottedVersionVector(copiedVersions, copiedDots);
 
                 // 2. Save document states FIRST (Idempotency safety: Docs advance before the overarching watermark preventing log gap data loss)
-                var documents = scopeProvider.Scope.ServiceProvider.GetRequiredService<IEnumerable<IDistributedCrdtDocument>>();
                 foreach (var document in documents)
                 {
                     await document.CheckpointAsync(stoppingToken).ConfigureAwait(false);

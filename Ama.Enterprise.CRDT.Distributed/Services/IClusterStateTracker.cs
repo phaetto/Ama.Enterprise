@@ -1,5 +1,6 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services;
 
+using System;
 using System.Collections.Generic;
 using Ama.CRDT.Models;
 
@@ -27,4 +28,11 @@ public interface IClusterStateTracker
     /// </summary>
     /// <param name="peerId">The remote network peer identifier.</param>
     void RemovePeerByNetworkId(string peerId);
+
+    /// <summary>
+    /// Identifies and removes peers that have not updated their state within the specified Time-To-Live (TTL) limit.
+    /// </summary>
+    /// <param name="ttl">The time-to-live duration determining expiration.</param>
+    /// <returns>A list of replica identifiers that were evicted.</returns>
+    IReadOnlyList<string> GetAndRemoveExpiredPeers(TimeSpan ttl);
 }
