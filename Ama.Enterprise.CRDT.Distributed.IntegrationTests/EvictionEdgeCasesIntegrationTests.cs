@@ -1,7 +1,6 @@
 namespace Ama.Enterprise.CRDT.Distributed.IntegrationTests;
 
 using System;
-using System.Linq;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,7 +21,6 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Moq;
 using Shouldly;
-using Xunit;
 
 [CrdtAotType(typeof(EvictionEdgeCasesIntegrationTests.TestState))]
 public sealed partial class EvictionEdgeCasesTestAotContext : CrdtAotContext

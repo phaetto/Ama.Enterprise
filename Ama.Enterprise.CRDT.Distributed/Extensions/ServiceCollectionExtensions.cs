@@ -11,7 +11,6 @@ using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Extension methods for registering completely generic distributed CRDT state logic.

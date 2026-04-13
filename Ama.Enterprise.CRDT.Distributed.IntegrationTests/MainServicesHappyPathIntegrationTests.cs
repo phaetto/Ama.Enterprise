@@ -1,7 +1,6 @@
 namespace Ama.Enterprise.CRDT.Distributed.IntegrationTests;
 
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -15,7 +14,6 @@ using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
-using Ama.Enterprise.CRDT.Distributed.Services.P2p;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;

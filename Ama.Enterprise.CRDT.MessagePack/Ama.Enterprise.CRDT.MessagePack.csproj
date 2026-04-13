@@ -13,10 +13,6 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\Ama.Enterprise.CRDT\Ama.Enterprise.CRDT.csproj" />
-	</ItemGroup>
-
-	<ItemGroup>
 		<ProjectReference Include="..\Ama.Enterprise.Project.Analyzers\Ama.Enterprise.Project.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
 

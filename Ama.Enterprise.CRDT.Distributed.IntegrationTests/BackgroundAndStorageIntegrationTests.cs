@@ -15,7 +15,6 @@ using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
-using Ama.Enterprise.CRDT.Distributed.Services.P2p;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Models.Transports;
