@@ -55,13 +55,13 @@ public sealed class WebRtcTransportIntegrationTests
 
         // Act - Establish WebRTC Data Channel via SDP exchange
         testOutputHelper.WriteLine("Creating invitation on Node A...");
-        var (connIdA, offer) = await nodeA.InvitationService.CreateInvitationAsync(cts.Token);
+        var offerDto = await nodeA.InvitationService.CreateInvitationAsync(cts.Token);
         
         testOutputHelper.WriteLine("Accepting invitation on Node B...");
-        var (connIdB, answer) = await nodeB.InvitationService.AcceptInvitationAsync(offer, cts.Token);
+        var answerDto = await nodeB.InvitationService.AcceptInvitationAsync(offerDto.SdpOffer, cts.Token);
         
         testOutputHelper.WriteLine("Finalizing invitation on Node A...");
-        await nodeA.InvitationService.FinalizeInvitationAsync(connIdA, answer, cts.Token);
+        await nodeA.InvitationService.FinalizeInvitationAsync(offerDto.ConnectionId, answerDto.SdpAnswer, cts.Token);
 
         var messageCompletionSource = new TaskCompletionSource<TestMessage>();
 
@@ -76,7 +76,7 @@ public sealed class WebRtcTransportIntegrationTests
         testOutputHelper.WriteLine("Waiting for WebRTC data channels to open...");
         await Task.Delay(TimeSpan.FromSeconds(8), cts.Token);
 
-        var endpointB = new WebRtcPeerEndpoint(connIdA); 
+        var endpointB = new WebRtcPeerEndpoint(offerDto.ConnectionId); 
         
         // Act - Send
         testOutputHelper.WriteLine("Sending message from Transport A...");
@@ -108,9 +108,9 @@ public sealed class WebRtcTransportIntegrationTests
         await using var nodeA = CreateTestNode(meshId, peerAId);
         await using var nodeB = CreateTestNode(meshId, peerBId);
 
-        var (connIdA, offer) = await nodeA.InvitationService.CreateInvitationAsync(cts.Token);
-        var (connIdB, answer) = await nodeB.InvitationService.AcceptInvitationAsync(offer, cts.Token);
-        await nodeA.InvitationService.FinalizeInvitationAsync(connIdA, answer, cts.Token);
+        var offerDto = await nodeA.InvitationService.CreateInvitationAsync(cts.Token);
+        var answerDto = await nodeB.InvitationService.AcceptInvitationAsync(offerDto.SdpOffer, cts.Token);
+        await nodeA.InvitationService.FinalizeInvitationAsync(offerDto.ConnectionId, answerDto.SdpAnswer, cts.Token);
 
         var messageCompletionSourceA = new TaskCompletionSource<TestMessage>();
         var messageCompletionSourceB = new TaskCompletionSource<TestMessage>();
@@ -129,8 +129,8 @@ public sealed class WebRtcTransportIntegrationTests
 
         await Task.Delay(TimeSpan.FromSeconds(8), cts.Token);
 
-        var endpointB = new WebRtcPeerEndpoint(connIdA);
-        var endpointA = new WebRtcPeerEndpoint(connIdB);
+        var endpointB = new WebRtcPeerEndpoint(offerDto.ConnectionId);
+        var endpointA = new WebRtcPeerEndpoint(answerDto.ConnectionId);
 
         // Act - Send in both directions
         await nodeA.Transport.SendAsync(endpointB, messageAtoB, cts.Token);
@@ -161,9 +161,9 @@ public sealed class WebRtcTransportIntegrationTests
         await using var nodeB = CreateTestNode(meshId, peerBId);
 
         // Act
-        var (connIdA, offer) = await nodeA.InvitationService.CreateInvitationAsync(cts.Token);
-        var (connIdB, answer) = await nodeB.InvitationService.AcceptInvitationAsync(offer, cts.Token);
-        await nodeA.InvitationService.FinalizeInvitationAsync(connIdA, answer, cts.Token);
+        var offerDto = await nodeA.InvitationService.CreateInvitationAsync(cts.Token);
+        var answerDto = await nodeB.InvitationService.AcceptInvitationAsync(offerDto.SdpOffer, cts.Token);
+        await nodeA.InvitationService.FinalizeInvitationAsync(offerDto.ConnectionId, answerDto.SdpAnswer, cts.Token);
 
         bool peerBDiscoveredByA = false;
         bool peerADiscoveredByB = false;

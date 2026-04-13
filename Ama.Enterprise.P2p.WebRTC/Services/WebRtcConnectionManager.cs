@@ -50,7 +50,7 @@ public sealed class WebRtcConnectionManager : IWebRtcConnectionManager, IWebRtcI
     }
 
     /// <inheritdoc />
-    public async Task<(Guid ConnectionId, string SdpOffer)> CreateInvitationAsync(CancellationToken cancellationToken)
+    public async Task<WebRtcInvitationOffer> CreateInvitationAsync(CancellationToken cancellationToken)
     {
         var connectionId = Guid.NewGuid();
         var pc = CreatePeerConnection(connectionId);
@@ -68,15 +68,15 @@ public sealed class WebRtcConnectionManager : IWebRtcConnectionManager, IWebRtcI
         
         logger.LogInformation("[{MeshId}] Created WebRTC invitation {ConnectionId}.", meshId, connectionId);
         
-        return (connectionId, sdpOffer);
+        return new WebRtcInvitationOffer(connectionId, sdpOffer);
     }
 
     /// <inheritdoc />
-    public async Task<(Guid ConnectionId, string SdpAnswer)> AcceptInvitationAsync(string sdpOffer, CancellationToken cancellationToken)
+    public async Task<WebRtcInvitationAnswer> AcceptInvitationAsync(string sdpOffer, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(sdpOffer))
         {
-            throw new ArgumentException("SDP Offer cannot be empty.", nameof(sdpOffer));
+            throw new ArgumentException("SDP Offer cannot be null or empty.", nameof(sdpOffer));
         }
 
         var connectionId = Guid.NewGuid();
@@ -107,12 +107,17 @@ public sealed class WebRtcConnectionManager : IWebRtcConnectionManager, IWebRtcI
 
         logger.LogInformation("[{MeshId}] Accepted WebRTC invitation {ConnectionId}.", meshId, connectionId);
 
-        return (connectionId, sdpAnswer);
+        return new WebRtcInvitationAnswer(connectionId, sdpAnswer);
     }
 
     /// <inheritdoc />
     public Task FinalizeInvitationAsync(Guid connectionId, string sdpAnswer, CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(sdpAnswer))
+        {
+            throw new ArgumentException("SDP Answer cannot be null or empty.", nameof(sdpAnswer));
+        }
+
         if (!connections.TryGetValue(connectionId, out var state))
         {
             throw new InvalidOperationException($"Connection {connectionId} not found.");
@@ -133,6 +138,11 @@ public sealed class WebRtcConnectionManager : IWebRtcConnectionManager, IWebRtcI
     /// <inheritdoc />
     public Task SendMessageAsync(Guid connectionId, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
+        if (payload.IsEmpty)
+        {
+            throw new ArgumentException("Payload cannot be empty.", nameof(payload));
+        }
+
         if (connections.TryGetValue(connectionId, out var state) && state.DataChannel is { readyState: RTCDataChannelState.open })
         {
             var buffer = new byte[payload.Length + 1];

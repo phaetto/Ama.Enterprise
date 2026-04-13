@@ -7,6 +7,8 @@ using System.Text.Json.Serialization;
 /// </summary>
 [JsonSerializable(typeof(WebRtcHandshakeMessage))]
 [JsonSerializable(typeof(WebRtcPeerEndpoint))]
+[JsonSerializable(typeof(WebRtcInvitationOffer))]
+[JsonSerializable(typeof(WebRtcInvitationAnswer))]
 internal sealed partial class WebRtcJsonContext : JsonSerializerContext
 {
 }
