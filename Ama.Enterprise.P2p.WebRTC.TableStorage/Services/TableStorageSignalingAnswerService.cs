@@ -15,27 +15,25 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Background hosted service continuously polling Azure Table Storage seamlessly generating and answering WebRTC SDP invitations.
+/// Background hosted service continuously polling Azure Table Storage seamlessly accepting remote WebRTC SDP invitations explicitly.
 /// </summary>
-public sealed class TableStorageSignalingService : BackgroundService
+public sealed class TableStorageSignalingAnswerService : BackgroundService
 {
     private readonly string meshId;
     private readonly IOptionsMonitor<TableStorageSignalingOptions> optionsMonitor;
     private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
     private readonly IServiceProvider serviceProvider;
-    private readonly ILogger<TableStorageSignalingService> logger;
-
-    private Guid? currentOfferConnectionId;
+    private readonly ILogger<TableStorageSignalingAnswerService> logger;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="TableStorageSignalingService"/> class.
+    /// Initializes a new instance of the <see cref="TableStorageSignalingAnswerService"/> class.
     /// </summary>
-    public TableStorageSignalingService(
+    public TableStorageSignalingAnswerService(
         string meshId,
         IOptionsMonitor<TableStorageSignalingOptions> optionsMonitor,
         IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
         IServiceProvider serviceProvider,
-        ILogger<TableStorageSignalingService> logger)
+        ILogger<TableStorageSignalingAnswerService> logger)
     {
         this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
         this.optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
@@ -55,9 +53,15 @@ public sealed class TableStorageSignalingService : BackgroundService
 
             try
             {
+                if (!options.EnableOfferAcceptance)
+                {
+                    await Task.Delay(options.PollingInterval, stoppingToken).ConfigureAwait(false);
+                    continue;
+                }
+
                 if (string.IsNullOrWhiteSpace(options.ConnectionString))
                 {
-                    logger.LogWarning("[{MeshId}] Table Storage signaling ConnectionString is empty. Signaling implicitly disabled.", meshId);
+                    logger.LogWarning("[{MeshId}] Table Storage signaling ConnectionString is empty. Answer signaling implicitly disabled.", meshId);
                     await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken).ConfigureAwait(false);
                     continue;
                 }
@@ -82,7 +86,7 @@ public sealed class TableStorageSignalingService : BackgroundService
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "[{MeshId}] Error during WebRTC Table Storage signaling cycle gracefully intercepted.", meshId);
+                logger.LogError(ex, "[{MeshId}] Error during WebRTC Table Storage answer signaling cycle gracefully intercepted.", meshId);
                 
                 // Prevent tight loops natively on continuous failures
                 await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken).ConfigureAwait(false);
@@ -96,66 +100,7 @@ public sealed class TableStorageSignalingService : BackgroundService
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
         var localPeerId = nodeOptions.LocalPeerId;
 
-        // 1. Maintain and monitor localized active offers specifically
-        if (currentOfferConnectionId.HasValue)
-        {
-            try
-            {
-                var response = await tableClient.GetEntityAsync<TableEntity>(
-                    meshId, 
-                    currentOfferConnectionId.Value.ToString(), 
-                    cancellationToken: cancellationToken).ConfigureAwait(false);
-                    
-                var model = response.Value.ToModel();
-
-                if (!string.IsNullOrWhiteSpace(model.AnswerSdp))
-                {
-                    logger.LogInformation("[{MeshId}] Received WebRTC signaling answer properly mapped for connection {ConnectionId}.", meshId, currentOfferConnectionId.Value);
-                    
-                    await invitationService.FinalizeInvitationAsync(currentOfferConnectionId.Value, model.AnswerSdp, cancellationToken).ConfigureAwait(false);
-                    await tableClient.DeleteEntityAsync(meshId, currentOfferConnectionId.Value.ToString(), cancellationToken: cancellationToken).ConfigureAwait(false);
-                    
-                    currentOfferConnectionId = null;
-                }
-                else
-                {
-                    if (model.CreatedAt < DateTimeOffset.UtcNow.Subtract(options.OfferExpiration))
-                    {
-                        // Clean up explicitly timed out offers appropriately ensuring proper table hygiene natively
-                        await tableClient.DeleteEntityAsync(meshId, currentOfferConnectionId.Value.ToString(), cancellationToken: cancellationToken).ConfigureAwait(false);
-                        currentOfferConnectionId = null;
-                    }
-                }
-            }
-            catch (RequestFailedException ex) when (ex.Status == 404)
-            {
-                // Active localized offer deleted cleanly out-of-band organically
-                currentOfferConnectionId = null;
-            }
-        }
-
-        // 2. Generate natively bounded local offers explicitly ensuring robust network topology discovery
-        if (!currentOfferConnectionId.HasValue)
-        {
-            var invitationResult = await invitationService.CreateInvitationAsync(cancellationToken).ConfigureAwait(false);
-            currentOfferConnectionId = invitationResult.ConnectionId;
-
-            var newModel = new WebRtcSignalingModel(
-                MeshId: meshId,
-                ConnectionId: invitationResult.ConnectionId.ToString(),
-                CreatorPeerId: localPeerId,
-                OfferSdp: invitationResult.SdpOffer,
-                CreatedAt: DateTimeOffset.UtcNow,
-                AnswerSdp: null,
-                ResponderPeerId: null,
-                ETag: default
-            );
-
-            await tableClient.AddEntityAsync(newModel.ToTableEntity(), cancellationToken).ConfigureAwait(false);
-            logger.LogDebug("[{MeshId}] Published new WebRTC signaling active offer {ConnectionId}.", meshId, currentOfferConnectionId.Value);
-        }
-
-        // 3. Scan overarching Table limits for remote implicitly disconnected peer offers matching conditions safely
+        // Scan overarching Table limits for remote implicitly disconnected peer offers matching conditions safely
         var filter = TableClient.CreateQueryFilter($"PartitionKey eq {meshId}");
         var query = tableClient.QueryAsync<TableEntity>(filter, cancellationToken: cancellationToken);
 

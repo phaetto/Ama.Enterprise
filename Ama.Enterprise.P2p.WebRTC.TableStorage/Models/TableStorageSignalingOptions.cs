@@ -27,6 +27,16 @@ public sealed class TableStorageSignalingOptions : IEquatable<TableStorageSignal
     /// </summary>
     public TimeSpan OfferExpiration { get; set; } = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// Gets or sets a value indicating whether the node should explicitly generate outgoing SDP offers dynamically.
+    /// </summary>
+    public bool EnableOfferGeneration { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the node should continuously poll and accept remote peer SDP offers securely.
+    /// </summary>
+    public bool EnableOfferAcceptance { get; set; } = true;
+
     /// <inheritdoc />
     public bool Equals(TableStorageSignalingOptions? other)
     {
@@ -36,12 +46,14 @@ public sealed class TableStorageSignalingOptions : IEquatable<TableStorageSignal
         return string.Equals(ConnectionString, other.ConnectionString, StringComparison.Ordinal) &&
                string.Equals(TableName, other.TableName, StringComparison.Ordinal) &&
                PollingInterval.Equals(other.PollingInterval) &&
-               OfferExpiration.Equals(other.OfferExpiration);
+               OfferExpiration.Equals(other.OfferExpiration) &&
+               EnableOfferGeneration == other.EnableOfferGeneration &&
+               EnableOfferAcceptance == other.EnableOfferAcceptance;
     }
 
     /// <inheritdoc />
     public override bool Equals(object? obj) => Equals(obj as TableStorageSignalingOptions);
 
     /// <inheritdoc />
-    public override int GetHashCode() => HashCode.Combine(ConnectionString, TableName, PollingInterval, OfferExpiration);
+    public override int GetHashCode() => HashCode.Combine(ConnectionString, TableName, PollingInterval, OfferExpiration, EnableOfferGeneration, EnableOfferAcceptance);
 }

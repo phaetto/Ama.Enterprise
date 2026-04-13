@@ -36,9 +36,12 @@ public static class ServiceCollectionExtensions
             builder.Services.Configure(builder.MeshId, configureOptions);
         }
 
-        // Add a singleton Hosted Service inherently tracking explicit Mesh instances completely decoupling execution safely
+        // Add singleton Hosted Services inherently tracking explicit Mesh instances completely decoupling execution safely
         builder.Services.AddSingleton<IHostedService>(sp =>
-            ActivatorUtilities.CreateInstance<TableStorageSignalingService>(sp, builder.MeshId));
+            ActivatorUtilities.CreateInstance<TableStorageSignalingOfferService>(sp, builder.MeshId));
+
+        builder.Services.AddSingleton<IHostedService>(sp =>
+            ActivatorUtilities.CreateInstance<TableStorageSignalingAnswerService>(sp, builder.MeshId));
 
         return builder;
     }
