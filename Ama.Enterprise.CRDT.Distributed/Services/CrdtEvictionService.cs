@@ -33,7 +33,8 @@ public sealed class CrdtEvictionService : ICrdtEvictionService
     {
         if (replicaIds == null || replicaIds.Count == 0) return;
 
-        var documents = scopeProvider.Scope.ServiceProvider.GetRequiredService<IEnumerable<IDistributedCrdtDocument>>().ToList();
+        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var documents = orchestrator.GetActiveDocuments();
         var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
         var syncService = scopeProvider.Scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
 
@@ -72,7 +73,8 @@ public sealed class CrdtEvictionService : ICrdtEvictionService
     public async Task RebootLocalIdentityAsync(CancellationToken cancellationToken = default)
     {
         var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
-        var documents = scopeProvider.Scope.ServiceProvider.GetRequiredService<IEnumerable<IDistributedCrdtDocument>>().ToList();
+        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var documents = orchestrator.GetActiveDocuments();
         var options = scopeProvider.Scope.ServiceProvider.GetRequiredService<IOptions<DistributedCrdtOptions>>().Value;
 
         logger.LogCritical("CRITICAL: This replica ({ReplicaId}) has been permanently tombstoned by the cluster. Re-bootstrapping identity completely to prevent split-brain amnesia anomalies.", replicaContext.ReplicaId);

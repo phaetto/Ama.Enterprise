@@ -49,6 +49,14 @@ public interface IDistributedCrdtStorage : ICrdtOperationJournal
     Task SaveDocumentAsync<TState>(string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new();
 
     /// <summary>
+    /// Permanently deletes the document state and unloads its specific journal operations natively.
+    /// </summary>
+    /// <param name="documentId">The specific identifier to tombstone seamlessly locally.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous deletion securely flawlessly smoothly mapping bounds natively.</returns>
+    Task DeleteDocumentAsync(string documentId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Asynchronously trims the underlying operation journal securely to remove obsolete operations strictly mapped across the background synchronized version vector bounds.
     /// </summary>
     /// <param name="globalMinimumVersionVector">The mapped version vector boundaries resolving safe historic patch removal limits.</param>

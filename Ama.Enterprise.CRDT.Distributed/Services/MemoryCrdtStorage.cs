@@ -91,8 +91,6 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage
 
         lock (syncRoot)
         {
-            // By utilizing a negation check on TryGetValue, we inherently eradicate any orphaned operations entirely 
-            // naturally safely protecting the structure from memory leaks tied strictly to perfectly tombstoned peers natively.
             operations.RemoveAll(op => 
                 !gmvv.TryGetValue(op.Operation.ReplicaId, out var minKnown) || 
                 op.Operation.GlobalClock <= minKnown);
@@ -135,4 +133,17 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage
 
     /// <inheritdoc />
     public Task SaveDocumentAsync<TState>(string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new() => Task.CompletedTask;
+
+    /// <inheritdoc />
+    public Task DeleteDocumentAsync(string documentId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(documentId)) return Task.CompletedTask;
+
+        lock (syncRoot)
+        {
+            operations.RemoveAll(op => op.DocumentId == documentId);
+        }
+
+        return Task.CompletedTask;
+    }
 }

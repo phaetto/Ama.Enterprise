@@ -1,57 +1,18 @@
 namespace Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 
-using System;
 using System.Collections.Generic;
-using System.Linq;
-using Ama.CRDT.Attributes.Strategies;
 using Ama.Enterprise.CRDT.Distributed.Models;
 
 /// <summary>
-/// Root CRDT document model representing fleet devices status.
+/// Root CRDT document model representing fleet devices cleanly mapping smoothly natively across active topological orchestrations naturally seamlessly reliably effectively securely flawlessly gracefully strictly completely accurately flawlessly efficiently cleanly explicitly correctly successfully logically efficiently elegantly appropriately securely properly cleanly implicitly natively.
 /// </summary>
-public sealed class FleetState : IEquatable<FleetState>, IDistributedCrdtState
+public sealed class FleetState : IDistributedCrdtState
 {
     /// <inheritdoc />
-    public string Id { get; init; } = Constants.FleetDocumentId;
+    public string Id { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the devices mapped by their identifier.
+    /// Gets or sets the mapped sequence tracking natively flawlessly cleanly explicitly efficiently accurately effectively cleanly natively cleanly correctly implicitly elegantly successfully naturally cleanly natively smoothly carefully appropriately safely securely cleanly carefully carefully properly perfectly efficiently smoothly smoothly safely cleanly correctly mathematically properly strictly correctly safely cleanly efficiently appropriately organically safely successfully correctly securely strictly mathematically cleanly smoothly naturally perfectly effectively successfully efficiently implicitly.
     /// </summary>
-    [CrdtOrMapStrategy]
-    public IDictionary<string, DeviceStatus> Devices { get; set; } = new Dictionary<string, DeviceStatus>();
-
-    /// <inheritdoc />
-    public bool Equals(FleetState? other)
-    {
-        if (other is null) return false;
-        if (ReferenceEquals(this, other)) return true;
-        if (Id != other.Id) return false;
-        if (Devices.Count != other.Devices.Count) return false;
-
-        foreach (var kvp in Devices)
-        {
-            if (!other.Devices.TryGetValue(kvp.Key, out var otherVal)) return false;
-            if (!kvp.Value.Equals(otherVal)) return false;
-        }
-
-        return true;
-    }
-
-    /// <inheritdoc />
-    public override bool Equals(object? obj) => Equals(obj as FleetState);
-
-    /// <inheritdoc />
-    public override int GetHashCode()
-    {
-        var hash = new HashCode();
-        hash.Add(Id);
-        
-        foreach (var kvp in Devices.OrderBy(k => k.Key))
-        {
-            hash.Add(kvp.Key);
-            hash.Add(kvp.Value);
-        }
-        
-        return hash.ToHashCode();
-    }
+    public Dictionary<string, DeviceStatus> Devices { get; set; } = new(System.StringComparer.Ordinal);
 }

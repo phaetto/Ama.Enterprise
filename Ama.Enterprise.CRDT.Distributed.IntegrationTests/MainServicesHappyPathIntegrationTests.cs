@@ -59,7 +59,7 @@ public sealed class MainServicesHappyPathIntegrationTests
                 .AddCrdtAotContext(new HappyPathTestAotContext())
                 .AddCrdtJsonTypeInfoResolver(HappyPathTestJsonContext.Default);
 
-        services.AddDistributedDocument(new HappyPathTestState { Id = "happy-doc" });
+        services.AddDistributedDocumentType<HappyPathTestState>("happy-doc");
         services.AddDistributedCrdtP2p("TestMesh");
         
         // Mock P2P Outbound
@@ -108,6 +108,10 @@ public sealed class MainServicesHappyPathIntegrationTests
         // Arrange
         var sp = BuildNode("Replica1");
         var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
+        
+        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        
         var context = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
         var evictionService = sp.GetRequiredService<ICrdtEvictionService>();
 
@@ -132,7 +136,12 @@ public sealed class MainServicesHappyPathIntegrationTests
         });
 
         var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var docManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IDistributedCrdtDocument<HappyPathTestState>>();
+        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("happy-doc", "happy-doc", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
+        var docManager = orchestrator.GetDocument<HappyPathTestState>("happy-doc")!;
 
         // Act - Initialize inherently natively safely resolves initial state correctly
         await docManager.InitializeAsync(CancellationToken.None);
@@ -187,6 +196,12 @@ public sealed class MainServicesHappyPathIntegrationTests
         {
             services.Replace(ServiceDescriptor.Singleton(mockP2p.Object));
         });
+
+        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
+        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("happy-doc", "happy-doc", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var handler = sp.GetRequiredKeyedService<IMessageHandler<GossipMessage>>("TestMesh");
         var serializer = sp.GetRequiredService<ICrdtSerializer>();

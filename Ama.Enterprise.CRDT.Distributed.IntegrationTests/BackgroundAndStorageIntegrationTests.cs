@@ -63,7 +63,7 @@ public sealed class BackgroundAndStorageIntegrationTests
                 .AddCrdtAotContext(new BackgroundAndStorageTestAotContext())
                 .AddCrdtJsonTypeInfoResolver(BackgroundAndStorageTestJsonContext.Default);
 
-        services.AddDistributedDocument(new StorageTestState { Id = "storage-doc" });
+        services.AddDistributedDocumentType<StorageTestState>("storage-doc");
         services.AddDistributedCrdtP2p("StorageMesh");
 
         services.AddSingleton(Mock.Of<IP2pProtocol>());
@@ -122,20 +122,26 @@ public sealed class BackgroundAndStorageIntegrationTests
             services.Replace(ServiceDescriptor.Singleton(mockP2p.Object));
         });
 
+        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
+        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("storage-doc", "storage-doc", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
         var observer = sp.GetRequiredService<IPeerTopologyObserver>();
         var peerNode = new PeerNode(new PeerId(Guid.NewGuid()), new HttpPeerEndpoint("http://localhost", 5000));
 
         // Act - Trigger Peer Joined naturally
         await observer.OnPeerJoinedAsync(peerNode, CancellationToken.None);
         
-        // Assert - The observer should explicitly smoothly dynamically trigger document state sync broadcast seamlessly
-        mockP2p.Verify(p => p.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once);
+        // Assert - The observer should explicitly smoothly dynamically trigger document state sync broadcast seamlessly (2 documents: Registry and our test doc)
+        mockP2p.Verify(p => p.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
         
         // Act - Trigger again explicitly testing the thread-safe connection check structurally
         await observer.OnPeerJoinedAsync(new PeerNode(new PeerId(Guid.NewGuid()), new HttpPeerEndpoint("http://localhost2", 5001)), CancellationToken.None);
         
         // Assert - Only triggered on the FIRST connected peer perfectly seamlessly safely natively correctly explicitly gracefully properly
-        mockP2p.Verify(p => p.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once);
+        mockP2p.Verify(p => p.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
     [IntegrationFact]
@@ -149,7 +155,12 @@ public sealed class BackgroundAndStorageIntegrationTests
         }, activeSync: true); // Enable active sync inherently
 
         var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var docManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IDistributedCrdtDocument<StorageTestState>>();
+        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("storage-doc", "storage-doc", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
+        var docManager = orchestrator.GetDocument<StorageTestState>("storage-doc")!;
         
         // Prepare a valid generic empty patch strictly resolving local bounds mapping natively
         var patch = new CrdtPatch(Array.Empty<CrdtOperation>());
@@ -177,6 +188,12 @@ public sealed class BackgroundAndStorageIntegrationTests
             services.Replace(ServiceDescriptor.Singleton(mockP2p.Object));
         });
 
+        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
+        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("storage-doc", "storage-doc", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
         var handler = sp.GetRequiredKeyedService<IMessageHandler<GossipMessage>>("StorageMesh");
         var serializer = sp.GetRequiredService<ICrdtSerializer>();
         
@@ -184,8 +201,7 @@ public sealed class BackgroundAndStorageIntegrationTests
         var globalDvv = new DottedVersionVector();
         globalDvv.Versions["RemoteA"] = 10;
         
-        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var docManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IDistributedCrdtDocument<StorageTestState>>();
+        var docManager = orchestrator.GetDocument<StorageTestState>("storage-doc")!;
         var metadataManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtMetadataManager>();
         
         var metadata = metadataManager.Initialize(new StorageTestState());
@@ -220,7 +236,12 @@ public sealed class BackgroundAndStorageIntegrationTests
         });
 
         var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var docManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IDistributedCrdtDocument<StorageTestState>>();
+        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("storage-doc", "storage-doc", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
+        var docManager = orchestrator.GetDocument<StorageTestState>("storage-doc")!;
         
         // Ensure the document is mutated so it gets flagged securely as Dirty and properly saved natively by the loop
         var op = default(CrdtOperation) with { Id = Guid.NewGuid(), ReplicaId = "Replica1", JsonPath = "$.Field", Type = OperationType.Upsert, Value = "DirtyData" };

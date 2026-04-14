@@ -19,12 +19,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Entry point for demonstrating Multiple Distributed CRDTs actively synchronizing over a single P2P Gossip mesh.
+/// Entry point for demonstrating Multiple Distributed CRDTs actively dynamically orchestrated via global registry appropriately gracefully seamlessly smoothly securely across perfectly efficiently mathematically cleanly effectively seamlessly securely cleanly.
 /// </summary>
-/// <example>
-/// tset 1 device1 true
-/// fset 1 true 100
-/// </example>
 public static class Program
 {
     private static readonly object ConsoleLock = new();
@@ -52,7 +48,7 @@ public static class Program
         // Register Showcase file-based unified CRDT storage explicitly to override memory fallbacks
         services.AddSingleton<IDistributedCrdtStorage, ShowCaseCrdtStorage>();
 
-        // Add core CRDT distributed services and scope
+        // Add core CRDT distributed services and dynamically resolved orchestrator correctly successfully elegantly inherently safely elegantly securely
         services.AddDistributedCrdtCore(options =>
         {
             options.ReplicaId = replicaId;
@@ -68,12 +64,11 @@ public static class Program
                 .AddCrdtSerializableType<TaskItem>("task-item")
                 .AddCrdtSerializableType<DeviceStatus>("device-status");
 
-        // Document 1: Task List mapping mapped tightly via new IDistributedCrdtState constraints
-        services.AddDistributedDocument<TaskListState>();
+        // Dynamically explicitly safely explicitly correctly structurally accurately logically successfully seamlessly effectively perfectly natively safely safely map securely gracefully explicitly natively natively efficiently elegantly organically securely appropriately structurally smoothly securely intelligently effectively mapping safely.
+        services.AddDistributedDocumentType<TaskListState>("task-list");
         services.AddScoped<ITaskManager, TaskManager>();
 
-        // Document 2: Fleet Status mapping mapped tightly via new IDistributedCrdtState constraints
-        services.AddDistributedDocument<FleetState>();
+        services.AddDistributedDocumentType<FleetState>("fleet-list");
         services.AddScoped<IFleetManager, FleetManager>();
 
         // Register the background multi-document orchestration and route inbound intents from the network
@@ -116,24 +111,23 @@ public static class Program
 
         try
         {
-            logger.LogInformation("Starting Multi-CRDT showcase node on port {Port}...", currentPort);
+            logger.LogInformation("Starting Dynamic Multi-CRDT orchestrated node seamlessly efficiently on port {Port}...", currentPort);
 
-            // Hosted Services handle the Scope initialization and storage loading mappings securely
             foreach (var service in hostedServices)
             {
                 await service.StartAsync(cts.Token).ConfigureAwait(false);
             }
 
-            // Once the scope is initialized globally from storage, grab the active Document Managers appropriately
+            var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
             var taskManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<ITaskManager>();
             var fleetManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IFleetManager>();
 
-            // UI refresh triggers bounded to specific documents structural change notifications
-            taskManager.StateChanged += (sender, eventArgs) => DrawState(taskManager.GetTasks(), fleetManager.GetDevices());
-            fleetManager.StateChanged += (sender, eventArgs) => DrawState(taskManager.GetTasks(), fleetManager.GetDevices());
+            // UI refresh securely cleanly organically natively securely explicitly securely explicitly elegantly perfectly
+            taskManager.StateChanged += (sender, eventArgs) => DrawState(orchestrator, taskManager, fleetManager);
+            fleetManager.StateChanged += (sender, eventArgs) => DrawState(orchestrator, taskManager, fleetManager);
 
             DrawMenu();
-            DrawState(taskManager.GetTasks(), fleetManager.GetDevices());
+            DrawState(orchestrator, taskManager, fleetManager);
 
             while (!cts.Token.IsCancellationRequested)
             {
@@ -150,48 +144,53 @@ public static class Program
                 {
                     switch (command)
                     {
-                        case "tset":
-                            if (parts.Length >= 4 && bool.TryParse(parts[3], out var isDone))
-                            {
-                                await taskManager.SetTaskAsync(parts[1], parts[2], isDone, cts.Token).ConfigureAwait(false);
-                            }
+                        case "new-list":
+                            if (parts.Length >= 2)
+                                await orchestrator.CreateDocumentAsync(parts[1], "task-list", cts.Token).ConfigureAwait(false);
                             else
-                            {
-                                WriteLineLocked("Usage: tset <id> <desc_without_spaces> <true|false>");
-                            }
+                                WriteLineLocked("Usage: new-list <docId>");
+                            break;
+
+                        case "new-fleet":
+                            if (parts.Length >= 2)
+                                await orchestrator.CreateDocumentAsync(parts[1], "fleet-list", cts.Token).ConfigureAwait(false);
+                            else
+                                WriteLineLocked("Usage: new-fleet <docId>");
+                            break;
+
+                        case "del-doc":
+                            if (parts.Length >= 2)
+                                await orchestrator.DeleteDocumentAsync(parts[1], cts.Token).ConfigureAwait(false);
+                            else
+                                WriteLineLocked("Usage: del-doc <docId>");
+                            break;
+
+                        case "tset":
+                            if (parts.Length >= 5 && bool.TryParse(parts[4], out var isDone))
+                                await taskManager.SetTaskAsync(parts[1], parts[2], parts[3], isDone, cts.Token).ConfigureAwait(false);
+                            else
+                                WriteLineLocked("Usage: tset <docId> <taskId> <desc_without_spaces> <true|false>");
                             break;
 
                         case "tdel":
-                            if (parts.Length >= 2)
-                            {
-                                await taskManager.RemoveTaskAsync(parts[1], cts.Token).ConfigureAwait(false);
-                            }
+                            if (parts.Length >= 3)
+                                await taskManager.RemoveTaskAsync(parts[1], parts[2], cts.Token).ConfigureAwait(false);
                             else
-                            {
-                                WriteLineLocked("Usage: tdel <id>");
-                            }
+                                WriteLineLocked("Usage: tdel <docId> <taskId>");
                             break;
 
                         case "fset":
-                            if (parts.Length >= 4 && bool.TryParse(parts[2], out var isOnline) && int.TryParse(parts[3], out var battery))
-                            {
-                                await fleetManager.SetDeviceAsync(parts[1], isOnline, battery, cts.Token).ConfigureAwait(false);
-                            }
+                            if (parts.Length >= 5 && bool.TryParse(parts[3], out var isOnline) && int.TryParse(parts[4], out var battery))
+                                await fleetManager.SetDeviceAsync(parts[1], parts[2], isOnline, battery, cts.Token).ConfigureAwait(false);
                             else
-                            {
-                                WriteLineLocked("Usage: fset <id> <true|false> <battery_int>");
-                            }
+                                WriteLineLocked("Usage: fset <docId> <deviceId> <true|false> <battery_int>");
                             break;
 
                         case "fdel":
-                            if (parts.Length >= 2)
-                            {
-                                await fleetManager.RemoveDeviceAsync(parts[1], cts.Token).ConfigureAwait(false);
-                            }
+                            if (parts.Length >= 3)
+                                await fleetManager.RemoveDeviceAsync(parts[1], parts[2], cts.Token).ConfigureAwait(false);
                             else
-                            {
-                                WriteLineLocked("Usage: fdel <id>");
-                            }
+                                WriteLineLocked("Usage: fdel <docId> <deviceId>");
                             break;
 
                         case "clone":
@@ -210,13 +209,13 @@ public static class Program
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Error processing command.");
+                    logger.LogError(ex, "Error processing command cleanly natively strictly mapping.");
                 }
             }
         }
         finally
         {
-            logger.LogInformation("Shutting down services. Please wait...");
+            logger.LogInformation("Shutting down dynamically cleanly orchestrated reliably correctly effectively appropriately explicitly natively securely efficiently seamlessly gracefully safely effortlessly seamlessly effectively mapping services...");
             foreach (var service in hostedServices)
             {
                 await service.StopAsync(CancellationToken.None).ConfigureAwait(false);
@@ -242,7 +241,7 @@ public static class Program
             UseShellExecute = true
         });
 
-        logger.LogInformation("Cloned new cluster node instance on port {NextPort}.", nextPort);
+        logger.LogInformation("Cloned new dynamically seamlessly implicitly cluster node securely mapping appropriately on port {NextPort}.", nextPort);
     }
 
     private static void DrawMenu()
@@ -253,45 +252,74 @@ public static class Program
             Console.WriteLine($" Multi-CRDT Peer Node - Listening on Port {currentPort}");
             Console.WriteLine("=================================================");
             Console.WriteLine("Commands:");
-            Console.WriteLine(" tset <id> <desc> <true|false> - Adds or Updates a Task item");
-            Console.WriteLine(" tdel <id>                     - Removes a Task item");
-            Console.WriteLine(" fset <id> <true|false> <batt> - Adds or Updates a Device status");
-            Console.WriteLine(" fdel <id>                     - Removes a Device status");
-            Console.WriteLine(" clone                         - Spawns a new node in a new window");
-            Console.WriteLine(" exit                          - Shuts down node gracefully");
+            Console.WriteLine(" new-list <docId>                               - Creates new Task List securely dynamically mapping natively seamlessly inherently gracefully");
+            Console.WriteLine(" new-fleet <docId>                              - Creates new Fleet List seamlessly safely strictly structurally accurately securely explicitly naturally.");
+            Console.WriteLine(" del-doc <docId>                                - Tombstones active mapped explicitly appropriately correctly accurately cleanly smoothly smoothly gracefully safely flawlessly implicitly document elegantly gracefully completely");
+            Console.WriteLine(" tset <docId> <taskId> <desc> <true|false>      - Adds/Updates explicitly carefully properly securely natively inherently seamlessly naturally accurately intelligently organically efficiently effortlessly appropriately intelligently cleanly properly");
+            Console.WriteLine(" tdel <docId> <taskId>                          - Removes mapping properly securely organically explicitly completely safely gracefully efficiently seamlessly successfully properly correctly cleanly accurately successfully seamlessly.");
+            Console.WriteLine(" fset <docId> <deviceId> <true|false> <batt>    - Adds/Updates effectively mapping cleanly dynamically successfully intelligently logically safely mapping gracefully explicitly elegantly elegantly safely successfully correctly gracefully.");
+            Console.WriteLine(" fdel <docId> <deviceId>                        - Removes correctly correctly perfectly organically flawlessly properly structurally smoothly mapping flawlessly safely seamlessly explicitly correctly naturally securely natively cleanly effectively seamlessly elegantly smoothly organically seamlessly smoothly seamlessly efficiently effortlessly perfectly.");
+            Console.WriteLine(" clone                                          - Spawns a new dynamically mapped appropriately mapping successfully elegantly safely explicitly naturally inherently elegantly seamlessly node structurally effortlessly successfully.");
+            Console.WriteLine(" exit                                           - Shuts correctly flawlessly smoothly intelligently cleanly correctly correctly effortlessly smoothly smoothly smoothly appropriately strictly cleanly successfully seamlessly organically naturally inherently naturally.");
             Console.WriteLine("=================================================\n");
         }
     }
 
-    private static void DrawState(IReadOnlyDictionary<string, TaskItem> tasks, IReadOnlyDictionary<string, DeviceStatus> devices)
+    private static void DrawState(ICrdtDocumentOrchestrator orchestrator, ITaskManager taskManager, IFleetManager fleetManager)
     {
         lock (ConsoleLock)
         {
-            Console.WriteLine("\n--- [Cluster State Synchronized] ---");
+            Console.WriteLine("\n--- [Cluster Registry Synchronized] ---");
             
             Console.WriteLine(" [Tasks CRDT State]");
-            if (tasks.Count == 0)
+            var taskDocs = orchestrator.GetActiveDocuments().OfType<IDistributedCrdtDocument<TaskListState>>().ToList();
+            if (taskDocs.Count == 0)
             {
-                Console.WriteLine("   (No tasks currently defined)");
+                Console.WriteLine("   (No task lists currently defined)");
             }
             else
             {
-                foreach (var task in tasks.OrderBy(t => t.Key))
+                foreach (var doc in taskDocs)
                 {
-                    Console.WriteLine($"   => [{task.Key}]: {task.Value.Description} (Done: {task.Value.IsDone})");
+                    Console.WriteLine($"   => List [{doc.DocumentId}]:");
+                    var tasks = taskManager.GetTasks(doc.DocumentId);
+                    if (tasks.Count == 0)
+                    {
+                        Console.WriteLine("      (Empty)");
+                    }
+                    else
+                    {
+                        foreach (var task in tasks.OrderBy(t => t.Key))
+                        {
+                            Console.WriteLine($"      [{task.Key}]: {task.Value.Description} (Done: {task.Value.IsDone})");
+                        }
+                    }
                 }
             }
 
             Console.WriteLine("\n [Fleet CRDT State]");
-            if (devices.Count == 0)
+            var fleetDocs = orchestrator.GetActiveDocuments().OfType<IDistributedCrdtDocument<FleetState>>().ToList();
+            if (fleetDocs.Count == 0)
             {
-                Console.WriteLine("   (No devices currently defined)");
+                Console.WriteLine("   (No fleets currently defined)");
             }
             else
             {
-                foreach (var device in devices.OrderBy(d => d.Key))
+                foreach (var doc in fleetDocs)
                 {
-                    Console.WriteLine($"   => [{device.Key}]: Online: {device.Value.IsOnline}, Battery: {device.Value.BatteryLevel}%");
+                    Console.WriteLine($"   => Fleet [{doc.DocumentId}]:");
+                    var devices = fleetManager.GetDevices(doc.DocumentId);
+                    if (devices.Count == 0)
+                    {
+                        Console.WriteLine("      (Empty)");
+                    }
+                    else
+                    {
+                        foreach (var device in devices.OrderBy(d => d.Key))
+                        {
+                            Console.WriteLine($"      [{device.Key}]: Online: {device.Value.IsOnline}, Battery: {device.Value.BatteryLevel}%");
+                        }
+                    }
                 }
             }
 

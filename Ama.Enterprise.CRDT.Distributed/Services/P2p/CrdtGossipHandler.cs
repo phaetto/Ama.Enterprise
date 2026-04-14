@@ -69,8 +69,8 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
             return;
         }
 
-        var documents = scopeProvider.Scope.ServiceProvider.GetRequiredService<IEnumerable<IDistributedCrdtDocument>>().ToList();
-        var targetDoc = documents.FirstOrDefault(d => d.DocumentId == wrapper.DocumentId);
+        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var targetDoc = orchestrator.GetActiveDocuments().FirstOrDefault(d => d.DocumentId == wrapper.DocumentId);
 
         if (targetDoc == null)
         {

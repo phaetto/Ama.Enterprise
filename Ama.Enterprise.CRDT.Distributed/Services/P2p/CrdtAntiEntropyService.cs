@@ -45,7 +45,8 @@ public sealed class CrdtAntiEntropyService : BackgroundService
         {
             try
             {
-                var documents = scopeProvider.Scope.ServiceProvider.GetRequiredService<IEnumerable<IDistributedCrdtDocument>>();
+                var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+                var documents = orchestrator.GetActiveDocuments();
 
                 foreach (var document in documents)
                 {

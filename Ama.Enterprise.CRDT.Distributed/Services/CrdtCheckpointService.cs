@@ -15,7 +15,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Background service responsible for periodically saving the full in-memory state of all registered CRDTs to persistent storage
+/// Background service responsible for periodically saving the full in-memory state of all dynamically registered CRDTs to persistent storage
 /// and explicitly trimming the underlying operational journals mapping across global cluster bounds to ensure overall consistency seamlessly.
 /// </summary>
 public sealed class CrdtCheckpointService : BackgroundService
@@ -68,7 +68,8 @@ public sealed class CrdtCheckpointService : BackgroundService
             try
             {
                 var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
-                var documents = scopeProvider.Scope.ServiceProvider.GetRequiredService<IEnumerable<IDistributedCrdtDocument>>().ToList();
+                var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+                var documents = orchestrator.GetActiveDocuments();
                 
                 if (options.Value.PeerEvictionTtlSeconds > 0)
                 {

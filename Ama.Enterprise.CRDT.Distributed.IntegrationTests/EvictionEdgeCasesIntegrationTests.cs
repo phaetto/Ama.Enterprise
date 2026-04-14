@@ -58,7 +58,7 @@ public class EvictionEdgeCasesIntegrationTests
                 .AddCrdtAotContext(new EvictionEdgeCasesTestAotContext())
                 .AddCrdtJsonTypeInfoResolver(EvictionEdgeCasesTestJsonContext.Default);
 
-        services.AddDistributedDocument(new TestState { Id = "test-doc" });
+        services.AddDistributedDocumentType<TestState>("test-doc");
         services.AddSingleton(Mock.Of<IP2pProtocol>());
 
         configureExtra?.Invoke(services);
@@ -136,7 +136,11 @@ public class EvictionEdgeCasesIntegrationTests
         await StartNodeAsync(sp);
 
         var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var docManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IDistributedCrdtDocument<TestState>>();
+        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.CreateDocumentAsync("test-doc", "test-doc", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+        
+        var docManager = orchestrator.GetDocument<TestState>("test-doc")!;
         var evictionService = sp.GetRequiredService<ICrdtEvictionService>();
         
         // Simulate local offline edit by mutating the Document state directly
@@ -146,7 +150,7 @@ public class EvictionEdgeCasesIntegrationTests
         // Act - Receive Eviction Rejection (Cluster tombstoned us, forcing identity reboot)
         await evictionService.RebootLocalIdentityAsync(CancellationToken.None);
         
-        // Assert - Fix: The document state is retained correctly across identity reboots seamlessly
+        // Assert - The document state intentionally preserves offline local data safely
         docManager.Document.Data.Data.ShouldBe("Unsaved Offline Edit");
     }
 
@@ -163,7 +167,11 @@ public class EvictionEdgeCasesIntegrationTests
         await StartNodeAsync(sp);
 
         var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var docManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IDistributedCrdtDocument<TestState>>();
+        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.CreateDocumentAsync("test-doc", "test-doc", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
+        var docManager = orchestrator.GetDocument<TestState>("test-doc")!;
         var metadataManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtMetadataManager>();
         
         // Local node has pending unsynced edits
@@ -178,7 +186,7 @@ public class EvictionEdgeCasesIntegrationTests
         // Act - Receive a snapshot message because we fell behind the journal bounds
         await docManager.MergeSnapshotAsync(new byte[] { 1, 2, 3 }, new DottedVersionVector(), CancellationToken.None);
         
-        // Assert - Fix: The snapshot merge successfully respects newer local operations securely correctly.
+        // Assert - The snapshot merge intentionally preserves pending local edits safely
         docManager.Document.Data.Data.ShouldBe("Local Pending Edit");
     }
 }

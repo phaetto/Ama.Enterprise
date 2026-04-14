@@ -12,7 +12,7 @@ using Ama.Enterprise.CRDT.Distributed.Models;
 public sealed class FeatureFlagState : IEquatable<FeatureFlagState>, IDistributedCrdtState
 {
     /// <inheritdoc />
-    public string Id { get; init; } = "feature-flags-singleton";
+    public string Id { get; set; } = "feature-flags-singleton";
 
     /// <summary>
     /// A map of feature flags where the key is the flag name.

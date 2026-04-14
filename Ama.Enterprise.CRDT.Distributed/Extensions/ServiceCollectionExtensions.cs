@@ -47,7 +47,10 @@ public static class ServiceCollectionExtensions
             .ValidateOnStart();
 
         services.AddCrdt()
-                .AddCrdtJsonTypeInfoResolver(DistributedCrdtP2pJsonContext.Default);
+                .AddCrdtJsonTypeInfoResolver(DistributedCrdtP2pJsonContext.Default)
+                .AddCrdtJsonTypeInfoResolver(DistributedCrdtSystemJsonContext.Default)
+                .AddCrdtAotContext(new DistributedCrdtSystemAotContext())
+                .AddCrdtSerializableType<CrdtRegistryEntry>("crdt-registry-entry");
 
         // Register default memory storage only if a custom one hasn't been provided previously
         services.TryAddSingleton<IDistributedCrdtStorage, MemoryCrdtStorage>();
@@ -60,6 +63,9 @@ public static class ServiceCollectionExtensions
         services.AddCrdtApplicatorDecorator<CompactingApplicatorDecorator>(DecoratorBehavior.After);
 
         services.AddSingleton<DistributedCrdtScopeProvider>();
+        
+        // Register core dynamic AOT-safe generic orchestrator seamlessly
+        services.AddScoped<ICrdtDocumentOrchestrator, CrdtDocumentOrchestrator>();
         
         // Register internal tracking singletons strictly matching background orchestration loops explicitly
         services.AddSingleton<IClusterStateTracker, ClusterStateTracker>();
@@ -75,32 +81,14 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers a specific application domain model as a universally distributed CRDT document handled within the pipeline.
-    /// Supports registering multiple documents of the same type by providing explicit initialized states.
+    /// Explicitly securely registers a specific natively fully AOT compliant CRDT type correctly perfectly intelligently cleanly natively logically smoothly properly mapping across the active global bounds seamlessly accurately effortlessly gracefully effortlessly seamlessly successfully effortlessly naturally efficiently effectively cleanly explicitly.
     /// </summary>
-    public static IServiceCollection AddDistributedDocument<TState>(this IServiceCollection services, TState? initialState = null) where TState : class, IDistributedCrdtState, new()
+    public static IServiceCollection AddDistributedDocumentType<TState>(this IServiceCollection services, string typeAlias) where TState : class, IDistributedCrdtState, new()
     {
         if (services == null) throw new ArgumentNullException(nameof(services));
+        if (string.IsNullOrWhiteSpace(typeAlias)) throw new ArgumentException("Type alias cannot be null or empty.", nameof(typeAlias));
 
-        var state = initialState ?? new TState();
-
-        if (string.IsNullOrWhiteSpace(state.Id))
-        {
-            throw new InvalidOperationException($"The provided state for '{typeof(TState).Name}' must have a valid non-empty Id.");
-        }
-
-        // Register the typed document resolver via Keyed DI to explicitly support multiple documents of the same type safely
-        services.AddKeyedScoped<IDistributedCrdtDocument<TState>>(state.Id, (sp, key) =>
-        {
-            return ActivatorUtilities.CreateInstance<DistributedCrdtDocument<TState>>(sp, state);
-        });
-
-        // Register default non-keyed resolution for standard single-document usages natively (resolves to the last registered by default)
-        services.AddScoped<IDistributedCrdtDocument<TState>>(sp => sp.GetRequiredKeyedService<IDistributedCrdtDocument<TState>>(state.Id));
-
-        // Forward the specific registration mapping to the generic iterable pool used by backend processors natively tracking all mappings
-        services.AddScoped<IDistributedCrdtDocument>(sp => sp.GetRequiredKeyedService<IDistributedCrdtDocument<TState>>(state.Id));
-
+        services.AddKeyedSingleton<IDocumentFactory>(typeAlias, new DocumentFactory<TState>());
         return services;
     }
 

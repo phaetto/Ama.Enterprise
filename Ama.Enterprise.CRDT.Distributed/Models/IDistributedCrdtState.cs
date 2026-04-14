@@ -6,7 +6,7 @@ namespace Ama.Enterprise.CRDT.Distributed.Models;
 public interface IDistributedCrdtState
 {
     /// <summary>
-    /// Gets the singleton identifier resolving this exact document structure dynamically across the P2P synchronization topology.
+    /// Gets or sets the singleton identifier resolving this exact document structure dynamically across the P2P synchronization topology.
     /// </summary>
-    string Id { get; }
+    string Id { get; set; }
 }

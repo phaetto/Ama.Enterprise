@@ -156,6 +156,24 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         }
     }
 
+    public async Task DeleteDocumentAsync(string documentId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
+
+        try
+        {
+            await this.tableClient.DeleteEntityAsync(DocumentStatePartitionKey, documentId, cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404)
+        {
+            // Ignore if not exists
+        }
+        catch (Exception ex)
+        {
+            this.logger.LogError(ex, "Failed to delete document state.");
+        }
+    }
+
     public void Append(string documentId, IReadOnlyList<CrdtOperation> operations)
     {
         if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));

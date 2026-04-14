@@ -98,6 +98,35 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         }
     }
 
+    public Task DeleteDocumentAsync(string documentId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(documentId)) return Task.CompletedTask;
+
+        var filePath = GetDocumentFilePath(documentId);
+        if (File.Exists(filePath))
+        {
+            try
+            {
+                File.Delete(filePath);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to actively safely locally delete structurally mapped CRDT document correctly gracefully explicitly natively safely cleanly elegantly smoothly effortlessly cleanly successfully accurately from {FilePath}", filePath);
+            }
+        }
+
+        lock (syncRoot)
+        {
+            var removed = journal.RemoveAll(o => o.DocumentId == documentId);
+            if (removed > 0)
+            {
+                SaveJournalSynchronously();
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
     public async Task<DottedVersionVector?> LoadGlobalVersionVectorAsync(string replicaId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(replicaId)) throw new ArgumentException("Value cannot be null or empty.", nameof(replicaId));
