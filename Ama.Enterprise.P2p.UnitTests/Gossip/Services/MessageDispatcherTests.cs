@@ -137,6 +137,7 @@ public sealed class MessageDispatcherTests
     private static GossipMessage CreateSampleMessage()
     {
         return new GossipMessage(
+            TestMeshId,
             Guid.NewGuid(),
             new PeerId(Guid.NewGuid()),
             5,

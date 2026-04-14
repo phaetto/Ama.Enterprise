@@ -1,7 +1,8 @@
-namespace Ama.Enterprise.P2p.Services.Core;
+namespace Ama.Enterprise.P2p.Services.Discovery;
 
 using System.Text.Json.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
+using Ama.Enterprise.P2p.Models.Discovery;
 using Ama.Enterprise.P2p.Models.Transports;
 
 /// <summary>
@@ -10,6 +11,7 @@ using Ama.Enterprise.P2p.Models.Transports;
 [JsonSerializable(typeof(PeerNode))]
 [JsonSerializable(typeof(PeerEndpoint))]
 [JsonSerializable(typeof(HttpPeerEndpoint))]
+[JsonSerializable(typeof(UdpDiscoveryMessage))]
 internal sealed partial class UdpDiscoveryJsonContext : JsonSerializerContext
 {
 }

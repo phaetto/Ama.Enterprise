@@ -26,7 +26,7 @@ internal partial class WebRtcIntegrationTestJsonContext : JsonSerializerContext
 
 public sealed class WebRtcTransportIntegrationTests
 {
-    public readonly record struct TestMessage(string Content);
+    public readonly record struct TestMessage(string Content, string MeshId = "integration-mesh") : IMeshMessage;
 
     private sealed record DummyPeerEndpoint : PeerEndpoint;
 
@@ -47,7 +47,7 @@ public sealed class WebRtcTransportIntegrationTests
         var peerAId = new PeerId(Guid.NewGuid());
         var peerBId = new PeerId(Guid.NewGuid());
 
-        var messageToSend = new TestMessage("Hello Decentralized World");
+        var messageToSend = new TestMessage("Hello Decentralized World", meshId);
 
         testOutputHelper.WriteLine("Initializing DI Nodes...");
         await using var nodeA = CreateTestNode(meshId, peerAId);
@@ -102,8 +102,8 @@ public sealed class WebRtcTransportIntegrationTests
         var peerAId = new PeerId(Guid.NewGuid());
         var peerBId = new PeerId(Guid.NewGuid());
 
-        var messageAtoB = new TestMessage("AtoB");
-        var messageBtoA = new TestMessage("BtoA");
+        var messageAtoB = new TestMessage("AtoB", meshId);
+        var messageBtoA = new TestMessage("BtoA", meshId);
 
         await using var nodeA = CreateTestNode(meshId, peerAId);
         await using var nodeB = CreateTestNode(meshId, peerBId);
@@ -205,7 +205,7 @@ public sealed class WebRtcTransportIntegrationTests
         canHandle.ShouldBeFalse();
 
         // Ensure SendAsync gracefully completes without throwing for unsupported endpoints
-        await Should.NotThrowAsync(() => nodeA.Transport.SendAsync(dummyEndpoint, new TestMessage("Ignored"), CancellationToken.None));
+        await Should.NotThrowAsync(() => nodeA.Transport.SendAsync(dummyEndpoint, new TestMessage("Ignored", meshId), CancellationToken.None));
     }
 
     [IntegrationFact]

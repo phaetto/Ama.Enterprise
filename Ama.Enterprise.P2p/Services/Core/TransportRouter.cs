@@ -8,10 +8,10 @@ using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
-/// Composite transport router that delegates sending messages to the correct specific transport implementation.
+/// Composite transport router that delegates sending messages to the correct specific transport implementation explicitly.
 /// </summary>
 /// <typeparam name="TMessage">The type of the message being transported.</typeparam>
-public sealed class TransportRouter<TMessage> : ITransportRouter<TMessage>
+public sealed class TransportRouter<TMessage> : ITransportRouter<TMessage> where TMessage : IMeshMessage
 {
     private readonly IEnumerable<ITransport<TMessage>> transports;
 
@@ -33,7 +33,7 @@ public sealed class TransportRouter<TMessage> : ITransportRouter<TMessage>
         var transport = transports.FirstOrDefault(t => t.CanHandle(endpoint));
         if (transport is null)
         {
-            throw new NotSupportedException($"No outbound transport found that can handle endpoint type {endpoint.GetType().Name}.");
+            throw new NotSupportedException($"No outbound explicitly mapped generic transport found that can handle endpoint type {endpoint.GetType().Name}.");
         }
 
         return transport.SendAsync(endpoint, message, cancellationToken);

@@ -1,34 +1,47 @@
 namespace Ama.Enterprise.P2p.Services.Transports;
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p;
+using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Implements generalized inbound listener using an <see cref="HttpListener"/> scoped to a given mesh identifier.
+/// Implements globally shared inbound multiplexing listeners explicitly wrapping HTTP natively capturing multi-tenant meshes accurately.
 /// </summary>
-/// <typeparam name="TMessage">The generic type of message payloads traversing the transport layer.</typeparam>
-public sealed class HttpTransportListener<TMessage>(
-    string meshId,
-    IOptionsMonitor<HttpTransportOptions> optionsMonitor,
-    ICrdtSerializer serializer,
-    ILogger<HttpTransportListener<TMessage>> logger) : ITransportListener<TMessage>, IDisposable
+/// <typeparam name="TMessage">The generic type of multiplexed messages natively traversing the transport effectively.</typeparam>
+public sealed class HttpTransportListener<TMessage> : ITransportListener<TMessage>, IDisposable where TMessage : IMeshMessage
 {
-    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-    private readonly IOptionsMonitor<HttpTransportOptions> optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
-    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-    private readonly ILogger<HttpTransportListener<TMessage>> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IEnumerable<P2pMeshMetadata> meshes;
+    private readonly IOptionsMonitor<HttpTransportOptions> optionsMonitor;
+    private readonly ICrdtSerializer serializer;
+    private readonly ILogger<HttpTransportListener<TMessage>> logger;
     private HttpListener? httpListener;
     private CancellationTokenSource? listenerCts;
     private Task? listeningTask;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="HttpTransportListener{TMessage}"/> class.
+    /// </summary>
+    public HttpTransportListener(
+        IEnumerable<P2pMeshMetadata> meshes,
+        IOptionsMonitor<HttpTransportOptions> optionsMonitor,
+        ICrdtSerializer serializer,
+        ILogger<HttpTransportListener<TMessage>> logger)
+    {
+        this.meshes = meshes ?? throw new ArgumentNullException(nameof(meshes));
+        this.optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
 
     /// <inheritdoc />
     public Task StartListeningAsync(Func<TMessage, Task> onMessageReceived, CancellationToken cancellationToken)
@@ -41,22 +54,31 @@ public sealed class HttpTransportListener<TMessage>(
         listenerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         httpListener = new HttpListener();
 
-        var options = optionsMonitor.Get(meshId);
-        var host = string.IsNullOrWhiteSpace(options.ListenHost) ? "+" : options.ListenHost;
-        var port = options.ListenPort;
-        var path = options.PathPrefix.EndsWith("/") ? options.PathPrefix : options.PathPrefix + "/";
-        var prefix = $"http://{host}:{port}{path}";
-        
-        httpListener.Prefixes.Add(prefix);
+        var prefixes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Map and group unique listener prefixes by all configured meshes.
+        foreach (var mesh in meshes)
+        {
+            var options = optionsMonitor.Get(mesh.MeshId);
+            var host = string.IsNullOrWhiteSpace(options.ListenHost) ? "+" : options.ListenHost;
+            var path = options.PathPrefix.EndsWith("/") ? options.PathPrefix : options.PathPrefix + "/";
+            var prefix = $"http://{host}:{options.ListenPort}{path}";
+            prefixes.Add(prefix);
+        }
 
         try
         {
+            foreach (var prefix in prefixes)
+            {
+                httpListener.Prefixes.Add(prefix);
+                logger.LogInformation("Listening globally for multiplexed HTTP P2P traffic on {Prefix}", prefix);
+            }
+
             httpListener.Start();
-            logger.LogInformation("[{MeshId}] Listening for generic HTTP messages on {Prefix}", meshId, prefix);
         }
         catch (HttpListenerException ex)
         {
-            logger.LogError(ex, "[{MeshId}] Failed to start HTTP listener on {Prefix}. Ensure proper permissions.", meshId, prefix);
+            logger.LogError(ex, "Failed to start multiplexed HTTP listener. Ensure proper port bindings and permissions.");
             throw;
         }
 
@@ -84,7 +106,7 @@ public sealed class HttpTransportListener<TMessage>(
             catch (OperationCanceledException) { }
         }
         
-        logger.LogInformation("[{MeshId}] Transport listener stopped.", meshId);
+        logger.LogInformation("Shared HTTP transport multiplexer listener stopped.");
     }
 
     private async Task ListenLoopAsync(Func<TMessage, Task> onMessageReceived, CancellationToken cancellationToken)
@@ -100,36 +122,26 @@ public sealed class HttpTransportListener<TMessage>(
             }
             catch (ObjectDisposedException)
             {
-                // The listener was safely disposed, break the loop without throwing an error
                 break;
             }
             catch (HttpListenerException ex)
             {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    break;
-                }
+                if (cancellationToken.IsCancellationRequested) break;
 
                 bool isListening = false;
                 try
                 {
                     isListening = httpListener.IsListening;
                 }
-                catch (ObjectDisposedException)
-                {
-                    break;
-                }
+                catch (ObjectDisposedException) { break; }
 
-                if (!isListening)
-                {
-                    break;
-                }
+                if (!isListening) break;
 
-                logger.LogError(ex, "[{MeshId}] HTTP listener error while accepting incoming request.", meshId);
+                logger.LogError(ex, "HTTP listener error while accepting incoming multiplexed request.");
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "[{MeshId}] Error accepting incoming HTTP request.", meshId);
+                logger.LogError(ex, "Error accepting incoming globally multiplexed HTTP request.");
             }
         }
     }
@@ -156,9 +168,7 @@ public sealed class HttpTransportListener<TMessage>(
             
             if (incomingVersion.Major != localVersion.Major)
             {
-                logger.LogWarning(
-                    "[{MeshId}] Rejected incoming message due to protocol major version mismatch. Local: {LocalVersion}, Incoming: {IncomingVersion}", 
-                    meshId, localVersion, incomingVersion);
+                logger.LogWarning("Rejected incoming generic message due to protocol major version mismatch. Local: {LocalVersion}, Incoming: {IncomingVersion}", localVersion, incomingVersion);
                 context.Response.StatusCode = (int)HttpStatusCode.HttpVersionNotSupported;
                 return;
             }
@@ -171,18 +181,28 @@ public sealed class HttpTransportListener<TMessage>(
 
             if (message is not null) 
             {
+                var targetMeshOptions = optionsMonitor.Get(message.MeshId);
+
+                // Enforce port isolation: ensure the target mesh actually exposes the port the message arrived on natively.
+                if (targetMeshOptions != null && context.Request.LocalEndPoint.Port != targetMeshOptions.ListenPort)
+                {
+                    logger.LogWarning("Isolation rejected message for mesh {MeshId}: attempted to cross-connect via non-allowed port {Port}.", message.MeshId, context.Request.LocalEndPoint.Port);
+                    context.Response.StatusCode = (int)HttpStatusCode.Forbidden;
+                    return;
+                }
+
                 await onMessageReceived(message).ConfigureAwait(false);
                 context.Response.StatusCode = (int)HttpStatusCode.Accepted;
             }
             else
             {
-                logger.LogWarning("[{MeshId}] Failed to deserialize incoming generic message. Invalid format.", meshId);
+                logger.LogWarning("Failed to deserialize generic multiplexed incoming message. Invalid format.");
                 context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
             }
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "[{MeshId}] Error processing incoming HTTP request.", meshId);
+            logger.LogError(ex, "Error processing incoming unified HTTP request.");
             context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
         }
         finally
@@ -209,10 +229,7 @@ public sealed class HttpTransportListener<TMessage>(
                     httpListener.Stop();
                 }
             }
-            catch (ObjectDisposedException)
-            {
-                // Ignore if it was already disposed
-            }
+            catch (ObjectDisposedException) { }
             
             httpListener.Close();
         }

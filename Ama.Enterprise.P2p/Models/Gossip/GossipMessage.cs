@@ -1,13 +1,17 @@
 namespace Ama.Enterprise.P2p.Models.Gossip;
 
+using System;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
 /// Represents the fundamental unit of communication in the gossip network.
 /// Wraps the actual CRDT state or operation payloads.
 /// </summary>
-public readonly record struct GossipMessage : IEquatable<GossipMessage>
+public readonly record struct GossipMessage : IMeshMessage, IEquatable<GossipMessage>
 {
+    /// <inheritdoc />
+    public string MeshId { get; init; }
+
     /// <summary>
     /// Gets the unique identifier of the message for propagation tracking.
     /// </summary>
@@ -31,12 +35,14 @@ public readonly record struct GossipMessage : IEquatable<GossipMessage>
     /// <summary>
     /// Initializes a new instance of the <see cref="GossipMessage"/> struct.
     /// </summary>
+    /// <param name="meshId">The mesh context identifier.</param>
     /// <param name="messageId">The message identifier.</param>
     /// <param name="senderId">The sender identifier.</param>
     /// <param name="timeToLive">The TTL counter.</param>
     /// <param name="payload">The message payload.</param>
-    public GossipMessage(Guid messageId, PeerId senderId, int timeToLive, ReadOnlyMemory<byte> payload)
+    public GossipMessage(string meshId, Guid messageId, PeerId senderId, int timeToLive, ReadOnlyMemory<byte> payload)
     {
+        MeshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
         MessageId = messageId;
         SenderId = senderId;
         TimeToLive = timeToLive;
@@ -46,7 +52,8 @@ public readonly record struct GossipMessage : IEquatable<GossipMessage>
     /// <inheritdoc />
     public bool Equals(GossipMessage other)
     {
-        return MessageId.Equals(other.MessageId) &&
+        return string.Equals(MeshId, other.MeshId, StringComparison.Ordinal) &&
+               MessageId.Equals(other.MessageId) &&
                SenderId.Equals(other.SenderId) &&
                TimeToLive == other.TimeToLive &&
                Payload.Span.SequenceEqual(other.Payload.Span);
@@ -56,6 +63,7 @@ public readonly record struct GossipMessage : IEquatable<GossipMessage>
     public override int GetHashCode()
     {
         var hash = new HashCode();
+        hash.Add(MeshId);
         hash.Add(MessageId);
         hash.Add(SenderId);
         hash.Add(TimeToLive);

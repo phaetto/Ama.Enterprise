@@ -118,6 +118,7 @@
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pNetworkIntegrationTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pVersioningIntegrationTests.cs` | Integration tests verifying backwards compatibility and explicit deployment protocol versioning constraints. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/UdpPeerDiscoveryIntegrationTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Transports/HttpTransportMultiplexingIntegrationTests.cs` | Integration tests verifying multiplexing, isolation, and cross-connect rejection securely for the global HTTP P2P transport listeners. |
 | `$/Ama.Enterprise.P2p.TableStorage/Ama.Enterprise.P2p.TableStorage.csproj` | Serverless-focused Azure Table Storage integration for P2P state management. |
 | `$/Ama.Enterprise.P2p.TableStorage/Extensions/ServiceCollectionExtensions.cs` | DI extension methods for registering the Table Storage peer registry. |
 | `$/Ama.Enterprise.P2p.TableStorage/Models/TableStorageRegistryOptions.cs` | Configuration options for the Table Storage peer registry. |
@@ -165,12 +166,14 @@
 | `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | DI extension methods configuring P2P Gossip protocol components. Updated `HttpTransport` registration to inject `IPeerRegistry` dependency. |
 | `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Registration logic configuring Dependency Injection specifically targeting the UDP peer discovery sub-components and background services. |
 | `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
+| `$/Ama.Enterprise.P2p/Models/Core/IMeshMessage.cs` | Defines the generic constraint interface ensuring all protocol payloads contain their explicitly targeted P2P Mesh identifier. |
 | `$/Ama.Enterprise.P2p/Models/Core/P2pMeshMetadata.cs` | Metadata record registering a specific mesh identifier into the global dependency container for orchestration. |
 | `$/Ama.Enterprise.P2p/Models/Core/P2pNodeOptions.cs` | Centralized generic configuration options holding the core node identity (ID and Endpoint) for the P2P Mesh. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerEndpoint.cs` | Abstract base record for peer endpoints, explicitly configured with JSON polymorphic attributes natively mapping same-assembly derivatives to support standard AOT serialization. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerId.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerNode.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerStatus.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Models/Discovery/UdpDiscoveryMessage.cs` | DTO envelope that wraps a discovered peer node directly with its associated mesh identifier context to support UDP multiplexing. |
 | `$/Ama.Enterprise.P2p/Models/Discovery/UdpDiscoveryOptions.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Gossip/GossipMessage.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Gossip/GossipOptions.cs` | No description provided. |

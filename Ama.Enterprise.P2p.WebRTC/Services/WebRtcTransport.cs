@@ -13,7 +13,7 @@ using Microsoft.Extensions.Logging;
 /// Implements outbound generic transport dynamically mapping messages across isolated WebRTC Data Channels.
 /// </summary>
 /// <typeparam name="TMessage">The type of the generic message traversing via the transport bounds.</typeparam>
-public sealed class WebRtcTransport<TMessage> : ITransport<TMessage>
+public sealed class WebRtcTransport<TMessage> : ITransport<TMessage> where TMessage : IMeshMessage
 {
     private readonly string meshId;
     private readonly IWebRtcConnectionManager connectionManager;

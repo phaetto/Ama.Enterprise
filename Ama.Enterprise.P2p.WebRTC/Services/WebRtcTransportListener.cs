@@ -4,6 +4,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
+using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
 
@@ -11,7 +12,7 @@ using Microsoft.Extensions.Logging;
 /// Implements generalized inbound data queue listeners hooked inherently directly to the Data Channel bindings.
 /// </summary>
 /// <typeparam name="TMessage">The generic type of network message bridging scopes natively.</typeparam>
-public sealed class WebRtcTransportListener<TMessage> : ITransportListener<TMessage>, IDisposable
+public sealed class WebRtcTransportListener<TMessage> : ITransportListener<TMessage>, IDisposable where TMessage : IMeshMessage
 {
     private readonly string meshId;
     private readonly IWebRtcConnectionManager connectionManager;

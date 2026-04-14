@@ -48,7 +48,11 @@ public static class ServiceCollectionExtensions
             services.Configure(meshId, configureNodeOptions);
         }
 
-        services.AddHostedService<P2pHostedService>();
+        if (!services.Any(s => s.ImplementationType == typeof(P2pHostedService)))
+        {
+            services.AddHostedService<P2pHostedService>();
+        }
+
         services.AddSingleton(new P2pMeshMetadata(meshId));
 
         return new P2pMeshBuilder(services, meshId);
@@ -63,7 +67,7 @@ public static class ServiceCollectionExtensions
     /// <returns>The updated mesh builder.</returns>
     public static IP2pMeshBuilder AddHttpTransport<TMessage>(
         this IP2pMeshBuilder builder,
-        Action<HttpTransportOptions>? configureOptions = null)
+        Action<HttpTransportOptions>? configureOptions = null) where TMessage : IMeshMessage
     {
         if (configureOptions is null)
         {
@@ -86,21 +90,9 @@ public static class ServiceCollectionExtensions
             return new HttpPeerEndpoint(host, options.ListenPort);
         });
 
-        builder.Services.AddKeyedSingleton<ITransport<TMessage>>(builder.MeshId, (sp, key) =>
-            new HttpTransport<TMessage>(
-                (string)key!,
-                sp.GetRequiredService<IOptionsMonitor<HttpTransportOptions>>(),
-                sp.GetRequiredService<IHttpClientFactory>(),
-                sp.GetRequiredService<ICrdtSerializer>(),
-                sp.GetRequiredService<IPeerRegistry>(),
-                sp.GetRequiredService<ILogger<HttpTransport<TMessage>>>()));
-
-        builder.Services.AddKeyedSingleton<ITransportListener<TMessage>>(builder.MeshId, (sp, key) =>
-            new HttpTransportListener<TMessage>(
-                (string)key!,
-                sp.GetRequiredService<IOptionsMonitor<HttpTransportOptions>>(),
-                sp.GetRequiredService<ICrdtSerializer>(),
-                sp.GetRequiredService<ILogger<HttpTransportListener<TMessage>>>()));
+        // Register the listeners and transports as global singletons effectively sharing resources across all meshes safely natively.
+        builder.Services.TryAddSingleton<ITransport<TMessage>, HttpTransport<TMessage>>();
+        builder.Services.TryAddSingleton<ITransportListener<TMessage>, HttpTransportListener<TMessage>>();
 
         return builder;
     }
@@ -161,7 +153,7 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<ILogger<TimeBasedFailureDetector>>()));
         
         builder.Services.AddKeyedSingleton<ITransportRouter<GossipMessage>>(builder.MeshId, (sp, key) =>
-            new TransportRouter<GossipMessage>(sp.GetKeyedServices<ITransport<GossipMessage>>(key)));
+            new TransportRouter<GossipMessage>(sp.GetServices<ITransport<GossipMessage>>()));
 
         builder.Services.AddKeyedSingleton<IMessageDispatcher<GossipMessage>>(builder.MeshId, (sp, key) =>
             new MessageDispatcher<GossipMessage>(

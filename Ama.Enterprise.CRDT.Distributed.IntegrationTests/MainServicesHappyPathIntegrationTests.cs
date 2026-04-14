@@ -214,7 +214,7 @@ public sealed class MainServicesHappyPathIntegrationTests
         var wrapper = new CrdtMessageWrapper("happy-doc", "CrdtSync", syncPayload);
         var wrapperPayload = serializer.SerializeToBytes(wrapper);
 
-        var gossipMsg = new GossipMessage(Guid.NewGuid(), new PeerId(Guid.NewGuid()), 10, wrapperPayload);
+        var gossipMsg = new GossipMessage("TestMesh", Guid.NewGuid(), new PeerId(Guid.NewGuid()), 10, wrapperPayload);
 
         // Act
         await handler.HandleAsync(gossipMsg, CancellationToken.None);

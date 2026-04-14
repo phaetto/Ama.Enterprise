@@ -5,10 +5,10 @@ using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
-/// Defines the outbound network transport capabilities for sending protocol-specific messages to peers.
+/// Defines the outbound network transport capabilities safely sending protocol-specific multiplexed messages explicitly targeting endpoints organically explicitly securely.
 /// </summary>
 /// <typeparam name="TMessage">The type of the message being transported.</typeparam>
-public interface ITransport<in TMessage>
+public interface ITransport<TMessage> where TMessage : IMeshMessage
 {
     /// <summary>
     /// Determines whether this transport can handle the specified peer endpoint.

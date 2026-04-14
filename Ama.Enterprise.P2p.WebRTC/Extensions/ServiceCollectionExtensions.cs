@@ -29,7 +29,7 @@ public static class ServiceCollectionExtensions
     /// <returns>The fully hydrated updated mesh builder.</returns>
     public static IP2pMeshBuilder AddWebRtcTransport<TMessage>(
         this IP2pMeshBuilder builder,
-        Action<WebRtcOptions>? configureOptions = null)
+        Action<WebRtcOptions>? configureOptions = null) where TMessage : IMeshMessage
     {
         if (builder is null)
         {

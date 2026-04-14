@@ -39,6 +39,24 @@ public sealed class P2pHostedService : IHostedService
     /// <inheritdoc />
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        // Start Global Transport Listeners mapping across multiplexed messages
+        var listeners = serviceProvider.GetServices<ITransportListener<GossipMessage>>();
+        foreach (var listener in listeners)
+        {
+            await listener.StartListeningAsync(async msg => 
+            {
+                var targetQueue = serviceProvider.GetKeyedService<IInboundMessageQueue<GossipMessage>>(msg.MeshId);
+                if (targetQueue is not null)
+                {
+                    await targetQueue.WriteAsync(msg, default).ConfigureAwait(false);
+                }
+                else
+                {
+                    logger.LogWarning("Received multiplexed message for unknown mesh {MeshId}.", msg.MeshId);
+                }
+            }, cancellationToken).ConfigureAwait(false);
+        }
+
         foreach (var mesh in meshes)
         {
             logger.LogInformation("Orchestrating startup for P2P mesh network: {MeshId}", mesh.MeshId);
@@ -47,18 +65,6 @@ public sealed class P2pHostedService : IHostedService
             if (discovery is IHostedService hostedDiscovery)
             {
                 await hostedDiscovery.StartAsync(cancellationToken).ConfigureAwait(false);
-            }
-
-            var queue = serviceProvider.GetKeyedService<IInboundMessageQueue<GossipMessage>>(mesh.MeshId);
-            var listeners = serviceProvider.GetKeyedServices<ITransportListener<GossipMessage>>(mesh.MeshId);
-            
-            if (queue is not null && listeners is not null)
-            {
-                foreach (var listener in listeners)
-                {
-                    await listener.StartListeningAsync(async msg => 
-                        await queue.WriteAsync(msg, default).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
-                }
             }
         }
 
@@ -76,20 +82,18 @@ public sealed class P2pHostedService : IHostedService
         {
             logger.LogInformation("Orchestrating shutdown for P2P mesh network: {MeshId}", mesh.MeshId);
 
-            var listeners = serviceProvider.GetKeyedServices<ITransportListener<GossipMessage>>(mesh.MeshId);
-            if (listeners is not null)
-            {
-                foreach (var listener in listeners)
-                {
-                    await listener.StopListeningAsync(cancellationToken).ConfigureAwait(false);
-                }
-            }
-
             var discovery = serviceProvider.GetKeyedService<IPeerDiscovery>(mesh.MeshId);
             if (discovery is IHostedService hostedDiscovery)
             {
                 await hostedDiscovery.StopAsync(cancellationToken).ConfigureAwait(false);
             }
+        }
+
+        // Stop Global Transport Listeners
+        var listeners = serviceProvider.GetServices<ITransportListener<GossipMessage>>();
+        foreach (var listener in listeners)
+        {
+            await listener.StopListeningAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 }

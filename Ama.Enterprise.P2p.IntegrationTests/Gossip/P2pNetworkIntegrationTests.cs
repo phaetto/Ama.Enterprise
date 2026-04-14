@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.IntegrationTests.Gossip;
 
 using Ama.CRDT.Extensions;
+using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
@@ -16,6 +17,7 @@ using Microsoft.Extensions.Logging;
 using Shouldly;
 using System;
 using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -95,9 +97,18 @@ public sealed class P2pNetworkIntegrationTests
         
         var messageFromB = nodeB.Handler.ReceivedMessages.FirstOrDefault();
         
-        // Emulate an unintended "echo" by explicitly sending the exact same tracked message back to Node B
-        var transport = nodeA.Provider.GetRequiredKeyedService<ITransport<GossipMessage>>(TestMeshId);
-        await transport.SendAsync(nodeB.Endpoint, messageFromB, cts.Token);
+        // Emulate an unintended "echo" by explicitly sending the exact same tracked message back to Node B via standard HTTP
+        var serializer = nodeA.Provider.GetRequiredService<ICrdtSerializer>();
+        var payloadBytes = serializer.SerializeToBytes(messageFromB);
+
+        var clientFactory = nodeA.Provider.GetRequiredService<IHttpClientFactory>();
+        using var client = clientFactory.CreateClient();
+        
+        using var request = new HttpRequestMessage(HttpMethod.Post, "http://localhost:8105/p2p/gossip/");
+        request.Headers.Add("X-P2P-Protocol-Version", Constants.ProtocolVersion);
+        request.Content = new ByteArrayContent(payloadBytes);
+        
+        await client.SendAsync(request, cts.Token);
 
         await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
 
@@ -224,6 +235,7 @@ public sealed class P2pNetworkIntegrationTests
         var services = new ServiceCollection();
 
         services.AddCrdt();
+        services.AddHttpClient();
 
         services.AddLogging(builder => 
         {

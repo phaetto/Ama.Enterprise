@@ -8,6 +8,7 @@ using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Services;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.Models.Gossip;
+using Ama.Enterprise.P2p.WebRTC.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
@@ -79,7 +80,8 @@ public static class ServiceCollectionExtensions
                     options.MulticastPort = ffOpts.MulticastPort;
                     options.DiscoveryInterval = ffOpts.DiscoveryInterval;
                     options.DiscoveryTimeout = ffOpts.DiscoveryTimeout;
-                });
+                })
+                .AddWebRtcTransport<GossipMessage>(options => { });
 
         return services;
     }

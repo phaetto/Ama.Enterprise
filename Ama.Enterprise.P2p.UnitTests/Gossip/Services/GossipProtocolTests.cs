@@ -126,7 +126,7 @@ public sealed class GossipProtocolTests
     public async Task ProcessInboundQueue_ShouldDispatchIncomingMessagesAndForward()
     {
         // Arrange
-        var testMessage = new GossipMessage(Guid.NewGuid(), new PeerId(Guid.NewGuid()), 10, new byte[] { 4, 5, 6 });
+        var testMessage = new GossipMessage(TestMeshId, Guid.NewGuid(), new PeerId(Guid.NewGuid()), 10, new byte[] { 4, 5, 6 });
         
         inboundQueueMock.Setup(q => q.ReadAllAsync(It.IsAny<CancellationToken>()))
             .Returns(YieldSingleMessageAsync(testMessage));

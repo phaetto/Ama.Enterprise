@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.IntegrationTests.Gossip;
 
 using Ama.CRDT.Extensions;
+using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
@@ -46,10 +47,7 @@ public sealed class P2pVersioningIntegrationTests
         var localVersion = Version.Parse(Constants.ProtocolVersion);
         var incompatibleVersion = new Version(localVersion.Major + 1, 0, 0);
 
-        var services = new ServiceCollection();
-        services.AddHttpClient();
-        await using var sp = services.BuildServiceProvider();
-        var clientFactory = sp.GetRequiredService<IHttpClientFactory>();
+        var clientFactory = node.Provider.GetRequiredService<IHttpClientFactory>();
         using var client = clientFactory.CreateClient();
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "http://localhost:8210/p2p/gossip/");
@@ -72,18 +70,19 @@ public sealed class P2pVersioningIntegrationTests
         // Ensure same major version, but completely different minor and patch version to guarantee backwards compatibility success
         var compatibleVersion = new Version(localVersion.Major, localVersion.Minor + 99, 99);
 
-        var services = new ServiceCollection();
-        services.AddHttpClient();
-        await using var sp = services.BuildServiceProvider();
-        var clientFactory = sp.GetRequiredService<IHttpClientFactory>();
+        var clientFactory = node.Provider.GetRequiredService<IHttpClientFactory>();
+        var serializer = node.Provider.GetRequiredService<ICrdtSerializer>();
+        
         using var client = clientFactory.CreateClient();
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "http://localhost:8211/p2p/gossip/");
         request.Headers.Add("X-P2P-Protocol-Version", compatibleVersion.ToString());
         
-        // We submit an empty JSON object payload. Since it successfully bypasses the 505 HttpVersionNotSupported check,
-        // the generic endpoint will accept it and return 202 Accepted.
-        request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+        // We submit a valid serialized model payload targeting the specific mesh to bypass HTTP listener isolation verification checks gracefully
+        var dummyMessage = new GossipMessage(TestMeshId, Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, ReadOnlyMemory<byte>.Empty);
+        var payloadBytes = serializer.SerializeToBytes(dummyMessage);
+        
+        request.Content = new ByteArrayContent(payloadBytes);
 
         using var response = await client.SendAsync(request, cts.Token);
 
@@ -102,18 +101,18 @@ public sealed class P2pVersioningIntegrationTests
         // This explicit test directly maps to the deployed YAML version. 
         var deployedVersion = new Version(0, 1, 0);
 
-        var services = new ServiceCollection();
-        services.AddHttpClient();
-        await using var sp = services.BuildServiceProvider();
-        var clientFactory = sp.GetRequiredService<IHttpClientFactory>();
+        var clientFactory = node.Provider.GetRequiredService<IHttpClientFactory>();
+        var serializer = node.Provider.GetRequiredService<ICrdtSerializer>();
+        
         using var client = clientFactory.CreateClient();
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "http://localhost:8212/p2p/gossip/");
         request.Headers.Add("X-P2P-Protocol-Version", deployedVersion.ToString());
         
-        // We submit an empty JSON object payload. Since it successfully bypasses the 505 HttpVersionNotSupported check,
-        // the generic endpoint will accept it and return 202 Accepted.
-        request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+        var dummyMessage = new GossipMessage(TestMeshId, Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, ReadOnlyMemory<byte>.Empty);
+        var payloadBytes = serializer.SerializeToBytes(dummyMessage);
+        
+        request.Content = new ByteArrayContent(payloadBytes);
 
         using var response = await client.SendAsync(request, cts.Token);
 
@@ -126,6 +125,7 @@ public sealed class P2pVersioningIntegrationTests
         var services = new ServiceCollection();
 
         services.AddCrdt();
+        services.AddHttpClient();
 
         services.AddLogging(builder => 
         {
