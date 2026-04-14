@@ -64,8 +64,8 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<DistributedCrdtScopeProvider>();
         
-        // Register core dynamic AOT-safe generic orchestrator
-        services.AddScoped<ICrdtDocumentOrchestrator, CrdtDocumentOrchestrator>();
+        // Register core dynamic AOT-safe generic orchestrator via transparent forwarder
+        services.AddDistributedCrdtService<ICrdtDocumentOrchestrator, CrdtDocumentOrchestrator>();
         
         // Register internal tracking singletons
         services.AddSingleton<IClusterStateTracker, ClusterStateTracker>();
@@ -89,6 +89,23 @@ public static class ServiceCollectionExtensions
         if (string.IsNullOrWhiteSpace(typeAlias)) throw new ArgumentException("Type alias cannot be null or empty.", nameof(typeAlias));
 
         services.AddKeyedSingleton<IDocumentFactory>(typeAlias, new DocumentFactory<TState>());
+        return services;
+    }
+
+    /// <summary>
+    /// Registers a generic domain service scoped securely within the dynamic CRDT lifecycle natively,
+    /// adding a transparent forwarder so it can be safely injected correctly from the root container seamlessly inherently explicit.
+    /// </summary>
+    public static IServiceCollection AddDistributedCrdtService<TService, TImplementation>(this IServiceCollection services) 
+        where TService : class 
+        where TImplementation : class, TService
+    {
+        if (services == null) throw new ArgumentNullException(nameof(services));
+
+        services.AddScoped<TImplementation>();
+        services.AddTransient<TService>(sp => 
+            sp.GetRequiredService<DistributedCrdtScopeProvider>().Scope.ServiceProvider.GetRequiredService<TImplementation>());
+
         return services;
     }
 

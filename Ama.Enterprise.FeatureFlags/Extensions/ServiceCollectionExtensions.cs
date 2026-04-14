@@ -6,6 +6,8 @@ using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Services;
+using Ama.Enterprise.P2p.Extensions;
+using Ama.Enterprise.P2p.Models.Gossip;
 using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
@@ -13,8 +15,11 @@ using Microsoft.Extensions.DependencyInjection;
 /// </summary>
 public static class ServiceCollectionExtensions
 {
+    private const string FeatureFlagsMeshId = "feature-flags-internal-mesh";
+
     /// <summary>
-    /// Adds the feature flags system to the service collection.
+    /// Adds the complete, plug-and-play feature flags system to the service collection,
+    /// abstracting away all internal P2P cluster mesh configurations natively.
     /// </summary>
     public static IServiceCollection AddFeatureFlags(this IServiceCollection services, Action<FeatureFlagOptions>? configure = null)
     {
@@ -23,18 +28,16 @@ public static class ServiceCollectionExtensions
             throw new ArgumentNullException(nameof(services));
         }
 
+        var ffOpts = new FeatureFlagOptions();
+        configure?.Invoke(ffOpts);
+
         // Apply configuration mappings natively maintaining backwards compatibility
         services.Configure<FeatureFlagOptions>(configure ?? (_ => { }));
 
         Action<DistributedCrdtOptions> distConfig = dist =>
         {
-            if (configure != null)
-            {
-                var ffOpts = new FeatureFlagOptions();
-                configure(ffOpts);
-                dist.ReplicaId = ffOpts.ReplicaId;
-                dist.ActiveSyncEnabled = ffOpts.ActiveSyncEnabled;
-            }
+            dist.ReplicaId = ffOpts.ReplicaId;
+            dist.ActiveSyncEnabled = ffOpts.ActiveSyncEnabled;
         };
 
         // Bootstrap generic core dependencies
@@ -50,29 +53,33 @@ public static class ServiceCollectionExtensions
         // Map domain generic types inside the centralized document pool securely via explicitly inherited constraints
         services.AddDistributedDocumentType<FeatureFlagState>("feature-flag");
 
-        // Register the business logic domain wrapper scoped exactly to the CRDT hierarchy
-        services.AddScoped<IFeatureFlagClusterManager, FeatureFlagClusterManager>();
+        // Register the business logic domain wrapper scoped exactly to the CRDT hierarchy via transparent forwarder natively
+        services.AddDistributedCrdtService<IFeatureFlagClusterManager, FeatureFlagClusterManager>();
 
-        return services;
-    }
-
-    /// <summary>
-    /// Adds P2P networking support for the feature flags system to synchronize across nodes.
-    /// </summary>
-    public static IServiceCollection AddFeatureFlagsP2p(this IServiceCollection services, string meshId)
-    {
-        if (services == null)
-        {
-            throw new ArgumentNullException(nameof(services));
-        }
-
-        if (string.IsNullOrWhiteSpace(meshId))
-        {
-            throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshId));
-        }
+        // Register the background initialization service to securely build the global scope natively
+        services.AddHostedService<FeatureFlagBootstrapper>();
 
         // Delegate routing orchestrations and background services completely to the distributed core
-        services.AddDistributedCrdtP2p(meshId);
+        services.AddDistributedCrdtP2p(FeatureFlagsMeshId);
+
+        // Wire up the abstracted P2P network layer specifically for Feature Flags completely encapsulating internals seamlessly
+        services.AddP2pMesh(FeatureFlagsMeshId)
+                .AddGossipNetwork(options =>
+                {
+                    options.GossipInterval = ffOpts.GossipInterval;
+                })
+                .AddHttpTransport<GossipMessage>(options =>
+                {
+                    options.ListenPort = ffOpts.ListenPort;
+                    options.ListenHost = ffOpts.ListenHost;
+                })
+                .AddUdpPeerDiscovery(options =>
+                {
+                    options.MulticastAddress = ffOpts.MulticastAddress;
+                    options.MulticastPort = ffOpts.MulticastPort;
+                    options.DiscoveryInterval = ffOpts.DiscoveryInterval;
+                    options.DiscoveryTimeout = ffOpts.DiscoveryTimeout;
+                });
 
         return services;
     }

@@ -90,7 +90,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         try
         {
             var bytes = serializer.SerializeToBytes(document);
-            await File.WriteAllBytesAsync(filePath, cancellationToken).ConfigureAwait(false);
+            await File.WriteAllBytesAsync(filePath, bytes, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

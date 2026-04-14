@@ -4,8 +4,6 @@ using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.FeatureFlags.Extensions;
 using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Services;
-using Ama.Enterprise.P2p.Extensions;
-using Ama.Enterprise.P2p.Models.Gossip;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -48,40 +46,25 @@ public static class Program
             builder.AddProvider(new LockedConsoleLoggerProvider());
         });
 
-        // 1. Add CRDT and Feature Flags with the assigned ReplicaId for the Showcase process node
+        // 1. Add Plug-and-Play Feature Flags Product with internal P2P setup naturally encapsulated
         services.AddFeatureFlags(options =>
         {
             options.ReplicaId = replicaId;
             options.ActiveSyncEnabled = true;
+            options.ListenPort = currentPort;
+            options.ListenHost = "localhost";
+            options.MulticastAddress = "239.255.0.1";
+            options.MulticastPort = 8035;
+            options.DiscoveryInterval = TimeSpan.FromSeconds(1);
+            options.DiscoveryTimeout = TimeSpan.FromSeconds(1);
+            options.GossipInterval = TimeSpan.FromMilliseconds(500);
         });
-        services.AddFeatureFlagsP2p("internal");
-
-        // 2. Add Gossip Network for P2P transport
-        services
-            .AddP2pMesh("internal")
-            .AddGossipNetwork(options =>
-            {
-                options.GossipInterval = TimeSpan.FromMilliseconds(500);
-            })
-            .AddHttpTransport<GossipMessage>(options =>
-            {
-                options.ListenPort = currentPort;
-                options.ListenHost = "localhost";
-            })
-            .AddUdpPeerDiscovery(options =>
-            {
-                options.MulticastAddress = "239.255.0.1";
-                options.MulticastPort = 8035;
-                options.DiscoveryInterval = TimeSpan.FromSeconds(1);
-                options.DiscoveryTimeout = TimeSpan.FromSeconds(1);
-            });
 
         await using var provider = services.BuildServiceProvider();
         var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("ShowCase");
         
-        // Resolve the centralized scope provider to ensure all parts of the application share the same CRDT State
-        var scopeProvider = provider.GetRequiredService<DistributedCrdtScopeProvider>();
-        var clusterManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
+        // Resolve the cluster manager natively via the transparent forwarder implicitly mapped to the internal state scope
+        var clusterManager = provider.GetRequiredService<IFeatureFlagClusterManager>();
         
         // Background services typically remain resolved from the root provider as singletons
         var hostedServices = provider.GetServices<IHostedService>().ToList();

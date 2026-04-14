@@ -63,12 +63,12 @@ public static class Program
                 .AddCrdtSerializableType<TaskItem>("task-item")
                 .AddCrdtSerializableType<DeviceStatus>("device-status");
 
-        // Register document types dynamically into the orchestrator
+        // Register document types dynamically into the orchestrator and expose generic interfaces via explicit transparent forwarders seamlessly
         services.AddDistributedDocumentType<TaskListState>("task-list");
-        services.AddScoped<ITaskManager, TaskManager>();
+        services.AddDistributedCrdtService<ITaskManager, TaskManager>();
 
         services.AddDistributedDocumentType<FleetState>("fleet-list");
-        services.AddScoped<IFleetManager, FleetManager>();
+        services.AddDistributedCrdtService<IFleetManager, FleetManager>();
 
         // Register the background multi-document orchestration and route inbound intents from the network
         services.AddDistributedCrdtP2p("internal");
@@ -96,8 +96,6 @@ public static class Program
         await using var provider = services.BuildServiceProvider();
         var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("ShowCase");
         
-        var scopeProvider = provider.GetRequiredService<DistributedCrdtScopeProvider>();
-        
         var hostedServices = provider.GetServices<IHostedService>().ToList();
         
         using var cts = new CancellationTokenSource();
@@ -117,9 +115,9 @@ public static class Program
                 await service.StartAsync(cts.Token).ConfigureAwait(false);
             }
 
-            var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-            var taskManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<ITaskManager>();
-            var fleetManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IFleetManager>();
+            var orchestrator = provider.GetRequiredService<ICrdtDocumentOrchestrator>();
+            var taskManager = provider.GetRequiredService<ITaskManager>();
+            var fleetManager = provider.GetRequiredService<IFleetManager>();
 
             // UI refresh bindings
             taskManager.StateChanged += (sender, eventArgs) => DrawState(orchestrator, taskManager, fleetManager);
