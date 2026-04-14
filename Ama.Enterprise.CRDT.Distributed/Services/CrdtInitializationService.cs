@@ -67,15 +67,15 @@ public sealed class CrdtInitializationService : IHostedService
                         }
                     }
                     
-                    logger.LogInformation("Successfully re-initialized in-place CRDT global Dotted Version Vector bounds natively for replica {ReplicaId}.", options.ReplicaId);
+                    logger.LogInformation("Successfully re-initialized in-place CRDT global Dotted Version Vector for replica {ReplicaId}.", options.ReplicaId);
                 }
             }
 
-            // 2. Initialize the dynamic document orchestrator completely strictly resolving logical states effectively
+            // 2. Initialize the dynamic document orchestrator
             var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
             await orchestrator.InitializeAsync(cancellationToken).ConfigureAwait(false);
 
-            // 3. Replay uncheckpointed WAL operations perfectly mapping local state back seamlessly logically
+            // 3. Replay uncheckpointed WAL operations mapping local state back
             if (globalStorage != null)
             {
                 IDictionary<string, List<CrdtOperation>> operationsByDoc = new Dictionary<string, List<CrdtOperation>>();
@@ -92,9 +92,9 @@ public sealed class CrdtInitializationService : IHostedService
 
                 if (operationsByDoc.Count > 0)
                 {
-                    logger.LogInformation("Replaying {Count} journaled operations safely cleanly mapping structural recovery bounds naturally seamlessly explicitly natively completely accurately securely appropriately successfully efficiently efficiently cleanly properly.", operationsByDoc.Values.Sum(l => l.Count));
+                    logger.LogInformation("Replaying {Count} journaled operations.", operationsByDoc.Values.Sum(l => l.Count));
                     
-                    // CRITICAL: Replay registry operations FIRST so the orchestrator correctly creates new generic local docs safely organically before routing their patches correctly flawlessly intelligently explicitly seamlessly properly cleanly effectively naturally explicitly properly explicitly appropriately carefully gracefully natively efficiently gracefully effectively correctly optimally elegantly effortlessly safely explicitly seamlessly correctly seamlessly smoothly reliably.
+                    // CRITICAL: Replay registry operations FIRST so the orchestrator correctly creates new generic local docs before routing their patches.
                     if (operationsByDoc.TryGetValue(orchestrator.Registry.DocumentId, out var registryOps))
                     {
                         await orchestrator.Registry.ApplyOperationsAsync(registryOps, cancellationToken).ConfigureAwait(false);
@@ -113,11 +113,11 @@ public sealed class CrdtInitializationService : IHostedService
                 }
             }
 
-            logger.LogInformation("Distributed CRDT documents successfully accurately logically dynamically safely flawlessly initialized accurately appropriately flawlessly gracefully naturally gracefully effectively efficiently appropriately gracefully perfectly securely appropriately.");
+            logger.LogInformation("Distributed CRDT documents successfully initialized.");
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "An error occurred while seamlessly explicitly successfully accurately efficiently initializing cleanly gracefully natively successfully successfully gracefully gracefully correctly correctly properly cleanly distributed effortlessly safely cleanly cleanly intelligently smoothly.");
+            logger.LogError(ex, "An error occurred while initializing distributed CRDT documents.");
         }
     }
 

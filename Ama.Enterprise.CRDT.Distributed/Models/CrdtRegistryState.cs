@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 
 /// <summary>
-/// Global P2P synced directory state handling distributed multi-document topologies inherently natively ensuring active instantiation maps across nodes safely.
+/// Global P2P synced directory state handling distributed multi-document topologies.
 /// </summary>
 public sealed class CrdtRegistryState : IDistributedCrdtState
 {

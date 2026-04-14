@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 using Ama.CRDT.Models;
 
 /// <summary>
-/// JSON serialization context guaranteeing AOT compatibility for internal orchestrator registry CRDT scopes inherently natively.
+/// JSON serialization context guaranteeing AOT compatibility for internal orchestrator registry CRDT scopes.
 /// </summary>
 [JsonSerializable(typeof(CrdtRegistryEntry))]
 [JsonSerializable(typeof(CrdtRegistryState))]

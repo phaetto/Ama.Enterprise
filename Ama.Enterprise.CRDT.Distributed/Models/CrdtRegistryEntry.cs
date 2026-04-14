@@ -4,7 +4,7 @@ using System;
 using System.Text.Json.Serialization;
 
 /// <summary>
-/// Represents metadata about an active or tombstoned distributed CRDT document natively mapped via the global cluster registry.
+/// Represents metadata about an active or tombstoned distributed CRDT document.
 /// </summary>
 public readonly record struct CrdtRegistryEntry : IEquatable<CrdtRegistryEntry>
 {

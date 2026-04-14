@@ -11,7 +11,7 @@ using Ama.CRDT.Models;
 public interface IClusterStateTracker
 {
     /// <summary>
-    /// Updates the tracked boundaries securely matching the explicitly extracted explicit global synchronizations seamlessly.
+    /// Updates the tracked boundaries matching the extracted global synchronizations.
     /// </summary>
     /// <param name="peerReplicaId">The remote peer node replica identifier.</param>
     /// <param name="peerId">The remote network peer identifier.</param>
@@ -19,7 +19,7 @@ public interface IClusterStateTracker
     void UpdatePeerState(string peerReplicaId, string peerId, DottedVersionVector globalState);
 
     /// <summary>
-    /// Retrieves a complete snapshot containing every currently connected peer mapped implicitly alongside native state parameters actively safely.
+    /// Retrieves a complete snapshot containing every currently connected peer.
     /// </summary>
     IReadOnlyList<DottedVersionVector> GetClusterStates();
 

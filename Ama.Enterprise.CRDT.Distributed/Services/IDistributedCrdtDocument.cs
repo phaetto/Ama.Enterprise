@@ -73,7 +73,7 @@ public interface IDistributedCrdtDocument
     Task EvictReplicaAsync(string replicaId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Resets the internal CRDT metadata and structures completely, used explicitly when forced to re-bootstrap identity following a cluster tombstone eviction gracefully strictly resolving amnesia states appropriately effectively naturally explicitly safely.
+    /// Resets the internal CRDT metadata and structures completely, used when forced to re-bootstrap identity following a cluster tombstone eviction.
     /// </summary>
     /// <param name="oldReplicaId">The pre-reboot replica ID allowing offline operation continuity to seamlessly map correctly during the incoming fallback snapshot overwrite natively.</param>
     /// <param name="cancellationToken">The cancellation token.</param>

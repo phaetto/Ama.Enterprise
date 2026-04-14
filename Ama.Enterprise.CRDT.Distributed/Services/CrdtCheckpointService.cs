@@ -15,8 +15,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Background service responsible for periodically saving the full in-memory state of all dynamically registered CRDTs to persistent storage
-/// and explicitly trimming the underlying operational journals mapping across global cluster bounds to ensure overall consistency seamlessly.
+/// Background service responsible for periodically saving the full in-memory state of all registered CRDTs to persistent storage
+/// and trimming operational journals.
 /// </summary>
 public sealed class CrdtCheckpointService : BackgroundService
 {
@@ -75,7 +75,7 @@ public sealed class CrdtCheckpointService : BackgroundService
                 {
                     var evictionTtl = TimeSpan.FromSeconds(options.Value.PeerEvictionTtlSeconds);
                     
-                    // Replicas evicted this way are tombstoned correctly inherently preventing causal structural amnesia gracefully
+                    // Replicas evicted this way are tombstoned correctly, preventing causal structural amnesia.
                     var tombstonedPeers = clusterTracker.GetAndTombstoneExpiredPeers(evictionTtl);
 
                     if (tombstonedPeers.Count > 0)
@@ -105,16 +105,16 @@ public sealed class CrdtCheckpointService : BackgroundService
                 
                 var safelyPersistedDvv = new DottedVersionVector(copiedVersions, copiedDots);
 
-                // 2. Save document states FIRST (Idempotency safety: Docs advance before the overarching watermark preventing log gap data loss)
+                // 2. Save document states FIRST (Idempotency safety: Docs advance before the overarching watermark preventing data loss)
                 foreach (var document in documents)
                 {
                     await document.CheckpointAsync(stoppingToken).ConfigureAwait(false);
                 }
 
-                // 3. Persist the overarching Global Version Vector explicitly after underlying documents inherently succeed securely
+                // 3. Persist the overarching Global Version Vector after underlying documents succeed.
                 await storage.SaveGlobalVersionVectorAsync(replicaContext.ReplicaId, safelyPersistedDvv, stoppingToken).ConfigureAwait(false);
 
-                // 4. Perform mathematically safe journal trimming mapped explicitly using the exact snapshot bounds we just successfully stored
+                // 4. Perform safe journal trimming mapped using the exact snapshot bounds we just stored.
                 var clusterStates = new List<DottedVersionVector>(clusterTracker.GetClusterStates())
                 {
                     safelyPersistedDvv
@@ -127,14 +127,14 @@ public sealed class CrdtCheckpointService : BackgroundService
                     if (gmvv.Count > 0)
                     {
                         await storage.TrimAsync(gmvv, stoppingToken).ConfigureAwait(false);
-                        logger.LogTrace("Executed background mathematically safe journal trim matching overarching Global Minimum Version Vector bounds natively securely.");
+                        logger.LogTrace("Executed background journal trim matching Global Minimum Version Vector bounds.");
                     }
                 }
             }
             catch (Exception ex)
             {
                 // If any document or DVV persistence strictly throws, we intentionally abort the trimming process securely.
-                logger.LogError(ex, "An error occurred during periodic CRDT checkpointing and journal trimming. Cycle aborted strictly ensuring data consistency.");
+                logger.LogError(ex, "An error occurred during periodic CRDT checkpointing and journal trimming. Cycle aborted.");
             }
         }
     }

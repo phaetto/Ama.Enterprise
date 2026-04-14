@@ -1,7 +1,7 @@
 namespace Ama.Enterprise.CRDT.Distributed.Models;
 
 /// <summary>
-/// Imposes a centralized constraint on root CRDT state models to inherently map their own synchronization document identifiers natively.
+/// Imposes a centralized constraint on root CRDT state models to map their own synchronization document identifiers.
 /// </summary>
 public interface IDistributedCrdtState
 {

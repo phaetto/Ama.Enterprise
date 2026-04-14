@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 using Ama.CRDT.Models;
 
 /// <summary>
-/// JSON serialization context for the generic Distributed CRDT P2P models guaranteeing AOT compatibility.
+/// JSON serialization context for the generic Distributed CRDT P2P models.
 /// </summary>
 [JsonSerializable(typeof(CrdtMessageWrapper))]
 [JsonSerializable(typeof(CrdtStateSyncMessage))]

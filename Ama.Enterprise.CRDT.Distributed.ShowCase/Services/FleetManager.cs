@@ -12,7 +12,7 @@ using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 
 /// <summary>
-/// Implementation handling smartly seamlessly natively gracefully effortlessly appropriately efficiently tracking intelligently mathematically elegantly seamlessly flawlessly natively effortlessly cleanly carefully seamlessly flawlessly gracefully safely securely cleanly explicitly mapping safely seamlessly gracefully explicitly cleanly perfectly completely smoothly reliably completely appropriately seamlessly correctly effectively flawlessly smoothly smoothly explicitly dynamically flawlessly effectively natively effectively securely gracefully correctly smoothly gracefully smoothly strictly appropriately intelligently securely gracefully gracefully.
+/// Implementation handling intentions and queries for the Fleet document.
 /// </summary>
 public sealed class FleetManager : IFleetManager, IDisposable
 {

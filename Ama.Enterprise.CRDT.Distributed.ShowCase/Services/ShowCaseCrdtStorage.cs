@@ -90,7 +90,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         try
         {
             var bytes = serializer.SerializeToBytes(document);
-            await File.WriteAllBytesAsync(filePath, bytes, cancellationToken).ConfigureAwait(false);
+            await File.WriteAllBytesAsync(filePath, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -111,7 +111,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Failed to actively safely locally delete structurally mapped CRDT document correctly gracefully explicitly natively safely cleanly elegantly smoothly effortlessly cleanly successfully accurately from {FilePath}", filePath);
+                logger.LogError(ex, "Failed to actively safely locally delete structurally mapped CRDT document from {FilePath}", filePath);
             }
         }
 

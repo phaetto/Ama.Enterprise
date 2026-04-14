@@ -20,7 +20,7 @@ public sealed class DistributedCrdtOptions
     public bool ActiveSyncEnabled { get; set; }
 
     /// <summary>
-    /// Gets or sets the interval in seconds at which the background checkpoint service periodically saves the in-memory state to persistent storage and trims the journal bounds explicitly securely.
+    /// Gets or sets the interval in seconds at which the background checkpoint service periodically saves the in-memory state to persistent storage and trims the journal bounds.
     /// Defaults to 30 seconds. Must be greater than 0.
     /// </summary>
     public int CheckpointIntervalSeconds { get; set; } = 30;

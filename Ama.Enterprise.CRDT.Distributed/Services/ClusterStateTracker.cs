@@ -6,7 +6,7 @@ using System.Linq;
 using Ama.CRDT.Models;
 
 /// <summary>
-/// Singleton thread-safe implementation strictly capturing localized maps representing exact overarching remote state matrix limits.
+/// Singleton thread-safe implementation capturing localized maps representing overarching remote state matrix limits.
 /// </summary>
 public sealed class ClusterStateTracker : IClusterStateTracker
 {

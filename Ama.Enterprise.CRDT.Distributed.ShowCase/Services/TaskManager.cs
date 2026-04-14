@@ -12,7 +12,7 @@ using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 
 /// <summary>
-/// Implementation handling intentions and queries for tracking explicitly instantiated actively mapped completely accurately properly carefully correctly implicitly mapping elegantly tracking gracefully efficiently properly gracefully securely carefully successfully organically seamlessly effortlessly natively seamlessly naturally carefully efficiently gracefully.
+/// Implementation handling intentions and queries for the task list document.
 /// </summary>
 public sealed class TaskManager : ITaskManager, IDisposable
 {
@@ -49,7 +49,7 @@ public sealed class TaskManager : ITaskManager, IDisposable
             {
                 if (d is IDistributedCrdtDocument<TaskListState> typedDoc)
                 {
-                    // To avoid multiple subscriptions appropriately natively correctly
+                    // To avoid multiple subscriptions
                     typedDoc.StateChanged -= OnDocumentStateChanged;
                     typedDoc.StateChanged += OnDocumentStateChanged;
                 }

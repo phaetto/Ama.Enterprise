@@ -64,24 +64,24 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<DistributedCrdtScopeProvider>();
         
-        // Register core dynamic AOT-safe generic orchestrator seamlessly
+        // Register core dynamic AOT-safe generic orchestrator
         services.AddScoped<ICrdtDocumentOrchestrator, CrdtDocumentOrchestrator>();
         
-        // Register internal tracking singletons strictly matching background orchestration loops explicitly
+        // Register internal tracking singletons
         services.AddSingleton<IClusterStateTracker, ClusterStateTracker>();
         services.AddSingleton<ICrdtEvictionService, CrdtEvictionService>();
         
         // Ensures documents initialize their states from their registered persistence providers eagerly on startup
         services.AddHostedService<CrdtInitializationService>();
 
-        // Orchestrates periodic saves ensuring underlying snapshots seamlessly offload persistent writes out-of-band directly alongside combined secure journal trimming bounds
+        // Orchestrates periodic saves ensuring underlying snapshots offload persistent writes alongside journal trimming bounds
         services.AddHostedService<CrdtCheckpointService>();
 
         return services;
     }
 
     /// <summary>
-    /// Explicitly securely registers a specific natively fully AOT compliant CRDT type correctly perfectly intelligently cleanly natively logically smoothly properly mapping across the active global bounds seamlessly accurately effortlessly gracefully effortlessly seamlessly successfully effortlessly naturally efficiently effectively cleanly explicitly.
+    /// Registers a specific AOT-compliant CRDT document type.
     /// </summary>
     public static IServiceCollection AddDistributedDocumentType<TState>(this IServiceCollection services, string typeAlias) where TState : class, IDistributedCrdtState, new()
     {

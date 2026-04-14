@@ -19,7 +19,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Entry point for demonstrating Multiple Distributed CRDTs actively dynamically orchestrated via global registry appropriately gracefully seamlessly smoothly securely across perfectly efficiently mathematically cleanly effectively seamlessly securely cleanly.
+/// Entry point for demonstrating Multiple Distributed CRDTs dynamically orchestrated via a global registry.
 /// </summary>
 public static class Program
 {
@@ -48,7 +48,7 @@ public static class Program
         // Register Showcase file-based unified CRDT storage explicitly to override memory fallbacks
         services.AddSingleton<IDistributedCrdtStorage, ShowCaseCrdtStorage>();
 
-        // Add core CRDT distributed services and dynamically resolved orchestrator correctly successfully elegantly inherently safely elegantly securely
+        // Add core CRDT distributed services and dynamically resolve the orchestrator
         services.AddDistributedCrdtCore(options =>
         {
             options.ReplicaId = replicaId;
@@ -64,7 +64,7 @@ public static class Program
                 .AddCrdtSerializableType<TaskItem>("task-item")
                 .AddCrdtSerializableType<DeviceStatus>("device-status");
 
-        // Dynamically explicitly safely explicitly correctly structurally accurately logically successfully seamlessly effectively perfectly natively safely safely map securely gracefully explicitly natively natively efficiently elegantly organically securely appropriately structurally smoothly securely intelligently effectively mapping safely.
+        // Register document types dynamically into the orchestrator
         services.AddDistributedDocumentType<TaskListState>("task-list");
         services.AddScoped<ITaskManager, TaskManager>();
 
@@ -111,7 +111,7 @@ public static class Program
 
         try
         {
-            logger.LogInformation("Starting Dynamic Multi-CRDT orchestrated node seamlessly efficiently on port {Port}...", currentPort);
+            logger.LogInformation("Starting Dynamic Multi-CRDT orchestrated node on port {Port}...", currentPort);
 
             foreach (var service in hostedServices)
             {
@@ -122,7 +122,7 @@ public static class Program
             var taskManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<ITaskManager>();
             var fleetManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IFleetManager>();
 
-            // UI refresh securely cleanly organically natively securely explicitly securely explicitly elegantly perfectly
+            // UI refresh bindings
             taskManager.StateChanged += (sender, eventArgs) => DrawState(orchestrator, taskManager, fleetManager);
             fleetManager.StateChanged += (sender, eventArgs) => DrawState(orchestrator, taskManager, fleetManager);
 
@@ -209,13 +209,13 @@ public static class Program
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Error processing command cleanly natively strictly mapping.");
+                    logger.LogError(ex, "Error processing command.");
                 }
             }
         }
         finally
         {
-            logger.LogInformation("Shutting down dynamically cleanly orchestrated reliably correctly effectively appropriately explicitly natively securely efficiently seamlessly gracefully safely effortlessly seamlessly effectively mapping services...");
+            logger.LogInformation("Shutting down dynamically orchestrated services...");
             foreach (var service in hostedServices)
             {
                 await service.StopAsync(CancellationToken.None).ConfigureAwait(false);
@@ -241,7 +241,7 @@ public static class Program
             UseShellExecute = true
         });
 
-        logger.LogInformation("Cloned new dynamically seamlessly implicitly cluster node securely mapping appropriately on port {NextPort}.", nextPort);
+        logger.LogInformation("Cloned new cluster node on port {NextPort}.", nextPort);
     }
 
     private static void DrawMenu()
@@ -252,15 +252,15 @@ public static class Program
             Console.WriteLine($" Multi-CRDT Peer Node - Listening on Port {currentPort}");
             Console.WriteLine("=================================================");
             Console.WriteLine("Commands:");
-            Console.WriteLine(" new-list <docId>                               - Creates new Task List securely dynamically mapping natively seamlessly inherently gracefully");
-            Console.WriteLine(" new-fleet <docId>                              - Creates new Fleet List seamlessly safely strictly structurally accurately securely explicitly naturally.");
-            Console.WriteLine(" del-doc <docId>                                - Tombstones active mapped explicitly appropriately correctly accurately cleanly smoothly smoothly gracefully safely flawlessly implicitly document elegantly gracefully completely");
-            Console.WriteLine(" tset <docId> <taskId> <desc> <true|false>      - Adds/Updates explicitly carefully properly securely natively inherently seamlessly naturally accurately intelligently organically efficiently effortlessly appropriately intelligently cleanly properly");
-            Console.WriteLine(" tdel <docId> <taskId>                          - Removes mapping properly securely organically explicitly completely safely gracefully efficiently seamlessly successfully properly correctly cleanly accurately successfully seamlessly.");
-            Console.WriteLine(" fset <docId> <deviceId> <true|false> <batt>    - Adds/Updates effectively mapping cleanly dynamically successfully intelligently logically safely mapping gracefully explicitly elegantly elegantly safely successfully correctly gracefully.");
-            Console.WriteLine(" fdel <docId> <deviceId>                        - Removes correctly correctly perfectly organically flawlessly properly structurally smoothly mapping flawlessly safely seamlessly explicitly correctly naturally securely natively cleanly effectively seamlessly elegantly smoothly organically seamlessly smoothly seamlessly efficiently effortlessly perfectly.");
-            Console.WriteLine(" clone                                          - Spawns a new dynamically mapped appropriately mapping successfully elegantly safely explicitly naturally inherently elegantly seamlessly node structurally effortlessly successfully.");
-            Console.WriteLine(" exit                                           - Shuts correctly flawlessly smoothly intelligently cleanly correctly correctly effortlessly smoothly smoothly smoothly appropriately strictly cleanly successfully seamlessly organically naturally inherently naturally.");
+            Console.WriteLine(" new-list <docId>                               - Creates a new Task List document");
+            Console.WriteLine(" new-fleet <docId>                              - Creates a new Fleet List document");
+            Console.WriteLine(" del-doc <docId>                                - Tombstones and removes an active document");
+            Console.WriteLine(" tset <docId> <taskId> <desc> <true|false>      - Adds/Updates a task item");
+            Console.WriteLine(" tdel <docId> <taskId>                          - Removes a task item");
+            Console.WriteLine(" fset <docId> <deviceId> <true|false> <batt>    - Adds/Updates a fleet device");
+            Console.WriteLine(" fdel <docId> <deviceId>                        - Removes a fleet device");
+            Console.WriteLine(" clone                                          - Spawns a new node process");
+            Console.WriteLine(" exit                                           - Shuts down the node gracefully");
             Console.WriteLine("=================================================\n");
         }
     }

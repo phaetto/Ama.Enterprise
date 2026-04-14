@@ -13,7 +13,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Implementation of the generic CRDT eviction service natively abstracting logic bridging evictions structurally efficiently explicitly efficiently.
+/// Implementation of the generic CRDT eviction service.
 /// </summary>
 public sealed class CrdtEvictionService : ICrdtEvictionService
 {
@@ -66,7 +66,7 @@ public sealed class CrdtEvictionService : ICrdtEvictionService
             }
         }
         
-        logger.LogInformation("Successfully applied eviction across {DocCount} documents and global version vector bounds perfectly structurally for {ReplicaCount} replicas.", documents.Count, replicaIds.Count);
+        logger.LogInformation("Successfully applied eviction across {DocCount} documents for {ReplicaCount} replicas.", documents.Count, replicaIds.Count);
     }
 
     /// <inheritdoc />
@@ -111,6 +111,6 @@ public sealed class CrdtEvictionService : ICrdtEvictionService
             await doc.BroadcastStateAsync(cancellationToken).ConfigureAwait(false);
         }
         
-        logger.LogInformation("Successfully explicitly cleanly securely completed structural re-bootstrap identity mechanisms completely flawlessly seamlessly smoothly properly.");
+        logger.LogInformation("Successfully completed re-bootstrap identity mechanisms.");
     }
 }

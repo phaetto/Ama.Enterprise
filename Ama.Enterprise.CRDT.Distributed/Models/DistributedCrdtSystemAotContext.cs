@@ -5,7 +5,7 @@ using Ama.CRDT.Attributes;
 using Ama.CRDT.Models.Aot;
 
 /// <summary>
-/// AOT contextual reflection mapping natively for internal orchestrator registry CRDT scopes gracefully securely bridging models natively.
+/// AOT contextual reflection mapping for internal orchestrator registry CRDT scopes.
 /// </summary>
 [CrdtAotType(typeof(CrdtRegistryEntry))]
 [CrdtAotType(typeof(CrdtRegistryState))]

@@ -38,7 +38,7 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver
     {
         if (Interlocked.CompareExchange(ref hasConnected, 1, 0) == 0)
         {
-            logger.LogInformation("Connected to first peer {PeerId}. Triggering immediate DVV state sync for all dynamically mapped active CRDTs seamlessly smoothly elegantly inherently securely flawlessly.", node.Id);
+            logger.LogInformation("Connected to first peer {PeerId}. Triggering immediate DVV state sync for all active CRDTs.", node.Id);
 
             try
             {
@@ -52,7 +52,7 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Failed to broadcast initial state sync upon connecting to first peer explicitly efficiently correctly natively properly safely reliably successfully.");
+                logger.LogError(ex, "Failed to broadcast initial state sync upon connecting to first peer.");
             }
         }
     }
@@ -63,10 +63,10 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver
         if (peerId.Value != Guid.Empty)
         {
             var stringId = peerId.Value.ToString();
-            logger.LogInformation("Peer {PeerId} gracefully departed. Unmapping network ID but explicitly preserving CRDT state strictly tracking limits avoiding destructive restart bounds successfully efficiently protecting structurally avoiding identity re-bootstraps.", stringId);
+            logger.LogInformation("Peer {PeerId} departed. Unmapping network ID but preserving CRDT state.", stringId);
             
-            // Intentionally DO NOT tombstone here to prevent massive cluster amnesia anomalies during rolling restarts natively gracefully efficiently.
-            // The background TTL expiration threshold handles actual dead nodes securely preventing structural damage accurately effectively safely explicitly seamlessly correctly natively seamlessly.
+            // Intentionally DO NOT tombstone here to prevent massive cluster amnesia anomalies during rolling restarts.
+            // The background TTL expiration threshold handles actual dead nodes securely.
             clusterTracker.RemovePeerByNetworkId(stringId);
         }
         

@@ -6,7 +6,7 @@ using System.Linq;
 using Ama.CRDT.Models;
 
 /// <summary>
-/// Represents the missing operations and whether a full snapshot is required for synchronization natively replacing tuple structs explicitly.
+/// Represents the missing operations and whether a full snapshot is required for synchronization.
 /// </summary>
 public readonly record struct MissingOperationsResult : IEquatable<MissingOperationsResult>
 {
@@ -16,7 +16,7 @@ public readonly record struct MissingOperationsResult : IEquatable<MissingOperat
     public IReadOnlyList<CrdtOperation> Operations { get; }
 
     /// <summary>
-    /// Gets a value indicating whether the journal has been truncated, natively requiring a complete document snapshot fallback.
+    /// Gets a value indicating whether the journal has been truncated, requiring a complete document snapshot fallback.
     /// </summary>
     public bool SnapshotRequired { get; }
 

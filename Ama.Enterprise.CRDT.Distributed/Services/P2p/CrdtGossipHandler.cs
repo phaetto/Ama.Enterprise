@@ -118,7 +118,7 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
             
             if (missingOpsResult.SnapshotRequired)
             {
-                logger.LogWarning("Journal bounds structurally trimmed. Cannot securely map logical operations matching replica {ReplicaId} requirements for document {DocumentId}. Automatically triggering complete state-based snapshot.", syncMsg.ReplicaId, targetDoc.DocumentId);
+                logger.LogWarning("Journal bounds trimmed. Cannot map operations for replica {ReplicaId} in document {DocumentId}. Triggering full snapshot.", syncMsg.ReplicaId, targetDoc.DocumentId);
                 await targetDoc.ProvideSnapshotAsync(syncMsg.ReplicaId, cancellationToken).ConfigureAwait(false);
             }
             else if (missingOpsResult.Operations.Count > 0)
@@ -186,7 +186,7 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
                 return;
             }
 
-            logger.LogInformation("Receiving full state network snapshot explicitly bridging synchronization deficit for document {DocumentId}.", targetDoc.DocumentId);
+            logger.LogInformation("Receiving full state network snapshot for document {DocumentId}.", targetDoc.DocumentId);
             
             // Map explicitly overarching tracking vectors effectively natively bridging states cleanly
             clusterTracker.UpdatePeerState(resMsg.ReplicaId, senderId.Value.ToString(), resMsg.GlobalState);
@@ -195,7 +195,7 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to safely process full state snapshot payload correctly for document {DocumentId}.", targetDoc.DocumentId);
+            logger.LogError(ex, "Failed to process full state snapshot payload for document {DocumentId}.", targetDoc.DocumentId);
         }
     }
 
@@ -213,13 +213,13 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to successfully execute identity re-bootstrap from an eviction rejection message mapping accurately.");
+            logger.LogError(ex, "Failed to execute identity re-bootstrap from an eviction rejection message.");
         }
     }
 
     private async Task RejectEvictedReplicaAsync(IDistributedCrdtDocument targetDoc, string evictedReplicaId, CancellationToken cancellationToken)
     {
-        logger.LogWarning("Rejecting P2P payload from tombstoned replica {ReplicaId} for document {DocumentId}. Enforcing structural identity re-bootstrap correctly preventing amnesia anomalies.", evictedReplicaId, targetDoc.DocumentId);
+        logger.LogWarning("Rejecting P2P payload from tombstoned replica {ReplicaId} for document {DocumentId}. Enforcing identity re-bootstrap.", evictedReplicaId, targetDoc.DocumentId);
         
         var rejectionMsg = new CrdtEvictionRejectionMessage(evictedReplicaId);
         var payload = serializer.SerializeToBytes(rejectionMsg);

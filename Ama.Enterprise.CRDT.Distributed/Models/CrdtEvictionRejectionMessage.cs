@@ -4,8 +4,7 @@ using System;
 using System.Text.Json.Serialization;
 
 /// <summary>
-/// Message broadcasted strictly to forcefully reject and re-bootstrap nodes that have been tombstoned by the cluster
-/// inherently preventing CRDT state amnesia and split-brain data resurrection anomalies efficiently.
+/// Message broadcasted to reject and re-bootstrap nodes that have been tombstoned by the cluster.
 /// </summary>
 public readonly record struct CrdtEvictionRejectionMessage : IEquatable<CrdtEvictionRejectionMessage>
 {
