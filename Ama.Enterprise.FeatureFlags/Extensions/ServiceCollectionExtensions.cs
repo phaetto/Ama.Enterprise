@@ -36,8 +36,12 @@ public static class ServiceCollectionExtensions
 
         Action<DistributedCrdtOptions> distConfig = dist =>
         {
-            dist.ReplicaId = ffOpts.ReplicaId;
-            dist.ActiveSyncEnabled = ffOpts.ActiveSyncEnabled;
+            dist.ReplicaId = ffOpts.Crdt.ReplicaId;
+            dist.ActiveSyncEnabled = ffOpts.Crdt.ActiveSyncEnabled;
+            dist.CheckpointIntervalSeconds = ffOpts.Crdt.CheckpointIntervalSeconds;
+            dist.AntiEntropyInitialDelaySeconds = ffOpts.Crdt.AntiEntropyInitialDelaySeconds;
+            dist.AntiEntropyIntervalSeconds = ffOpts.Crdt.AntiEntropyIntervalSeconds;
+            dist.PeerEvictionTtlSeconds = ffOpts.Crdt.PeerEvictionTtlSeconds;
         };
 
         // Bootstrap generic core dependencies
@@ -66,21 +70,28 @@ public static class ServiceCollectionExtensions
         services.AddP2pMesh(FeatureFlagsMeshId)
                 .AddGossipNetwork(options =>
                 {
-                    options.GossipInterval = ffOpts.GossipInterval;
+                    options.GossipInterval = ffOpts.Gossip.GossipInterval;
+                    options.Fanout = ffOpts.Gossip.Fanout;
+                    options.DefaultTimeToLive = ffOpts.Gossip.DefaultTimeToLive;
                 })
                 .AddHttpTransport(options =>
                 {
-                    options.ListenPort = ffOpts.ListenPort;
-                    options.ListenHost = ffOpts.ListenHost;
+                    options.ListenPort = ffOpts.Http.ListenPort;
+                    options.ListenHost = ffOpts.Http.ListenHost;
+                    options.PathPrefix = ffOpts.Http.PathPrefix;
                 })
                 .AddUdpPeerDiscovery(options =>
                 {
-                    options.MulticastAddress = ffOpts.MulticastAddress;
-                    options.MulticastPort = ffOpts.MulticastPort;
-                    options.DiscoveryInterval = ffOpts.DiscoveryInterval;
-                    options.DiscoveryTimeout = ffOpts.DiscoveryTimeout;
+                    options.MulticastAddress = ffOpts.UdpDiscovery.MulticastAddress;
+                    options.MulticastPort = ffOpts.UdpDiscovery.MulticastPort;
+                    options.DiscoveryInterval = ffOpts.UdpDiscovery.DiscoveryInterval;
+                    options.DiscoveryTimeout = ffOpts.UdpDiscovery.DiscoveryTimeout;
                 })
-                .AddWebRtcTransport(options => { });
+                .AddWebRtcTransport(options => 
+                {
+                    options.IceServers = ffOpts.WebRtc.IceServers;
+                    options.IceGatheringTimeout = ffOpts.WebRtc.IceGatheringTimeout;
+                });
 
         return services;
     }

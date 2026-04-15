@@ -138,7 +138,7 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
 
         if (activeMeshes.IsEmpty)
         {
-            throw new InvalidOperationException("Gossip Protocol algorithm is not actively running for any meshes.");
+            return Task.CompletedTask;
         }
 
         var dispatchTasks = new List<Task>();

@@ -92,12 +92,12 @@
 | `$/Ama.Enterprise.CRDT.Testing/Ama.Enterprise.CRDT.Testing.csproj` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Ama.Enterprise.FeatureFlags.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj` | Showcase console application project displaying P2P feature flags integration, AOT readiness, and UDP cluster discovery. |
-| `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Removed boilerplate `scopeProvider` resolution utilizing transparent forwarders efficiently ensuring a better developer experience. |
+| `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Updated showcase application reflecting the refactored categorical options assignments. |
 | `$/Ama.Enterprise.FeatureFlags.UnitTests/Ama.Enterprise.FeatureFlags.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj` | No description provided. |
-| `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | Replaced scoped generic registration with `AddDistributedCrdtService` applying a transparent root-resolvable forwarder safely and cleanly. |
+| `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | Modified dependency mappings redirecting nested option properties directly to the underlying P2P dependencies. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlag.cs` | Data structure representing a single feature flag. |
-| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagOptions.cs` | Augmented to encompass all network, discovery, and transport properties completely encapsulating underlying clusters securely making it a plug-and-play module. |
+| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagOptions.cs` | Configuration structure broken into typed categories encompassing all underlying network and CRDT discovery options to prevent field duplication. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagState.cs` | Explicitly inherits `IDistributedCrdtState` and maps generic constraints bridging properties dynamically. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsCrdtAotContext.cs` | AOT context for the feature flags models. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsJsonContext.cs` | JSON context for the feature flags models. |

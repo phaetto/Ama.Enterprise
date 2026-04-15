@@ -48,15 +48,16 @@ public static class Program
         // 1. Add Plug-and-Play Feature Flags Product with internal P2P setup naturally encapsulated
         services.AddFeatureFlags(options =>
         {
-            options.ReplicaId = replicaId;
-            options.ActiveSyncEnabled = true;
-            options.ListenPort = currentPort;
-            options.ListenHost = "localhost";
-            options.MulticastAddress = "239.255.0.1";
-            options.MulticastPort = 8035;
-            options.DiscoveryInterval = TimeSpan.FromSeconds(1);
-            options.DiscoveryTimeout = TimeSpan.FromSeconds(1);
-            options.GossipInterval = TimeSpan.FromMilliseconds(500);
+            options.Crdt.ReplicaId = replicaId;
+            options.Crdt.ActiveSyncEnabled = true;
+            options.Crdt.CheckpointIntervalSeconds = 120;
+            options.Http.ListenPort = currentPort;
+            options.Http.ListenHost = "localhost";
+            options.UdpDiscovery.MulticastAddress = "239.255.0.1";
+            options.UdpDiscovery.MulticastPort = 8035;
+            options.UdpDiscovery.DiscoveryInterval = TimeSpan.FromSeconds(1);
+            options.UdpDiscovery.DiscoveryTimeout = TimeSpan.FromSeconds(10);
+            options.Gossip.GossipInterval = TimeSpan.FromMilliseconds(500);
         });
 
         await using var provider = services.BuildServiceProvider();

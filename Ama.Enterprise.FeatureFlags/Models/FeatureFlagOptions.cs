@@ -1,6 +1,10 @@
 namespace Ama.Enterprise.FeatureFlags.Models;
 
-using System;
+using Ama.Enterprise.CRDT.Distributed.Models;
+using Ama.Enterprise.P2p.Models.Discovery;
+using Ama.Enterprise.P2p.Models.Gossip;
+using Ama.Enterprise.P2p.Models.Transports;
+using Ama.Enterprise.P2p.WebRTC.Models;
 
 /// <summary>
 /// Configuration options for the feature flags module.
@@ -8,49 +12,27 @@ using System;
 public sealed class FeatureFlagOptions
 {
     /// <summary>
-    /// Gets or sets the unique identifier for this replica in the CRDT cluster.
+    /// Gets or sets the distributed CRDT options configuration.
     /// </summary>
-    public string ReplicaId { get; set; } = Guid.NewGuid().ToString("N");
+    public DistributedCrdtOptions Crdt { get; set; } = new();
 
     /// <summary>
-    /// Gets or sets a value indicating whether active mode is enabled.
-    /// When enabled, local state changes trigger an immediate network sync broadcast,
-    /// bypassing the regular anti-entropy delay.
+    /// Gets or sets the generic HTTP transport layer options configuration.
     /// </summary>
-    public bool ActiveSyncEnabled { get; set; }
+    public HttpTransportOptions Http { get; set; } = new();
 
     /// <summary>
-    /// Gets or sets the host address to listen for incoming P2P connections.
+    /// Gets or sets the UDP multicast peer discovery options configuration.
     /// </summary>
-    public string ListenHost { get; set; } = "localhost";
+    public UdpDiscoveryOptions UdpDiscovery { get; set; } = new();
 
     /// <summary>
-    /// Gets or sets the port to listen for incoming P2P connections.
+    /// Gets or sets the gossip protocol options configuration.
     /// </summary>
-    public int ListenPort { get; set; } = 8080;
+    public GossipOptions Gossip { get; set; } = new();
 
     /// <summary>
-    /// Gets or sets the multicast group address for UDP peer discovery.
+    /// Gets or sets the WebRTC transport options configuration.
     /// </summary>
-    public string MulticastAddress { get; set; } = "239.255.0.1";
-
-    /// <summary>
-    /// Gets or sets the multicast port for UDP peer discovery.
-    /// </summary>
-    public int MulticastPort { get; set; } = 8035;
-
-    /// <summary>
-    /// Gets or sets the interval between UDP discovery broadcasts.
-    /// </summary>
-    public TimeSpan DiscoveryInterval { get; set; } = TimeSpan.FromSeconds(1);
-
-    /// <summary>
-    /// Gets or sets the timeout for dropping inactive peers from discovery.
-    /// </summary>
-    public TimeSpan DiscoveryTimeout { get; set; } = TimeSpan.FromSeconds(1);
-
-    /// <summary>
-    /// Gets or sets the interval for the gossip protocol anti-entropy runs.
-    /// </summary>
-    public TimeSpan GossipInterval { get; set; } = TimeSpan.FromMilliseconds(500);
+    public WebRtcOptions WebRtc { get; set; } = new();
 }
