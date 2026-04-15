@@ -19,6 +19,8 @@ using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.UnitTests.Attributes;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Moq;
 using Shouldly;
 
@@ -192,5 +194,65 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
         replicaContext.GlobalVersionVector.Versions["ReplicaB"].ShouldBe(5);
+    }
+
+    [IntegrationFact]
+    public async Task CrdtInitializationService_ShouldReplayJournaledOperations_OnStartup()
+    {
+        // Arrange - Node 1 (Simulates initial application run writing to the WAL without checkpointing)
+        var sharedStorage = new MemoryCrdtStorage();
+
+        var sp1 = BuildNode("Replica1", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(sharedStorage));
+        });
+
+        var scopeProvider1 = sp1.GetRequiredService<DistributedCrdtScopeProvider>();
+        var orchestrator1 = scopeProvider1.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var patcher1 = scopeProvider1.Scope.ServiceProvider.GetRequiredService<ICrdtPatcher>();
+
+        // Orchestrator initialization creates the empty registry natively smoothly.
+        await orchestrator1.InitializeAsync(CancellationToken.None);
+        
+        // Creating a document mutates the registry natively and appends a valid patch to the shared storage WAL inherently via decorators.
+        await orchestrator1.CreateDocumentAsync("test-replayed-doc", "journal-doc", CancellationToken.None);
+        await orchestrator1.SyncDocumentsAsync(CancellationToken.None);
+
+        var doc1 = orchestrator1.GetDocument<JournalTestState>("test-replayed-doc")!;
+        
+        // Generate multiple operations safely using the Patcher to explicitly map true logical clock values natively
+        var intent1 = new MapSetIntent("key1", "ReplayedData1");
+        var op1 = patcher1.GenerateOperation(doc1.Document, x => x.DataMap, intent1);
+
+        var intent2 = new MapSetIntent("key2", "ReplayedData2");
+        var op2 = patcher1.GenerateOperation(doc1.Document, x => x.DataMap, intent2);
+
+        // Apply patches correctly invoking the decorators seamlessly explicitly cleanly writing structurally valid WAL entries.
+        await doc1.ApplyPatchAsync(new CrdtPatch(new[] { op1, op2 }), CancellationToken.None);
+
+        // Verify the uncheckpointed operations hit the underlying storage correctly inherently
+        var journalOps = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
+        journalOps.Count.ShouldBeGreaterThan(2);
+
+        // Act - Node 2 (Simulates a restart binding the same storage mapping natively to recover the state)
+        var sp2 = BuildNode("Replica1", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(sharedStorage));
+        });
+
+        // The HostedService startup simulates the application boot sequence natively reading uncheckpointed fallback operations.
+        var initService = sp2.GetServices<IHostedService>().OfType<CrdtInitializationService>().First();
+        await initService.StartAsync(CancellationToken.None);
+
+        // Assert - The orchestrator should have completely accurately reliably explicitly rebuilt the registry and replayed operations natively.
+        var scopeProvider2 = sp2.GetRequiredService<DistributedCrdtScopeProvider>();
+        var orchestrator2 = scopeProvider2.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        
+        var doc2 = orchestrator2.GetDocument<JournalTestState>("test-replayed-doc");
+
+        doc2.ShouldNotBeNull();
+        doc2!.DocumentId.ShouldBe("test-replayed-doc");
+        doc2.Document.Data.DataMap.ShouldContainKeyAndValue("key1", "ReplayedData1");
+        doc2.Document.Data.DataMap.ShouldContainKeyAndValue("key2", "ReplayedData2");
     }
 }

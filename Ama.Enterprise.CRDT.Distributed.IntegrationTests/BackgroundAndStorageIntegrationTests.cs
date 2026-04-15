@@ -107,7 +107,7 @@ public sealed class BackgroundAndStorageIntegrationTests
 
         // Assert - Correct Trimming
         var postTrimOps = await storage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
-        postTrimOps.Count.ShouldBe(2); // op2 (ReplicaA clock 2) and op3 (ReplicaB clock 1) should correctly remain natively protecting data explicitly
+        postTrimOps.Count.ShouldBe(2); // op2 (ReplicaA clock 2) and op3 (ReplicaB clock 1) should remain protecting data explicitly
         postTrimOps.Any(o => o.Operation.Id == op1Id).ShouldBeFalse();
         postTrimOps.Any(o => o.Operation.Id == op2Id).ShouldBeTrue();
     }
@@ -140,7 +140,7 @@ public sealed class BackgroundAndStorageIntegrationTests
         // Act - Trigger again explicitly testing the thread-safe connection check structurally
         await observer.OnPeerJoinedAsync(new PeerNode(new PeerId(Guid.NewGuid()), new HttpPeerEndpoint("http://localhost2", 5001)), CancellationToken.None);
         
-        // Assert - Only triggered on the FIRST connected peer perfectly seamlessly safely natively correctly explicitly gracefully properly
+        // Assert - Only triggered on the FIRST connected peer perfectly seamlessly safely natively correctly explicitly properly
         mockP2p.Verify(p => p.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
     }
 
@@ -174,7 +174,7 @@ public sealed class BackgroundAndStorageIntegrationTests
 
         await docManager.ApplyPatchAsync(populatedPatch, CancellationToken.None);
 
-        // Now verify it natively correctly cleanly broadcasted explicitly smoothly dynamically matching active states accurately optimally appropriately reliably seamlessly flawlessly successfully
+        // Now verify it natively broadcasted explicitly smoothly dynamically matching active states accurately optimally appropriately reliably seamlessly flawlessly
         mockP2p.Verify(p => p.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
 
@@ -197,7 +197,7 @@ public sealed class BackgroundAndStorageIntegrationTests
         var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>("StorageMesh");
         var serializer = sp.GetRequiredService<ICrdtSerializer>();
         
-        // Prepare a complete fully bound fallback snapshot explicitly cleanly logically gracefully
+        // Prepare a complete fully bound fallback snapshot explicitly cleanly logically
         var globalDvv = new DottedVersionVector();
         globalDvv.Versions["RemoteA"] = 10;
         
@@ -267,7 +267,7 @@ public sealed class BackgroundAndStorageIntegrationTests
             await checkpointService.StopAsync(CancellationToken.None);
         }
 
-        // Assert - Effectively explicitly functionally smoothly naturally seamlessly securely thoroughly verifies bounds gracefully successfully optimally
+        // Assert - Effectively explicitly functionally smoothly naturally seamlessly securely thoroughly verifies bounds
         mockStorage.Verify(s => s.SaveGlobalVersionVectorAsync(It.IsAny<string>(), It.IsAny<DottedVersionVector>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
         mockStorage.Verify(s => s.SaveDocumentAsync(It.IsAny<string>(), It.IsAny<CrdtDocument<StorageTestState>>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
