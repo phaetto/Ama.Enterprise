@@ -2,12 +2,12 @@ namespace Ama.Enterprise.P2p.WebRTC.IntegrationTests.Services;
 
 using System;
 using System.Linq;
-using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.Models.Core;
+using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.WebRTC.Extensions;
 using Ama.Enterprise.P2p.WebRTC.Models;
@@ -19,15 +19,8 @@ using Microsoft.Extensions.Logging;
 using Shouldly;
 using Xunit;
 
-[JsonSerializable(typeof(WebRtcTransportIntegrationTests.TestMessage))]
-internal partial class WebRtcIntegrationTestJsonContext : JsonSerializerContext
-{
-}
-
 public sealed class WebRtcTransportIntegrationTests
 {
-    public readonly record struct TestMessage(string Content, string MeshId = "integration-mesh") : IMeshMessage;
-
     private sealed record DummyPeerEndpoint : PeerEndpoint;
 
     private readonly ITestOutputHelper testOutputHelper;
@@ -47,7 +40,8 @@ public sealed class WebRtcTransportIntegrationTests
         var peerAId = new PeerId(Guid.NewGuid());
         var peerBId = new PeerId(Guid.NewGuid());
 
-        var messageToSend = new TestMessage("Hello Decentralized World", meshId);
+        var payloadBytes = System.Text.Encoding.UTF8.GetBytes("Hello Decentralized World");
+        var messageToSend = new GossipMessage(meshId, Guid.NewGuid(), peerAId, 10, payloadBytes);
 
         testOutputHelper.WriteLine("Initializing DI Nodes...");
         await using var nodeA = CreateTestNode(meshId, peerAId);
@@ -63,14 +57,14 @@ public sealed class WebRtcTransportIntegrationTests
         testOutputHelper.WriteLine("Finalizing invitation on Node A...");
         await nodeA.InvitationService.FinalizeInvitationAsync(offerDto.ConnectionId, answerDto.SdpAnswer, cts.Token);
 
-        var messageCompletionSource = new TaskCompletionSource<TestMessage>();
+        var messageCompletionSource = new TaskCompletionSource<GossipMessage>();
 
         await nodeB.Listener.StartListeningAsync(msg =>
         {
-            if (msg is TestMessage testMsg)
+            if (msg is GossipMessage gossipMsg)
             {
-                testOutputHelper.WriteLine("Message successfully received by Listener B!");
-                messageCompletionSource.TrySetResult(testMsg);
+                testOutputHelper.WriteLine("Message received by Listener B.");
+                messageCompletionSource.TrySetResult(gossipMsg);
             }
             return Task.CompletedTask;
         }, cts.Token);
@@ -89,10 +83,11 @@ public sealed class WebRtcTransportIntegrationTests
         testOutputHelper.WriteLine("Awaiting message handle block...");
         var receivedMessage = await messageCompletionSource.Task.WaitAsync(TimeSpan.FromSeconds(15), cts.Token);
         
-        receivedMessage.Content.ShouldBe("Hello Decentralized World");
+        var receivedText = System.Text.Encoding.UTF8.GetString(receivedMessage.Payload.ToArray());
+        receivedText.ShouldBe("Hello Decentralized World");
 
         await nodeB.Listener.StopListeningAsync(cts.Token);
-        testOutputHelper.WriteLine("Test finished correctly.");
+        testOutputHelper.WriteLine("Test finished.");
     }
 
     [IntegrationFact]
@@ -105,8 +100,8 @@ public sealed class WebRtcTransportIntegrationTests
         var peerAId = new PeerId(Guid.NewGuid());
         var peerBId = new PeerId(Guid.NewGuid());
 
-        var messageAtoB = new TestMessage("AtoB", meshId);
-        var messageBtoA = new TestMessage("BtoA", meshId);
+        var messageAtoB = new GossipMessage(meshId, Guid.NewGuid(), peerAId, 10, System.Text.Encoding.UTF8.GetBytes("AtoB"));
+        var messageBtoA = new GossipMessage(meshId, Guid.NewGuid(), peerBId, 10, System.Text.Encoding.UTF8.GetBytes("BtoA"));
 
         await using var nodeA = CreateTestNode(meshId, peerAId);
         await using var nodeB = CreateTestNode(meshId, peerBId);
@@ -115,23 +110,23 @@ public sealed class WebRtcTransportIntegrationTests
         var answerDto = await nodeB.InvitationService.AcceptInvitationAsync(offerDto.SdpOffer, cts.Token);
         await nodeA.InvitationService.FinalizeInvitationAsync(offerDto.ConnectionId, answerDto.SdpAnswer, cts.Token);
 
-        var messageCompletionSourceA = new TaskCompletionSource<TestMessage>();
-        var messageCompletionSourceB = new TaskCompletionSource<TestMessage>();
+        var messageCompletionSourceA = new TaskCompletionSource<GossipMessage>();
+        var messageCompletionSourceB = new TaskCompletionSource<GossipMessage>();
 
         await nodeA.Listener.StartListeningAsync(msg =>
         {
-            if (msg is TestMessage testMsg)
+            if (msg is GossipMessage gossipMsg)
             {
-                messageCompletionSourceA.TrySetResult(testMsg);
+                messageCompletionSourceA.TrySetResult(gossipMsg);
             }
             return Task.CompletedTask;
         }, cts.Token);
 
         await nodeB.Listener.StartListeningAsync(msg =>
         {
-            if (msg is TestMessage testMsg)
+            if (msg is GossipMessage gossipMsg)
             {
-                messageCompletionSourceB.TrySetResult(testMsg);
+                messageCompletionSourceB.TrySetResult(gossipMsg);
             }
             return Task.CompletedTask;
         }, cts.Token);
@@ -149,8 +144,8 @@ public sealed class WebRtcTransportIntegrationTests
         var receivedByA = await messageCompletionSourceA.Task.WaitAsync(TimeSpan.FromSeconds(15), cts.Token);
         var receivedByB = await messageCompletionSourceB.Task.WaitAsync(TimeSpan.FromSeconds(15), cts.Token);
         
-        receivedByA.Content.ShouldBe("BtoA");
-        receivedByB.Content.ShouldBe("AtoB");
+        System.Text.Encoding.UTF8.GetString(receivedByA.Payload.ToArray()).ShouldBe("BtoA");
+        System.Text.Encoding.UTF8.GetString(receivedByB.Payload.ToArray()).ShouldBe("AtoB");
 
         await nodeA.Listener.StopListeningAsync(cts.Token);
         await nodeB.Listener.StopListeningAsync(cts.Token);
@@ -206,6 +201,7 @@ public sealed class WebRtcTransportIntegrationTests
         await using var nodeA = CreateTestNode(meshId, peerAId);
 
         var dummyEndpoint = new DummyPeerEndpoint();
+        var message = new GossipMessage(meshId, Guid.NewGuid(), peerAId, 10, Array.Empty<byte>());
         
         // Act
         var canHandle = nodeA.Transport.CanHandle(dummyEndpoint);
@@ -214,7 +210,7 @@ public sealed class WebRtcTransportIntegrationTests
         canHandle.ShouldBeFalse();
 
         // Ensure SendAsync gracefully completes without throwing for unsupported endpoints
-        await Should.NotThrowAsync(() => nodeA.Transport.SendAsync(dummyEndpoint, new TestMessage("Ignored", meshId), CancellationToken.None));
+        await Should.NotThrowAsync(() => nodeA.Transport.SendAsync(dummyEndpoint, message, CancellationToken.None));
     }
 
     [IntegrationFact]
@@ -245,11 +241,9 @@ public sealed class WebRtcTransportIntegrationTests
     {
         var services = new ServiceCollection();
 
-        // Register core CRDT capabilities handling JSON serializers natively via AOT contexts
+        // Register core CRDT capabilities natively
         services.AddCrdt();
 
-        // Register the AOT context strictly targeting the internal integration test message type payload gracefully
-        services.AddCrdtJsonTypeInfoResolver(WebRtcIntegrationTestJsonContext.Default);
         services.AddLogging(builder => 
         {
             builder.AddXunit(testOutputHelper);
@@ -265,6 +259,7 @@ public sealed class WebRtcTransportIntegrationTests
         });
 
         services.AddP2pMesh(meshId)
+            .AddGossipNetwork() // Installs AOT contexts explicitly bridging GossipMessage serialization
             .AddWebRtcTransport(options =>
             {
                 // Disable external STUN lookup to accelerate local integration tests efficiently

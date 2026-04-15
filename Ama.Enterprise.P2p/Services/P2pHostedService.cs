@@ -45,6 +45,19 @@ public sealed class P2pHostedService : IHostedService
         {
             await listener.StartListeningAsync(async msg => 
             {
+                var incomingVersion = new Version(0, 0, 0);
+                if (!string.IsNullOrWhiteSpace(msg.ProtocolVersion) && Version.TryParse(msg.ProtocolVersion, out var parsedVersion))
+                {
+                    incomingVersion = parsedVersion;
+                }
+
+                var localVersion = Version.Parse(Constants.ProtocolVersion);
+                if (incomingVersion.Major != localVersion.Major)
+                {
+                    logger.LogWarning("Rejected incoming multiplexed protocol message due to major version mismatch. Local: {LocalVersion}, Incoming: {IncomingVersion}", localVersion, incomingVersion);
+                    throw new NotSupportedException($"Protocol major version mismatch. Local: {localVersion.Major}, Incoming: {incomingVersion.Major}");
+                }
+
                 if (msg is GossipMessage gossipMsg)
                 {
                     var targetQueue = serviceProvider.GetKeyedService<IInboundMessageQueue<GossipMessage>>(msg.MeshId);

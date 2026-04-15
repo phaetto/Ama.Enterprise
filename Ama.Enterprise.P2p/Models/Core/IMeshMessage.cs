@@ -17,4 +17,9 @@ public interface IMeshMessage
     /// Gets the unique identifier of the target P2P mesh network context.
     /// </summary>
     string MeshId { get; }
+
+    /// <summary>
+    /// Gets the protocol version of the message ensuring cross-version compatibility natively across all transports.
+    /// </summary>
+    string ProtocolVersion { get; }
 }

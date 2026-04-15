@@ -152,6 +152,7 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
 
             var message = new GossipMessage(
                 meshId,
+                Constants.ProtocolVersion,
                 Guid.NewGuid(),
                 new PeerId(nodeOptions.LocalPeerId),
                 gossipOptions.DefaultTimeToLive,

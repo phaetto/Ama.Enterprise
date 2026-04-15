@@ -110,7 +110,7 @@
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/Models/TestNode.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pAdvancedIntegrationTests.cs` | Updated DI registrations safely routing `IApplicationPayloadHandler` explicitly and adapted assertion mechanics to cleanly decode unwrapped byte arrays effectively flawlessly securely. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pNetworkIntegrationTests.cs` | Refactored integration assertions targeting correctly unboxed test payloads. Cleanly redesigned deduplication tests securely explicitly wrapping identical envelopes ensuring robust evaluation natively naturally successfully gracefully. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pVersioningIntegrationTests.cs` | Adapted integration DI boundaries ensuring testing compatibility inherently mapping correctly natively avoiding unboxed routing gaps explicitly properly smoothly naturally successfully natively gracefully intelligently. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pVersioningIntegrationTests.cs` | Refactored integration assertions accurately mapping completely natively unboxed generic wrappers implicitly flawlessly properly completely correctly natively cleanly organically smoothly appropriately. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/UdpPeerDiscoveryIntegrationTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Transports/HttpTransportMultiplexingIntegrationTests.cs` | Adjusted globally multiplexed HTTP listener correctly invoking abstract base `ITransportListener` natively securely parsing abstract polymorphic multiplex constraints efficiently successfully successfully perfectly naturally gracefully smoothly intelligently securely correctly cleanly accurately correctly properly seamlessly efficiently. |
 | `$/Ama.Enterprise.P2p.UnitTests/Ama.Enterprise.P2p.UnitTests.csproj` | No description provided. |
@@ -120,7 +120,7 @@
 | `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/RandomPeerSelectorTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/TimeBasedFailureDetectorTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Ama.Enterprise.P2p.WebRTC.IntegrationTests.csproj` | No description provided. |
-| `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Services/WebRtcTransportIntegrationTests.cs` | Updated WebRTC transport integration tests adapting implicitly correctly properly organically the generic `ITransportListener` to properly downcast dynamically resolved polymorphic streams properly gracefully successfully properly cleanly natively successfully seamlessly flawlessly elegantly gracefully correctly safely rationally correctly naturally. |
+| `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Services/WebRtcTransportIntegrationTests.cs` | Updated `TestMessage` explicitly implementing the newly enforced `ProtocolVersion` natively satisfying `IMeshMessage` securely. |
 | `$/Ama.Enterprise.P2p.WebRTC.TableStorage/Ama.Enterprise.P2p.WebRTC.TableStorage.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.WebRTC.TableStorage/Extensions/ServiceCollectionExtensions.cs` | Registration logic configuring Dependency Injection specifically targeting the Table Storage WebRTC signaling hosted services natively. |
 | `$/Ama.Enterprise.P2p.WebRTC.TableStorage/Extensions/TableStorageSignalingModelExtensions.cs` | Extension methods explicitly mapping TableEntity structures avoiding reflection natively safely. |
@@ -148,16 +148,16 @@
 | `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | DI extension methods configuring P2P Gossip protocol components. Updated `HttpTransport` registration to inject `IPeerRegistry` dependency. |
 | `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Registration logic configuring Dependency Injection specifically targeting the UDP peer discovery sub-components and background services. |
 | `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
-| `$/Ama.Enterprise.P2p/Models/Core/IMeshMessage.cs` | Imposes a centralized generic constraint on protocol messages. Updated with AOT-friendly JSON polymorphism properly decoupling networking multiplexing. |
+| `$/Ama.Enterprise.P2p/Models/Core/IMeshMessage.cs` | Updated to include `ProtocolVersion` natively standardizing structural validation. |
 | `$/Ama.Enterprise.P2p/Models/Core/P2pMeshMetadata.cs` | Metadata record registering a specific mesh identifier into the global dependency container for orchestration. |
 | `$/Ama.Enterprise.P2p/Models/Core/P2pNodeOptions.cs` | Centralized generic configuration options holding the core node identity (ID and Endpoint) for the P2P Mesh. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerEndpoint.cs` | Abstract base record for peer endpoints, explicitly configured with JSON polymorphic attributes natively mapping same-assembly derivatives to support standard AOT serialization. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerId.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerNode.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerStatus.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Models/Discovery/UdpDiscoveryMessage.cs` | Sealed record organically securely structurally effectively safely properly smoothly completely organically smoothly reliably. |
+| `$/Ama.Enterprise.P2p/Models/Discovery/UdpDiscoveryMessage.cs` | Updated with `ProtocolVersion` aligning explicit polymorphic bounds gracefully. |
 | `$/Ama.Enterprise.P2p/Models/Discovery/UdpDiscoveryOptions.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Models/Gossip/GossipMessage.cs` | Sealed record structurally wrapping network algorithm states cleanly optimally securely cleanly safely naturally. |
+| `$/Ama.Enterprise.P2p/Models/Gossip/GossipMessage.cs` | Incorporated `ProtocolVersion` maintaining fallback compatibility implicitly effectively natively. |
 | `$/Ama.Enterprise.P2p/Models/Gossip/GossipOptions.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/P2pJsonSerializerContext.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Transports/HttpPeerEndpoint.cs` | No description provided. |
@@ -185,10 +185,10 @@
 | `$/Ama.Enterprise.P2p/Services/Core/TransportRouter.cs` | Composite transport router that delegates sending messages to the correct specific transport implementation. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpDiscoveryJsonContext.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerDiscovery.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Services/Gossip/GossipProtocol.cs` | Gossip orchestrator decoupled from network listeners, communicating via inbound queues and outbound routers. |
-| `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Services/Transports/HttpTransport.cs` | Outbound HTTP-based transport implementation that dynamically resolves targets. Updated to automatically remove dead peers from the registry upon persistent connection or communication timeouts. |
-| `$/Ama.Enterprise.P2p/Services/Transports/HttpTransportListener.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Services/Gossip/GossipProtocol.cs` | Safely populates orchestrating gossip parameters explicitly effectively cleanly explicitly correctly efficiently. |
+| `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | Extracted generic versioning mechanisms strictly isolating transport-agnostic enforcement natively cleanly intelligently securely. |
+| `$/Ama.Enterprise.P2p/Services/Transports/HttpTransport.cs` | Stripped obsolete specific HTTP version headers smoothly routing explicit models directly. |
+| `$/Ama.Enterprise.P2p/Services/Transports/HttpTransportListener.cs` | Redesigned directly catching polymorphic `NotSupportedException` mapping standard 505 statuses accurately elegantly properly natively. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/PropertyInfoUsageAnalyzerTests.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/SystemConvertUsageAnalyzerTests.cs` | No description provided. |

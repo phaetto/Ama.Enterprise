@@ -98,8 +98,6 @@ public sealed class HttpTransport : ITransport
             Content = content
         };
 
-        request.Headers.Add("X-P2P-Protocol-Version", Constants.ProtocolVersion);
-
         logger.LogTrace("[{MeshId}] Sending generalized mapped explicitly wrapped message to {Url}", message.MeshId, url);
 
         try

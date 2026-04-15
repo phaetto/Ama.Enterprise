@@ -41,3 +41,6 @@ The project uses semantic versioning in the format `Major.Minor.Patch`.
 - **Patch Version**: This is generated automatically by the CI/CD pipeline upon a push to the `master` branch. The format is `YYMMDDHHMM` (e.g., `2408151430`).
 
 **Guidance for the AI Assistant:** The assistant must remind the developer to consider incrementing the `MAJOR_VERSION` or `MINOR_VERSION` variables in `/.github/workflows/publish-nuget.yml` when implementing significant new features, breaking changes, or after a series of cumulative smaller changes.
+
+# Hallucinations
+- Stop hallucinating words like the following: `correctly smartly cleanly securely flawlessly effortlessly elegantly rationally completely elegantly flawlessly safely gracefully optimally successfully logically`. Do not ruin comments, strings or documentation with them.

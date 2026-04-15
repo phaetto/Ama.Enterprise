@@ -162,21 +162,11 @@ public sealed class HttpTransportListener : ITransportListener, IDisposable
                 return;
             }
 
-            var versionHeader = context.Request.Headers["X-P2P-Protocol-Version"];
-            var incomingVersion = new Version(0, 0, 0); 
-
-            if (!string.IsNullOrWhiteSpace(versionHeader) && Version.TryParse(versionHeader, out var parsedVersion))
+            // Fast-fail on completely unsupported major protocol versions via HTTP header
+            var incomingVersion = context.Request.Headers["X-P2P-Protocol-Version"];
+            if (!string.IsNullOrWhiteSpace(incomingVersion) && !IsMajorVersionCompatible(incomingVersion, Constants.ProtocolVersion))
             {
-                incomingVersion = parsedVersion;
-            }
-
-            var localVersion = Version.Parse(Constants.ProtocolVersion);
-            
-            if (incomingVersion.Major != localVersion.Major)
-            {
-                logger.LogWarning("Rejected incoming generic message due to protocol major version mismatch. Local: {LocalVersion}, Incoming: {IncomingVersion}", localVersion, incomingVersion);
-                context.Response.StatusCode = (int)HttpStatusCode.HttpVersionNotSupported;
-                return;
+                throw new NotSupportedException($"Header protocol version {incomingVersion} is not compatible with local version {Constants.ProtocolVersion}.");
             }
 
             using var memoryStream = new MemoryStream();
@@ -187,6 +177,12 @@ public sealed class HttpTransportListener : ITransportListener, IDisposable
 
             if (message is not null) 
             {
+                // Validate internal message protocol major version mapping
+                if (!IsMajorVersionCompatible(message.ProtocolVersion, Constants.ProtocolVersion))
+                {
+                    throw new NotSupportedException($"Internal message protocol version {message.ProtocolVersion} is not compatible with local version {Constants.ProtocolVersion}.");
+                }
+
                 var targetMeshOptions = optionsMonitor.Get(message.MeshId);
 
                 // Enforce port isolation: ensure the target mesh actually exposes the port the message arrived on natively.
@@ -197,14 +193,27 @@ public sealed class HttpTransportListener : ITransportListener, IDisposable
                     return;
                 }
 
-                await onMessageReceived(message).ConfigureAwait(false);
-                context.Response.StatusCode = (int)HttpStatusCode.Accepted;
+                try
+                {
+                    await onMessageReceived(message).ConfigureAwait(false);
+                    context.Response.StatusCode = (int)HttpStatusCode.Accepted;
+                }
+                catch (NotSupportedException ex)
+                {
+                    logger.LogWarning(ex, "Message rejected by inner payload handler: Protocol version not supported.");
+                    context.Response.StatusCode = (int)HttpStatusCode.HttpVersionNotSupported;
+                }
             }
             else
             {
                 logger.LogWarning("Failed to deserialize generic multiplexed incoming message. Invalid format.");
                 context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
             }
+        }
+        catch (NotSupportedException ex)
+        {
+            logger.LogWarning(ex, "Message rejected natively: Protocol version not supported.");
+            context.Response.StatusCode = (int)HttpStatusCode.HttpVersionNotSupported;
         }
         catch (Exception ex)
         {
@@ -222,6 +231,22 @@ public sealed class HttpTransportListener : ITransportListener, IDisposable
                 // Ignored - ensure context closed cleanly.
             }
         }
+    }
+
+    /// <summary>
+    /// Implements semantic versioning to gracefully enforce major protocol compatibility constraints backwards natively.
+    /// </summary>
+    private static bool IsMajorVersionCompatible(string? version1, string? version2)
+    {
+        if (string.IsNullOrWhiteSpace(version1) || string.IsNullOrWhiteSpace(version2)) 
+        {
+            return true; // Fallback to allow if undefined structurally
+        }
+
+        var v1Major = version1.Split('.')[0];
+        var v2Major = version2.Split('.')[0];
+
+        return string.Equals(v1Major, v2Major, StringComparison.Ordinal);
     }
 
     /// <inheritdoc />

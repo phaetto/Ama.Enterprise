@@ -48,11 +48,15 @@ public sealed class P2pVersioningIntegrationTests
         var incompatibleVersion = new Version(localVersion.Major + 1, 0, 0);
 
         var clientFactory = node.Provider.GetRequiredService<IHttpClientFactory>();
+        var serializer = node.Provider.GetRequiredService<ICrdtSerializer>();
         using var client = clientFactory.CreateClient();
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "http://localhost:8210/p2p/gossip/");
-        request.Headers.Add("X-P2P-Protocol-Version", incompatibleVersion.ToString());
-        request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+        
+        var dummyMessage = new GossipMessage(TestMeshId, incompatibleVersion.ToString(), Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, ReadOnlyMemory<byte>.Empty);
+        var payloadBytes = serializer.SerializeToBytes<IMeshMessage>(dummyMessage);
+        
+        request.Content = new ByteArrayContent(payloadBytes);
 
         using var response = await client.SendAsync(request, cts.Token);
 
@@ -76,10 +80,9 @@ public sealed class P2pVersioningIntegrationTests
         using var client = clientFactory.CreateClient();
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "http://localhost:8211/p2p/gossip/");
-        request.Headers.Add("X-P2P-Protocol-Version", compatibleVersion.ToString());
         
         // We submit a valid serialized model payload targeting the specific mesh to bypass HTTP listener isolation verification checks gracefully
-        var dummyMessage = new GossipMessage(TestMeshId, Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, ReadOnlyMemory<byte>.Empty);
+        var dummyMessage = new GossipMessage(TestMeshId, compatibleVersion.ToString(), Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, ReadOnlyMemory<byte>.Empty);
         
         // Use STJ polymorphism mapping explicitly identifying the generic interface container
         var payloadBytes = serializer.SerializeToBytes<IMeshMessage>(dummyMessage);
@@ -109,9 +112,8 @@ public sealed class P2pVersioningIntegrationTests
         using var client = clientFactory.CreateClient();
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "http://localhost:8212/p2p/gossip/");
-        request.Headers.Add("X-P2P-Protocol-Version", deployedVersion.ToString());
         
-        var dummyMessage = new GossipMessage(TestMeshId, Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, ReadOnlyMemory<byte>.Empty);
+        var dummyMessage = new GossipMessage(TestMeshId, deployedVersion.ToString(), Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, ReadOnlyMemory<byte>.Empty);
         var payloadBytes = serializer.SerializeToBytes<IMeshMessage>(dummyMessage);
         
         request.Content = new ByteArrayContent(payloadBytes);

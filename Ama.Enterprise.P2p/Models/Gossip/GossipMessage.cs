@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.Models.Gossip;
 
 using System;
+using System.Text.Json.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
@@ -11,6 +12,9 @@ public sealed record GossipMessage : IMeshMessage, IEquatable<GossipMessage>
 {
     /// <inheritdoc />
     public string MeshId { get; init; }
+
+    /// <inheritdoc />
+    public string ProtocolVersion { get; init; }
 
     /// <summary>
     /// Gets the unique identifier of the message for propagation tracking.
@@ -33,7 +37,7 @@ public sealed record GossipMessage : IMeshMessage, IEquatable<GossipMessage>
     public ReadOnlyMemory<byte> Payload { get; init; }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="GossipMessage"/> class.
+    /// Initializes a new instance of the <see cref="GossipMessage"/> class, automatically assigning the current protocol version.
     /// </summary>
     /// <param name="meshId">The mesh context identifier.</param>
     /// <param name="messageId">The message identifier.</param>
@@ -41,8 +45,24 @@ public sealed record GossipMessage : IMeshMessage, IEquatable<GossipMessage>
     /// <param name="timeToLive">The TTL counter.</param>
     /// <param name="payload">The message payload.</param>
     public GossipMessage(string meshId, Guid messageId, PeerId senderId, int timeToLive, ReadOnlyMemory<byte> payload)
+        : this(meshId, Constants.ProtocolVersion, messageId, senderId, timeToLive, payload)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="GossipMessage"/> class.
+    /// </summary>
+    /// <param name="meshId">The mesh context identifier.</param>
+    /// <param name="protocolVersion">The explicitly tracked protocol version.</param>
+    /// <param name="messageId">The message identifier.</param>
+    /// <param name="senderId">The sender identifier.</param>
+    /// <param name="timeToLive">The TTL counter.</param>
+    /// <param name="payload">The message payload.</param>
+    [JsonConstructor]
+    public GossipMessage(string meshId, string protocolVersion, Guid messageId, PeerId senderId, int timeToLive, ReadOnlyMemory<byte> payload)
     {
         MeshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
+        ProtocolVersion = protocolVersion ?? throw new ArgumentNullException(nameof(protocolVersion));
         MessageId = messageId;
         SenderId = senderId;
         TimeToLive = timeToLive;
@@ -55,6 +75,7 @@ public sealed record GossipMessage : IMeshMessage, IEquatable<GossipMessage>
         if (other is null) return false;
         
         return string.Equals(MeshId, other.MeshId, StringComparison.Ordinal) &&
+               string.Equals(ProtocolVersion, other.ProtocolVersion, StringComparison.Ordinal) &&
                MessageId.Equals(other.MessageId) &&
                SenderId.Equals(other.SenderId) &&
                TimeToLive == other.TimeToLive &&
@@ -66,6 +87,7 @@ public sealed record GossipMessage : IMeshMessage, IEquatable<GossipMessage>
     {
         var hash = new HashCode();
         hash.Add(MeshId);
+        hash.Add(ProtocolVersion);
         hash.Add(MessageId);
         hash.Add(SenderId);
         hash.Add(TimeToLive);
