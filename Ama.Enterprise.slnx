@@ -5,6 +5,7 @@
     <Project Path="Ama.Enterprise.Project.Analyzers/Ama.Enterprise.Project.Analyzers.csproj" />
   </Folder>
   <Folder Name="/Apps/">
+    <File Path="apps-todo.txt" />
     <Project Path="Ama.Enterprise.CRDT.BlazorApp/Ama.Enterprise.CRDT.BlazorApp.csproj" Id="8fb88a8e-60af-420c-8cc2-1cdd1d967720" />
   </Folder>
   <Folder Name="/EndProducts/">

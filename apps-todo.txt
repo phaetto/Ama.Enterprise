@@ -1,0 +1,11 @@
+- Composable UI
+- UI would connect to 'ama-enterprise-admin' mesh (default)
+- UI gets data from all the end products we own
+- UI shows the areas that are only been loaded from the node
+	- Could only have feature flags, or feature flags and metrics, etc
+- UI Panels (maybe this can go to UI assembly)
+	- Feature Flags
+	- Metrics
+	- Peer graph and connections
+	- CRDT history (Semantic snapshot/compression (squash))
+	- CRDT Journal, Snapshot (viewable JSON)

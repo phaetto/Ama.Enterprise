@@ -67,7 +67,7 @@ public static class ServiceCollectionExtensions
         services.AddDistributedCrdtP2p(FeatureFlagsMeshId);
 
         // Wire up the abstracted P2P network layer specifically for Feature Flags completely encapsulating internals seamlessly
-        services.AddP2pMesh(FeatureFlagsMeshId)
+        services.AddP2pMesh(FeatureFlagsMeshId) // TODO: allow the user to select mesh ID always
                 .AddGossipNetwork(options =>
                 {
                     options.GossipInterval = ffOpts.Gossip.GossipInterval;
@@ -92,6 +92,8 @@ public static class ServiceCollectionExtensions
                     options.IceServers = ffOpts.WebRtc.IceServers;
                     options.IceGatheringTimeout = ffOpts.WebRtc.IceGatheringTimeout;
                 });
+
+        // TODO: ama-enterprise-admin : The mesh that sends data to the admin panel, usually using WebRTC
 
         return services;
     }

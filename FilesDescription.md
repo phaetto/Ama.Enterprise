@@ -88,9 +88,11 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/StorageJournalForwarder.cs` | Injects localized implementations mapping directly back into underlying internal storage architectures acting strictly as the interface wrapper over globally active pipelines. |
 | `$/Ama.Enterprise.CRDT.MessagePack/Ama.Enterprise.CRDT.MessagePack.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.OpenTelemetry/Ama.Enterprise.CRDT.OpenTelemetry.csproj` | No description provided. |
+| `$/Ama.Enterprise.CRDT.OpenTelemetry/todo.txt` | No description provided. |
 | `$/Ama.Enterprise.CRDT.TableStorage/Ama.Enterprise.CRDT.TableStorage.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.TableStorage/todo.txt` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Testing/Ama.Enterprise.CRDT.Testing.csproj` | No description provided. |
+| `$/Ama.Enterprise.CRDT.Testing/todo.txt` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Ama.Enterprise.FeatureFlags.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj` | Showcase console application project displaying P2P feature flags integration, AOT readiness, and UDP cluster discovery. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Updated showcase application reflecting the refactored categorical options assignments. |
@@ -206,4 +208,5 @@
 | `$/CodingStandards.md` | No description provided. |
 | `$/FilesDescription.md` | No description provided. |
 | `$/LICENCE` | No description provided. |
+| `$/apps-todo.txt` | No description provided. |
 | `$/solution.settings.json` | No description provided. |

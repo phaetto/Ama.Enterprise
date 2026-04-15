@@ -1,0 +1,2 @@
+- Add testing with reflection got get all models and make sure they are serializable
+- Add testing for AOT & and AOT serializable (I am not sure if we need different for AOT)
