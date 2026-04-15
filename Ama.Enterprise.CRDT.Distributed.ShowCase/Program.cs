@@ -12,7 +12,6 @@ using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 using Ama.Enterprise.CRDT.Distributed.ShowCase.Services;
 using Ama.Enterprise.P2p.Extensions;
-using Ama.Enterprise.P2p.Models.Gossip;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;

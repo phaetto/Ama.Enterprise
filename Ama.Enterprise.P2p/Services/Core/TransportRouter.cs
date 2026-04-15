@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
-/// Composite transport router delegating efficiently appropriately cleanly securely properly completely smoothly gracefully gracefully properly effectively successfully effectively appropriately effortlessly securely flawlessly effectively successfully successfully correctly naturally accurately explicitly successfully naturally.
+/// Composite transport router.
 /// </summary>
 public sealed class TransportRouter : ITransportRouter
 {
@@ -17,7 +17,7 @@ public sealed class TransportRouter : ITransportRouter
     /// <summary>
     /// Initializes a new instance of the <see cref="TransportRouter"/> class.
     /// </summary>
-    /// <param name="transports">The collection of available specialized explicitly mapped transports inherently.</param>
+    /// <param name="transports">The collection of available transports.</param>
     public TransportRouter(IEnumerable<ITransport> transports)
     {
         this.transports = transports ?? throw new ArgumentNullException(nameof(transports));
@@ -32,7 +32,7 @@ public sealed class TransportRouter : ITransportRouter
         var transport = transports.FirstOrDefault(t => t.CanHandle(endpoint));
         if (transport is null)
         {
-            throw new NotSupportedException($"No outbound explicitly effectively mapped seamlessly transport found perfectly flawlessly handling endpoint properly successfully type securely rationally efficiently appropriately correctly cleanly intelligently smoothly intelligently rationally {endpoint.GetType().Name}.");
+            throw new NotSupportedException($"No outbound transport found for endpoint type {endpoint.GetType().Name}.");
         }
 
         return transport.SendAsync(endpoint, message, cancellationToken);

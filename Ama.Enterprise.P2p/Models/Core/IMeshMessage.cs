@@ -5,8 +5,8 @@ using Ama.Enterprise.P2p.Models.Discovery;
 using Ama.Enterprise.P2p.Models.Gossip;
 
 /// <summary>
-/// Imposes a centralized generic constraint on protocol messages to inherently map their own synchronization mesh identifiers natively.
-/// Configured with AOT-friendly JSON polymorphism to dynamically resolve specific network envelopes at the transport layer cleanly.
+/// Imposes a centralized generic constraint on protocol messages to map their own synchronization mesh identifiers.
+/// Configured with AOT-friendly JSON polymorphism to dynamically resolve specific network envelopes at the transport layer.
 /// </summary>
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type", IgnoreUnrecognizedTypeDiscriminators = true, UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
 [JsonDerivedType(typeof(GossipMessage), "gossip")]
@@ -19,7 +19,7 @@ public interface IMeshMessage
     string MeshId { get; }
 
     /// <summary>
-    /// Gets the protocol version of the message ensuring cross-version compatibility natively across all transports.
+    /// Gets the protocol version of the message ensuring cross-version compatibility across all transports.
     /// </summary>
     string ProtocolVersion { get; }
 }

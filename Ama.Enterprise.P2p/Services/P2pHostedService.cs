@@ -39,7 +39,7 @@ public sealed class P2pHostedService : IHostedService
     /// <inheritdoc />
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        // Start Global Transport Listeners mapping across multiplexed polymorphic messages cleanly natively
+        // Start Global Transport Listeners
         var listeners = serviceProvider.GetServices<ITransportListener>();
         foreach (var listener in listeners)
         {
@@ -72,7 +72,7 @@ public sealed class P2pHostedService : IHostedService
                 }
                 else
                 {
-                    // Designed for future generic expansion (e.g., PushPullMessage) decoupled appropriately natively
+                    // Designed for future generic expansion (e.g., PushPullMessage)
                     logger.LogDebug("Received unhandled multiplexed protocol message type {MessageType} for mesh {MeshId}.", msg.GetType().Name, msg.MeshId);
                 }
             }, cancellationToken).ConfigureAwait(false);

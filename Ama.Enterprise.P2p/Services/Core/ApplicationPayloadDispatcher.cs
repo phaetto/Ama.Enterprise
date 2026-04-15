@@ -8,7 +8,7 @@ using Ama.Enterprise.P2p.Models.Core;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Implements the generic application payload dispatcher, routing raw unwrapped payloads to all registered domain handlers inherently bridging cleanly gracefully smoothly flawlessly effectively correctly cleanly elegantly seamlessly properly appropriately effectively accurately.
+/// Implements the generic application payload dispatcher, routing raw unwrapped payloads to all registered domain handlers.
 /// </summary>
 /// <remarks>
 /// Initializes a new instance of the <see cref="ApplicationPayloadDispatcher"/> class.

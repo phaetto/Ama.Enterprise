@@ -5,8 +5,8 @@ using System.Text.Json.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
-/// Represents the fundamental unit of communication in the gossip network algorithm natively.
-/// Wraps the generic application payloads securely for distribution.
+/// Represents the fundamental unit of communication in the gossip network algorithm.
+/// Wraps the generic application payloads for distribution.
 /// </summary>
 public sealed record GossipMessage : IMeshMessage, IEquatable<GossipMessage>
 {

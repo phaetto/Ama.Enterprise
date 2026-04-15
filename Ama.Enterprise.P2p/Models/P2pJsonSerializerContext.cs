@@ -6,7 +6,7 @@ using Ama.Enterprise.P2p.Models.Discovery;
 using Ama.Enterprise.P2p.Models.Transports;
 
 /// <summary>
-/// AOT-friendly JSON context for P2P models natively bridging polymorphic network envelopes securely.
+/// AOT-friendly JSON context for P2P models.
 /// </summary>
 [JsonSerializable(typeof(IMeshMessage))]
 [JsonSerializable(typeof(GossipMessage))]

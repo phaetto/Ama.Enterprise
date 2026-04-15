@@ -15,7 +15,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Implements globally shared inbound multiplexing listeners explicitly wrapping HTTP natively capturing multi-tenant meshes accurately.
+/// Implements globally shared inbound multiplexing listeners.
 /// </summary>
 public sealed class HttpTransportListener : ITransportListener, IDisposable
 {
@@ -212,7 +212,7 @@ public sealed class HttpTransportListener : ITransportListener, IDisposable
         }
         catch (NotSupportedException ex)
         {
-            logger.LogWarning(ex, "Message rejected natively: Protocol version not supported.");
+            logger.LogWarning(ex, "Message rejected: Protocol version not supported.");
             context.Response.StatusCode = (int)HttpStatusCode.HttpVersionNotSupported;
         }
         catch (Exception ex)
@@ -234,7 +234,7 @@ public sealed class HttpTransportListener : ITransportListener, IDisposable
     }
 
     /// <summary>
-    /// Implements semantic versioning to gracefully enforce major protocol compatibility constraints backwards natively.
+    /// Implements semantic versioning to enforce major protocol compatibility constraints.
     /// </summary>
     private static bool IsMajorVersionCompatible(string? version1, string? version2)
     {

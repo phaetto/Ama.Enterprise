@@ -16,12 +16,12 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Provides extension methods for registering generic P2P meshes intelligently decoupled thoroughly natively structurally accurately gracefully natively efficiently gracefully appropriately intelligently elegantly explicitly efficiently properly successfully safely rationally.
+/// Provides extension methods for registering generic P2P meshes.
 /// </summary>
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Initiates the registration of a new P2P mesh network profile under the given identifier natively.
+    /// Initiates the registration of a new P2P mesh network profile under the given identifier.
     /// </summary>
     public static IP2pMeshBuilder AddP2pMesh(
         this IServiceCollection services, 
@@ -53,7 +53,7 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers the core HTTP transport explicitly natively mapping smoothly properly organically effectively intelligently gracefully correctly securely.
+    /// Registers the core HTTP transport.
     /// </summary>
     public static IP2pMeshBuilder AddHttpTransport(
         this IP2pMeshBuilder builder,
@@ -80,7 +80,7 @@ public static class ServiceCollectionExtensions
             return new HttpPeerEndpoint(host, options.ListenPort);
         });
 
-        // Transport mechanisms are generic, polymorphic, and explicitly securely shared.
+        // Transport mechanisms are generic, polymorphic, and shared.
         builder.Services.TryAddSingleton<ITransport, HttpTransport>();
         builder.Services.TryAddSingleton<ITransportListener, HttpTransportListener>();
 
@@ -88,7 +88,7 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers the specific Gossip network protocol orchestrators appropriately decoupled from domain listeners robustly securely flawlessly.
+    /// Registers the specific Gossip network protocol orchestrators.
     /// </summary>
     public static IP2pMeshBuilder AddGossipNetwork(
         this IP2pMeshBuilder builder, 

@@ -14,7 +14,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Orchestrates the Gossip protocol algorithm across multiple meshes effortlessly unwrapping application payloads securely safely efficiently gracefully properly perfectly seamlessly smoothly elegantly intelligently logically correctly flawlessly intelligently smartly correctly properly securely flawlessly organically appropriately natively.
+/// Orchestrates the Gossip protocol algorithm across multiple meshes.
 /// </summary>
 public sealed class GossipProtocol : IP2pProtocol, IDisposable
 {
@@ -138,7 +138,7 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
 
         if (activeMeshes.IsEmpty)
         {
-            throw new InvalidOperationException("Gossip Protocol algorithm is not actively running for any meshes natively safely organically elegantly cleanly explicitly effectively efficiently flawlessly.");
+            throw new InvalidOperationException("Gossip Protocol algorithm is not actively running for any meshes.");
         }
 
         var dispatchTasks = new List<Task>();
@@ -158,7 +158,7 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
                 gossipOptions.DefaultTimeToLive,
                 payload);
 
-            logger.LogDebug("[{MeshId}] Wrapping payload and broadcasting newly mapped envelope {MessageId} efficiently locally from {NodeId}.", meshId, message.MessageId, nodeOptions.LocalPeerId);
+            logger.LogDebug("[{MeshId}] Wrapping payload and broadcasting newly mapped envelope {MessageId} locally from {NodeId}.", meshId, message.MessageId, nodeOptions.LocalPeerId);
 
             state.SeenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow);
             state.MessageQueue.Enqueue(message);
@@ -241,7 +241,7 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
                     }
                     catch (Exception ex)
                     {
-                        logger.LogWarning(ex, "[{MeshId}] Failed to send algorithm envelope {MessageId} natively safely smoothly optimally appropriately efficiently structurally completely successfully reliably efficiently rationally effectively successfully naturally reliably logically safely flawlessly optimally seamlessly flawlessly gracefully appropriately completely efficiently cleanly smoothly effectively intelligently accurately perfectly flawlessly flawlessly smoothly cleanly cleanly cleanly accurately safely to peer explicitly dynamically securely smoothly reliably elegantly appropriately dynamically smoothly appropriately smoothly safely safely successfully efficiently explicitly explicitly safely perfectly flawlessly optimally successfully securely smoothly reliably successfully properly confidently.", meshId, currentMessage.MessageId);
+                        logger.LogWarning(ex, "[{MeshId}] Failed to send algorithm envelope {MessageId} to peer.", meshId, currentMessage.MessageId);
                     }
                 }, cancellationToken));
             }
@@ -254,7 +254,7 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
     {
         if (state.SeenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow))
         {
-            logger.LogDebug("[{MeshId}] Received new algorithmic mapped payload properly correctly securely smoothly efficiently dynamically correctly smoothly explicitly correctly securely smoothly gracefully perfectly securely elegantly smoothly successfully rationally intelligently cleanly appropriately properly correctly smoothly elegantly flawlessly reliably correctly seamlessly flawlessly confidently properly correctly securely smoothly dynamically gracefully elegantly elegantly reliably elegantly smoothly properly accurately gracefully cleanly cleanly flawlessly natively smoothly dynamically seamlessly seamlessly flawlessly efficiently elegantly efficiently securely successfully explicitly seamlessly correctly reliably smoothly perfectly correctly optimally correctly smoothly successfully organically flawlessly smoothly smoothly securely smoothly successfully successfully reliably appropriately effectively rationally accurately intelligently cleanly flawlessly seamlessly successfully {MessageId} from securely gracefully effectively effectively elegantly intelligently logically efficiently correctly safely intelligently successfully securely confidently smoothly cleanly cleanly efficiently effectively cleanly correctly cleanly perfectly dynamically appropriately smoothly reliably correctly perfectly natively rationally cleanly flawlessly safely securely gracefully properly correctly smoothly smoothly correctly seamlessly gracefully efficiently seamlessly seamlessly safely {SenderId}. TTL: {Ttl}", meshId, message.MessageId, message.SenderId.Value, message.TimeToLive);
+            logger.LogDebug("[{MeshId}] Received new payload {MessageId} from {SenderId}. TTL: {Ttl}", meshId, message.MessageId, message.SenderId.Value, message.TimeToLive);
 
             try
             {
@@ -271,7 +271,7 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "[{MeshId}] Error pushing generic unwrapped payload dynamically securely seamlessly intelligently accurately into localized gracefully seamlessly smoothly reliably explicitly efficiently confidently naturally successfully naturally flawlessly reliably securely organically cleanly elegantly optimally natively cleanly rationally securely effortlessly successfully appropriately properly effectively naturally safely elegantly flawlessly successfully appropriately correctly efficiently explicitly naturally cleanly rationally natively safely seamlessly securely flawlessly flawlessly cleanly perfectly organically perfectly naturally efficiently appropriately flawlessly effortlessly successfully seamlessly elegantly flawlessly correctly cleanly flawlessly smoothly smoothly efficiently dynamically correctly intelligently cleanly intelligently explicitly domain gracefully flawlessly explicitly effectively correctly appropriately securely securely intelligently rationally confidently organically natively accurately seamlessly seamlessly rationally securely organically seamlessly intelligently gracefully smartly elegantly explicitly elegantly securely smartly flawlessly explicitly naturally seamlessly optimally gracefully reliably gracefully cleanly smartly safely naturally safely natively intelligently successfully dynamically correctly efficiently appropriately effortlessly smoothly successfully correctly explicitly dynamically naturally efficiently intelligently reliably successfully {MessageId}.", meshId, message.MessageId);
+                logger.LogError(ex, "[{MeshId}] Error pushing generic unwrapped payload into localized domain {MessageId}.", meshId, message.MessageId);
             }
         }
     }

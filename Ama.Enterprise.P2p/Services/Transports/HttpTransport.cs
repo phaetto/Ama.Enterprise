@@ -7,7 +7,6 @@ using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
-using Ama.Enterprise.P2p;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.Services.Core;
@@ -15,7 +14,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Implements generalized outbound transport using HTTP POST requests correctly decoupling explicitly securely.
+/// Implements generalized outbound transport using HTTP POST requests.
 /// </summary>
 public sealed class HttpTransport : ITransport
 {
@@ -98,7 +97,7 @@ public sealed class HttpTransport : ITransport
             Content = content
         };
 
-        logger.LogTrace("[{MeshId}] Sending generalized mapped explicitly wrapped message to {Url}", message.MeshId, url);
+        logger.LogTrace("[{MeshId}] Sending message to {Url}", message.MeshId, url);
 
         try
         {
@@ -107,14 +106,14 @@ public sealed class HttpTransport : ITransport
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TimeoutException)
         {
-            logger.LogWarning(ex, "[{MeshId}] Transport failure when communicating with {Url}. Removing peer from registry organically.", message.MeshId, url);
+            logger.LogWarning(ex, "[{MeshId}] Transport failure when communicating with {Url}. Removing peer from registry.", message.MeshId, url);
             
             var allPeers = await peerRegistry.GetAllPeersAsync(cancellationToken).ConfigureAwait(false);
             var deadPeer = allPeers.FirstOrDefault(p => p.Endpoint.Equals(endpoint));
 
             if (deadPeer.Id.Value != Guid.Empty)
             {
-                logger.LogInformation("[{MeshId}] Automatically removing unreachable explicitly targeted peer {PeerId}.", message.MeshId, deadPeer.Id);
+                logger.LogInformation("[{MeshId}] Automatically removing unreachable peer {PeerId}.", message.MeshId, deadPeer.Id);
                 await peerRegistry.RemovePeerAsync(deadPeer.Id, cancellationToken).ConfigureAwait(false);
             }
 
