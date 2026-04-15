@@ -42,11 +42,6 @@ public interface IDistributedCrdtDocument
     Task ApplyOperationsAsync(IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Manually broadcasts the entire local synchronization state vector (DVV) to the cluster.
-    /// </summary>
-    Task BroadcastStateAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// Serializes the current local state and broadcasts it as a snapshot to the network after detecting an unrecoverable journal truncation gap.
     /// </summary>
     Task ProvideSnapshotAsync(string targetReplicaId, CancellationToken cancellationToken = default);

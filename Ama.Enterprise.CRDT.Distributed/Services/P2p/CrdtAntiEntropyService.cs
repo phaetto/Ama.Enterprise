@@ -45,22 +45,7 @@ public sealed class CrdtAntiEntropyService : BackgroundService
             try
             {
                 var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-                var documents = orchestrator.GetActiveDocuments();
-
-                foreach (var document in documents)
-                {
-                    await document.BroadcastStateAsync(stoppingToken).ConfigureAwait(false);
-
-                    try
-                    {
-                        // Network smoothing logic: Introduces a 50ms structural jitter preventing catastrophic "Thundering Herd" packet overflow storms smoothly naturally across dense document collections.
-                        await Task.Delay(50, stoppingToken).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        break;
-                    }
-                }
+                await orchestrator.BroadcastGlobalStateAsync(stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -68,7 +53,7 @@ public sealed class CrdtAntiEntropyService : BackgroundService
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "An error occurred during CRDT distributed anti-entropy structural broadcast.");
+                logger.LogError(ex, "An error occurred during CRDT distributed anti-entropy global state broadcast.");
             }
 
             try

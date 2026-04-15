@@ -241,29 +241,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     }
 
     /// <inheritdoc />
-    public async Task BroadcastStateAsync(CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var p2pProtocol = serviceProvider.GetRequiredService<IP2pProtocol>();
-            var state = GetLocalState();
-            var syncMsg = new CrdtStateSyncMessage(replicaContext.ReplicaId, state);
-            
-            var payload = serializer.SerializeToBytes(syncMsg);
-            var wrapper = new CrdtMessageWrapper(DocumentId, "CrdtSync", payload);
-            var finalBytes = serializer.SerializeToBytes(wrapper);
-
-            await p2pProtocol.BroadcastAsync(finalBytes, cancellationToken).ConfigureAwait(false);
-            
-            logger.LogTrace("Broadcasted DVV state sync for document {DocumentId}.", DocumentId);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Failed to broadcast state for document {DocumentId}.", DocumentId);
-        }
-    }
-
-    /// <inheritdoc />
     public async Task ProvideSnapshotAsync(string targetReplicaId, CancellationToken cancellationToken = default)
     {
         try

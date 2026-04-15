@@ -107,8 +107,9 @@ public sealed class CrdtEvictionService : ICrdtEvictionService
         foreach (var doc in documents)
         {
             await doc.ResetLocalStateAsync(currentId, cancellationToken).ConfigureAwait(false);
-            await doc.BroadcastStateAsync(cancellationToken).ConfigureAwait(false);
         }
+        
+        await orchestrator.BroadcastGlobalStateAsync(cancellationToken).ConfigureAwait(false);
         
         logger.LogInformation("Successfully completed re-bootstrap identity mechanisms.");
     }

@@ -50,4 +50,9 @@ public interface ICrdtDocumentOrchestrator
     /// Processes localized matrix modifications.
     /// </summary>
     Task SyncDocumentsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Manually broadcasts the entire global synchronization state vector (DVV) to the cluster natively.
+    /// </summary>
+    Task BroadcastGlobalStateAsync(CancellationToken cancellationToken = default);
 }

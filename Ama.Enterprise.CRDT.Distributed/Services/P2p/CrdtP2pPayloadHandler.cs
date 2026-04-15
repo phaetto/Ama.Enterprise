@@ -57,7 +57,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler
             return;
         }
 
-        if (string.IsNullOrEmpty(wrapper.DocumentId) || string.IsNullOrEmpty(wrapper.MessageType) || wrapper.Payload == null)
+        if (string.IsNullOrEmpty(wrapper.MessageType) || wrapper.Payload == null)
         {
             return;
         }
@@ -65,6 +65,12 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler
         if (wrapper.MessageType == "CrdtEviction")
         {
             await ProcessEvictionRejectionAsync(wrapper, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (wrapper.MessageType == "CrdtSync")
+        {
+            await ProcessStateSyncAsync(wrapper, senderId, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -76,11 +82,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler
             return;
         }
 
-        if (wrapper.MessageType == "CrdtSync")
-        {
-            await ProcessStateSyncAsync(targetDoc, wrapper, senderId, cancellationToken).ConfigureAwait(false);
-        }
-        else if (wrapper.MessageType == "CrdtOps")
+        if (wrapper.MessageType == "CrdtOps")
         {
             await ProcessOperationsAsync(targetDoc, wrapper, cancellationToken).ConfigureAwait(false);
         }
@@ -90,15 +92,17 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler
         }
     }
 
-    private async Task ProcessStateSyncAsync(IDistributedCrdtDocument targetDoc, CrdtMessageWrapper wrapper, PeerId senderId, CancellationToken cancellationToken)
+    private async Task ProcessStateSyncAsync(CrdtMessageWrapper wrapper, PeerId senderId, CancellationToken cancellationToken)
     {
         try
         {
             var syncMsg = serializer.DeserializeFromBytes<CrdtStateSyncMessage>(wrapper.Payload!);
             
+            var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+
             if (syncMsg.ReplicaId != null && clusterTracker.IsReplicaTombstoned(syncMsg.ReplicaId))
             {
-                await RejectEvictedReplicaAsync(targetDoc, syncMsg.ReplicaId, cancellationToken).ConfigureAwait(false);
+                await RejectEvictedReplicaAsync(orchestrator.Registry, syncMsg.ReplicaId, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -112,29 +116,34 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler
 
             clusterTracker.UpdatePeerState(syncMsg.ReplicaId, senderId.Value.ToString(), syncMsg.State);
 
-            var missingOpsResult = await targetDoc.GetMissingOperationsAsync(syncMsg.ReplicaId, syncMsg.State, cancellationToken).ConfigureAwait(false);
-            
-            if (missingOpsResult.SnapshotRequired)
-            {
-                logger.LogWarning("Journal bounds trimmed. Cannot map operations for replica {ReplicaId} in document {DocumentId}. Triggering full snapshot.", syncMsg.ReplicaId, targetDoc.DocumentId);
-                await targetDoc.ProvideSnapshotAsync(syncMsg.ReplicaId, cancellationToken).ConfigureAwait(false);
-            }
-            else if (missingOpsResult.Operations.Count > 0)
-            {
-                logger.LogDebug("Sending {Count} missing operations for document {DocumentId} to replica {ReplicaId}", missingOpsResult.Operations.Count, targetDoc.DocumentId, syncMsg.ReplicaId);
-                
-                var opsMsg = new CrdtOperationsMessage(replicaContext.ReplicaId, missingOpsResult.Operations.ToArray());
-                var opsPayload = serializer.SerializeToBytes(opsMsg);
-                
-                var replyWrapper = new CrdtMessageWrapper(targetDoc.DocumentId, "CrdtOps", opsPayload);
-                var replyBytes = serializer.SerializeToBytes(replyWrapper);
+            var documents = orchestrator.GetActiveDocuments();
 
-                await p2pProtocol.BroadcastAsync(replyBytes, cancellationToken).ConfigureAwait(false);
+            foreach (var targetDoc in documents)
+            {
+                var missingOpsResult = await targetDoc.GetMissingOperationsAsync(syncMsg.ReplicaId, syncMsg.State, cancellationToken).ConfigureAwait(false);
+                
+                if (missingOpsResult.SnapshotRequired)
+                {
+                    logger.LogWarning("Journal bounds trimmed. Cannot map operations for replica {ReplicaId} in document {DocumentId}. Triggering full snapshot.", syncMsg.ReplicaId, targetDoc.DocumentId);
+                    await targetDoc.ProvideSnapshotAsync(syncMsg.ReplicaId, cancellationToken).ConfigureAwait(false);
+                }
+                else if (missingOpsResult.Operations.Count > 0)
+                {
+                    logger.LogDebug("Sending {Count} missing operations for document {DocumentId} to replica {ReplicaId}", missingOpsResult.Operations.Count, targetDoc.DocumentId, syncMsg.ReplicaId);
+                    
+                    var opsMsg = new CrdtOperationsMessage(replicaContext.ReplicaId, missingOpsResult.Operations.ToArray());
+                    var opsPayload = serializer.SerializeToBytes(opsMsg);
+                    
+                    var replyWrapper = new CrdtMessageWrapper(targetDoc.DocumentId, "CrdtOps", opsPayload);
+                    var replyBytes = serializer.SerializeToBytes(replyWrapper);
+
+                    await p2pProtocol.BroadcastAsync(replyBytes, cancellationToken).ConfigureAwait(false);
+                }
             }
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to process incoming CrdtSync message for document {DocumentId}.", targetDoc.DocumentId);
+            logger.LogError(ex, "Failed to process incoming CrdtSync message.");
         }
     }
 

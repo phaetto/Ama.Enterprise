@@ -8,7 +8,9 @@ using System.Threading.Tasks;
 using Ama.CRDT.Models;
 using Ama.CRDT.Models.Intents;
 using Ama.CRDT.Services;
+using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Models;
+using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -159,6 +161,36 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             var patch = new CrdtPatch(new[] { operation });
             
             await Registry.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    public async Task BroadcastGlobalStateAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
+            var p2pProtocol = serviceProvider.GetRequiredService<IP2pProtocol>();
+            var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
+
+            DottedVersionVector globalState;
+            lock (replicaContext.GlobalVersionVector)
+            {
+                globalState = replicaContext.GlobalVersionVector.DeepClone();
+            }
+
+            var syncMsg = new CrdtStateSyncMessage(replicaContext.ReplicaId, globalState);
+            var payload = serializer.SerializeToBytes(syncMsg);
+            
+            var wrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", payload);
+            var finalBytes = serializer.SerializeToBytes(wrapper);
+
+            await p2pProtocol.BroadcastAsync(finalBytes, cancellationToken).ConfigureAwait(false);
+            
+            logger.LogTrace("Broadcasted global DVV cluster state sync.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to broadcast global cluster state.");
         }
     }
 

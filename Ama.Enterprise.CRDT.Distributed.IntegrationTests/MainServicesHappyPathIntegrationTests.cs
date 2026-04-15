@@ -226,6 +226,6 @@ public sealed class MainServicesHappyPathIntegrationTests
         states[0].Versions["RemoteReplica2"].ShouldBe(15);
         
         // Since we didn't have operations locally mapped, it shouldn't have broadcasted any return operations
-        mockP2p.Verify(p => p.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never);
+        mockP2p.Verify(p => p.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
     }
 }

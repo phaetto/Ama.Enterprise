@@ -37,21 +37,16 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver
     {
         if (Interlocked.CompareExchange(ref hasConnected, 1, 0) == 0)
         {
-            logger.LogInformation("Connected to first peer {PeerId}. Triggering immediate DVV state sync for all active CRDTs.", node.Id);
+            logger.LogInformation("Connected to first peer {PeerId}. Triggering immediate global DVV state sync.", node.Id);
 
             try
             {
                 var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-                var documents = orchestrator.GetActiveDocuments();
-
-                foreach (var document in documents)
-                {
-                    await document.BroadcastStateAsync(cancellationToken).ConfigureAwait(false);
-                }
+                await orchestrator.BroadcastGlobalStateAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Failed to broadcast initial state sync upon connecting to first peer.");
+                logger.LogError(ex, "Failed to broadcast initial global state sync upon connecting to first peer.");
             }
         }
     }
