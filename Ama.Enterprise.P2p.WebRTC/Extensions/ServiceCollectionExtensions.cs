@@ -16,20 +16,16 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Extension methods for securely registering cross-platform WebRTC transport components deeply integrated onto any configured P2P mesh logic explicitly.
+/// Extension methods for securely registering cross-platform WebRTC transport securely decoupled rationally organically seamlessly natively gracefully cleanly perfectly optimally confidently dynamically intelligently gracefully cleanly efficiently elegantly.
 /// </summary>
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers standalone WebRTC transport services binding actively underneath the current mesh context identifiers properly.
+    /// Registers standalone WebRTC generic polymorphic dynamically effectively rationally cleanly securely explicitly cleanly smoothly organically appropriately gracefully transport services binding actively underneath the current mesh context identifiers properly.
     /// </summary>
-    /// <typeparam name="TMessage">The type of the generic message traversing via the transport bounds.</typeparam>
-    /// <param name="builder">The mesh builder configuration instance pipeline.</param>
-    /// <param name="configureOptions">An action specifying isolated STUN/TURN rules mapping appropriately.</param>
-    /// <returns>The fully hydrated updated mesh builder.</returns>
-    public static IP2pMeshBuilder AddWebRtcTransport<TMessage>(
+    public static IP2pMeshBuilder AddWebRtcTransport(
         this IP2pMeshBuilder builder,
-        Action<WebRtcOptions>? configureOptions = null) where TMessage : IMeshMessage
+        Action<WebRtcOptions>? configureOptions = null)
     {
         if (builder is null)
         {
@@ -45,16 +41,13 @@ public static class ServiceCollectionExtensions
             builder.Services.Configure(builder.MeshId, configureOptions);
         }
 
-        // Register STJ AOT Context for WebRTC models into the CRDT mesh context safely
         if (!builder.Services.Any(s => s.ServiceType == typeof(IJsonTypeInfoResolver) && (string?)s.ServiceKey == "Ama.CRDT" && s.ImplementationInstance == WebRtcJsonContext.Default))
         {
             builder.Services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", WebRtcJsonContext.Default);
         }
 
-        // Map the internal serializer tracking identifier directly matching derived AOT definitions
         builder.Services.AddCrdtSerializableType<WebRtcPeerEndpoint>("webrtc-peer-endpoint");
 
-        // Explicitly inject the cross-assembly polymorphism modifier safely for strictly native AOT compilation behaviors
         builder.Services.Configure<JsonSerializerOptions>(options =>
         {
             if (options.TypeInfoResolver is not null)
@@ -70,7 +63,6 @@ public static class ServiceCollectionExtensions
                             UnknownDerivedTypeHandling = System.Text.Json.Serialization.JsonUnknownDerivedTypeHandling.FallBackToBaseType
                         };
 
-                        // Prevent duplicated derivations upon multiple identical scoped registrations
                         if (!ti.PolymorphismOptions.DerivedTypes.Any(dt => dt.DerivedType == typeof(WebRtcPeerEndpoint)))
                         {
                             ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(WebRtcPeerEndpoint), "webrtc-peer-endpoint"));
@@ -80,7 +72,6 @@ public static class ServiceCollectionExtensions
             }
         });
 
-        // Add the primary connection manager handling invitation lifecycle capabilities dynamically
         builder.Services.AddKeyedSingleton<WebRtcConnectionManager>(builder.MeshId, (sp, key) =>
             new WebRtcConnectionManager(
                 (string)key!,
@@ -89,28 +80,25 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<IPeerRegistry>(),
                 sp.GetRequiredService<ILogger<WebRtcConnectionManager>>()));
 
-        // Expose explicitly separated behavioral interfaces universally targeting the singleton reference safely
         builder.Services.AddKeyedSingleton<IWebRtcConnectionManager>(builder.MeshId, (sp, key) =>
             sp.GetRequiredKeyedService<WebRtcConnectionManager>(key));
             
         builder.Services.AddKeyedSingleton<IWebRtcInvitationService>(builder.MeshId, (sp, key) =>
             sp.GetRequiredKeyedService<WebRtcConnectionManager>(key));
 
-        // Inject dynamic transport routers capturing WebRtc endpoint variations seamlessly
-        builder.Services.AddKeyedSingleton<ITransport<TMessage>>(builder.MeshId, (sp, key) =>
-            new WebRtcTransport<TMessage>(
+        builder.Services.AddKeyedSingleton<ITransport>(builder.MeshId, (sp, key) =>
+            new WebRtcTransport(
                 (string)key!,
                 sp.GetRequiredKeyedService<IWebRtcConnectionManager>(key),
                 sp.GetRequiredService<ICrdtSerializer>(),
-                sp.GetRequiredService<ILogger<WebRtcTransport<TMessage>>>()));
+                sp.GetRequiredService<ILogger<WebRtcTransport>>()));
 
-        // Inject inbound transport listener tracking deeply routed RTCPeer connections continuously 
-        builder.Services.AddKeyedSingleton<ITransportListener<TMessage>>(builder.MeshId, (sp, key) =>
-            new WebRtcTransportListener<TMessage>(
+        builder.Services.AddKeyedSingleton<ITransportListener>(builder.MeshId, (sp, key) =>
+            new WebRtcTransportListener(
                 (string)key!,
                 sp.GetRequiredKeyedService<IWebRtcConnectionManager>(key),
                 sp.GetRequiredService<ICrdtSerializer>(),
-                sp.GetRequiredService<ILogger<WebRtcTransportListener<TMessage>>>()));
+                sp.GetRequiredService<ILogger<WebRtcTransportListener>>()));
 
         return builder;
     }

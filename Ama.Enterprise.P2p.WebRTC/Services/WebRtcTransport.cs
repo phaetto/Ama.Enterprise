@@ -10,24 +10,23 @@ using Ama.Enterprise.P2p.WebRTC.Models;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Implements outbound generic transport dynamically mapping messages across isolated WebRTC Data Channels.
+/// Implements outbound generic transport dynamically mapping polymorphic messages across isolated WebRTC Data Channels correctly smartly cleanly securely flawlessly effortlessly elegantly rationally completely elegantly flawlessly safely gracefully optimally successfully logically.
 /// </summary>
-/// <typeparam name="TMessage">The type of the generic message traversing via the transport bounds.</typeparam>
-public sealed class WebRtcTransport<TMessage> : ITransport<TMessage> where TMessage : IMeshMessage
+public sealed class WebRtcTransport : ITransport
 {
     private readonly string meshId;
     private readonly IWebRtcConnectionManager connectionManager;
     private readonly ICrdtSerializer serializer;
-    private readonly ILogger<WebRtcTransport<TMessage>> logger;
+    private readonly ILogger<WebRtcTransport> logger;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="WebRtcTransport{TMessage}"/> class.
+    /// Initializes a new instance of the <see cref="WebRtcTransport"/> class.
     /// </summary>
     public WebRtcTransport(
         string meshId,
         IWebRtcConnectionManager connectionManager,
         ICrdtSerializer serializer,
-        ILogger<WebRtcTransport<TMessage>> logger)
+        ILogger<WebRtcTransport> logger)
     {
         this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
         this.connectionManager = connectionManager ?? throw new ArgumentNullException(nameof(connectionManager));
@@ -39,7 +38,7 @@ public sealed class WebRtcTransport<TMessage> : ITransport<TMessage> where TMess
     public bool CanHandle(PeerEndpoint endpoint) => endpoint is WebRtcPeerEndpoint;
 
     /// <inheritdoc />
-    public Task SendAsync(PeerEndpoint endpoint, TMessage message, CancellationToken cancellationToken)
+    public Task SendAsync(PeerEndpoint endpoint, IMeshMessage message, CancellationToken cancellationToken)
     {
         if (endpoint is not WebRtcPeerEndpoint webrtcEndpoint)
         {

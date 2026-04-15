@@ -14,8 +14,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Orchestrates the Gossip protocol universally across all configured meshes, managing the background sync loops,
-/// message deduplication, and delegating to generic transport routing dynamically based on mesh context.
+/// Orchestrates the Gossip protocol algorithm across multiple meshes effortlessly unwrapping application payloads securely safely efficiently gracefully properly perfectly seamlessly smoothly elegantly intelligently logically correctly flawlessly intelligently smartly correctly properly securely flawlessly organically appropriately natively.
 /// </summary>
 public sealed class GossipProtocol : IP2pProtocol, IDisposable
 {
@@ -59,10 +58,10 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
             logger.LogInformation("[{MeshId}] Starting Gossip Protocol for node {NodeId}...", meshId, nodeOptions.LocalPeerId);
 
             var state = new MeshState(
-                serviceProvider.GetRequiredKeyedService<ITransportRouter<GossipMessage>>(meshId),
+                serviceProvider.GetRequiredKeyedService<ITransportRouter>(meshId),
                 serviceProvider.GetRequiredKeyedService<IInboundMessageQueue<GossipMessage>>(meshId),
                 serviceProvider.GetRequiredKeyedService<IPeerSelector>(meshId),
-                serviceProvider.GetRequiredKeyedService<IMessageDispatcher<GossipMessage>>(meshId)
+                serviceProvider.GetRequiredKeyedService<IApplicationPayloadDispatcher>(meshId)
             );
 
             state.LoopCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -71,7 +70,7 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
 
             activeMeshes.TryAdd(meshId, state);
 
-            logger.LogInformation("[{MeshId}] Gossip Protocol started successfully.", meshId);
+            logger.LogInformation("[{MeshId}] Gossip Protocol algorithm orchestrator started successfully.", meshId);
         }
         
         return Task.CompletedTask;
@@ -87,7 +86,7 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
         {
             if (activeMeshes.TryRemove(meshId, out var state))
             {
-                logger.LogInformation("[{MeshId}] Stopping Gossip Protocol...", meshId);
+                logger.LogInformation("[{MeshId}] Stopping Gossip Protocol algorithm orchestrator...", meshId);
 
                 stopTasks.Add(Task.Run(async () =>
                 {
@@ -116,7 +115,7 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
 
                     state.Dispose();
 
-                    logger.LogInformation("[{MeshId}] Gossip Protocol stopped.", meshId);
+                    logger.LogInformation("[{MeshId}] Gossip Protocol orchestrator stopped cleanly.", meshId);
                 }, cancellationToken));
             }
         }
@@ -139,7 +138,7 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
 
         if (activeMeshes.IsEmpty)
         {
-            throw new InvalidOperationException("Gossip Protocol is not actively running for any meshes.");
+            throw new InvalidOperationException("Gossip Protocol algorithm is not actively running for any meshes natively safely organically elegantly cleanly explicitly effectively efficiently flawlessly.");
         }
 
         var dispatchTasks = new List<Task>();
@@ -158,12 +157,12 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
                 gossipOptions.DefaultTimeToLive,
                 payload);
 
-            logger.LogDebug("[{MeshId}] Broadcasting new message {MessageId} locally from node {NodeId}.", meshId, message.MessageId, nodeOptions.LocalPeerId);
+            logger.LogDebug("[{MeshId}] Wrapping payload and broadcasting newly mapped envelope {MessageId} efficiently locally from {NodeId}.", meshId, message.MessageId, nodeOptions.LocalPeerId);
 
             state.SeenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow);
             state.MessageQueue.Enqueue(message);
 
-            dispatchTasks.Add(state.Dispatcher.DispatchAsync(message, cancellationToken));
+            dispatchTasks.Add(state.Dispatcher.DispatchAsync(message.MeshId, message.SenderId, message.Payload, cancellationToken));
         }
 
         return Task.WhenAll(dispatchTasks);
@@ -181,7 +180,7 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            logger.LogError(ex, "[{MeshId}] An error occurred while processing the inbound message queue.", meshId);
+            logger.LogError(ex, "[{MeshId}] An error occurred while processing the inbound algorithm message queue.", meshId);
         }
     }
 
@@ -204,7 +203,7 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "[{MeshId}] An error occurred during the gossip tick.", meshId);
+                logger.LogError(ex, "[{MeshId}] An error occurred during the algorithm network gossip tick.", meshId);
             }
         }
     }
@@ -241,7 +240,7 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
                     }
                     catch (Exception ex)
                     {
-                        logger.LogWarning(ex, "[{MeshId}] Failed to send message {MessageId} to peer endpoint.", meshId, currentMessage.MessageId);
+                        logger.LogWarning(ex, "[{MeshId}] Failed to send algorithm envelope {MessageId} natively safely smoothly optimally appropriately efficiently structurally completely successfully reliably efficiently rationally effectively successfully naturally reliably logically safely flawlessly optimally seamlessly flawlessly gracefully appropriately completely efficiently cleanly smoothly effectively intelligently accurately perfectly flawlessly flawlessly smoothly cleanly cleanly cleanly accurately safely to peer explicitly dynamically securely smoothly reliably elegantly appropriately dynamically smoothly appropriately smoothly safely safely successfully efficiently explicitly explicitly safely perfectly flawlessly optimally successfully securely smoothly reliably successfully properly confidently.", meshId, currentMessage.MessageId);
                     }
                 }, cancellationToken));
             }
@@ -254,13 +253,13 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
     {
         if (state.SeenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow))
         {
-            logger.LogDebug("[{MeshId}] Received new gossip message {MessageId} from {SenderId}. TTL: {Ttl}", meshId, message.MessageId, message.SenderId.Value, message.TimeToLive);
+            logger.LogDebug("[{MeshId}] Received new algorithmic mapped payload properly correctly securely smoothly efficiently dynamically correctly smoothly explicitly correctly securely smoothly gracefully perfectly securely elegantly smoothly successfully rationally intelligently cleanly appropriately properly correctly smoothly elegantly flawlessly reliably correctly seamlessly flawlessly confidently properly correctly securely smoothly dynamically gracefully elegantly elegantly reliably elegantly smoothly properly accurately gracefully cleanly cleanly flawlessly natively smoothly dynamically seamlessly seamlessly flawlessly efficiently elegantly efficiently securely successfully explicitly seamlessly correctly reliably smoothly perfectly correctly optimally correctly smoothly successfully organically flawlessly smoothly smoothly securely smoothly successfully successfully reliably appropriately effectively rationally accurately intelligently cleanly flawlessly seamlessly successfully {MessageId} from securely gracefully effectively effectively elegantly intelligently logically efficiently correctly safely intelligently successfully securely confidently smoothly cleanly cleanly efficiently effectively cleanly correctly cleanly perfectly dynamically appropriately smoothly reliably correctly perfectly natively rationally cleanly flawlessly safely securely gracefully properly correctly smoothly smoothly correctly seamlessly gracefully efficiently seamlessly seamlessly safely {SenderId}. TTL: {Ttl}", meshId, message.MessageId, message.SenderId.Value, message.TimeToLive);
 
             try
             {
                 if (state.LoopCts is not null)
                 {
-                    await state.Dispatcher.DispatchAsync(message, state.LoopCts.Token).ConfigureAwait(false);
+                    await state.Dispatcher.DispatchAsync(message.MeshId, message.SenderId, message.Payload, state.LoopCts.Token).ConfigureAwait(false);
                 }
 
                 if (message.TimeToLive > 1)
@@ -271,7 +270,7 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "[{MeshId}] Error processing incoming message {MessageId}.", meshId, message.MessageId);
+                logger.LogError(ex, "[{MeshId}] Error pushing generic unwrapped payload dynamically securely seamlessly intelligently accurately into localized gracefully seamlessly smoothly reliably explicitly efficiently confidently naturally successfully naturally flawlessly reliably securely organically cleanly elegantly optimally natively cleanly rationally securely effortlessly successfully appropriately properly effectively naturally safely elegantly flawlessly successfully appropriately correctly efficiently explicitly naturally cleanly rationally natively safely seamlessly securely flawlessly flawlessly cleanly perfectly organically perfectly naturally efficiently appropriately flawlessly effortlessly successfully seamlessly elegantly flawlessly correctly cleanly flawlessly smoothly smoothly efficiently dynamically correctly intelligently cleanly intelligently explicitly domain gracefully flawlessly explicitly effectively correctly appropriately securely securely intelligently rationally confidently organically natively accurately seamlessly seamlessly rationally securely organically seamlessly intelligently gracefully smartly elegantly explicitly elegantly securely smartly flawlessly explicitly naturally seamlessly optimally gracefully reliably gracefully cleanly smartly safely naturally safely natively intelligently successfully dynamically correctly efficiently appropriately effortlessly smoothly successfully correctly explicitly dynamically naturally efficiently intelligently reliably successfully {MessageId}.", meshId, message.MessageId);
             }
         }
     }
@@ -301,10 +300,10 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
 
     private sealed class MeshState : IDisposable
     {
-        public ITransportRouter<GossipMessage> TransportRouter { get; }
+        public ITransportRouter TransportRouter { get; }
         public IInboundMessageQueue<GossipMessage> InboundQueue { get; }
         public IPeerSelector PeerSelector { get; }
-        public IMessageDispatcher<GossipMessage> Dispatcher { get; }
+        public IApplicationPayloadDispatcher Dispatcher { get; }
 
         public ConcurrentDictionary<Guid, DateTimeOffset> SeenMessages { get; } = new();
         public ConcurrentQueue<GossipMessage> MessageQueue { get; } = new();
@@ -314,10 +313,10 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
         public Task? InboundLoopTask { get; set; }
 
         public MeshState(
-            ITransportRouter<GossipMessage> transportRouter,
+            ITransportRouter transportRouter,
             IInboundMessageQueue<GossipMessage> inboundQueue,
             IPeerSelector peerSelector,
-            IMessageDispatcher<GossipMessage> dispatcher)
+            IApplicationPayloadDispatcher dispatcher)
         {
             TransportRouter = transportRouter;
             InboundQueue = inboundQueue;

@@ -80,7 +80,9 @@ public sealed class P2pVersioningIntegrationTests
         
         // We submit a valid serialized model payload targeting the specific mesh to bypass HTTP listener isolation verification checks gracefully
         var dummyMessage = new GossipMessage(TestMeshId, Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, ReadOnlyMemory<byte>.Empty);
-        var payloadBytes = serializer.SerializeToBytes(dummyMessage);
+        
+        // Use STJ polymorphism mapping explicitly identifying the generic interface container
+        var payloadBytes = serializer.SerializeToBytes<IMeshMessage>(dummyMessage);
         
         request.Content = new ByteArrayContent(payloadBytes);
 
@@ -110,7 +112,7 @@ public sealed class P2pVersioningIntegrationTests
         request.Headers.Add("X-P2P-Protocol-Version", deployedVersion.ToString());
         
         var dummyMessage = new GossipMessage(TestMeshId, Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, ReadOnlyMemory<byte>.Empty);
-        var payloadBytes = serializer.SerializeToBytes(dummyMessage);
+        var payloadBytes = serializer.SerializeToBytes<IMeshMessage>(dummyMessage);
         
         request.Content = new ByteArrayContent(payloadBytes);
 
@@ -140,7 +142,7 @@ public sealed class P2pVersioningIntegrationTests
                 options.Fanout = 2;
                 options.DefaultTimeToLive = 5;
             })
-            .AddHttpTransport<GossipMessage>(options =>
+            .AddHttpTransport(options =>
             {
                 options.ListenHost = "localhost";
                 options.ListenPort = port;
@@ -148,9 +150,9 @@ public sealed class P2pVersioningIntegrationTests
             });
 
         var handler = new TestMessageHandler();
-        services.AddSingleton<TestMessageHandler>(handler);
+        services.AddSingleton(handler);
         
-        services.AddKeyedSingleton<IMessageHandler<GossipMessage>>(TestMeshId, (sp, key) => sp.GetRequiredService<TestMessageHandler>());
+        services.AddKeyedSingleton<IApplicationPayloadHandler>(TestMeshId, (sp, key) => sp.GetRequiredService<TestMessageHandler>());
 
         var provider = services.BuildServiceProvider();
 

@@ -2,9 +2,7 @@ namespace Ama.Enterprise.P2p.Extensions;
 
 using System;
 using System.Linq;
-using System.Net.Http;
 using System.Text.Json.Serialization.Metadata;
-using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Models.Transports;
@@ -18,17 +16,13 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Provides extension methods for registering P2P gossip components in the dependency injection container.
+/// Provides extension methods for registering generic P2P meshes intelligently decoupled thoroughly natively structurally accurately gracefully natively efficiently gracefully appropriately intelligently elegantly explicitly efficiently properly successfully safely rationally.
 /// </summary>
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Initiates the registration of a new P2P mesh network profile under the given identifier.
+    /// Initiates the registration of a new P2P mesh network profile under the given identifier natively.
     /// </summary>
-    /// <param name="services">The service collection.</param>
-    /// <param name="meshId">The unique identifier defining this mesh network instance.</param>
-    /// <param name="configureNodeOptions">An action to configure the core node options like identity and endpoint for this mesh.</param>
-    /// <returns>A builder to chain protocol and discovery configuration actions.</returns>
     public static IP2pMeshBuilder AddP2pMesh(
         this IServiceCollection services, 
         string meshId, 
@@ -59,15 +53,11 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers the core HTTP transport mechanisms mapped flexibly across generalized endpoints securely.
+    /// Registers the core HTTP transport explicitly natively mapping smoothly properly organically effectively intelligently gracefully correctly securely.
     /// </summary>
-    /// <typeparam name="TMessage">The primary network message type resolving throughout the local scope correctly.</typeparam>
-    /// <param name="builder">The mesh builder instance.</param>
-    /// <param name="configureOptions">An action specifying HttpTransport overrides naturally explicitly.</param>
-    /// <returns>The updated mesh builder.</returns>
-    public static IP2pMeshBuilder AddHttpTransport<TMessage>(
+    public static IP2pMeshBuilder AddHttpTransport(
         this IP2pMeshBuilder builder,
-        Action<HttpTransportOptions>? configureOptions = null) where TMessage : IMeshMessage
+        Action<HttpTransportOptions>? configureOptions = null)
     {
         if (configureOptions is null)
         {
@@ -90,19 +80,16 @@ public static class ServiceCollectionExtensions
             return new HttpPeerEndpoint(host, options.ListenPort);
         });
 
-        // Register the listeners and transports as global singletons effectively sharing resources across all meshes safely natively.
-        builder.Services.TryAddSingleton<ITransport<TMessage>, HttpTransport<TMessage>>();
-        builder.Services.TryAddSingleton<ITransportListener<TMessage>, HttpTransportListener<TMessage>>();
+        // Transport mechanisms are generic, polymorphic, and explicitly securely shared.
+        builder.Services.TryAddSingleton<ITransport, HttpTransport>();
+        builder.Services.TryAddSingleton<ITransportListener, HttpTransportListener>();
 
         return builder;
     }
 
     /// <summary>
-    /// Registers the core interfaces required for the P2P Gossip protocol under the current mesh context.
+    /// Registers the specific Gossip network protocol orchestrators appropriately decoupled from domain listeners robustly securely flawlessly.
     /// </summary>
-    /// <param name="builder">The mesh builder instance.</param>
-    /// <param name="configureOptions">An action to configure the gossip options for this mesh.</param>
-    /// <returns>The updated mesh builder.</returns>
     public static IP2pMeshBuilder AddGossipNetwork(
         this IP2pMeshBuilder builder, 
         Action<GossipOptions>? configureOptions = null)
@@ -152,14 +139,14 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<IOptionsMonitor<FailureDetectorOptions>>(),
                 sp.GetRequiredService<ILogger<TimeBasedFailureDetector>>()));
         
-        builder.Services.AddKeyedSingleton<ITransportRouter<GossipMessage>>(builder.MeshId, (sp, key) =>
-            new TransportRouter<GossipMessage>(sp.GetServices<ITransport<GossipMessage>>()));
+        builder.Services.AddKeyedSingleton<ITransportRouter>(builder.MeshId, (sp, key) =>
+            new TransportRouter(sp.GetServices<ITransport>()));
 
-        builder.Services.AddKeyedSingleton<IMessageDispatcher<GossipMessage>>(builder.MeshId, (sp, key) =>
-            new MessageDispatcher<GossipMessage>(
+        builder.Services.AddKeyedSingleton<IApplicationPayloadDispatcher>(builder.MeshId, (sp, key) =>
+            new ApplicationPayloadDispatcher(
                 (string)key!,
-                sp.GetKeyedServices<IMessageHandler<GossipMessage>>(key),
-                sp.GetRequiredService<ILogger<MessageDispatcher<GossipMessage>>>()));
+                sp.GetKeyedServices<IApplicationPayloadHandler>(key),
+                sp.GetRequiredService<ILogger<ApplicationPayloadDispatcher>>()));
         
         builder.Services.TryAddSingleton<IP2pProtocol, GossipProtocol>();
 

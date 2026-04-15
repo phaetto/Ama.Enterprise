@@ -100,7 +100,7 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
                 nodeOptions.LocalPeerId = peerId;
             })
             .AddGossipNetwork()
-            .AddHttpTransport<GossipMessage>(opts => 
+            .AddHttpTransport(opts => 
             { 
                 opts.ListenPort = listenPort; 
                 opts.ListenHost = "localhost"; // Override from '+' to 'localhost' to avoid Access Denied under unprivileged execution on Windows

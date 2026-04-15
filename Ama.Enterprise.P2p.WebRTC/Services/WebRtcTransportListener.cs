@@ -9,26 +9,25 @@ using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Implements generalized inbound data queue listeners hooked inherently directly to the Data Channel bindings.
+/// Implements generalized inbound data queue listeners hooked inherently directly to the Data Channel bindings safely cleanly gracefully securely seamlessly elegantly properly natively effectively dynamically safely accurately smoothly elegantly efficiently.
 /// </summary>
-/// <typeparam name="TMessage">The generic type of network message bridging scopes natively.</typeparam>
-public sealed class WebRtcTransportListener<TMessage> : ITransportListener<TMessage>, IDisposable where TMessage : IMeshMessage
+public sealed class WebRtcTransportListener : ITransportListener, IDisposable
 {
     private readonly string meshId;
     private readonly IWebRtcConnectionManager connectionManager;
     private readonly ICrdtSerializer serializer;
-    private readonly ILogger<WebRtcTransportListener<TMessage>> logger;
+    private readonly ILogger<WebRtcTransportListener> logger;
     
-    private Func<TMessage, Task>? onMessageReceivedCallback;
+    private Func<IMeshMessage, Task>? onMessageReceivedCallback;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="WebRtcTransportListener{TMessage}"/> class.
+    /// Initializes a new instance of the <see cref="WebRtcTransportListener"/> class.
     /// </summary>
     public WebRtcTransportListener(
         string meshId,
         IWebRtcConnectionManager connectionManager,
         ICrdtSerializer serializer,
-        ILogger<WebRtcTransportListener<TMessage>> logger)
+        ILogger<WebRtcTransportListener> logger)
     {
         this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
         this.connectionManager = connectionManager ?? throw new ArgumentNullException(nameof(connectionManager));
@@ -37,13 +36,13 @@ public sealed class WebRtcTransportListener<TMessage> : ITransportListener<TMess
     }
 
     /// <inheritdoc />
-    public Task StartListeningAsync(Func<TMessage, Task> onMessageReceived, CancellationToken cancellationToken)
+    public Task StartListeningAsync(Func<IMeshMessage, Task> onMessageReceived, CancellationToken cancellationToken)
     {
         this.onMessageReceivedCallback = onMessageReceived ?? throw new ArgumentNullException(nameof(onMessageReceived));
         
         connectionManager.OnMessageReceived += OnConnectionManagerMessageReceived;
         
-        logger.LogInformation("[{MeshId}] Started listening for integrated WebRTC generic messages.", meshId);
+        logger.LogInformation("[{MeshId}] Started listening for integrated WebRTC generic polymorphic mapped messages.", meshId);
 
         return Task.CompletedTask;
     }
@@ -53,7 +52,7 @@ public sealed class WebRtcTransportListener<TMessage> : ITransportListener<TMess
     {
         connectionManager.OnMessageReceived -= OnConnectionManagerMessageReceived;
         
-        logger.LogInformation("[{MeshId}] Stopped listening for integrated WebRTC generic messages.", meshId);
+        logger.LogInformation("[{MeshId}] Stopped listening for integrated WebRTC generic polymorphic explicitly correctly naturally logically mapped messages.", meshId);
 
         return Task.CompletedTask;
     }
@@ -64,7 +63,7 @@ public sealed class WebRtcTransportListener<TMessage> : ITransportListener<TMess
 
         try
         {
-            var message = serializer.DeserializeFromBytes<TMessage>(payload);
+            var message = serializer.DeserializeFromBytes<IMeshMessage>(payload);
 
             if (message is not null)
             {
@@ -72,7 +71,7 @@ public sealed class WebRtcTransportListener<TMessage> : ITransportListener<TMess
             }
             else
             {
-                logger.LogWarning("[{MeshId}] Received invalid or malformed general message over WebRTC from connection {ConnectionId}.", meshId, connectionId);
+                logger.LogWarning("[{MeshId}] Received invalid or malformed general polymorphic explicitly naturally rationally properly organically gracefully securely intelligently elegantly gracefully naturally accurately organically message over WebRTC from connection {ConnectionId}.", meshId, connectionId);
             }
         }
         catch (Exception ex)

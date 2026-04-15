@@ -14,12 +14,11 @@ using Ama.Enterprise.P2p;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
-using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.UnitTests.Attributes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Shouldly;
-using Xunit;
+using Ama.Enterprise.P2p.Services.Core;
 
 public sealed class HttpTransportMultiplexingIntegrationTests : IDisposable
 {
@@ -45,7 +44,7 @@ public sealed class HttpTransportMultiplexingIntegrationTests : IDisposable
 
         services.AddP2pMesh("MeshA", opt => opt.LocalPeerId = Guid.NewGuid())
             .AddGossipNetwork() // Adds necessary AOT JSON Contexts for GossipMessage
-            .AddHttpTransport<GossipMessage>(opt => 
+            .AddHttpTransport(opt => 
             { 
                 opt.ListenPort = portA; 
                 opt.ListenHost = "localhost"; 
@@ -54,7 +53,7 @@ public sealed class HttpTransportMultiplexingIntegrationTests : IDisposable
 
         services.AddP2pMesh("MeshB", opt => opt.LocalPeerId = Guid.NewGuid())
             .AddGossipNetwork()
-            .AddHttpTransport<GossipMessage>(opt => 
+            .AddHttpTransport(opt => 
             { 
                 opt.ListenPort = portB; 
                 opt.ListenHost = "localhost"; 
@@ -63,13 +62,16 @@ public sealed class HttpTransportMultiplexingIntegrationTests : IDisposable
 
         serviceProvider = services.BuildServiceProvider();
 
-        var listener = serviceProvider.GetRequiredService<ITransportListener<GossipMessage>>();
+        var listener = serviceProvider.GetRequiredService<ITransportListener>();
         var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
         var receivedMessages = new ConcurrentBag<GossipMessage>();
 
         await listener.StartListeningAsync(msg => 
         {
-            receivedMessages.Add(msg);
+            if (msg is GossipMessage gmsg)
+            {
+                receivedMessages.Add(gmsg);
+            }
             return Task.CompletedTask;
         }, CancellationToken.None);
 
@@ -126,10 +128,11 @@ public sealed class HttpTransportMultiplexingIntegrationTests : IDisposable
     private static async Task<HttpResponseMessage> SendTestMessageAsync(
         HttpClient client, 
         int port, 
-        GossipMessage message, 
+        IMeshMessage message, 
         ICrdtSerializer serializer, 
         string protocolVersion)
     {
+        // Parameter 'message' acts as IMeshMessage correctly leveraging polymorphic STJ mappings
         var payloadBytes = serializer.SerializeToBytes(message);
         using var content = new ByteArrayContent(payloadBytes);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");

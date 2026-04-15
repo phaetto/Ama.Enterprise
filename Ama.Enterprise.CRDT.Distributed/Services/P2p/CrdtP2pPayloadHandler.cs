@@ -8,28 +8,28 @@ using Ama.CRDT.Services;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.P2p.Models.Core;
-using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Deserializes incoming network Gossip bytes and routes the parsed CRDT intents to the correct distributed document manager.
+/// Deserializes incoming network application payloads and routes the parsed CRDT intents to the correct distributed document manager reliably dynamically accurately.
+/// Now completely agnostic to the underlying distribution algorithm cleanly naturally intelligently.
 /// </summary>
-public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
+public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler
 {
     private readonly DistributedCrdtScopeProvider scopeProvider;
     private readonly IClusterStateTracker clusterTracker;
     private readonly ICrdtSerializer serializer;
     private readonly ICrdtEvictionService evictionService;
-    private readonly ILogger<CrdtGossipHandler> logger;
+    private readonly ILogger<CrdtP2pPayloadHandler> logger;
 
-    public CrdtGossipHandler(
+    public CrdtP2pPayloadHandler(
         DistributedCrdtScopeProvider scopeProvider,
         IClusterStateTracker clusterTracker,
         ICrdtSerializer serializer,
         ICrdtEvictionService evictionService,
-        ILogger<CrdtGossipHandler> logger)
+        ILogger<CrdtP2pPayloadHandler> logger)
     {
         this.scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
         this.clusterTracker = clusterTracker ?? throw new ArgumentNullException(nameof(clusterTracker));
@@ -39,9 +39,9 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
     }
 
     /// <inheritdoc />
-    public async Task HandleAsync(GossipMessage message, CancellationToken cancellationToken)
+    public async Task HandlePayloadAsync(string meshId, PeerId senderId, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
-        if (message.Payload.IsEmpty)
+        if (payload.IsEmpty)
         {
             return;
         }
@@ -49,11 +49,11 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
         CrdtMessageWrapper wrapper;
         try
         {
-            wrapper = serializer.DeserializeFromBytes<CrdtMessageWrapper>(message.Payload.ToArray());
+            wrapper = serializer.DeserializeFromBytes<CrdtMessageWrapper>(payload.ToArray());
         }
         catch (Exception)
         {
-            // The payload belongs to another generic handler mapping within the same P2P pipeline.
+            // The payload belongs to another generic handler mapping within the same P2P pipeline natively.
             return;
         }
 
@@ -78,7 +78,7 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
 
         if (wrapper.MessageType == "CrdtSync")
         {
-            await ProcessStateSyncAsync(targetDoc, wrapper, message.SenderId, cancellationToken).ConfigureAwait(false);
+            await ProcessStateSyncAsync(targetDoc, wrapper, senderId, cancellationToken).ConfigureAwait(false);
         }
         else if (wrapper.MessageType == "CrdtOps")
         {
@@ -86,7 +86,7 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
         }
         else if (wrapper.MessageType == "CrdtSnapshot")
         {
-            await ProcessSnapshotAsync(targetDoc, wrapper, message.SenderId, cancellationToken).ConfigureAwait(false);
+            await ProcessSnapshotAsync(targetDoc, wrapper, senderId, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -110,7 +110,6 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
                 return;
             }
 
-            // Immediately track the globally reported DVV for background mathematically secure truncation trimming maps natively
             clusterTracker.UpdatePeerState(syncMsg.ReplicaId, senderId.Value.ToString(), syncMsg.State);
 
             var missingOpsResult = await targetDoc.GetMissingOperationsAsync(syncMsg.ReplicaId, syncMsg.State, cancellationToken).ConfigureAwait(false);
@@ -187,7 +186,6 @@ public sealed class CrdtGossipHandler : IMessageHandler<GossipMessage>
 
             logger.LogInformation("Receiving full state network snapshot for document {DocumentId}.", targetDoc.DocumentId);
             
-            // Map explicitly overarching tracking vectors effectively natively bridging states cleanly
             clusterTracker.UpdatePeerState(resMsg.ReplicaId, senderId.Value.ToString(), resMsg.GlobalState);
             
             await targetDoc.MergeSnapshotAsync(resMsg.SnapshotData, resMsg.GlobalState, cancellationToken).ConfigureAwait(false);

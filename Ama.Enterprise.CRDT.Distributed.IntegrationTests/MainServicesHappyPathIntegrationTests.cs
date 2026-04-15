@@ -152,7 +152,7 @@ public sealed class MainServicesHappyPathIntegrationTests
         // Act - Ask for snapshot
         await docManager.ProvideSnapshotAsync("RemoteReplica2", CancellationToken.None);
 
-        // Assert - Ensure the component actively broadcasted the payload over P2P correctly cleanly explicitly naturally correctly properly flawlessly successfully correctly cleanly securely reliably seamlessly smoothly effectively cleanly appropriately effectively seamlessly
+        // Assert - Ensure the component actively broadcasted the payload over P2P
         mockP2p.Verify(p => p.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -180,7 +180,7 @@ public sealed class MainServicesHappyPathIntegrationTests
         // Act
         await initService.StartAsync(CancellationToken.None);
 
-        // Assert - Context inherently structurally replaced safely in-place perfectly logically efficiently cleanly
+        // Assert - Context replaced safely in-place
         var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
         var context = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
 
@@ -203,7 +203,7 @@ public sealed class MainServicesHappyPathIntegrationTests
         await orchestrator.CreateDocumentAsync("happy-doc", "happy-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
-        var handler = sp.GetRequiredKeyedService<IMessageHandler<GossipMessage>>("TestMesh");
+        var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>("TestMesh");
         var serializer = sp.GetRequiredService<ICrdtSerializer>();
 
         var remoteDvv = new DottedVersionVector();
@@ -214,10 +214,10 @@ public sealed class MainServicesHappyPathIntegrationTests
         var wrapper = new CrdtMessageWrapper("happy-doc", "CrdtSync", syncPayload);
         var wrapperPayload = serializer.SerializeToBytes(wrapper);
 
-        var gossipMsg = new GossipMessage("TestMesh", Guid.NewGuid(), new PeerId(Guid.NewGuid()), 10, wrapperPayload);
+        var senderId = new PeerId(Guid.NewGuid());
 
         // Act
-        await handler.HandleAsync(gossipMsg, CancellationToken.None);
+        await handler.HandlePayloadAsync("TestMesh", senderId, wrapperPayload, CancellationToken.None);
 
         // Assert
         var tracker = sp.GetRequiredService<IClusterStateTracker>();
@@ -226,7 +226,7 @@ public sealed class MainServicesHappyPathIntegrationTests
         states.Count.ShouldBe(1);
         states[0].Versions["RemoteReplica2"].ShouldBe(15);
         
-        // Since we didn't have operations locally mapped perfectly seamlessly effortlessly safely accurately organically cleanly completely successfully logically natively explicitly gracefully securely efficiently, it shouldn't have broadcasted any return operations natively cleanly reliably natively seamlessly natively appropriately reliably seamlessly
+        // Since we didn't have operations locally mapped, it shouldn't have broadcasted any return operations
         mockP2p.Verify(p => p.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

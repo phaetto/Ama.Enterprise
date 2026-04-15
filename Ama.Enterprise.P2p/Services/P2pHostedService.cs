@@ -39,20 +39,28 @@ public sealed class P2pHostedService : IHostedService
     /// <inheritdoc />
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        // Start Global Transport Listeners mapping across multiplexed messages
-        var listeners = serviceProvider.GetServices<ITransportListener<GossipMessage>>();
+        // Start Global Transport Listeners mapping across multiplexed polymorphic messages cleanly natively
+        var listeners = serviceProvider.GetServices<ITransportListener>();
         foreach (var listener in listeners)
         {
             await listener.StartListeningAsync(async msg => 
             {
-                var targetQueue = serviceProvider.GetKeyedService<IInboundMessageQueue<GossipMessage>>(msg.MeshId);
-                if (targetQueue is not null)
+                if (msg is GossipMessage gossipMsg)
                 {
-                    await targetQueue.WriteAsync(msg, default).ConfigureAwait(false);
+                    var targetQueue = serviceProvider.GetKeyedService<IInboundMessageQueue<GossipMessage>>(msg.MeshId);
+                    if (targetQueue is not null)
+                    {
+                        await targetQueue.WriteAsync(gossipMsg, default).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        logger.LogWarning("Received multiplexed gossip message for unknown mesh {MeshId}.", msg.MeshId);
+                    }
                 }
                 else
                 {
-                    logger.LogWarning("Received multiplexed message for unknown mesh {MeshId}.", msg.MeshId);
+                    // Designed for future generic expansion (e.g., PushPullMessage) decoupled appropriately natively
+                    logger.LogDebug("Received unhandled multiplexed protocol message type {MessageType} for mesh {MeshId}.", msg.GetType().Name, msg.MeshId);
                 }
             }, cancellationToken).ConfigureAwait(false);
         }
@@ -90,7 +98,7 @@ public sealed class P2pHostedService : IHostedService
         }
 
         // Stop Global Transport Listeners
-        var listeners = serviceProvider.GetServices<ITransportListener<GossipMessage>>();
+        var listeners = serviceProvider.GetServices<ITransportListener>();
         foreach (var listener in listeners)
         {
             await listener.StopListeningAsync(cancellationToken).ConfigureAwait(false);

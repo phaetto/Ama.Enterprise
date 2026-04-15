@@ -20,10 +20,10 @@ using Xunit;
 public sealed class GossipProtocolTests
 {
     private const string TestMeshId = "TestMesh";
-    private readonly Mock<ITransportRouter<GossipMessage>> transportRouterMock;
+    private readonly Mock<ITransportRouter> transportRouterMock;
     private readonly Mock<IInboundMessageQueue<GossipMessage>> inboundQueueMock;
     private readonly Mock<IPeerSelector> peerSelectorMock;
-    private readonly Mock<IMessageDispatcher<GossipMessage>> dispatcherMock;
+    private readonly Mock<IApplicationPayloadDispatcher> dispatcherMock;
     private readonly Mock<ILogger<GossipProtocol>> loggerMock;
     private readonly Mock<IOptionsMonitor<GossipOptions>> gossipOptionsMock;
     private readonly Mock<IOptionsMonitor<P2pNodeOptions>> nodeOptionsMock;
@@ -31,10 +31,10 @@ public sealed class GossipProtocolTests
 
     public GossipProtocolTests()
     {
-        transportRouterMock = new Mock<ITransportRouter<GossipMessage>>();
+        transportRouterMock = new Mock<ITransportRouter>();
         inboundQueueMock = new Mock<IInboundMessageQueue<GossipMessage>>();
         peerSelectorMock = new Mock<IPeerSelector>();
-        dispatcherMock = new Mock<IMessageDispatcher<GossipMessage>>();
+        dispatcherMock = new Mock<IApplicationPayloadDispatcher>();
         loggerMock = new Mock<ILogger<GossipProtocol>>();
         
         gossipOptionsMock = new Mock<IOptionsMonitor<GossipOptions>>();
@@ -89,7 +89,9 @@ public sealed class GossipProtocolTests
 
         // Assert
         dispatcherMock.Verify(d => d.DispatchAsync(
-            It.Is<GossipMessage>(m => m.Payload.ToArray().SequenceEqual(payload)), 
+            TestMeshId,
+            It.Is<PeerId>(p => p.Value == nodeOptionsMock.Object.Get(TestMeshId).LocalPeerId),
+            It.Is<ReadOnlyMemory<byte>>(m => m.ToArray().SequenceEqual(payload)), 
             It.IsAny<CancellationToken>()), Times.Once);
             
         // Stop to clean up background tasks
@@ -141,7 +143,9 @@ public sealed class GossipProtocolTests
 
         // Assert
         dispatcherMock.Verify(d => d.DispatchAsync(
-            It.Is<GossipMessage>(m => m.MessageId == testMessage.MessageId), 
+            TestMeshId,
+            testMessage.SenderId,
+            It.Is<ReadOnlyMemory<byte>>(m => m.ToArray().SequenceEqual(testMessage.Payload.ToArray())), 
             It.IsAny<CancellationToken>()), Times.Once);
 
         await protocol.StopAsync(CancellationToken.None);

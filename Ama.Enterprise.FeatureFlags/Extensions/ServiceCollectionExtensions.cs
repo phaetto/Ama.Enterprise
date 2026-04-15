@@ -7,7 +7,6 @@ using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Services;
 using Ama.Enterprise.P2p.Extensions;
-using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.WebRTC.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -69,7 +68,7 @@ public static class ServiceCollectionExtensions
                 {
                     options.GossipInterval = ffOpts.GossipInterval;
                 })
-                .AddHttpTransport<GossipMessage>(options =>
+                .AddHttpTransport(options =>
                 {
                     options.ListenPort = ffOpts.ListenPort;
                     options.ListenHost = ffOpts.ListenHost;
@@ -81,7 +80,7 @@ public static class ServiceCollectionExtensions
                     options.DiscoveryInterval = ffOpts.DiscoveryInterval;
                     options.DiscoveryTimeout = ffOpts.DiscoveryTimeout;
                 })
-                .AddWebRtcTransport<GossipMessage>(options => { });
+                .AddWebRtcTransport(options => { });
 
         return services;
     }

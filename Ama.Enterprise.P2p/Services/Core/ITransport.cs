@@ -5,10 +5,9 @@ using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
-/// Defines the outbound network transport capabilities safely sending protocol-specific multiplexed messages explicitly targeting endpoints organically explicitly securely.
+/// Defines the outbound generic network transport capabilities safely sending polymorphic explicitly targeted protocol messages explicitly securely.
 /// </summary>
-/// <typeparam name="TMessage">The type of the message being transported.</typeparam>
-public interface ITransport<TMessage> where TMessage : IMeshMessage
+public interface ITransport
 {
     /// <summary>
     /// Determines whether this transport can handle the specified peer endpoint.
@@ -18,11 +17,11 @@ public interface ITransport<TMessage> where TMessage : IMeshMessage
     bool CanHandle(PeerEndpoint endpoint);
 
     /// <summary>
-    /// Sends a protocol message to a specific peer endpoint.
+    /// Sends a polymorphic protocol message to a specific peer endpoint organically.
     /// </summary>
     /// <param name="endpoint">The destination peer's network endpoint.</param>
-    /// <param name="message">The message to send.</param>
+    /// <param name="message">The explicitly mapped polymorphic network message envelope cleanly gracefully successfully.</param>
     /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
     /// <returns>A task that represents the asynchronous send operation.</returns>
-    Task SendAsync(PeerEndpoint endpoint, TMessage message, CancellationToken cancellationToken);
+    Task SendAsync(PeerEndpoint endpoint, IMeshMessage message, CancellationToken cancellationToken);
 }

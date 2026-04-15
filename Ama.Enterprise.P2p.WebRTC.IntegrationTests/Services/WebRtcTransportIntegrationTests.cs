@@ -67,8 +67,11 @@ public sealed class WebRtcTransportIntegrationTests
 
         await nodeB.Listener.StartListeningAsync(msg =>
         {
-            testOutputHelper.WriteLine("Message successfully received by Listener B!");
-            messageCompletionSource.TrySetResult(msg);
+            if (msg is TestMessage testMsg)
+            {
+                testOutputHelper.WriteLine("Message successfully received by Listener B!");
+                messageCompletionSource.TrySetResult(testMsg);
+            }
             return Task.CompletedTask;
         }, cts.Token);
 
@@ -117,13 +120,19 @@ public sealed class WebRtcTransportIntegrationTests
 
         await nodeA.Listener.StartListeningAsync(msg =>
         {
-            messageCompletionSourceA.TrySetResult(msg);
+            if (msg is TestMessage testMsg)
+            {
+                messageCompletionSourceA.TrySetResult(testMsg);
+            }
             return Task.CompletedTask;
         }, cts.Token);
 
         await nodeB.Listener.StartListeningAsync(msg =>
         {
-            messageCompletionSourceB.TrySetResult(msg);
+            if (msg is TestMessage testMsg)
+            {
+                messageCompletionSourceB.TrySetResult(testMsg);
+            }
             return Task.CompletedTask;
         }, cts.Token);
 
@@ -256,7 +265,7 @@ public sealed class WebRtcTransportIntegrationTests
         });
 
         services.AddP2pMesh(meshId)
-            .AddWebRtcTransport<TestMessage>(options =>
+            .AddWebRtcTransport(options =>
             {
                 // Disable external STUN lookup to accelerate local integration tests efficiently
                 options.IceServers = Array.Empty<string>();
@@ -269,8 +278,8 @@ public sealed class WebRtcTransportIntegrationTests
             provider,
             peerId,
             provider.GetRequiredKeyedService<IWebRtcInvitationService>(meshId),
-            provider.GetRequiredKeyedService<ITransport<TestMessage>>(meshId),
-            provider.GetRequiredKeyedService<ITransportListener<TestMessage>>(meshId),
+            provider.GetRequiredKeyedService<ITransport>(meshId),
+            provider.GetRequiredKeyedService<ITransportListener>(meshId),
             provider.GetRequiredService<IPeerRegistry>()
         );
     }
@@ -279,8 +288,8 @@ public sealed class WebRtcTransportIntegrationTests
         ServiceProvider Provider,
         PeerId Id,
         IWebRtcInvitationService InvitationService,
-        ITransport<TestMessage> Transport,
-        ITransportListener<TestMessage> Listener,
+        ITransport Transport,
+        ITransportListener Listener,
         IPeerRegistry Registry) : IAsyncDisposable
     {
         public async ValueTask DisposeAsync()

@@ -158,7 +158,7 @@ public sealed class P2pAdvancedIntegrationTests
         }
 
         return node.Handler.ReceivedMessages.Any(m => 
-            Encoding.UTF8.GetString(m.Payload.Span) == expectedText);
+            Encoding.UTF8.GetString(m.Payload) == expectedText);
     }
 
     private TestNode CreateTestNode(int port, int defaultTtl = 5)
@@ -180,7 +180,7 @@ public sealed class P2pAdvancedIntegrationTests
                 options.Fanout = 2;
                 options.DefaultTimeToLive = defaultTtl;
             })
-            .AddHttpTransport<GossipMessage>(options =>
+            .AddHttpTransport(options =>
             {
                 options.ListenHost = "localhost";
                 options.ListenPort = port;
@@ -190,7 +190,7 @@ public sealed class P2pAdvancedIntegrationTests
         var handler = new TestMessageHandler();
         services.AddSingleton(handler);
         
-        services.AddKeyedSingleton<IMessageHandler<GossipMessage>>(TestMeshId, (sp, key) => sp.GetRequiredService<TestMessageHandler>());
+        services.AddKeyedSingleton<IApplicationPayloadHandler>(TestMeshId, (sp, key) => sp.GetRequiredService<TestMessageHandler>());
 
         var provider = services.BuildServiceProvider();
 

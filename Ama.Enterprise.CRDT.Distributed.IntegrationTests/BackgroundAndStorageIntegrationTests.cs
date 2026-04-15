@@ -194,7 +194,7 @@ public sealed class BackgroundAndStorageIntegrationTests
         await orchestrator.CreateDocumentAsync("storage-doc", "storage-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
-        var handler = sp.GetRequiredKeyedService<IMessageHandler<GossipMessage>>("StorageMesh");
+        var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>("StorageMesh");
         var serializer = sp.GetRequiredService<ICrdtSerializer>();
         
         // Prepare a complete fully bound fallback snapshot explicitly cleanly logically gracefully
@@ -215,8 +215,8 @@ public sealed class BackgroundAndStorageIntegrationTests
         
         var gossipMsg = new GossipMessage("StorageMesh", Guid.NewGuid(), new PeerId(Guid.NewGuid()), 10, wrapperBytes);
 
-        // Act
-        await handler.HandleAsync(gossipMsg, CancellationToken.None);
+        // Act - Process the completely unwrapped payload natively gracefully effectively bridging payload states
+        await handler.HandlePayloadAsync(gossipMsg.MeshId, gossipMsg.SenderId, gossipMsg.Payload, CancellationToken.None);
 
         // Assert
         docManager.Document.Data.Field.ShouldBe("SnapshotData");

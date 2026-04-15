@@ -80,7 +80,7 @@ public static class Program
             {
                 options.GossipInterval = TimeSpan.FromMilliseconds(500);
             })
-            .AddHttpTransport<GossipMessage>(options =>
+            .AddHttpTransport(options =>
             {
                 options.ListenPort = currentPort;
                 options.ListenHost = "localhost";

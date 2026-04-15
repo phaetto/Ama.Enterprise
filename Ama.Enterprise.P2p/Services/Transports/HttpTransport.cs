@@ -17,24 +17,23 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Implements generalized outbound transport using HTTP POST requests correctly decoupling explicitly securely.
 /// </summary>
-/// <typeparam name="TMessage">The type of the message being transported.</typeparam>
-public sealed class HttpTransport<TMessage> : ITransport<TMessage> where TMessage : IMeshMessage
+public sealed class HttpTransport : ITransport
 {
     private readonly IOptionsMonitor<HttpTransportOptions> optionsMonitor;
     private readonly IHttpClientFactory httpClientFactory;
     private readonly ICrdtSerializer serializer;
     private readonly IPeerRegistry peerRegistry;
-    private readonly ILogger<HttpTransport<TMessage>> logger;
+    private readonly ILogger<HttpTransport> logger;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="HttpTransport{TMessage}"/> class.
+    /// Initializes a new instance of the <see cref="HttpTransport"/> class.
     /// </summary>
     public HttpTransport(
         IOptionsMonitor<HttpTransportOptions> optionsMonitor,
         IHttpClientFactory httpClientFactory,
         ICrdtSerializer serializer,
         IPeerRegistry peerRegistry,
-        ILogger<HttpTransport<TMessage>> logger)
+        ILogger<HttpTransport> logger)
     {
         this.optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         this.httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
@@ -44,11 +43,29 @@ public sealed class HttpTransport<TMessage> : ITransport<TMessage> where TMessag
     }
 
     /// <inheritdoc />
-    public bool CanHandle(PeerEndpoint endpoint) => endpoint is HttpPeerEndpoint;
+    public bool CanHandle(PeerEndpoint endpoint)
+    {
+        if (endpoint == null)
+        {
+            throw new ArgumentNullException(nameof(endpoint));
+        }
+
+        return endpoint is HttpPeerEndpoint;
+    }
 
     /// <inheritdoc />
-    public async Task SendAsync(PeerEndpoint endpoint, TMessage message, CancellationToken cancellationToken)
+    public async Task SendAsync(PeerEndpoint endpoint, IMeshMessage message, CancellationToken cancellationToken)
     {
+        if (endpoint == null)
+        {
+            throw new ArgumentNullException(nameof(endpoint));
+        }
+
+        if (message == null)
+        {
+            throw new ArgumentNullException(nameof(message));
+        }
+
         if (endpoint is not HttpPeerEndpoint httpEndpoint)
         {
             logger.LogWarning("Cannot send HTTP message. Target endpoint is not an HttpPeerEndpoint: {Type}", endpoint.GetType().Name);
@@ -66,7 +83,7 @@ public sealed class HttpTransport<TMessage> : ITransport<TMessage> where TMessag
         }
 
         var options = optionsMonitor.Get(message.MeshId);
-        var path = options.PathPrefix.TrimStart('/');
+        var path = options.PathPrefix?.TrimStart('/') ?? string.Empty;
         var url = $"http://{httpEndpoint.Host}:{httpEndpoint.Port}/{path}";
         
         using var client = httpClientFactory.CreateClient("P2pTransport");

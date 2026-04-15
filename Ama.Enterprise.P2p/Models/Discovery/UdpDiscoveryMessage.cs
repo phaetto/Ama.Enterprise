@@ -7,4 +7,4 @@ using Ama.Enterprise.P2p.Models.Core;
 /// </summary>
 /// <param name="MeshId">The explicit mesh identifier context targeted inherently by the payload.</param>
 /// <param name="Node">The identified active P2P node data organically discovered gracefully.</param>
-public readonly record struct UdpDiscoveryMessage(string MeshId, PeerNode Node) : IMeshMessage;
+public sealed record UdpDiscoveryMessage(string MeshId, PeerNode Node) : IMeshMessage;

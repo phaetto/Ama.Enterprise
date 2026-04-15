@@ -1,8 +1,16 @@
 namespace Ama.Enterprise.P2p.Models.Core;
 
+using System.Text.Json.Serialization;
+using Ama.Enterprise.P2p.Models.Discovery;
+using Ama.Enterprise.P2p.Models.Gossip;
+
 /// <summary>
-/// Imposes a centralized generic constraint on protocol messages to inherently map their own synchronization mesh identifiers natively, enabling protocol-agnostic multiplexing globally.
+/// Imposes a centralized generic constraint on protocol messages to inherently map their own synchronization mesh identifiers natively.
+/// Configured with AOT-friendly JSON polymorphism to dynamically resolve specific network envelopes at the transport layer cleanly.
 /// </summary>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "$type", IgnoreUnrecognizedTypeDiscriminators = true, UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
+[JsonDerivedType(typeof(GossipMessage), "gossip")]
+[JsonDerivedType(typeof(UdpDiscoveryMessage), "udp-discovery")]
 public interface IMeshMessage
 {
     /// <summary>

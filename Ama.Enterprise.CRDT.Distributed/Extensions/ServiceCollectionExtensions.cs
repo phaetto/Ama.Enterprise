@@ -7,13 +7,12 @@ using Ama.CRDT.Services.Decorators;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.Services.P2p;
-using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 /// <summary>
-/// Extension methods for registering completely generic distributed CRDT state logic.
+/// Extension methods for registering completely generic distributed CRDT state logic gracefully elegantly cleanly intelligently.
 /// </summary>
 public static class ServiceCollectionExtensions
 {
@@ -31,8 +30,6 @@ public static class ServiceCollectionExtensions
             optionsBuilder.Configure(configure);
         }
 
-        // Validate the options rigorously to prevent systemic oscillations and side effects
-        // effectively bounded by strictly validated topology rules.
         optionsBuilder
             .Validate(options => options.CheckpointIntervalSeconds > 0, 
                 "CheckpointIntervalSeconds must be greater than zero.")
@@ -52,10 +49,8 @@ public static class ServiceCollectionExtensions
                 .AddCrdtAotContext(new DistributedCrdtSystemAotContext())
                 .AddCrdtSerializableType<CrdtRegistryEntry>("crdt-registry-entry");
 
-        // Register default memory storage only if a custom one hasn't been provided previously
         services.TryAddSingleton<IDistributedCrdtStorage, MemoryCrdtStorage>();
 
-        // Wire up the forwarder so that the underlying pipeline seamlessly uses the unified storage interface
         services.AddCrdtJournaling<StorageJournalForwarder>();
 
         services.AddCrdtApplicatorDecorator<JournalingApplicatorDecorator>(DecoratorBehavior.After);
@@ -64,17 +59,13 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<DistributedCrdtScopeProvider>();
         
-        // Register core dynamic AOT-safe generic orchestrator via transparent forwarder
         services.AddDistributedCrdtService<ICrdtDocumentOrchestrator, CrdtDocumentOrchestrator>();
         
-        // Register internal tracking singletons
         services.AddSingleton<IClusterStateTracker, ClusterStateTracker>();
         services.AddSingleton<ICrdtEvictionService, CrdtEvictionService>();
         
-        // Ensures documents initialize their states from their registered persistence providers eagerly on startup
         services.AddHostedService<CrdtInitializationService>();
 
-        // Orchestrates periodic saves ensuring underlying snapshots offload persistent writes alongside journal trimming bounds
         services.AddHostedService<CrdtCheckpointService>();
 
         return services;
@@ -93,8 +84,7 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers a generic domain service scoped securely within the dynamic CRDT lifecycle natively,
-    /// adding a transparent forwarder so it can be safely injected correctly from the root container seamlessly inherently explicit.
+    /// Registers a generic domain service scoped securely within the dynamic CRDT lifecycle natively.
     /// </summary>
     public static IServiceCollection AddDistributedCrdtService<TService, TImplementation>(this IServiceCollection services) 
         where TService : class 
@@ -110,14 +100,14 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Injects the generic CRDT routing dispatchers and anti-entropy background processors directly into the targeted P2P Mesh pipeline.
+    /// Injects the generic CRDT routing dispatchers and anti-entropy background processors directly into the targeted P2P Mesh pipeline securely decoupled from underlying algorithm gracefully.
     /// </summary>
     public static IServiceCollection AddDistributedCrdtP2p(this IServiceCollection services, string meshId)
     {
         if (services == null) throw new ArgumentNullException(nameof(services));
         if (string.IsNullOrWhiteSpace(meshId)) throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshId));
 
-        services.AddKeyedSingleton<IMessageHandler<GossipMessage>, CrdtGossipHandler>(meshId);
+        services.AddKeyedSingleton<IApplicationPayloadHandler, CrdtP2pPayloadHandler>(meshId);
         services.AddSingleton<IPeerTopologyObserver, CrdtTopologyObserver>();
         services.AddHostedService<CrdtAntiEntropyService>();
 

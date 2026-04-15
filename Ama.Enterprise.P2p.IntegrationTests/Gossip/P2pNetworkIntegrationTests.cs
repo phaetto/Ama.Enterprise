@@ -74,7 +74,7 @@ public sealed class P2pNetworkIntegrationTests
         nodeC.Handler.ReceivedMessages.Count.ShouldBe(1);
 
         var messageB = nodeB.Handler.ReceivedMessages.First();
-        Encoding.UTF8.GetString(messageB.Payload.Span).ShouldBe("IntegrationTestPayload123");
+        Encoding.UTF8.GetString(messageB.Payload).ShouldBe("IntegrationTestPayload123");
     }
 
     [IntegrationFact]
@@ -85,31 +85,37 @@ public sealed class P2pNetworkIntegrationTests
         await using var nodeA = CreateTestNode(8104);
         await using var nodeB = CreateTestNode(8105);
 
-        await RegisterPeerAsync(nodeA, nodeB, cts.Token);
+        // We manually push an explicitly crafted duplicate envelope over HTTP strictly verifying algorithm deduplication
         await nodeA.HostedService.StartAsync(cts.Token);
         await nodeB.HostedService.StartAsync(cts.Token);
 
         var payload = Encoding.UTF8.GetBytes("DeduplicationTest");
-        await nodeA.Protocol.BroadcastAsync(payload, cts.Token);
+        
+        var messageId = Guid.NewGuid();
+        var gossipMessage = new GossipMessage(TestMeshId, messageId, nodeA.Id, 5, payload);
 
-        // Wait for first propagation
-        await Task.Delay(TimeSpan.FromSeconds(2), cts.Token);
-        
-        var messageFromB = nodeB.Handler.ReceivedMessages.FirstOrDefault();
-        
-        // Emulate an unintended "echo" by explicitly sending the exact same tracked message back to Node B via standard HTTP
         var serializer = nodeA.Provider.GetRequiredService<ICrdtSerializer>();
-        var payloadBytes = serializer.SerializeToBytes(messageFromB);
+        
+        // Ensure STJ serialize the payload resolving abstract polymorphism explicitly
+        var payloadBytes = serializer.SerializeToBytes<IMeshMessage>(gossipMessage);
 
         var clientFactory = nodeA.Provider.GetRequiredService<IHttpClientFactory>();
         using var client = clientFactory.CreateClient();
         
-        using var request = new HttpRequestMessage(HttpMethod.Post, "http://localhost:8105/p2p/gossip/");
-        request.Headers.Add("X-P2P-Protocol-Version", Constants.ProtocolVersion);
-        request.Content = new ByteArrayContent(payloadBytes);
+        // First send
+        using var request1 = new HttpRequestMessage(HttpMethod.Post, "http://localhost:8105/p2p/gossip/");
+        request1.Headers.Add("X-P2P-Protocol-Version", Constants.ProtocolVersion);
+        request1.Content = new ByteArrayContent(payloadBytes);
         
-        await client.SendAsync(request, cts.Token);
+        await client.SendAsync(request1, cts.Token);
+        await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
 
+        // Second send (echo duplication directly pushing the exact same message UUID envelope)
+        using var request2 = new HttpRequestMessage(HttpMethod.Post, "http://localhost:8105/p2p/gossip/");
+        request2.Headers.Add("X-P2P-Protocol-Version", Constants.ProtocolVersion);
+        request2.Content = new ByteArrayContent(payloadBytes);
+        
+        await client.SendAsync(request2, cts.Token);
         await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
 
         // Assert Node B handled deduplication within IP2pProtocol and didn't dispatch to handlers again
@@ -227,7 +233,7 @@ public sealed class P2pNetworkIntegrationTests
         }
 
         return node.Handler.ReceivedMessages.Any(m => 
-            Encoding.UTF8.GetString(m.Payload.Span) == expectedText);
+            Encoding.UTF8.GetString(m.Payload) == expectedText);
     }
 
     private TestNode CreateTestNode(int port)
@@ -246,13 +252,12 @@ public sealed class P2pNetworkIntegrationTests
         services.AddP2pMesh(TestMeshId)
             .AddGossipNetwork(options =>
             {
-                options.GossipInterval = TimeSpan.FromMilliseconds(500); // Super-fast interval strictly for speeding tests
+                options.GossipInterval = TimeSpan.FromMilliseconds(500); 
                 options.Fanout = 2;
                 options.DefaultTimeToLive = 5;
             })
-            .AddHttpTransport<GossipMessage>(options =>
+            .AddHttpTransport(options =>
             {
-                // Bind strictly to localhost so Windows doesn't require Admin rights for HttpListener
                 options.ListenHost = "localhost";
                 options.ListenPort = port;
                 options.PathPrefix = "/p2p/gossip/";
@@ -261,8 +266,7 @@ public sealed class P2pNetworkIntegrationTests
         var handler = new TestMessageHandler();
         services.AddSingleton(handler);
         
-        // Delegate keyed interface registration to the exact same tracking instance
-        services.AddKeyedSingleton<IMessageHandler<GossipMessage>>(TestMeshId, (sp, key) => sp.GetRequiredService<TestMessageHandler>());
+        services.AddKeyedSingleton<IApplicationPayloadHandler>(TestMeshId, (sp, key) => sp.GetRequiredService<TestMessageHandler>());
 
         var provider = services.BuildServiceProvider();
 

@@ -4,10 +4,10 @@ using System;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
-/// Represents the fundamental unit of communication in the gossip network.
-/// Wraps the actual CRDT state or operation payloads.
+/// Represents the fundamental unit of communication in the gossip network algorithm natively.
+/// Wraps the generic application payloads securely for distribution.
 /// </summary>
-public readonly record struct GossipMessage : IMeshMessage, IEquatable<GossipMessage>
+public sealed record GossipMessage : IMeshMessage, IEquatable<GossipMessage>
 {
     /// <inheritdoc />
     public string MeshId { get; init; }
@@ -33,7 +33,7 @@ public readonly record struct GossipMessage : IMeshMessage, IEquatable<GossipMes
     public ReadOnlyMemory<byte> Payload { get; init; }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="GossipMessage"/> struct.
+    /// Initializes a new instance of the <see cref="GossipMessage"/> class.
     /// </summary>
     /// <param name="meshId">The mesh context identifier.</param>
     /// <param name="messageId">The message identifier.</param>
@@ -50,8 +50,10 @@ public readonly record struct GossipMessage : IMeshMessage, IEquatable<GossipMes
     }
 
     /// <inheritdoc />
-    public bool Equals(GossipMessage other)
+    public bool Equals(GossipMessage? other)
     {
+        if (other is null) return false;
+        
         return string.Equals(MeshId, other.MeshId, StringComparison.Ordinal) &&
                MessageId.Equals(other.MessageId) &&
                SenderId.Equals(other.SenderId) &&

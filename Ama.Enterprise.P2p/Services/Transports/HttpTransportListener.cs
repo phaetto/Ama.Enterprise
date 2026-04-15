@@ -17,25 +17,24 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Implements globally shared inbound multiplexing listeners explicitly wrapping HTTP natively capturing multi-tenant meshes accurately.
 /// </summary>
-/// <typeparam name="TMessage">The generic type of multiplexed messages natively traversing the transport effectively.</typeparam>
-public sealed class HttpTransportListener<TMessage> : ITransportListener<TMessage>, IDisposable where TMessage : IMeshMessage
+public sealed class HttpTransportListener : ITransportListener, IDisposable
 {
     private readonly IEnumerable<P2pMeshMetadata> meshes;
     private readonly IOptionsMonitor<HttpTransportOptions> optionsMonitor;
     private readonly ICrdtSerializer serializer;
-    private readonly ILogger<HttpTransportListener<TMessage>> logger;
+    private readonly ILogger<HttpTransportListener> logger;
     private HttpListener? httpListener;
     private CancellationTokenSource? listenerCts;
     private Task? listeningTask;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="HttpTransportListener{TMessage}"/> class.
+    /// Initializes a new instance of the <see cref="HttpTransportListener"/> class.
     /// </summary>
     public HttpTransportListener(
         IEnumerable<P2pMeshMetadata> meshes,
         IOptionsMonitor<HttpTransportOptions> optionsMonitor,
         ICrdtSerializer serializer,
-        ILogger<HttpTransportListener<TMessage>> logger)
+        ILogger<HttpTransportListener> logger)
     {
         this.meshes = meshes ?? throw new ArgumentNullException(nameof(meshes));
         this.optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
@@ -44,7 +43,7 @@ public sealed class HttpTransportListener<TMessage> : ITransportListener<TMessag
     }
 
     /// <inheritdoc />
-    public Task StartListeningAsync(Func<TMessage, Task> onMessageReceived, CancellationToken cancellationToken)
+    public Task StartListeningAsync(Func<IMeshMessage, Task> onMessageReceived, CancellationToken cancellationToken)
     {
         if (onMessageReceived is null)
         {
@@ -61,7 +60,7 @@ public sealed class HttpTransportListener<TMessage> : ITransportListener<TMessag
         {
             var options = optionsMonitor.Get(mesh.MeshId);
             var host = string.IsNullOrWhiteSpace(options.ListenHost) ? "+" : options.ListenHost;
-            var path = options.PathPrefix.EndsWith("/") ? options.PathPrefix : options.PathPrefix + "/";
+            var path = options.PathPrefix?.EndsWith("/") == true ? options.PathPrefix : (options.PathPrefix + "/");
             var prefix = $"http://{host}:{options.ListenPort}{path}";
             prefixes.Add(prefix);
         }
@@ -95,7 +94,14 @@ public sealed class HttpTransportListener<TMessage> : ITransportListener<TMessag
             await listenerCts.CancelAsync().ConfigureAwait(false);
         }
 
-        httpListener?.Stop();
+        if (httpListener is not null)
+        {
+            try
+            {
+                httpListener.Stop();
+            }
+            catch (ObjectDisposedException) { }
+        }
 
         if (listeningTask is not null)
         {
@@ -109,7 +115,7 @@ public sealed class HttpTransportListener<TMessage> : ITransportListener<TMessag
         logger.LogInformation("Shared HTTP transport multiplexer listener stopped.");
     }
 
-    private async Task ListenLoopAsync(Func<TMessage, Task> onMessageReceived, CancellationToken cancellationToken)
+    private async Task ListenLoopAsync(Func<IMeshMessage, Task> onMessageReceived, CancellationToken cancellationToken)
     {
         if (httpListener is null) return;
 
@@ -146,7 +152,7 @@ public sealed class HttpTransportListener<TMessage> : ITransportListener<TMessag
         }
     }
 
-    private async Task ProcessRequestAsync(HttpListenerContext context, Func<TMessage, Task> onMessageReceived, CancellationToken cancellationToken)
+    private async Task ProcessRequestAsync(HttpListenerContext context, Func<IMeshMessage, Task> onMessageReceived, CancellationToken cancellationToken)
     {
         try
         {
@@ -177,16 +183,16 @@ public sealed class HttpTransportListener<TMessage> : ITransportListener<TMessag
             await context.Request.InputStream.CopyToAsync(memoryStream, cancellationToken).ConfigureAwait(false);
             
             var payload = memoryStream.ToArray();
-            var message = serializer.DeserializeFromBytes<TMessage>(payload);
+            var message = serializer.DeserializeFromBytes<IMeshMessage>(payload);
 
             if (message is not null) 
             {
                 var targetMeshOptions = optionsMonitor.Get(message.MeshId);
 
                 // Enforce port isolation: ensure the target mesh actually exposes the port the message arrived on natively.
-                if (targetMeshOptions != null && context.Request.LocalEndPoint.Port != targetMeshOptions.ListenPort)
+                if (targetMeshOptions != null && context.Request.LocalEndPoint?.Port != targetMeshOptions.ListenPort)
                 {
-                    logger.LogWarning("Isolation rejected message for mesh {MeshId}: attempted to cross-connect via non-allowed port {Port}.", message.MeshId, context.Request.LocalEndPoint.Port);
+                    logger.LogWarning("Isolation rejected message for mesh {MeshId}: attempted to cross-connect via non-allowed port {Port}.", message.MeshId, context.Request.LocalEndPoint?.Port);
                     context.Response.StatusCode = (int)HttpStatusCode.Forbidden;
                     return;
                 }
@@ -207,7 +213,14 @@ public sealed class HttpTransportListener<TMessage> : ITransportListener<TMessag
         }
         finally
         {
-            context.Response.Close();
+            try
+            {
+                context.Response.Close();
+            }
+            catch (Exception)
+            {
+                // Ignored - ensure context closed cleanly.
+            }
         }
     }
 
