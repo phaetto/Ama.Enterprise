@@ -148,7 +148,7 @@
 | `$/Ama.Enterprise.P2p/Constants.cs` | Global constants for the P2P module, including protocol versions and payload size limits. |
 | `$/Ama.Enterprise.P2p/Extensions/IP2pMeshBuilder.cs` | Interface for building and configuring specific Keyed DI mesh profiles. |
 | `$/Ama.Enterprise.P2p/Extensions/P2pMeshBuilder.cs` | Implementation of `IP2pMeshBuilder` handling multi-mesh dependency injection tracking. |
-| `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | DI extension methods configuring P2P Gossip protocol components. Updated `HttpTransport` registration to inject `IPeerRegistry` dependency. |
+| `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Modified dependency mappings updating `ITransport` and `ITransportListener` to use explicitly mapped Keyed Services decoupled directly per mesh to enhance isolation boundaries. |
 | `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Registration logic configuring Dependency Injection specifically targeting the UDP peer discovery sub-components and background services. |
 | `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
 | `$/Ama.Enterprise.P2p/Models/Core/IMeshMessage.cs` | Updated to include `ProtocolVersion` natively standardizing structural validation. |
@@ -164,7 +164,7 @@
 | `$/Ama.Enterprise.P2p/Models/Gossip/GossipOptions.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/P2pJsonSerializerContext.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Transports/HttpPeerEndpoint.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Models/Transports/HttpTransportOptions.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Models/Transports/HttpTransportOptions.cs` | Added `IsEnabled` flag to explicitly track if the HTTP transport has been added for a designated P2P mesh dynamically cleanly natively. |
 | `$/Ama.Enterprise.P2p/Services/Core/ApplicationPayloadDispatcher.cs` | Composite orchestrator accurately securely cleanly dispatching to abstract domain observers efficiently naturally explicitly appropriately gracefully dynamically cleanly securely effortlessly logically. |
 | `$/Ama.Enterprise.P2p/Services/Core/IApplicationPayloadDispatcher.cs` | Dispatches explicitly targeted application payloads dynamically safely organically. |
 | `$/Ama.Enterprise.P2p/Services/Core/IApplicationPayloadHandler.cs` | Defines a domain-level consumer explicitly natively perfectly organically decoupling underlying distribution protocols seamlessly appropriately seamlessly efficiently. |
@@ -189,9 +189,9 @@
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpDiscoveryJsonContext.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerDiscovery.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Gossip/GossipProtocol.cs` | Safely populates orchestrating gossip parameters explicitly effectively cleanly explicitly correctly efficiently. |
-| `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | Extracted generic versioning mechanisms strictly isolating transport-agnostic enforcement natively cleanly intelligently securely. |
-| `$/Ama.Enterprise.P2p/Services/Transports/HttpTransport.cs` | Stripped obsolete specific HTTP version headers smoothly routing explicit models directly. |
-| `$/Ama.Enterprise.P2p/Services/Transports/HttpTransportListener.cs` | Redesigned directly catching polymorphic `NotSupportedException` mapping standard 505 statuses accurately elegantly properly natively. |
+| `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | Refactored generic mesh lifecycle orchestrator starting specifically Keyed transport listeners individually to match explicitly isolated bounds securely preventing multiplexing. |
+| `$/Ama.Enterprise.P2p/Services/Transports/HttpTransport.cs` | Refactored standard HTTP implementation natively isolated specifically strictly via Keyed dependencies handling precise outgoing payloads implicitly evaluating identical network bounds efficiently. |
+| `$/Ama.Enterprise.P2p/Services/Transports/HttpTransportListener.cs` | Redesigned inbound network listener transitioning away from multiplexing securely adapting explicit keyed dependencies handling localized prefixes explicitly safely isolating meshes effectively. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/PropertyInfoUsageAnalyzerTests.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/SystemConvertUsageAnalyzerTests.cs` | No description provided. |

@@ -39,48 +39,52 @@ public sealed class P2pHostedService : IHostedService
     /// <inheritdoc />
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        // Start Global Transport Listeners
-        var listeners = serviceProvider.GetServices<ITransportListener>();
-        foreach (var listener in listeners)
-        {
-            await listener.StartListeningAsync(async msg => 
-            {
-                var incomingVersion = new Version(0, 0, 0);
-                if (!string.IsNullOrWhiteSpace(msg.ProtocolVersion) && Version.TryParse(msg.ProtocolVersion, out var parsedVersion))
-                {
-                    incomingVersion = parsedVersion;
-                }
-
-                var localVersion = Version.Parse(Constants.ProtocolVersion);
-                if (incomingVersion.Major != localVersion.Major)
-                {
-                    logger.LogWarning("Rejected incoming multiplexed protocol message due to major version mismatch. Local: {LocalVersion}, Incoming: {IncomingVersion}", localVersion, incomingVersion);
-                    throw new NotSupportedException($"Protocol major version mismatch. Local: {localVersion.Major}, Incoming: {incomingVersion.Major}");
-                }
-
-                if (msg is GossipMessage gossipMsg)
-                {
-                    var targetQueue = serviceProvider.GetKeyedService<IInboundMessageQueue<GossipMessage>>(msg.MeshId);
-                    if (targetQueue is not null)
-                    {
-                        await targetQueue.WriteAsync(gossipMsg, default).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        logger.LogWarning("Received multiplexed gossip message for unknown mesh {MeshId}.", msg.MeshId);
-                    }
-                }
-                else
-                {
-                    // Designed for future generic expansion (e.g., PushPullMessage)
-                    logger.LogDebug("Received unhandled multiplexed protocol message type {MessageType} for mesh {MeshId}.", msg.GetType().Name, msg.MeshId);
-                }
-            }, cancellationToken).ConfigureAwait(false);
-        }
-
         foreach (var mesh in meshes)
         {
             logger.LogInformation("Orchestrating startup for P2P mesh network: {MeshId}", mesh.MeshId);
+
+            var listeners = serviceProvider.GetKeyedServices<ITransportListener>(mesh.MeshId);
+            foreach (var listener in listeners)
+            {
+                await listener.StartListeningAsync(async msg => 
+                {
+                    var incomingVersion = new Version(0, 0, 0);
+                    if (!string.IsNullOrWhiteSpace(msg.ProtocolVersion) && Version.TryParse(msg.ProtocolVersion, out var parsedVersion))
+                    {
+                        incomingVersion = parsedVersion;
+                    }
+
+                    var localVersion = Version.Parse(Constants.ProtocolVersion);
+                    if (incomingVersion.Major != localVersion.Major)
+                    {
+                        logger.LogWarning("[{MeshId}] Rejected incoming protocol message due to major version mismatch. Local: {LocalVersion}, Incoming: {IncomingVersion}", mesh.MeshId, localVersion, incomingVersion);
+                        throw new NotSupportedException($"Protocol major version mismatch. Local: {localVersion.Major}, Incoming: {incomingVersion.Major}");
+                    }
+
+                    if (!string.Equals(msg.MeshId, mesh.MeshId, StringComparison.Ordinal))
+                    {
+                        logger.LogWarning("[{ExpectedMeshId}] Listener received message isolated for a different mesh {ActualMeshId}.", mesh.MeshId, msg.MeshId);
+                        return;
+                    }
+
+                    if (msg is GossipMessage gossipMsg)
+                    {
+                        var targetQueue = serviceProvider.GetKeyedService<IInboundMessageQueue<GossipMessage>>(mesh.MeshId);
+                        if (targetQueue is not null)
+                        {
+                            await targetQueue.WriteAsync(gossipMsg, default).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            logger.LogWarning("[{MeshId}] Received gossip message for unknown isolated inbound queue.", mesh.MeshId);
+                        }
+                    }
+                    else
+                    {
+                        logger.LogDebug("[{MeshId}] Received unhandled protocol message type {MessageType}.", mesh.MeshId, msg.GetType().Name);
+                    }
+                }, cancellationToken).ConfigureAwait(false);
+            }
 
             var discovery = serviceProvider.GetKeyedService<IPeerDiscovery>(mesh.MeshId);
             if (discovery is IHostedService hostedDiscovery)
@@ -108,13 +112,12 @@ public sealed class P2pHostedService : IHostedService
             {
                 await hostedDiscovery.StopAsync(cancellationToken).ConfigureAwait(false);
             }
-        }
 
-        // Stop Global Transport Listeners
-        var listeners = serviceProvider.GetServices<ITransportListener>();
-        foreach (var listener in listeners)
-        {
-            await listener.StopListeningAsync(cancellationToken).ConfigureAwait(false);
+            var listeners = serviceProvider.GetKeyedServices<ITransportListener>(mesh.MeshId);
+            foreach (var listener in listeners)
+            {
+                await listener.StopListeningAsync(cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 }

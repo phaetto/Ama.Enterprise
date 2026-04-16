@@ -1,7 +1,6 @@
 namespace Ama.Enterprise.P2p.Services.Transports;
 
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Threading;
@@ -15,11 +14,11 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Implements globally shared inbound multiplexing listeners.
+/// Implements isolated inbound network listener, strictly binding configurations specific to a single mesh.
 /// </summary>
 public sealed class HttpTransportListener : ITransportListener, IDisposable
 {
-    private readonly IEnumerable<P2pMeshMetadata> meshes;
+    private readonly string meshId;
     private readonly IOptionsMonitor<HttpTransportOptions> optionsMonitor;
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<HttpTransportListener> logger;
@@ -31,12 +30,12 @@ public sealed class HttpTransportListener : ITransportListener, IDisposable
     /// Initializes a new instance of the <see cref="HttpTransportListener"/> class.
     /// </summary>
     public HttpTransportListener(
-        IEnumerable<P2pMeshMetadata> meshes,
+        string meshId,
         IOptionsMonitor<HttpTransportOptions> optionsMonitor,
         ICrdtSerializer serializer,
         ILogger<HttpTransportListener> logger)
     {
-        this.meshes = meshes ?? throw new ArgumentNullException(nameof(meshes));
+        this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
         this.optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -50,34 +49,30 @@ public sealed class HttpTransportListener : ITransportListener, IDisposable
             throw new ArgumentNullException(nameof(onMessageReceived));
         }
 
+        var options = optionsMonitor.Get(meshId);
+        if (!options.IsEnabled)
+        {
+            logger.LogInformation("[{MeshId}] HTTP Transport Listener is disabled for this mesh.", meshId);
+            return Task.CompletedTask;
+        }
+
         listenerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         httpListener = new HttpListener();
 
-        var prefixes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        // Map and group unique listener prefixes by all configured meshes.
-        foreach (var mesh in meshes)
-        {
-            var options = optionsMonitor.Get(mesh.MeshId);
-            var host = string.IsNullOrWhiteSpace(options.ListenHost) ? "+" : options.ListenHost;
-            var path = options.PathPrefix?.EndsWith("/") == true ? options.PathPrefix : (options.PathPrefix + "/");
-            var prefix = $"http://{host}:{options.ListenPort}{path}";
-            prefixes.Add(prefix);
-        }
+        var host = string.IsNullOrWhiteSpace(options.ListenHost) ? "+" : options.ListenHost;
+        var path = options.PathPrefix?.EndsWith("/") == true ? options.PathPrefix : (options.PathPrefix + "/");
+        var prefix = $"http://{host}:{options.ListenPort}{path}";
 
         try
         {
-            foreach (var prefix in prefixes)
-            {
-                httpListener.Prefixes.Add(prefix);
-                logger.LogInformation("Listening globally for multiplexed HTTP P2P traffic on {Prefix}", prefix);
-            }
+            httpListener.Prefixes.Add(prefix);
+            logger.LogInformation("[{MeshId}] Listening globally for HTTP P2P traffic on {Prefix}", meshId, prefix);
 
             httpListener.Start();
         }
         catch (HttpListenerException ex)
         {
-            logger.LogError(ex, "Failed to start multiplexed HTTP listener. Ensure proper port bindings and permissions.");
+            logger.LogError(ex, "[{MeshId}] Failed to start HTTP listener. Ensure proper port bindings and permissions.", meshId);
             throw;
         }
 
@@ -112,7 +107,7 @@ public sealed class HttpTransportListener : ITransportListener, IDisposable
             catch (OperationCanceledException) { }
         }
         
-        logger.LogInformation("Shared HTTP transport multiplexer listener stopped.");
+        logger.LogInformation("[{MeshId}] HTTP transport listener stopped.", meshId);
     }
 
     private async Task ListenLoopAsync(Func<IMeshMessage, Task> onMessageReceived, CancellationToken cancellationToken)
@@ -143,11 +138,11 @@ public sealed class HttpTransportListener : ITransportListener, IDisposable
 
                 if (!isListening) break;
 
-                logger.LogError(ex, "HTTP listener error while accepting incoming multiplexed request.");
+                logger.LogError(ex, "[{MeshId}] HTTP listener error while accepting incoming request.", meshId);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error accepting incoming globally multiplexed HTTP request.");
+                logger.LogError(ex, "[{MeshId}] Error accepting incoming HTTP request.", meshId);
             }
         }
     }
@@ -162,7 +157,6 @@ public sealed class HttpTransportListener : ITransportListener, IDisposable
                 return;
             }
 
-            // Fast-fail on completely unsupported major protocol versions via HTTP header
             var incomingVersion = context.Request.Headers["X-P2P-Protocol-Version"];
             if (!string.IsNullOrWhiteSpace(incomingVersion) && !IsMajorVersionCompatible(incomingVersion, Constants.ProtocolVersion))
             {
@@ -177,18 +171,14 @@ public sealed class HttpTransportListener : ITransportListener, IDisposable
 
             if (message is not null) 
             {
-                // Validate internal message protocol major version mapping
                 if (!IsMajorVersionCompatible(message.ProtocolVersion, Constants.ProtocolVersion))
                 {
                     throw new NotSupportedException($"Internal message protocol version {message.ProtocolVersion} is not compatible with local version {Constants.ProtocolVersion}.");
                 }
 
-                var targetMeshOptions = optionsMonitor.Get(message.MeshId);
-
-                // Enforce port isolation: ensure the target mesh actually exposes the port the message arrived on natively.
-                if (targetMeshOptions != null && context.Request.LocalEndPoint?.Port != targetMeshOptions.ListenPort)
+                if (!string.Equals(message.MeshId, meshId, StringComparison.Ordinal))
                 {
-                    logger.LogWarning("Isolation rejected message for mesh {MeshId}: attempted to cross-connect via non-allowed port {Port}.", message.MeshId, context.Request.LocalEndPoint?.Port);
+                    logger.LogWarning("[{MeshId}] Rejected message targeting foreign mesh ID {ForeignMeshId}.", meshId, message.MeshId);
                     context.Response.StatusCode = (int)HttpStatusCode.Forbidden;
                     return;
                 }
@@ -200,24 +190,24 @@ public sealed class HttpTransportListener : ITransportListener, IDisposable
                 }
                 catch (NotSupportedException ex)
                 {
-                    logger.LogWarning(ex, "Message rejected by inner payload handler: Protocol version not supported.");
+                    logger.LogWarning(ex, "[{MeshId}] Message rejected by inner payload handler: Protocol version not supported.", meshId);
                     context.Response.StatusCode = (int)HttpStatusCode.HttpVersionNotSupported;
                 }
             }
             else
             {
-                logger.LogWarning("Failed to deserialize generic multiplexed incoming message. Invalid format.");
+                logger.LogWarning("[{MeshId}] Failed to deserialize incoming message. Invalid format.", meshId);
                 context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
             }
         }
         catch (NotSupportedException ex)
         {
-            logger.LogWarning(ex, "Message rejected: Protocol version not supported.");
+            logger.LogWarning(ex, "[{MeshId}] Message rejected: Protocol version not supported.", meshId);
             context.Response.StatusCode = (int)HttpStatusCode.HttpVersionNotSupported;
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error processing incoming unified HTTP request.");
+            logger.LogError(ex, "[{MeshId}] Error processing incoming HTTP request.", meshId);
             context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
         }
         finally
@@ -233,14 +223,11 @@ public sealed class HttpTransportListener : ITransportListener, IDisposable
         }
     }
 
-    /// <summary>
-    /// Implements semantic versioning to enforce major protocol compatibility constraints.
-    /// </summary>
     private static bool IsMajorVersionCompatible(string? version1, string? version2)
     {
         if (string.IsNullOrWhiteSpace(version1) || string.IsNullOrWhiteSpace(version2)) 
         {
-            return true; // Fallback to allow if undefined structurally
+            return true;
         }
 
         var v1Major = version1.Split('.')[0];
@@ -268,6 +255,7 @@ public sealed class HttpTransportListener : ITransportListener, IDisposable
                 }
             }
             catch (ObjectDisposedException) { }
+            catch (PlatformNotSupportedException) { }
             
             httpListener.Close();
         }

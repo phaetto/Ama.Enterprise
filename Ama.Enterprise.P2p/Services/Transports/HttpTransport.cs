@@ -14,10 +14,11 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Implements generalized outbound transport using HTTP POST requests.
+/// Implements isolated outbound transport using HTTP POST requests mapped specifically to a target mesh.
 /// </summary>
 public sealed class HttpTransport : ITransport
 {
+    private readonly string meshId;
     private readonly IOptionsMonitor<HttpTransportOptions> optionsMonitor;
     private readonly IHttpClientFactory httpClientFactory;
     private readonly ICrdtSerializer serializer;
@@ -28,12 +29,14 @@ public sealed class HttpTransport : ITransport
     /// Initializes a new instance of the <see cref="HttpTransport"/> class.
     /// </summary>
     public HttpTransport(
+        string meshId,
         IOptionsMonitor<HttpTransportOptions> optionsMonitor,
         IHttpClientFactory httpClientFactory,
         ICrdtSerializer serializer,
         IPeerRegistry peerRegistry,
         ILogger<HttpTransport> logger)
     {
+        this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
         this.optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         this.httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
@@ -65,9 +68,14 @@ public sealed class HttpTransport : ITransport
             throw new ArgumentNullException(nameof(message));
         }
 
+        if (!string.Equals(message.MeshId, meshId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Message MeshId '{message.MeshId}' does not match Transport MeshId '{meshId}'.");
+        }
+
         if (endpoint is not HttpPeerEndpoint httpEndpoint)
         {
-            logger.LogWarning("Cannot send HTTP message. Target endpoint is not an HttpPeerEndpoint: {Type}", endpoint.GetType().Name);
+            logger.LogWarning("[{MeshId}] Cannot send HTTP message. Target endpoint is not an HttpPeerEndpoint: {Type}", meshId, endpoint.GetType().Name);
             return;
         }
 
@@ -81,7 +89,7 @@ public sealed class HttpTransport : ITransport
             throw new ArgumentOutOfRangeException(nameof(endpoint), "Endpoint port must be between 1 and 65535.");
         }
 
-        var options = optionsMonitor.Get(message.MeshId);
+        var options = optionsMonitor.Get(meshId);
         var path = options.PathPrefix?.TrimStart('/') ?? string.Empty;
         var url = $"http://{httpEndpoint.Host}:{httpEndpoint.Port}/{path}";
         
@@ -97,7 +105,7 @@ public sealed class HttpTransport : ITransport
             Content = content
         };
 
-        logger.LogTrace("[{MeshId}] Sending message to {Url}", message.MeshId, url);
+        logger.LogTrace("[{MeshId}] Sending message to {Url}", meshId, url);
 
         try
         {
@@ -106,15 +114,15 @@ public sealed class HttpTransport : ITransport
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TimeoutException)
         {
-            logger.LogWarning(ex, "[{MeshId}] Transport failure when communicating with {Url}. Removing peer from registry.", message.MeshId, url);
+            logger.LogWarning(ex, "[{MeshId}] Transport failure when communicating with {Url}. Removing peer from registry.", meshId, url);
             
-            var allPeers = await peerRegistry.GetAllPeersAsync(message.MeshId, cancellationToken).ConfigureAwait(false);
+            var allPeers = await peerRegistry.GetAllPeersAsync(meshId, cancellationToken).ConfigureAwait(false);
             var deadPeer = allPeers.FirstOrDefault(p => p.Endpoint.Equals(endpoint));
 
             if (deadPeer.Id.Value != Guid.Empty)
             {
-                logger.LogInformation("[{MeshId}] Automatically removing unreachable peer {PeerId}.", message.MeshId, deadPeer.Id);
-                await peerRegistry.RemovePeerAsync(message.MeshId, deadPeer.Id, cancellationToken).ConfigureAwait(false);
+                logger.LogInformation("[{MeshId}] Automatically removing unreachable peer {PeerId}.", meshId, deadPeer.Id);
+                await peerRegistry.RemovePeerAsync(meshId, deadPeer.Id, cancellationToken).ConfigureAwait(false);
             }
 
             throw;

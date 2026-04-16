@@ -3,6 +3,7 @@ namespace Ama.Enterprise.P2p.Extensions;
 using System;
 using System.Linq;
 using System.Text.Json.Serialization.Metadata;
+using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Models.Transports;
@@ -53,20 +54,17 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers the core HTTP transport.
+    /// Registers the core HTTP transport explicitly isolated to the current mesh context.
     /// </summary>
     public static IP2pMeshBuilder AddHttpTransport(
         this IP2pMeshBuilder builder,
         Action<HttpTransportOptions>? configureOptions = null)
     {
-        if (configureOptions is null)
+        builder.Services.Configure<HttpTransportOptions>(builder.MeshId, options => 
         {
-            builder.Services.Configure<HttpTransportOptions>(builder.MeshId, _ => { });
-        }
-        else
-        {
-            builder.Services.Configure(builder.MeshId, configureOptions);
-        }
+            options.IsEnabled = true;
+            configureOptions?.Invoke(options);
+        });
 
         builder.Services.AddHttpClient("P2pTransport");
 
@@ -80,9 +78,21 @@ public static class ServiceCollectionExtensions
             return new HttpPeerEndpoint(host, options.ListenPort);
         });
 
-        // Transport mechanisms are generic, polymorphic, and shared.
-        builder.Services.TryAddSingleton<ITransport, HttpTransport>();
-        builder.Services.TryAddSingleton<ITransportListener, HttpTransportListener>();
+        builder.Services.AddKeyedSingleton<ITransport>(builder.MeshId, (sp, key) =>
+            new HttpTransport(
+                (string)key!,
+                sp.GetRequiredService<IOptionsMonitor<HttpTransportOptions>>(),
+                sp.GetRequiredService<IHttpClientFactory>(),
+                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredService<IPeerRegistry>(),
+                sp.GetRequiredService<ILogger<HttpTransport>>()));
+
+        builder.Services.AddKeyedSingleton<ITransportListener>(builder.MeshId, (sp, key) =>
+            new HttpTransportListener(
+                (string)key!,
+                sp.GetRequiredService<IOptionsMonitor<HttpTransportOptions>>(),
+                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredService<ILogger<HttpTransportListener>>()));
 
         return builder;
     }
@@ -141,7 +151,7 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<ILogger<TimeBasedFailureDetector>>()));
         
         builder.Services.AddKeyedSingleton<ITransportRouter>(builder.MeshId, (sp, key) =>
-            new TransportRouter(sp.GetServices<ITransport>()));
+            new TransportRouter(sp.GetKeyedServices<ITransport>(key)));
 
         builder.Services.AddKeyedSingleton<IApplicationPayloadDispatcher>(builder.MeshId, (sp, key) =>
             new ApplicationPayloadDispatcher(

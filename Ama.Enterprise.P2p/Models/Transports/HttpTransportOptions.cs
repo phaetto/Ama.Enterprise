@@ -8,6 +8,11 @@ using System;
 public sealed class HttpTransportOptions : IEquatable<HttpTransportOptions>
 {
     /// <summary>
+    /// Gets or sets a value indicating whether the HTTP transport is explicitly enabled for a specific mesh.
+    /// </summary>
+    public bool IsEnabled { get; set; } = false;
+
+    /// <summary>
     /// Gets or sets the host address to bind to for incoming connections. 
     /// Defaults to "+" (all interfaces). Use "localhost" to avoid requiring Admin rights on Windows during local testing.
     /// </summary>
@@ -29,7 +34,8 @@ public sealed class HttpTransportOptions : IEquatable<HttpTransportOptions>
         if (other is null) return false;
         if (ReferenceEquals(this, other)) return true;
         
-        return ListenPort == other.ListenPort &&
+        return IsEnabled == other.IsEnabled &&
+               ListenPort == other.ListenPort &&
                string.Equals(ListenHost, other.ListenHost, StringComparison.OrdinalIgnoreCase) &&
                string.Equals(PathPrefix, other.PathPrefix, StringComparison.OrdinalIgnoreCase);
     }
@@ -38,6 +44,7 @@ public sealed class HttpTransportOptions : IEquatable<HttpTransportOptions>
     public override int GetHashCode()
     {
         return HashCode.Combine(
+            IsEnabled,
             ListenPort,
             StringComparer.OrdinalIgnoreCase.GetHashCode(ListenHost ?? string.Empty),
             StringComparer.OrdinalIgnoreCase.GetHashCode(PathPrefix ?? string.Empty));
