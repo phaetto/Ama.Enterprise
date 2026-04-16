@@ -6,7 +6,6 @@
   </Folder>
   <Folder Name="/Apps/">
     <File Path="apps-todo.txt" />
-    <Project Path="Ama.Enterprise.CRDT.BlazorApp/Ama.Enterprise.CRDT.BlazorApp.csproj" Id="8fb88a8e-60af-420c-8cc2-1cdd1d967720" />
   </Folder>
   <Folder Name="/EndProducts/">
     <Project Path="Ama.Enterprise.CRDT.OpenTelemetry/Ama.Enterprise.CRDT.OpenTelemetry.csproj" Id="c43db689-b047-4d09-ba26-ca88479ac36f" />

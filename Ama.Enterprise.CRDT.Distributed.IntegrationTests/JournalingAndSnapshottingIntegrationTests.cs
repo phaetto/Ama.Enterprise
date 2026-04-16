@@ -12,7 +12,9 @@ using Ama.CRDT.Models;
 using Ama.CRDT.Models.Aot;
 using Ama.CRDT.Models.Intents;
 using Ama.CRDT.Services;
+using Ama.CRDT.Services.Journaling;
 using Ama.CRDT.Services.Serialization;
+using Ama.CRDT.Services.Versioning;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
@@ -95,13 +97,16 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     }
 
     [IntegrationFact]
-    public async Task GetMissingOperations_ShouldReturnOperations_WhenJournalIsIntact()
+    public async Task EvaluateJournalCompletion_ShouldReturnOperations_WhenJournalIsIntact()
     {
         // Arrange
         var sp = BuildNode("ReplicaA");
         var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
         var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         var patcher = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtPatcher>();
+        var syncService = scopeProvider.Scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
+        var journalManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IJournalManager>();
+        var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
         
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
@@ -120,16 +125,18 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var remoteDvv = new DottedVersionVector();
 
         // Act
-        var result = await docA.GetMissingOperationsAsync("ReplicaB", remoteDvv, CancellationToken.None);
+        var requirement = syncService.CalculateRequirement("ReplicaB", remoteDvv, replicaContext.ReplicaId, replicaContext.GlobalVersionVector);
+        var missingOpsStream = journalManager.GetMissingOperationsAsync(requirement, CancellationToken.None);
+        var result = await syncService.EvaluateJournalCompletionAsync(missingOpsStream, requirement, CancellationToken.None);
 
         // Assert
         result.SnapshotRequired.ShouldBeFalse();
         result.Operations.Count.ShouldBeGreaterThan(0);
-        result.Operations.Any(o => o.Id == op.Id).ShouldBeTrue();
+        result.Operations.Any(o => o.Operation.Id == op.Id).ShouldBeTrue();
     }
 
     [IntegrationFact]
-    public async Task GetMissingOperations_ShouldReturnSnapshotRequired_WhenJournalIsTrimmed()
+    public async Task EvaluateJournalCompletion_ShouldReturnSnapshotRequired_WhenJournalIsTrimmed()
     {
         // Arrange
         var sp = BuildNode("ReplicaA");
@@ -137,6 +144,9 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         var patcher = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtPatcher>();
         var storage = sp.GetRequiredService<IDistributedCrdtStorage>();
+        var syncService = scopeProvider.Scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
+        var journalManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IJournalManager>();
+        var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
@@ -156,7 +166,10 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         // Act - Remote node with empty bounds asks for missing operations securely triggering gap logic organically
         var remoteDvv = new DottedVersionVector();
-        var result = await docA.GetMissingOperationsAsync("ReplicaB", remoteDvv, CancellationToken.None);
+        
+        var requirement = syncService.CalculateRequirement("ReplicaB", remoteDvv, replicaContext.ReplicaId, replicaContext.GlobalVersionVector);
+        var missingOpsStream = journalManager.GetMissingOperationsAsync(requirement, CancellationToken.None);
+        var result = await syncService.EvaluateJournalCompletionAsync(missingOpsStream, requirement, CancellationToken.None);
 
         // Assert - The mechanism detects causal truncation and smoothly requests a complete fallback snapshot flawlessly
         result.SnapshotRequired.ShouldBeTrue();

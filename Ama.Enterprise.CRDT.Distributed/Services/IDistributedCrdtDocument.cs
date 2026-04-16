@@ -31,12 +31,6 @@ public interface IDistributedCrdtDocument
     DottedVersionVector GetLocalState();
 
     /// <summary>
-    /// Calculates what operations are needed by a remote replica to catch up to this node's state.
-    /// Returns the natively defined operation data structure representing journal payloads appropriately seamlessly mapped natively.
-    /// </summary>
-    Task<MissingOperationsResult> GetMissingOperationsAsync(string remoteReplicaId, DottedVersionVector remoteState, CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// Applies incoming operations retrieved from a remote replica to the local document state.
     /// </summary>
     Task ApplyOperationsAsync(IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default);
@@ -47,20 +41,20 @@ public interface IDistributedCrdtDocument
     Task ProvideSnapshotAsync(string targetReplicaId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Applies a completely materialized snapshot payload seamlessly superseding local structure dependencies alongside explicitly targeted overarching global bounds explicitly.
+    /// Applies a completely materialized snapshot payload superseding local structure dependencies alongside explicitly targeted overarching global bounds.
     /// </summary>
     Task MergeSnapshotAsync(byte[] snapshotData, DottedVersionVector globalState, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Asynchronously saves the current in-memory document state to persistent storage natively.
-    /// Does not directly manage overarching DVV mapping updates natively avoiding structural write-ahead gaps securely.
+    /// Does not directly manage overarching DVV mapping updates avoiding structural write-ahead gaps.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous checkpoint operation.</returns>
     Task CheckpointAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Evicts the state and metadata of a specific peer replica from this document's internal tracker securely.
+    /// Evicts the state and metadata of a specific peer replica from this document's internal tracker.
     /// </summary>
     /// <param name="replicaId">The identifier of the remote replica to evict.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
@@ -70,7 +64,7 @@ public interface IDistributedCrdtDocument
     /// <summary>
     /// Resets the internal CRDT metadata and structures completely, used when forced to re-bootstrap identity following a cluster tombstone eviction.
     /// </summary>
-    /// <param name="oldReplicaId">The pre-reboot replica ID allowing offline operation continuity to seamlessly map correctly during the incoming fallback snapshot overwrite natively.</param>
+    /// <param name="oldReplicaId">The pre-reboot replica ID allowing offline operation continuity to map correctly during the incoming fallback snapshot overwrite.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     Task ResetLocalStateAsync(string oldReplicaId, CancellationToken cancellationToken = default);

@@ -37,7 +37,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     // Fast synchronous lock for atomic reference/flag swapping
     private readonly object syncRoot = new();
     
-    // Asynchronous lock guaranteeing strictly serialized patch/operation pipelines to completely prevent Lost Update anomalies
+    // Asynchronous lock guaranteeing strictly serialized patch/operation pipelines to prevent Lost Update anomalies
     private readonly SemaphoreSlim modificationLock = new(1, 1);
     
     private volatile bool isDirty;
@@ -163,41 +163,11 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     {
         var sourceDvv = replicaContext.GlobalVersionVector;
 
-        // Lock to natively prevent cross-thread collection modification errors during serialization mappings
+        // Lock to prevent cross-thread collection modification errors during serialization mappings
         lock (sourceDvv)
         {
             return sourceDvv.DeepClone();
         }
-    }
-
-    /// <inheritdoc />
-    public async Task<MissingOperationsResult> GetMissingOperationsAsync(string remoteReplicaId, DottedVersionVector remoteState, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(remoteReplicaId)) throw new ArgumentException("Remote replica ID cannot be null or empty.", nameof(remoteReplicaId));
-        if (remoteState == null) throw new ArgumentNullException(nameof(remoteState));
-
-        var localState = GetLocalState();
-        var requirement = syncService.CalculateRequirement(remoteReplicaId, remoteState, replicaContext.ReplicaId, localState);
-
-        if (!requirement.IsBehind)
-        {
-            return new MissingOperationsResult(Array.Empty<CrdtOperation>(), false);
-        }
-
-        var missingOpsStream = journalManager.GetMissingOperationsAsync(requirement, cancellationToken);
-        var syncResult = await syncService.EvaluateJournalCompletionAsync(missingOpsStream, requirement, cancellationToken).ConfigureAwait(false);
-
-        if (syncResult.SnapshotRequired)
-        {
-            return new MissingOperationsResult(Array.Empty<CrdtOperation>(), true);
-        }
-
-        var documentOperations = syncResult.Operations
-            .Where(jOp => jOp.DocumentId == DocumentId)
-            .Select(jOp => jOp.Operation)
-            .ToList();
-
-        return new MissingOperationsResult(documentOperations, false);
     }
 
     /// <inheritdoc />
@@ -248,7 +218,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             CrdtDocument<TState> currentDoc;
             DottedVersionVector globalState;
 
-            // Strict Pipeline lock ensures extraction of Document and DVV cannot be horizontally torn by concurrent active patches organically
+            // Strict Pipeline lock ensures extraction of Document and DVV cannot be horizontally torn by concurrent active patches
             await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
@@ -294,15 +264,15 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                // We intentionally discard any conflicting offline local operations because a snapshot effectively represents
-                // a cluster-mandated absolute truth natively completely preventing causal resurrection amnesia anomalies securely.
+                // We discard any conflicting offline local operations because a snapshot represents
+                // a cluster-mandated absolute truth preventing causal resurrection amnesia anomalies.
                 lock (syncRoot)
                 {
                     Document = snapshotDoc;
                     isDirty = true;
                 }
 
-                // Crucial alignment: Overwrite explicitly tracked encompassing P2P tracking vectors effectively matching the provider natively.
+                // Crucial alignment: Overwrite tracked encompassing P2P tracking vectors matching the provider.
                 lock (replicaContext.GlobalVersionVector)
                 {
                     replicaContext.GlobalVersionVector.Merge(globalState);
@@ -336,13 +306,13 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         {
             currentDoc = Document;
             // Acknowledge the dirty state prior to asynchronous I/O to prevent 
-            // concurrent writes during saving from being permanently ignored.
+            // concurrent writes during saving from being ignored.
             isDirty = false; 
         }
 
         try
         {
-            // Intentionally bubble exceptions so orchestrator safely aborts overarching global log modifications natively avoiding write ahead gaps securely
+            // Intentionally bubble exceptions so orchestrator aborts overarching global log modifications avoiding write ahead gaps
             await storage.SaveDocumentAsync(DocumentId, currentDoc, cancellationToken).ConfigureAwait(false);
             logger.LogDebug("Successfully saved checkpoint to persistent storage for document {DocumentId}.", DocumentId);
         }
@@ -350,7 +320,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         {
             lock (syncRoot)
             {
-                // Revert flag on failure so the orchestrator attempts mapping it again logically on the next loop cleanly
+                // Revert flag on failure so the orchestrator attempts mapping it again on the next loop
                 isDirty = true;
             }
             throw;

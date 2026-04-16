@@ -33,7 +33,6 @@ public sealed class RandomPeerSelector(
 
         if (peerList.Count == 0)
         {
-            logger.LogDebug("[{MeshId}] No active peers available for selection.", meshId);
             return Enumerable.Empty<PeerNode>();
         }
 

@@ -36,7 +36,7 @@ public static class Program
         // (like our UDP discovery logs) don't shred the interactive console UI.
         services.AddLogging(builder =>
         {
-            builder.SetMinimumLevel(LogLevel.Information);
+            builder.SetMinimumLevel(LogLevel.Debug);
             builder.AddFilter("Microsoft", LogLevel.Warning);
             builder.AddFilter("System", LogLevel.Warning);
             
@@ -50,7 +50,7 @@ public static class Program
         {
             options.Crdt.ReplicaId = replicaId;
             options.Crdt.ActiveSyncEnabled = true;
-            options.Crdt.CheckpointIntervalSeconds = 120;
+            options.Crdt.CheckpointIntervalSeconds = 5; // 120;
             options.Http.ListenPort = currentPort;
             options.Http.ListenHost = "localhost";
             options.UdpDiscovery.MulticastAddress = "239.255.0.1";
@@ -248,7 +248,7 @@ public static class Program
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
-        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Information;
+        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Debug;
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
