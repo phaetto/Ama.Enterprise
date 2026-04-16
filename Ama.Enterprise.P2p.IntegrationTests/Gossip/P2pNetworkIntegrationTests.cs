@@ -172,8 +172,8 @@ public sealed class P2pNetworkIntegrationTests
 
         // Phase 2: Node C crashes/drops out
         await nodeC.HostedService.StopAsync(cts.Token);
-        await nodeA.Registry.RemovePeerAsync(nodeC.Id, cts.Token);
-        await nodeB.Registry.RemovePeerAsync(nodeC.Id, cts.Token);
+        await nodeA.Registry.RemovePeerAsync(TestMeshId, nodeC.Id, cts.Token);
+        await nodeB.Registry.RemovePeerAsync(TestMeshId, nodeC.Id, cts.Token);
 
         // Phase 3: Node D joins the network mid-flight
         await using var nodeD = CreateTestNode(8114);
@@ -297,6 +297,6 @@ public sealed class P2pNetworkIntegrationTests
         }
 
         var nodeDetails = new PeerNode(targetNode.Id, targetNode.Endpoint);
-        await sourceNode.Registry.AddOrUpdatePeerAsync(nodeDetails, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
+        await sourceNode.Registry.AddOrUpdatePeerAsync(TestMeshId, nodeDetails, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
     }
 }

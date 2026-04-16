@@ -201,7 +201,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
 
                     if (remoteNode.Id.Value != nodeOptions.LocalPeerId && remoteNode.Id.Value != Guid.Empty)
                     {
-                        await peerRegistry.AddOrUpdatePeerAsync(remoteNode, PeerStatus.Active, token).ConfigureAwait(false);
+                        await peerRegistry.AddOrUpdatePeerAsync(meshId, remoteNode, PeerStatus.Active, token).ConfigureAwait(false);
 
                         var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), localEndpoint);
                         var responseBytes = serializer.SerializeToBytes(localNode);
@@ -248,7 +248,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
                 
                 foreach (var peer in discoveredPeers)
                 {
-                    await peerRegistry.AddOrUpdatePeerAsync(peer, PeerStatus.Active, token).ConfigureAwait(false);
+                    await peerRegistry.AddOrUpdatePeerAsync(meshId, peer, PeerStatus.Active, token).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException) { }

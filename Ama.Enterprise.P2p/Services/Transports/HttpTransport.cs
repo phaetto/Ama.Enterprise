@@ -108,13 +108,13 @@ public sealed class HttpTransport : ITransport
         {
             logger.LogWarning(ex, "[{MeshId}] Transport failure when communicating with {Url}. Removing peer from registry.", message.MeshId, url);
             
-            var allPeers = await peerRegistry.GetAllPeersAsync(cancellationToken).ConfigureAwait(false);
+            var allPeers = await peerRegistry.GetAllPeersAsync(message.MeshId, cancellationToken).ConfigureAwait(false);
             var deadPeer = allPeers.FirstOrDefault(p => p.Endpoint.Equals(endpoint));
 
             if (deadPeer.Id.Value != Guid.Empty)
             {
                 logger.LogInformation("[{MeshId}] Automatically removing unreachable peer {PeerId}.", message.MeshId, deadPeer.Id);
-                await peerRegistry.RemovePeerAsync(deadPeer.Id, cancellationToken).ConfigureAwait(false);
+                await peerRegistry.RemovePeerAsync(message.MeshId, deadPeer.Id, cancellationToken).ConfigureAwait(false);
             }
 
             throw;

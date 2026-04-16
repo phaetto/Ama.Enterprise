@@ -98,9 +98,9 @@
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Updated showcase application reflecting the refactored categorical options assignments. |
 | `$/Ama.Enterprise.FeatureFlags.UnitTests/Ama.Enterprise.FeatureFlags.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj` | No description provided. |
-| `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | Modified dependency mappings redirecting nested option properties directly to the underlying P2P dependencies. |
+| `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | Modified dependency mappings redirecting nested option properties directly to the underlying P2P dependencies. Updated to use configurable mesh IDs and registered the new Admin WebRTC interface. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlag.cs` | Data structure representing a single feature flag. |
-| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagOptions.cs` | Configuration structure broken into typed categories encompassing all underlying network and CRDT discovery options to prevent field duplication. |
+| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagOptions.cs` | Configuration structure broken into typed categories encompassing all underlying network and CRDT discovery options to prevent field duplication. Updated to include configurable Internal and Admin WebRTC mesh IDs. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagState.cs` | Explicitly inherits `IDistributedCrdtState` and maps generic constraints bridging properties dynamically. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsCrdtAotContext.cs` | AOT context for the feature flags models. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsJsonContext.cs` | JSON context for the feature flags models. |

@@ -15,8 +15,6 @@ using Microsoft.Extensions.DependencyInjection;
 /// </summary>
 public static class ServiceCollectionExtensions
 {
-    private const string FeatureFlagsMeshId = "feature-flags-internal-mesh";
-
     /// <summary>
     /// Adds the complete, plug-and-play feature flags system to the service collection,
     /// abstracting away all internal P2P cluster mesh configurations natively.
@@ -64,36 +62,54 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<FeatureFlagBootstrapper>();
 
         // Delegate routing orchestrations and background services completely to the distributed core
-        services.AddDistributedCrdtP2p(FeatureFlagsMeshId);
+        services.AddDistributedCrdtP2p(ffOpts.InternalMeshId);
 
         // Wire up the abstracted P2P network layer specifically for Feature Flags completely encapsulating internals seamlessly
-        services.AddP2pMesh(FeatureFlagsMeshId) // TODO: allow the user to select mesh ID always
-                .AddGossipNetwork(options =>
-                {
-                    options.GossipInterval = ffOpts.Gossip.GossipInterval;
-                    options.Fanout = ffOpts.Gossip.Fanout;
-                    options.DefaultTimeToLive = ffOpts.Gossip.DefaultTimeToLive;
-                })
-                .AddHttpTransport(options =>
-                {
-                    options.ListenPort = ffOpts.Http.ListenPort;
-                    options.ListenHost = ffOpts.Http.ListenHost;
-                    options.PathPrefix = ffOpts.Http.PathPrefix;
-                })
-                .AddUdpPeerDiscovery(options =>
-                {
-                    options.MulticastAddress = ffOpts.UdpDiscovery.MulticastAddress;
-                    options.MulticastPort = ffOpts.UdpDiscovery.MulticastPort;
-                    options.DiscoveryInterval = ffOpts.UdpDiscovery.DiscoveryInterval;
-                    options.DiscoveryTimeout = ffOpts.UdpDiscovery.DiscoveryTimeout;
-                })
-                .AddWebRtcTransport(options => 
-                {
-                    options.IceServers = ffOpts.WebRtc.IceServers;
-                    options.IceGatheringTimeout = ffOpts.WebRtc.IceGatheringTimeout;
-                });
+        if (!string.IsNullOrWhiteSpace(ffOpts.InternalMeshId))
+        {
+            services.AddP2pMesh(ffOpts.InternalMeshId)
+                    .AddGossipNetwork(options =>
+                    {
+                        options.GossipInterval = ffOpts.Gossip.GossipInterval;
+                        options.Fanout = ffOpts.Gossip.Fanout;
+                        options.DefaultTimeToLive = ffOpts.Gossip.DefaultTimeToLive;
+                    })
+                    .AddHttpTransport(options =>
+                    {
+                        options.ListenPort = ffOpts.Http.ListenPort;
+                        options.ListenHost = ffOpts.Http.ListenHost;
+                        options.PathPrefix = ffOpts.Http.PathPrefix;
+                    })
+                    .AddUdpPeerDiscovery(options =>
+                    {
+                        options.MulticastAddress = ffOpts.UdpDiscovery.MulticastAddress;
+                        options.MulticastPort = ffOpts.UdpDiscovery.MulticastPort;
+                        options.DiscoveryInterval = ffOpts.UdpDiscovery.DiscoveryInterval;
+                        options.DiscoveryTimeout = ffOpts.UdpDiscovery.DiscoveryTimeout;
+                    })
+                    .AddWebRtcTransport(options => 
+                    {
+                        options.IceServers = ffOpts.WebRtc.IceServers;
+                        options.IceGatheringTimeout = ffOpts.WebRtc.IceGatheringTimeout;
+                    });
+        }
 
-        // TODO: ama-enterprise-admin : The mesh that sends data to the admin panel, usually using WebRTC
+        // Add the mesh that sends data to the admin panel, usually using WebRTC
+        if (!string.IsNullOrWhiteSpace(ffOpts.AdminMeshId))
+        {
+            services.AddP2pMesh(ffOpts.AdminMeshId)
+                    .AddGossipNetwork(options =>
+                    {
+                        options.GossipInterval = ffOpts.Gossip.GossipInterval;
+                        options.Fanout = ffOpts.Gossip.Fanout;
+                        options.DefaultTimeToLive = ffOpts.Gossip.DefaultTimeToLive;
+                    })
+                    .AddWebRtcTransport(options =>
+                    {
+                        options.IceServers = ffOpts.AdminWebRtc.IceServers;
+                        options.IceGatheringTimeout = ffOpts.AdminWebRtc.IceGatheringTimeout;
+                    });
+        }
 
         return services;
     }

@@ -12,6 +12,16 @@ using Ama.Enterprise.P2p.WebRTC.Models;
 public sealed class FeatureFlagOptions
 {
     /// <summary>
+    /// Gets or sets the internal mesh identifier for the feature flags P2P network.
+    /// </summary>
+    public string InternalMeshId { get; set; } = "feature-flags-internal-mesh";
+
+    /// <summary>
+    /// Gets or sets the admin mesh identifier for the WebRTC admin interface.
+    /// </summary>
+    public string AdminMeshId { get; set; } = "ama-enterprise-admin";
+
+    /// <summary>
     /// Gets or sets the distributed CRDT options configuration.
     /// </summary>
     public DistributedCrdtOptions Crdt { get; set; } = new();
@@ -35,4 +45,9 @@ public sealed class FeatureFlagOptions
     /// Gets or sets the WebRTC transport options configuration.
     /// </summary>
     public WebRtcOptions WebRtc { get; set; } = new();
+
+    /// <summary>
+    /// Gets or sets the WebRTC transport options configuration for the admin panel mesh.
+    /// </summary>
+    public WebRtcOptions AdminWebRtc { get; set; } = new();
 }

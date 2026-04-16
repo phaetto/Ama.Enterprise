@@ -1,5 +1,7 @@
 namespace Ama.Enterprise.P2p.Services.Core;
 
+using System.Threading;
+using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
@@ -9,27 +11,30 @@ using Ama.Enterprise.P2p.Models.Core;
 public interface IPeerTopologyObserver
 {
     /// <summary>
-    /// Invoked when a new peer is successfully discovered, authenticated, and added to the active registry.
+    /// Invoked when a new peer is successfully discovered, authenticated, and added to a specific mesh registry.
     /// </summary>
+    /// <param name="meshId">The explicit mesh context identifier.</param>
     /// <param name="node">The newly joined peer.</param>
     /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
     /// <returns>A task that represents the asynchronous operation.</returns>
-    Task OnPeerJoinedAsync(PeerNode node, CancellationToken cancellationToken);
+    Task OnPeerJoinedAsync(string meshId, PeerNode node, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Invoked when a peer is declared dead by the failure detector and removed from the active registry.
+    /// Invoked when a peer is declared dead by the failure detector and removed from a specific mesh registry.
     /// </summary>
+    /// <param name="meshId">The explicit mesh context identifier.</param>
     /// <param name="peerId">The identifier of the departed peer.</param>
     /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
     /// <returns>A task that represents the asynchronous operation.</returns>
-    Task OnPeerDepartedAsync(PeerId peerId, CancellationToken cancellationToken);
+    Task OnPeerDepartedAsync(string meshId, PeerId peerId, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Invoked when a peer's status changes (e.g., from Active to Suspect).
+    /// Invoked when a peer's status changes (e.g., from Active to Suspect) within a specific mesh.
     /// </summary>
+    /// <param name="meshId">The explicit mesh context identifier.</param>
     /// <param name="peerId">The identifier of the peer.</param>
     /// <param name="newStatus">The updated status.</param>
     /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
     /// <returns>A task that represents the asynchronous operation.</returns>
-    Task OnPeerStatusChangedAsync(PeerId peerId, PeerStatus newStatus, CancellationToken cancellationToken);
+    Task OnPeerStatusChangedAsync(string meshId, PeerId peerId, PeerStatus newStatus, CancellationToken cancellationToken);
 }

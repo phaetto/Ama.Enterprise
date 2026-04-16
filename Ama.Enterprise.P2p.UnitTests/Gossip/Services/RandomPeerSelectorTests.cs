@@ -14,6 +14,7 @@ using Xunit;
 
 public sealed class RandomPeerSelectorTests
 {
+    private const string TestMeshId = "TestMesh";
     private readonly Mock<IPeerRegistry> registryMock;
     private readonly RandomPeerSelector selector;
 
@@ -21,7 +22,7 @@ public sealed class RandomPeerSelectorTests
     {
         registryMock = new Mock<IPeerRegistry>();
         var loggerMock = new Mock<ILogger<RandomPeerSelector>>();
-        selector = new RandomPeerSelector(registryMock.Object, loggerMock.Object);
+        selector = new RandomPeerSelector(TestMeshId, registryMock.Object, loggerMock.Object);
     }
 
     [Fact]
@@ -36,7 +37,7 @@ public sealed class RandomPeerSelectorTests
     public async Task GetPeersAsync_WithNoActivePeers_ShouldReturnEmpty()
     {
         // Arrange
-        registryMock.Setup(r => r.GetPeersByStatusAsync(PeerStatus.Active, It.IsAny<CancellationToken>()))
+        registryMock.Setup(r => r.GetPeersByStatusAsync(TestMeshId, PeerStatus.Active, It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
 
         // Act
@@ -54,7 +55,7 @@ public sealed class RandomPeerSelectorTests
             .Select(_ => new PeerNode(new PeerId(Guid.NewGuid()), new HttpPeerEndpoint("localhost", 8080)))
             .ToList();
 
-        registryMock.Setup(r => r.GetPeersByStatusAsync(PeerStatus.Active, It.IsAny<CancellationToken>()))
+        registryMock.Setup(r => r.GetPeersByStatusAsync(TestMeshId, PeerStatus.Active, It.IsAny<CancellationToken>()))
             .ReturnsAsync(activePeers);
 
         // Act
@@ -73,7 +74,7 @@ public sealed class RandomPeerSelectorTests
             .Select(_ => new PeerNode(new PeerId(Guid.NewGuid()), new HttpPeerEndpoint("localhost", 8080)))
             .ToList();
 
-        registryMock.Setup(r => r.GetPeersByStatusAsync(PeerStatus.Active, It.IsAny<CancellationToken>()))
+        registryMock.Setup(r => r.GetPeersByStatusAsync(TestMeshId, PeerStatus.Active, It.IsAny<CancellationToken>()))
             .ReturnsAsync(activePeers);
 
         // Act

@@ -221,6 +221,6 @@ public sealed class P2pAdvancedIntegrationTests
         }
 
         var nodeDetails = new PeerNode(targetNode.Id, targetNode.Endpoint);
-        await sourceNode.Registry.AddOrUpdatePeerAsync(nodeDetails, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
+        await sourceNode.Registry.AddOrUpdatePeerAsync(TestMeshId, nodeDetails, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
     }
 }

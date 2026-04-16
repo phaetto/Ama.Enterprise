@@ -11,13 +11,12 @@ using Microsoft.Extensions.Logging;
 /// <summary>
 /// Selects a randomized subset of active peers from a specific mesh, primarily suited for Epidemic/Gossip distributions.
 /// </summary>
-/// <remarks>
-/// Initializes a new instance of the <see cref="RandomPeerSelector"/> class.
-/// </remarks>
 public sealed class RandomPeerSelector(
+    string meshId,
     IPeerRegistry peerRegistry,
     ILogger<RandomPeerSelector> logger) : IPeerSelector
 {
+    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
     private readonly IPeerRegistry peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
     private readonly ILogger<RandomPeerSelector> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
@@ -29,12 +28,12 @@ public sealed class RandomPeerSelector(
             throw new ArgumentOutOfRangeException(nameof(count), "Count must be greater than zero.");
         }
 
-        var activePeers = await peerRegistry.GetPeersByStatusAsync(PeerStatus.Active, cancellationToken).ConfigureAwait(false);
+        var activePeers = await peerRegistry.GetPeersByStatusAsync(meshId, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
         var peerList = activePeers.ToList();
 
         if (peerList.Count == 0)
         {
-            logger.LogDebug("No active peers available for selection.");
+            logger.LogDebug("[{MeshId}] No active peers available for selection.", meshId);
             return Enumerable.Empty<PeerNode>();
         }
 
@@ -43,7 +42,7 @@ public sealed class RandomPeerSelector(
 
         var selectedPeers = peerList.Take(count).ToList();
         
-        logger.LogTrace("Selected {Count} peers out of {Total} active peers.", selectedPeers.Count, peerList.Count);
+        logger.LogTrace("[{MeshId}] Selected {Count} peers out of {Total} active peers.", meshId, selectedPeers.Count, peerList.Count);
         
         return selectedPeers;
     }

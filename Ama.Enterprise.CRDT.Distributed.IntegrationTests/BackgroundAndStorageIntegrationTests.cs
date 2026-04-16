@@ -39,6 +39,8 @@ public sealed partial class BackgroundAndStorageTestJsonContext : JsonSerializer
 
 public sealed class BackgroundAndStorageIntegrationTests
 {
+    private const string TestMeshId = "StorageMesh";
+
     public sealed class StorageTestState : IDistributedCrdtState
     {
         public string Id { get; set; } = "storage-doc";
@@ -64,7 +66,7 @@ public sealed class BackgroundAndStorageIntegrationTests
                 .AddCrdtJsonTypeInfoResolver(BackgroundAndStorageTestJsonContext.Default);
 
         services.AddDistributedDocumentType<StorageTestState>("storage-doc");
-        services.AddDistributedCrdtP2p("StorageMesh");
+        services.AddDistributedCrdtP2p(TestMeshId);
 
         services.AddSingleton(Mock.Of<IP2pProtocol>());
 
@@ -132,13 +134,13 @@ public sealed class BackgroundAndStorageIntegrationTests
         var peerNode = new PeerNode(new PeerId(Guid.NewGuid()), new HttpPeerEndpoint("http://localhost", 5000));
 
         // Act - Trigger Peer Joined naturally
-        await observer.OnPeerJoinedAsync(peerNode, CancellationToken.None);
+        await observer.OnPeerJoinedAsync(TestMeshId, peerNode, CancellationToken.None);
         
         // Assert - The observer should explicitly smoothly dynamically trigger document state sync broadcast seamlessly (1 documents: Registry and our test doc)
         mockP2p.Verify(p => p.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
         
         // Act - Trigger again explicitly testing the thread-safe connection check structurally
-        await observer.OnPeerJoinedAsync(new PeerNode(new PeerId(Guid.NewGuid()), new HttpPeerEndpoint("http://localhost2", 5001)), CancellationToken.None);
+        await observer.OnPeerJoinedAsync(TestMeshId, new PeerNode(new PeerId(Guid.NewGuid()), new HttpPeerEndpoint("http://localhost2", 5001)), CancellationToken.None);
         
         // Assert - Only triggered on the FIRST connected peer perfectly seamlessly safely natively correctly explicitly properly
         mockP2p.Verify(p => p.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());

@@ -33,11 +33,11 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver
     }
 
     /// <inheritdoc />
-    public async Task OnPeerJoinedAsync(PeerNode node, CancellationToken cancellationToken)
+    public async Task OnPeerJoinedAsync(string meshId, PeerNode node, CancellationToken cancellationToken)
     {
         if (Interlocked.CompareExchange(ref hasConnected, 1, 0) == 0)
         {
-            logger.LogInformation("Connected to first peer {PeerId}. Triggering immediate global DVV state sync.", node.Id);
+            logger.LogInformation("[{MeshId}] Connected to first peer {PeerId}. Triggering immediate global DVV state sync.", meshId, node.Id);
 
             try
             {
@@ -46,18 +46,18 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Failed to broadcast initial global state sync upon connecting to first peer.");
+                logger.LogError(ex, "[{MeshId}] Failed to broadcast initial global state sync upon connecting to first peer.", meshId);
             }
         }
     }
 
     /// <inheritdoc />
-    public Task OnPeerDepartedAsync(PeerId peerId, CancellationToken cancellationToken)
+    public Task OnPeerDepartedAsync(string meshId, PeerId peerId, CancellationToken cancellationToken)
     {
         if (peerId.Value != Guid.Empty)
         {
             var stringId = peerId.Value.ToString();
-            logger.LogInformation("Peer {PeerId} departed. Unmapping network ID but preserving CRDT state.", stringId);
+            logger.LogInformation("[{MeshId}] Peer {PeerId} departed. Unmapping network ID but preserving CRDT state.", meshId, stringId);
             
             // Intentionally DO NOT tombstone here to prevent massive cluster amnesia anomalies during rolling restarts.
             // The background TTL expiration threshold handles actual dead nodes securely.
@@ -68,14 +68,14 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver
     }
 
     /// <inheritdoc />
-    public Task OnPeerStatusChangedAsync(PeerId peerId, PeerStatus newStatus, CancellationToken cancellationToken)
+    public Task OnPeerStatusChangedAsync(string meshId, PeerId peerId, PeerStatus newStatus, CancellationToken cancellationToken)
     {
         if (newStatus == PeerStatus.Dead)
         {
             if (peerId.Value != Guid.Empty)
             {
                 var stringId = peerId.Value.ToString();
-                logger.LogInformation("Peer {PeerId} marked as Dead (network drop). Unmapping network ID but explicitly preserving CRDT state to allow safe offline reconnect without forcing identity re-bootstraps.", stringId);
+                logger.LogInformation("[{MeshId}] Peer {PeerId} marked as Dead (network drop). Unmapping network ID but explicitly preserving CRDT state to allow safe offline reconnect without forcing identity re-bootstraps.", meshId, stringId);
                 
                 // Intentionally DO NOT tombstone here to prevent data loss. The background TTL service will clean it if it doesn't return.
                 clusterTracker.RemovePeerByNetworkId(stringId);

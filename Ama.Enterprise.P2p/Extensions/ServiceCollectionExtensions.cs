@@ -130,6 +130,7 @@ public static class ServiceCollectionExtensions
 
         builder.Services.AddKeyedSingleton<IPeerSelector>(builder.MeshId, (sp, key) =>
             new RandomPeerSelector(
+                (string)key!,
                 sp.GetRequiredService<IPeerRegistry>(),
                 sp.GetRequiredService<ILogger<RandomPeerSelector>>()));
 

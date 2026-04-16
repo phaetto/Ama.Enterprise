@@ -175,8 +175,8 @@ public sealed class WebRtcTransportIntegrationTests
         // Give the WebRTC handshake message time to implicitly transmit and populate the registry
         for (int i = 0; i < 15; i++)
         {
-            var peersA = await nodeA.Registry.GetAllPeersAsync(cts.Token);
-            var peersB = await nodeB.Registry.GetAllPeersAsync(cts.Token);
+            var peersA = await nodeA.Registry.GetAllPeersAsync(meshId, cts.Token);
+            var peersB = await nodeB.Registry.GetAllPeersAsync(meshId, cts.Token);
 
             if (!peerBDiscoveredByA && peersA.Any(p => p.Id == peerBId)) peerBDiscoveredByA = true;
             if (!peerADiscoveredByB && peersB.Any(p => p.Id == peerAId)) peerADiscoveredByB = true;

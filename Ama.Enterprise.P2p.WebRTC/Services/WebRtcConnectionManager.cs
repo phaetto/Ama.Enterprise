@@ -217,7 +217,7 @@ public sealed class WebRtcConnectionManager : IWebRtcConnectionManager, IWebRtcI
                         logger.LogInformation("[{MeshId}] Discovered PeerId {PeerId} via WebRTC handshake on connection {ConnectionId}.", meshId, peerId.Value, connectionId);
                         
                         // Register dynamically to trigger discovery topology events implicitly
-                        _ = peerRegistry.AddOrUpdatePeerAsync(node, PeerStatus.Active, CancellationToken.None);
+                        _ = peerRegistry.AddOrUpdatePeerAsync(meshId, node, PeerStatus.Active, CancellationToken.None);
                     }
                 }
                 else if (data[0] == 0x00) // Standard payload mapping
