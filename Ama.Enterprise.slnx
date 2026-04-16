@@ -38,6 +38,7 @@
   <Project Path="Ama.Enterprise.CRDT.MessagePack/Ama.Enterprise.CRDT.MessagePack.csproj" Id="a96ff158-4583-485b-9d64-eb52b2b25123" />
   <Project Path="Ama.Enterprise.CRDT.TableStorage/Ama.Enterprise.CRDT.TableStorage.csproj" Id="807a871d-7aad-43f6-83c2-48e62e019c07" />
   <Project Path="Ama.Enterprise.P2p.IntegrationTests/Ama.Enterprise.P2p.IntegrationTests.csproj" Id="15a7eaaf-b3d8-4ec7-a32b-25a409f265c7" />
+  <Project Path="Ama.Enterprise.P2p.Kestrel/Ama.Enterprise.P2p.Kestrel.csproj" Id="ca40e19b-52d7-41b4-acc9-d5dd7648fb28" />
   <Project Path="Ama.Enterprise.P2p.UnitTests/Ama.Enterprise.P2p.UnitTests.csproj" Id="59f1fd65-b40a-4eec-9c39-f99f1665b7f0" />
   <Project Path="Ama.Enterprise.P2p.WebRTC.IntegrationTests/Ama.Enterprise.P2p.WebRTC.IntegrationTests.csproj" Id="484d8c43-aa18-41cf-8aef-27615860617d" />
   <Project Path="Ama.Enterprise.P2p.WebRTC.TableStorage/Ama.Enterprise.P2p.WebRTC.TableStorage.csproj" Id="7ef478ba-ea5b-4818-9c5b-aabae5d3485d" />
