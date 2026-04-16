@@ -17,6 +17,7 @@ using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 using Ama.Enterprise.P2p.Models.Transports;
@@ -185,6 +186,10 @@ public sealed class P2pAdvancedIntegrationTests
                 options.ListenPort = port;
                 options.PathPrefix = "/p2p/gossip/";
             });
+
+        // Ensure newly mapped keyed interfaces natively resolve bounds explicitly safely
+        services.AddKeyedSingleton<IFailureDetector>(TestMeshId, (sp, key) => new TimeBasedFailureDetector((string)key!, sp.GetRequiredService<IOptionsMonitor<FailureDetectorOptions>>(), sp.GetRequiredService<ILogger<TimeBasedFailureDetector>>()));
+        services.AddKeyedSingleton<IPeerAuthenticator>(TestMeshId, (sp, key) => new PassThroughPeerAuthenticator((string)key!, sp.GetRequiredService<ILogger<PassThroughPeerAuthenticator>>()));
 
         var handler = new TestMessageHandler();
         services.AddSingleton(handler);

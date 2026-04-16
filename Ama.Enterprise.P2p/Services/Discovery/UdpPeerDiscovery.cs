@@ -26,6 +26,8 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     private readonly ILogger<UdpPeerDiscovery> logger;
     private readonly IPeerRegistry peerRegistry;
     private readonly ICrdtSerializer serializer;
+    private readonly IPeerAuthenticator authenticator;
+    private readonly IFailureDetector failureDetector;
     
     private UdpClient? listener;
     private CancellationTokenSource? backgroundTaskCancellationSource;
@@ -43,6 +45,8 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     /// <param name="logger">The logger instance.</param>
     /// <param name="peerRegistry">The peer registry to populate with discovered nodes.</param>
     /// <param name="serializer">The centralized CRDT serializer.</param>
+    /// <param name="authenticator">The peer authenticator to validate remote node connections.</param>
+    /// <param name="failureDetector">The failure detector to track heartbeat signals during discovery pings.</param>
     /// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
     public UdpPeerDiscovery(
         string meshId,
@@ -51,7 +55,9 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
         PeerEndpoint localEndpoint,
         ILogger<UdpPeerDiscovery> logger,
         IPeerRegistry peerRegistry,
-        ICrdtSerializer serializer)
+        ICrdtSerializer serializer,
+        IPeerAuthenticator authenticator,
+        IFailureDetector failureDetector)
     {
         this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
         this.discoveryOptionsMonitor = discoveryOptionsMonitor ?? throw new ArgumentNullException(nameof(discoveryOptionsMonitor));
@@ -60,6 +66,8 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
         this.peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+        this.authenticator = authenticator ?? throw new ArgumentNullException(nameof(authenticator));
+        this.failureDetector = failureDetector ?? throw new ArgumentNullException(nameof(failureDetector));
     }
 
     /// <inheritdoc />
@@ -155,7 +163,13 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
 
                     if (node.Id.Value != nodeOptions.LocalPeerId && node.Id.Value != Guid.Empty)
                     {
-                        discoveredPeers.Add(node);
+                        var isAuthenticated = await authenticator.AuthenticateAsync(node, ReadOnlyMemory<byte>.Empty, timeoutCancellationSource.Token).ConfigureAwait(false);
+                        
+                        if (isAuthenticated)
+                        {
+                            await failureDetector.RecordHeartbeatAsync(node.Id, timeoutCancellationSource.Token).ConfigureAwait(false);
+                            discoveredPeers.Add(node);
+                        }
                     }
                 }
                 catch(Exception ex)
@@ -201,12 +215,22 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
 
                     if (remoteNode.Id.Value != nodeOptions.LocalPeerId && remoteNode.Id.Value != Guid.Empty)
                     {
-                        await peerRegistry.AddOrUpdatePeerAsync(meshId, remoteNode, PeerStatus.Active, token).ConfigureAwait(false);
-
-                        var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), localEndpoint);
-                        var responseBytes = serializer.SerializeToBytes(localNode);
+                        var isAuthenticated = await authenticator.AuthenticateAsync(remoteNode, ReadOnlyMemory<byte>.Empty, token).ConfigureAwait(false);
                         
-                        await listener.SendAsync(responseBytes, responseBytes.Length, result.RemoteEndPoint).ConfigureAwait(false);
+                        if (isAuthenticated)
+                        {
+                            await failureDetector.RecordHeartbeatAsync(remoteNode.Id, token).ConfigureAwait(false);
+                            await peerRegistry.AddOrUpdatePeerAsync(meshId, remoteNode, PeerStatus.Active, token).ConfigureAwait(false);
+
+                            var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), localEndpoint);
+                            var responseBytes = serializer.SerializeToBytes(localNode);
+                            
+                            await listener.SendAsync(responseBytes, responseBytes.Length, result.RemoteEndPoint).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            logger.LogDebug("[{MeshId}] Incoming UDP discovery ping from {PeerId} failed authentication.", meshId, remoteNode.Id.Value);
+                        }
                     }
                 }
                 catch (Exception ex)

@@ -50,14 +50,15 @@ public static class Program
         {
             options.Crdt.ReplicaId = replicaId;
             options.Crdt.ActiveSyncEnabled = true;
-            options.Crdt.CheckpointIntervalSeconds = 5; // 120;
+            options.Crdt.CheckpointIntervalSeconds = 120;
             options.Http.ListenPort = currentPort;
             options.Http.ListenHost = "localhost";
             options.UdpDiscovery.MulticastAddress = "239.255.0.1";
             options.UdpDiscovery.MulticastPort = 8035;
             options.UdpDiscovery.DiscoveryInterval = TimeSpan.FromSeconds(1);
             options.UdpDiscovery.DiscoveryTimeout = TimeSpan.FromSeconds(10);
-            options.Gossip.GossipInterval = TimeSpan.FromMilliseconds(500);
+            options.Gossip.GossipInterval = TimeSpan.FromMilliseconds(1500);
+            options.Gossip.DefaultTimeToLive = 3;
         });
 
         await using var provider = services.BuildServiceProvider();

@@ -4,11 +4,13 @@ using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
+using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Shouldly;
 using System;
 using System.Collections.Generic;
@@ -111,6 +113,10 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
                 options.MulticastPort = multicastPort;
                 options.DiscoveryTimeout = TimeSpan.FromSeconds(5);
             });
+
+        // Ensure newly mapped keyed interfaces natively resolve bounds explicitly safely
+        services.AddKeyedSingleton<IFailureDetector>(meshId, (sp, key) => new TimeBasedFailureDetector((string)key!, sp.GetRequiredService<IOptionsMonitor<FailureDetectorOptions>>(), sp.GetRequiredService<ILogger<TimeBasedFailureDetector>>()));
+        services.AddKeyedSingleton<IPeerAuthenticator>(meshId, (sp, key) => new PassThroughPeerAuthenticator((string)key!, sp.GetRequiredService<ILogger<PassThroughPeerAuthenticator>>()));
 
         var provider = services.BuildServiceProvider();
         serviceProviders.Add(provider);

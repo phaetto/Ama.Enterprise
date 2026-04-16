@@ -6,27 +6,6 @@
 | `$/.github/workflows/publish-nuget.yml` | GitHub Actions workflow for automatically publishing preview packages to NuGet upon pushing to the master branch. |
 | `$/.gitignore` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Analyzers/Ama.Enterprise.CRDT.Analyzers.csproj` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/Ama.Enterprise.CRDT.BlazorApp.csproj` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/App.razor` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/Layout/MainLayout.razor` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/Layout/MainLayout.razor.css` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/Layout/NavMenu.razor` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/Layout/NavMenu.razor.css` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/Pages/Counter.razor` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/Pages/Home.razor` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/Pages/NotFound.razor` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/Pages/Weather.razor` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/Program.cs` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/_Imports.razor` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/wwwroot/css/app.css` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/wwwroot/favicon.png` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/wwwroot/icon-192.png` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/wwwroot/icon-512.png` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/wwwroot/index.html` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/wwwroot/manifest.webmanifest` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/wwwroot/sample-data/weather.json` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/wwwroot/service-worker.js` | No description provided. |
-| `$/Ama.Enterprise.CRDT.BlazorApp/wwwroot/service-worker.published.js` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/Ama.Enterprise.CRDT.Distributed.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/AntiEntropyStateSyncIntegrationTests.cs` | Integration tests strictly verifying that state synchronization extracts unified missing operations efficiently. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/BackgroundAndStorageIntegrationTests.cs` | Handled breaking DI changes cleanly by invoking `IApplicationPayloadHandler` avoiding obsolete generic envelopes during manual fallback sync testing seamlessly intelligently perfectly optimally seamlessly reliably appropriately correctly gracefully securely seamlessly rationally flawlessly smoothly effectively explicitly smoothly cleanly natively. |
@@ -167,6 +146,7 @@
 | `$/Ama.Enterprise.P2p/Models/Transports/HttpPeerEndpoint.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Transports/HttpTransportOptions.cs` | Added `IsEnabled` flag to explicitly track if the HTTP transport has been added for a designated P2P mesh dynamically cleanly natively. |
 | `$/Ama.Enterprise.P2p/Services/Core/ApplicationPayloadDispatcher.cs` | Composite orchestrator accurately securely cleanly dispatching to abstract domain observers efficiently naturally explicitly appropriately gracefully dynamically cleanly securely effortlessly logically. |
+| `$/Ama.Enterprise.P2p/Services/Core/Design.md` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IApplicationPayloadDispatcher.cs` | Dispatches explicitly targeted application payloads dynamically safely organically. |
 | `$/Ama.Enterprise.P2p/Services/Core/IApplicationPayloadHandler.cs` | Defines a domain-level consumer explicitly natively perfectly organically decoupling underlying distribution protocols seamlessly appropriately seamlessly efficiently. |
 | `$/Ama.Enterprise.P2p/Services/Core/IFailureDetector.cs` | No description provided. |

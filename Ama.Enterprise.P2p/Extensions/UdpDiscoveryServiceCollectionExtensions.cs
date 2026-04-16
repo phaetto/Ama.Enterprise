@@ -59,7 +59,9 @@ public static class UdpDiscoveryServiceCollectionExtensions
                 sp.GetRequiredKeyedService<PeerEndpoint>(key),
                 sp.GetRequiredService<ILogger<UdpPeerDiscovery>>(),
                 sp.GetRequiredService<IPeerRegistry>(),
-                sp.GetRequiredService<ICrdtSerializer>()));
+                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredKeyedService<IPeerAuthenticator>(key),
+                sp.GetRequiredKeyedService<IFailureDetector>(key)));
 
         return builder;
     }

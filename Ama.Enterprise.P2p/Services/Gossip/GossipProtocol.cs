@@ -61,12 +61,15 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
                 serviceProvider.GetRequiredKeyedService<ITransportRouter>(meshId),
                 serviceProvider.GetRequiredKeyedService<IInboundMessageQueue<GossipMessage>>(meshId),
                 serviceProvider.GetRequiredKeyedService<IPeerSelector>(meshId),
-                serviceProvider.GetRequiredKeyedService<IApplicationPayloadDispatcher>(meshId)
+                serviceProvider.GetRequiredKeyedService<IApplicationPayloadDispatcher>(meshId),
+                serviceProvider.GetRequiredKeyedService<IFailureDetector>(meshId),
+                serviceProvider.GetRequiredService<IPeerRegistry>()
             );
 
             state.LoopCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             state.InboundLoopTask = Task.Run(() => ProcessInboundQueueAsync(meshId, state, state.LoopCts.Token), state.LoopCts.Token);
             state.BackgroundLoopTask = Task.Run(() => GossipLoopAsync(meshId, state, state.LoopCts.Token), state.LoopCts.Token);
+            state.HealthCheckLoopTask = Task.Run(() => HealthCheckLoopAsync(meshId, state, state.LoopCts.Token), state.LoopCts.Token);
 
             activeMeshes.TryAdd(meshId, state);
 
@@ -109,6 +112,15 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
                         try
                         {
                             await state.BackgroundLoopTask.ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) { }
+                    }
+
+                    if (state.HealthCheckLoopTask is not null)
+                    {
+                        try
+                        {
+                            await state.HealthCheckLoopTask.ConfigureAwait(false);
                         }
                         catch (OperationCanceledException) { }
                     }
@@ -169,6 +181,17 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
         return Task.WhenAll(dispatchTasks);
     }
 
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        foreach (var state in activeMeshes.Values)
+        {
+            state.Dispose();
+        }
+
+        activeMeshes.Clear();
+    }
+
     private async Task ProcessInboundQueueAsync(string meshId, MeshState state, CancellationToken cancellationToken)
     {
         try
@@ -205,6 +228,46 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
             catch (Exception ex)
             {
                 logger.LogError(ex, "[{MeshId}] An error occurred during the algorithm network gossip tick.", meshId);
+            }
+        }
+    }
+
+    private async Task HealthCheckLoopAsync(string meshId, MeshState state, CancellationToken cancellationToken)
+    {
+        var checkInterval = TimeSpan.FromSeconds(5);
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(checkInterval, cancellationToken).ConfigureAwait(false);
+                
+                var peers = await state.PeerRegistry.GetAllPeersAsync(meshId, cancellationToken).ConfigureAwait(false);
+                foreach (var peer in peers)
+                {
+                    var health = await state.FailureDetector.EvaluatePeerHealthAsync(peer.Id, cancellationToken).ConfigureAwait(false);
+                    
+                    if (health == PeerStatus.Dead)
+                    {
+                        logger.LogInformation("[{MeshId}] Peer {PeerId} marked as Dead by failure detector. Removing from registry.", meshId, peer.Id.Value);
+                        await state.PeerRegistry.RemovePeerAsync(meshId, peer.Id, cancellationToken).ConfigureAwait(false);
+                    }
+                    else if (health == PeerStatus.Suspect)
+                    {
+                        await state.PeerRegistry.AddOrUpdatePeerAsync(meshId, peer, PeerStatus.Suspect, cancellationToken).ConfigureAwait(false);
+                    }
+                    else 
+                    {
+                        await state.PeerRegistry.AddOrUpdatePeerAsync(meshId, peer, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "[{MeshId}] An error occurred during the algorithm health check tick.", meshId);
             }
         }
     }
@@ -252,6 +315,16 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
 
     private async Task HandleIncomingMessageAsync(string meshId, MeshState state, GossipMessage message)
     {
+        try
+        {
+            var token = state.LoopCts?.Token ?? default;
+            await state.FailureDetector.RecordHeartbeatAsync(message.SenderId, token).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "[{MeshId}] Failed to record heartbeat for peer {PeerId}.", meshId, message.SenderId.Value);
+        }
+
         if (state.SeenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow))
         {
             logger.LogDebug("[{MeshId}] Received new payload {MessageId} from {SenderId}. TTL: {Ttl}", meshId, message.MessageId, message.SenderId.Value, message.TimeToLive);
@@ -288,23 +361,14 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
         }
     }
 
-    /// <inheritdoc />
-    public void Dispose()
-    {
-        foreach (var state in activeMeshes.Values)
-        {
-            state.Dispose();
-        }
-
-        activeMeshes.Clear();
-    }
-
     private sealed class MeshState : IDisposable
     {
         public ITransportRouter TransportRouter { get; }
         public IInboundMessageQueue<GossipMessage> InboundQueue { get; }
         public IPeerSelector PeerSelector { get; }
         public IApplicationPayloadDispatcher Dispatcher { get; }
+        public IFailureDetector FailureDetector { get; }
+        public IPeerRegistry PeerRegistry { get; }
 
         public ConcurrentDictionary<Guid, DateTimeOffset> SeenMessages { get; } = new();
         public ConcurrentQueue<GossipMessage> MessageQueue { get; } = new();
@@ -312,17 +376,22 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
         public CancellationTokenSource? LoopCts { get; set; }
         public Task? BackgroundLoopTask { get; set; }
         public Task? InboundLoopTask { get; set; }
+        public Task? HealthCheckLoopTask { get; set; }
 
         public MeshState(
             ITransportRouter transportRouter,
             IInboundMessageQueue<GossipMessage> inboundQueue,
             IPeerSelector peerSelector,
-            IApplicationPayloadDispatcher dispatcher)
+            IApplicationPayloadDispatcher dispatcher,
+            IFailureDetector failureDetector,
+            IPeerRegistry peerRegistry)
         {
             TransportRouter = transportRouter;
             InboundQueue = inboundQueue;
             PeerSelector = peerSelector;
             Dispatcher = dispatcher;
+            FailureDetector = failureDetector;
+            PeerRegistry = peerRegistry;
         }
 
         public void Dispose()

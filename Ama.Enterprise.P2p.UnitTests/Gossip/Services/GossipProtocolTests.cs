@@ -24,6 +24,8 @@ public sealed class GossipProtocolTests
     private readonly Mock<IInboundMessageQueue<GossipMessage>> inboundQueueMock;
     private readonly Mock<IPeerSelector> peerSelectorMock;
     private readonly Mock<IApplicationPayloadDispatcher> dispatcherMock;
+    private readonly Mock<IFailureDetector> failureDetectorMock;
+    private readonly Mock<IPeerRegistry> peerRegistryMock;
     private readonly Mock<ILogger<GossipProtocol>> loggerMock;
     private readonly Mock<IOptionsMonitor<GossipOptions>> gossipOptionsMock;
     private readonly Mock<IOptionsMonitor<P2pNodeOptions>> nodeOptionsMock;
@@ -35,6 +37,8 @@ public sealed class GossipProtocolTests
         inboundQueueMock = new Mock<IInboundMessageQueue<GossipMessage>>();
         peerSelectorMock = new Mock<IPeerSelector>();
         dispatcherMock = new Mock<IApplicationPayloadDispatcher>();
+        failureDetectorMock = new Mock<IFailureDetector>();
+        peerRegistryMock = new Mock<IPeerRegistry>();
         loggerMock = new Mock<ILogger<GossipProtocol>>();
         
         gossipOptionsMock = new Mock<IOptionsMonitor<GossipOptions>>();
@@ -49,11 +53,22 @@ public sealed class GossipProtocolTests
         inboundQueueMock.Setup(q => q.ReadAllAsync(It.IsAny<CancellationToken>()))
             .Returns(EmptyAsyncEnumerable());
 
+        failureDetectorMock.Setup(f => f.EvaluatePeerHealthAsync(It.IsAny<PeerId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PeerStatus.Active);
+
+        peerRegistryMock.Setup(p => p.GetAllPeersAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Enumerable.Empty<PeerNode>());
+
         var services = new ServiceCollection();
         services.AddKeyedSingleton(TestMeshId, transportRouterMock.Object);
         services.AddKeyedSingleton(TestMeshId, inboundQueueMock.Object);
         services.AddKeyedSingleton(TestMeshId, peerSelectorMock.Object);
         services.AddKeyedSingleton(TestMeshId, dispatcherMock.Object);
+        services.AddKeyedSingleton(TestMeshId, failureDetectorMock.Object);
+        
+        // IPeerRegistry is registered as a regular singleton globally, mapping meshes natively
+        services.AddSingleton(peerRegistryMock.Object);
+        
         serviceProvider = services.BuildServiceProvider();
     }
 
@@ -128,7 +143,7 @@ public sealed class GossipProtocolTests
     public async Task ProcessInboundQueue_ShouldDispatchIncomingMessagesAndForward()
     {
         // Arrange
-        var testMessage = new GossipMessage(TestMeshId, Guid.NewGuid(), new PeerId(Guid.NewGuid()), 10, new byte[] { 4, 5, 6 });
+        var testMessage = new GossipMessage(TestMeshId, Constants.ProtocolVersion, Guid.NewGuid(), new PeerId(Guid.NewGuid()), 10, new byte[] { 4, 5, 6 });
         
         inboundQueueMock.Setup(q => q.ReadAllAsync(It.IsAny<CancellationToken>()))
             .Returns(YieldSingleMessageAsync(testMessage));
@@ -147,6 +162,9 @@ public sealed class GossipProtocolTests
             testMessage.SenderId,
             It.Is<ReadOnlyMemory<byte>>(m => m.ToArray().SequenceEqual(testMessage.Payload.ToArray())), 
             It.IsAny<CancellationToken>()), Times.Once);
+
+        // Check if heartbeat record logic was triggered correctly on inbound generic processing
+        failureDetectorMock.Verify(f => f.RecordHeartbeatAsync(testMessage.SenderId, It.IsAny<CancellationToken>()), Times.Once);
 
         await protocol.StopAsync(CancellationToken.None);
     }
