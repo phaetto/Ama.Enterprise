@@ -183,4 +183,77 @@ public static class ServiceCollectionExtensions
 
         return builder;
     }
+
+    /// <summary>
+    /// Registers the specific Push-Pull Gossip network protocol orchestrators natively handling targeted anti-entropy.
+    /// </summary>
+    public static IP2pMeshBuilder AddPushPullGossipNetwork(
+        this IP2pMeshBuilder builder, 
+        Action<PushPullGossipOptions>? configureOptions = null)
+    {
+        var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
+        if (!tracker.TryRegister(builder.MeshId, configureOptions))
+        {
+            return builder;
+        }
+
+        if (configureOptions is null)
+        {
+            builder.Services.Configure<PushPullGossipOptions>(builder.MeshId, _ => { });
+        }
+        else
+        {
+            builder.Services.Configure(builder.MeshId, configureOptions);
+        }
+
+        builder.Services.AddOptions<FailureDetectorOptions>(builder.MeshId)
+            .Configure<IOptionsMonitor<PushPullGossipOptions>>((failureOptions, pushPullOptionsMonitor) =>
+            {
+                var options = pushPullOptionsMonitor.Get(builder.MeshId);
+                if (options is not null)
+                {
+                    failureOptions.HeartbeatInterval = options.GossipInterval;
+                }
+            });
+
+        if (!builder.Services.Any(s => s.ServiceType == typeof(IJsonTypeInfoResolver) && s.ServiceKey as string == "Ama.CRDT" && s.ImplementationInstance == P2pJsonSerializerContext.Default))
+        {
+            builder.Services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", P2pJsonSerializerContext.Default);
+        }
+
+        builder.Services.AddKeyedSingleton<IInboundMessageQueue<GossipMessage>>(builder.MeshId, (sp, key) =>
+            new InboundMessageQueue<GossipMessage>());
+
+        builder.Services.TryAddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
+
+        builder.Services.AddKeyedSingleton<IPeerAuthenticator>(builder.MeshId, (sp, key) =>
+            new PassThroughPeerAuthenticator(
+                (string)key!, 
+                sp.GetRequiredService<ILogger<PassThroughPeerAuthenticator>>()));
+
+        builder.Services.AddKeyedSingleton<IPeerSelector>(builder.MeshId, (sp, key) =>
+            new RandomPeerSelector(
+                (string)key!,
+                sp.GetRequiredService<IPeerRegistry>(),
+                sp.GetRequiredService<ILogger<RandomPeerSelector>>()));
+
+        builder.Services.AddKeyedSingleton<IFailureDetector>(builder.MeshId, (sp, key) =>
+            new TimeBasedFailureDetector(
+                (string)key!,
+                sp.GetRequiredService<IOptionsMonitor<FailureDetectorOptions>>(),
+                sp.GetRequiredService<ILogger<TimeBasedFailureDetector>>()));
+        
+        builder.Services.AddKeyedSingleton<ITransportRouter>(builder.MeshId, (sp, key) =>
+            new TransportRouter(sp.GetKeyedServices<ITransport>(key)));
+
+        builder.Services.AddKeyedSingleton<IApplicationPayloadDispatcher>(builder.MeshId, (sp, key) =>
+            new ApplicationPayloadDispatcher(
+                (string)key!,
+                sp.GetKeyedServices<IApplicationPayloadHandler>(key),
+                sp.GetRequiredService<ILogger<ApplicationPayloadDispatcher>>()));
+        
+        builder.Services.TryAddSingleton<IP2pProtocol, PushPullGossipProtocol>();
+
+        return builder;
+    }
 }

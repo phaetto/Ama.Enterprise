@@ -94,6 +94,7 @@
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pAdvancedIntegrationTests.cs` | Updated DI registrations safely routing `IApplicationPayloadHandler` explicitly and adapted assertion mechanics to cleanly decode unwrapped byte arrays effectively flawlessly securely. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pNetworkIntegrationTests.cs` | Refactored integration assertions targeting correctly unboxed test payloads. Cleanly redesigned deduplication tests securely explicitly wrapping identical envelopes ensuring robust evaluation natively naturally successfully gracefully. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pVersioningIntegrationTests.cs` | Refactored integration assertions accurately mapping completely natively unboxed generic wrappers implicitly flawlessly properly completely correctly natively cleanly organically smoothly appropriately. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/PushPullGossipIntegrationTests.cs` | Integration tests thoroughly verifying explicit Push-Pull anti-entropy bounds appropriately isolating digest transmissions natively ensuring active localized fallback synchronizations cleanly explicitly successfully. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/UdpPeerDiscoveryIntegrationTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.Kestrel.IntegrationTests/Services/KestrelTransportIntegrationTests.cs` | Integration tests thoroughly verifying the ASP.NET Core Kestrel-based P2P networking transport. Validates isolated end-to-end messaging correctly, bidirectional dynamic routing safely, explicit fault handling seamlessly evicting dead remote targets organically, and generic unmapped fallback bounds smoothly accurately natively gracefully properly inherently logically intelligently reliably rationally perfectly flawlessly smartly. |
 | `$/Ama.Enterprise.P2p.Kestrel/Ama.Enterprise.P2p.Kestrel.csproj` | Added `Microsoft.AspNetCore.App` framework reference for ASP.NET Core Kestrel dependencies. |
@@ -136,7 +137,7 @@
 | `$/Ama.Enterprise.P2p/Extensions/IP2pMeshBuilder.cs` | Interface for building and configuring specific Keyed DI mesh profiles. |
 | `$/Ama.Enterprise.P2p/Extensions/P2pMeshBuilder.cs` | Implementation of `IP2pMeshBuilder` handling multi-mesh dependency injection tracking. |
 | `$/Ama.Enterprise.P2p/Extensions/P2pMeshRegistrationTracker.cs` | Centralized tracking mechanism guaranteeing idempotent mesh registrations safely evaluating structurally identical configurations natively bypassing duplicates perfectly securely efficiently. |
-| `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Modified dependency mappings updating `ITransport` and `ITransportListener` to use explicitly mapped Keyed Services decoupled directly per mesh to enhance isolation boundaries. |
+| `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Modified dependency mappings safely adding the explicit `AddPushPullGossipNetwork` configurator decoupling the protocol boundaries cleanly. |
 | `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Registration logic configuring Dependency Injection specifically targeting the UDP peer discovery sub-components and background services. |
 | `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
 | `$/Ama.Enterprise.P2p/Models/Core/IMeshMessage.cs` | Updated to include `ProtocolVersion` natively standardizing structural validation. |
@@ -149,7 +150,9 @@
 | `$/Ama.Enterprise.P2p/Models/Discovery/UdpDiscoveryMessage.cs` | Updated with `ProtocolVersion` aligning explicit polymorphic bounds gracefully. |
 | `$/Ama.Enterprise.P2p/Models/Discovery/UdpDiscoveryOptions.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Gossip/GossipMessage.cs` | Incorporated `ProtocolVersion` maintaining fallback compatibility implicitly effectively natively. |
+| `$/Ama.Enterprise.P2p/Models/Gossip/GossipMessageType.cs` | Defines explicit message typings enabling push-pull sync interactions cleanly distinguishing broadcasts natively. |
 | `$/Ama.Enterprise.P2p/Models/Gossip/GossipOptions.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Models/Gossip/PushPullGossipOptions.cs` | Dedicated configuration options decoupling the Push-Pull mechanisms safely without polluting the pure baseline primitives. |
 | `$/Ama.Enterprise.P2p/Models/P2pJsonSerializerContext.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Transports/HttpPeerEndpoint.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Transports/HttpTransportOptions.cs` | Added `IsEnabled` flag to explicitly track if the HTTP transport has been added for a designated P2P mesh dynamically cleanly natively. |
@@ -178,6 +181,7 @@
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpDiscoveryJsonContext.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerDiscovery.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Gossip/GossipProtocol.cs` | Safely populates orchestrating gossip parameters explicitly effectively cleanly explicitly correctly efficiently. |
+| `$/Ama.Enterprise.P2p/Services/Gossip/PushPullGossipProtocol.cs` | Dedicated generic advanced orchestrator gracefully managing structured Push-Pull anti-entropy bounds securely over native P2P boundaries. |
 | `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | Refactored generic mesh lifecycle orchestrator starting specifically Keyed transport listeners individually to match explicitly isolated bounds securely preventing multiplexing. |
 | `$/Ama.Enterprise.P2p/Services/Transports/HttpTransport.cs` | Refactored standard HTTP implementation natively isolated specifically strictly via Keyed dependencies handling precise outgoing payloads implicitly evaluating identical network bounds efficiently. |
 | `$/Ama.Enterprise.P2p/Services/Transports/HttpTransportListener.cs` | Redesigned inbound network listener transitioning away from multiplexing securely adapting explicit keyed dependencies handling localized prefixes explicitly safely isolating meshes effectively. |
