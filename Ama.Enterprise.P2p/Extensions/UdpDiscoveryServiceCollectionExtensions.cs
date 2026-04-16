@@ -38,6 +38,12 @@ public static class UdpDiscoveryServiceCollectionExtensions
             throw new ArgumentNullException(nameof(configureOptions));
         }
 
+        var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
+        if (!tracker.TryRegister(builder.MeshId, configureOptions))
+        {
+            return builder;
+        }
+
         builder.Services.Configure(builder.MeshId, configureOptions);
 
         if (!builder.Services.Any(s => s.ServiceType == typeof(IJsonTypeInfoResolver) && s.ServiceKey as string == "Ama.CRDT" && s.ImplementationInstance == UdpDiscoveryJsonContext.Default))

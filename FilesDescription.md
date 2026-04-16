@@ -148,12 +148,13 @@
 | `$/Ama.Enterprise.P2p/Constants.cs` | Global constants for the P2P module, including protocol versions and payload size limits. |
 | `$/Ama.Enterprise.P2p/Extensions/IP2pMeshBuilder.cs` | Interface for building and configuring specific Keyed DI mesh profiles. |
 | `$/Ama.Enterprise.P2p/Extensions/P2pMeshBuilder.cs` | Implementation of `IP2pMeshBuilder` handling multi-mesh dependency injection tracking. |
+| `$/Ama.Enterprise.P2p/Extensions/P2pMeshRegistrationTracker.cs` | Centralized tracking mechanism guaranteeing idempotent mesh registrations safely evaluating structurally identical configurations natively bypassing duplicates perfectly securely efficiently. |
 | `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Modified dependency mappings updating `ITransport` and `ITransportListener` to use explicitly mapped Keyed Services decoupled directly per mesh to enhance isolation boundaries. |
 | `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Registration logic configuring Dependency Injection specifically targeting the UDP peer discovery sub-components and background services. |
 | `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
 | `$/Ama.Enterprise.P2p/Models/Core/IMeshMessage.cs` | Updated to include `ProtocolVersion` natively standardizing structural validation. |
 | `$/Ama.Enterprise.P2p/Models/Core/P2pMeshMetadata.cs` | Metadata record registering a specific mesh identifier into the global dependency container for orchestration. |
-| `$/Ama.Enterprise.P2p/Models/Core/P2pNodeOptions.cs` | Centralized generic configuration options holding the core node identity (ID and Endpoint) for the P2P Mesh. |
+| `$/Ama.Enterprise.P2p/Models/Core/P2pNodeOptions.cs` | Centralized generic configuration options holding the core node identity (ID and Endpoint) for the P2P Mesh. Updated to enforce a static, process-wide global peer identifier to satisfy repeatable idempotent tracker validations explicitly. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerEndpoint.cs` | Abstract base record for peer endpoints, explicitly configured with JSON polymorphic attributes natively mapping same-assembly derivatives to support standard AOT serialization. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerId.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerNode.cs` | No description provided. |

@@ -34,6 +34,12 @@ public static class ServiceCollectionExtensions
             throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshId));
         }
 
+        var tracker = P2pMeshRegistrationTracker.GetOrCreate(services);
+        if (!tracker.TryRegister(meshId, configureNodeOptions))
+        {
+            return new P2pMeshBuilder(services, meshId);
+        }
+
         if (configureNodeOptions is null)
         {
             services.Configure<P2pNodeOptions>(meshId, _ => { });
@@ -60,11 +66,19 @@ public static class ServiceCollectionExtensions
         this IP2pMeshBuilder builder,
         Action<HttpTransportOptions>? configureOptions = null)
     {
-        builder.Services.Configure<HttpTransportOptions>(builder.MeshId, options => 
+        Action<HttpTransportOptions> configAction = options => 
         {
             options.IsEnabled = true;
             configureOptions?.Invoke(options);
-        });
+        };
+
+        var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
+        if (!tracker.TryRegister(builder.MeshId, configAction))
+        {
+            return builder;
+        }
+
+        builder.Services.Configure<HttpTransportOptions>(builder.MeshId, configAction);
 
         builder.Services.AddHttpClient("P2pTransport");
 
@@ -104,6 +118,12 @@ public static class ServiceCollectionExtensions
         this IP2pMeshBuilder builder, 
         Action<GossipOptions>? configureOptions = null)
     {
+        var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
+        if (!tracker.TryRegister(builder.MeshId, configureOptions))
+        {
+            return builder;
+        }
+
         if (configureOptions is null)
         {
             builder.Services.Configure<GossipOptions>(builder.MeshId, _ => { });

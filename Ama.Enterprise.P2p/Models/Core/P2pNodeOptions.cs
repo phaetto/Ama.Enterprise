@@ -7,10 +7,12 @@ using System;
 /// </summary>
 public sealed class P2pNodeOptions : IEquatable<P2pNodeOptions>
 {
+    private static readonly Guid ProcessGlobalPeerId = Guid.NewGuid();
+
     /// <summary>
-    /// Gets or sets the unique identifier of the local peer node.
+    /// Gets or sets the unique identifier of the local peer node. Defaults to a process-wide unique identifier.
     /// </summary>
-    public Guid LocalPeerId { get; set; } = Guid.NewGuid();
+    public Guid LocalPeerId { get; set; } = ProcessGlobalPeerId;
 
     /// <inheritdoc />
     public bool Equals(P2pNodeOptions? other)

@@ -16,12 +16,12 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Extension methods for securely registering cross-platform WebRTC transport securely decoupled rationally organically seamlessly natively gracefully cleanly perfectly optimally confidently dynamically intelligently gracefully cleanly efficiently elegantly.
+/// Extension methods for securely registering cross-platform WebRTC transport.
 /// </summary>
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers standalone WebRTC generic polymorphic dynamically effectively rationally cleanly securely explicitly cleanly smoothly organically appropriately gracefully transport services binding actively underneath the current mesh context identifiers properly.
+    /// Registers standalone WebRTC transport services binding actively underneath the current mesh context identifiers properly.
     /// </summary>
     public static IP2pMeshBuilder AddWebRtcTransport(
         this IP2pMeshBuilder builder,
@@ -30,6 +30,12 @@ public static class ServiceCollectionExtensions
         if (builder is null)
         {
             throw new ArgumentNullException(nameof(builder));
+        }
+
+        var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
+        if (!tracker.TryRegister(builder.MeshId, configureOptions))
+        {
+            return builder;
         }
 
         if (configureOptions is null)
