@@ -15,7 +15,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Background hosted service continuously polling Azure Table Storage seamlessly accepting remote WebRTC SDP invitations explicitly.
+/// Background hosted service continuously polling Azure Table Storage to accept remote WebRTC SDP invitations.
+/// This service works in tandem with the offer service to ensure every node in the cluster interconnects,
+/// establishing a fully distributed peer-to-peer network mesh.
 /// </summary>
 public sealed class TableStorageSignalingAnswerService : BackgroundService
 {
@@ -61,7 +63,7 @@ public sealed class TableStorageSignalingAnswerService : BackgroundService
 
                 if (string.IsNullOrWhiteSpace(options.ConnectionString))
                 {
-                    logger.LogWarning("[{MeshId}] Table Storage signaling ConnectionString is empty. Answer signaling implicitly disabled.", meshId);
+                    logger.LogWarning("[{MeshId}] Table Storage signaling ConnectionString is empty. Answer signaling disabled.", meshId);
                     await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken).ConfigureAwait(false);
                     continue;
                 }
@@ -72,7 +74,7 @@ public sealed class TableStorageSignalingAnswerService : BackgroundService
                     await tableClient.CreateIfNotExistsAsync(cancellationToken: stoppingToken).ConfigureAwait(false);
                 }
 
-                // Explicitly resolve the generic invitation service scoped per localized Mesh
+                // Resolve the generic invitation service scoped per localized Mesh
                 var invitationService = serviceProvider.GetRequiredKeyedService<IWebRtcInvitationService>(meshId);
 
                 await ProcessSignalingCycleAsync(tableClient, invitationService, stoppingToken).ConfigureAwait(false);
@@ -81,14 +83,14 @@ public sealed class TableStorageSignalingAnswerService : BackgroundService
             }
             catch (OperationCanceledException)
             {
-                // Graceful termination
+                // Termination
                 break;
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "[{MeshId}] Error during WebRTC Table Storage answer signaling cycle gracefully intercepted.", meshId);
+                logger.LogError(ex, "[{MeshId}] Error during WebRTC Table Storage answer signaling cycle intercepted.", meshId);
                 
-                // Prevent tight loops natively on continuous failures
+                // Prevent tight loops on continuous failures
                 await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken).ConfigureAwait(false);
             }
         }
@@ -100,7 +102,7 @@ public sealed class TableStorageSignalingAnswerService : BackgroundService
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
         var localPeerId = nodeOptions.LocalPeerId;
 
-        // Scan overarching Table limits for remote implicitly disconnected peer offers matching conditions safely
+        // Scan overarching Table limits for remote disconnected peer offers matching conditions
         var filter = TableClient.CreateQueryFilter($"PartitionKey eq {meshId}");
         var query = tableClient.QueryAsync<TableEntity>(filter, cancellationToken: cancellationToken);
 
@@ -116,13 +118,13 @@ public sealed class TableStorageSignalingAnswerService : BackgroundService
                     {
                         await tableClient.DeleteEntityAsync(entity.PartitionKey, entity.RowKey, entity.ETag, cancellationToken).ConfigureAwait(false);
                     }
-                    catch { /* Ignore safely explicit deletion collisions implicitly */ }
+                    catch { /* Ignore deletion collisions */ }
                     continue;
                 }
 
                 if (model.CreatorPeerId == localPeerId)
                 {
-                    continue; // Organically skip natively created localized loopback bounds
+                    continue; // Skip localized loopback bounds
                 }
 
                 if (string.IsNullOrWhiteSpace(model.AnswerSdp) && !string.IsNullOrWhiteSpace(model.OfferSdp))
@@ -137,21 +139,21 @@ public sealed class TableStorageSignalingAnswerService : BackgroundService
                             ResponderPeerId = localPeerId 
                         };
 
-                        // Use Table ETag limits seamlessly performing explicit optimistic concurrency natively
+                        // Use Table ETag limits performing optimistic concurrency
                         await tableClient.UpdateEntityAsync(updatedModel.ToTableEntity(), updatedModel.ETag, TableUpdateMode.Replace, cancellationToken).ConfigureAwait(false);
                         
-                        logger.LogInformation("[{MeshId}] Successfully answered distributed WebRTC signaling offer {RowKey}.", meshId, model.ConnectionId);
+                        logger.LogInformation("[{MeshId}] Answered distributed WebRTC signaling offer {RowKey}.", meshId, model.ConnectionId);
                         
-                        // Restrict inherently answering to only one remote peer per polling limit cycle mapping smoothly
+                        // Restrict answering to only one remote peer per polling limit cycle
                         return;
                     }
                     catch (RequestFailedException ex) when (ex.Status == 412)
                     {
-                        logger.LogDebug("[{MeshId}] Concurrency conflict strictly answering offer {RowKey}. Handled dynamically by another peer correctly.", meshId, model.ConnectionId);
+                        logger.LogDebug("[{MeshId}] Concurrency conflict answering offer {RowKey}. Handled by another peer.", meshId, model.ConnectionId);
                     }
                     catch (Exception ex)
                     {
-                        logger.LogWarning(ex, "[{MeshId}] Failed to gracefully accept distributed table offer {RowKey}.", meshId, model.ConnectionId);
+                        logger.LogWarning(ex, "[{MeshId}] Failed to accept distributed table offer {RowKey}.", meshId, model.ConnectionId);
                     }
                 }
             }

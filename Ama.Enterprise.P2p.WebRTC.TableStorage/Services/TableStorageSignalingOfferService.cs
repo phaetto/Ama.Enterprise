@@ -15,7 +15,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Background hosted service continuously polling Azure Table Storage seamlessly generating and monitoring WebRTC SDP invitations natively.
+/// Background hosted service continuously polling Azure Table Storage to generate and monitor WebRTC SDP invitations.
+/// By constantly broadcasting connectivity offers, this service guarantees that the node will form outbound links
+/// to the rest of the cluster, maintaining a complete full-mesh P2P network.
 /// </summary>
 public sealed class TableStorageSignalingOfferService : BackgroundService
 {
@@ -57,7 +59,7 @@ public sealed class TableStorageSignalingOfferService : BackgroundService
             {
                 if (string.IsNullOrWhiteSpace(options.ConnectionString))
                 {
-                    logger.LogWarning("[{MeshId}] Table Storage signaling ConnectionString is empty. Offer generation signaling implicitly disabled.", meshId);
+                    logger.LogWarning("[{MeshId}] Table Storage signaling ConnectionString is empty. Offer generation signaling disabled.", meshId);
                     await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken).ConfigureAwait(false);
                     continue;
                 }
@@ -68,7 +70,7 @@ public sealed class TableStorageSignalingOfferService : BackgroundService
                     await tableClient.CreateIfNotExistsAsync(cancellationToken: stoppingToken).ConfigureAwait(false);
                 }
 
-                // Explicitly resolve the generic invitation service scoped per localized Mesh
+                // Resolve the generic invitation service scoped per localized Mesh
                 var invitationService = serviceProvider.GetRequiredKeyedService<IWebRtcInvitationService>(meshId);
 
                 await ProcessSignalingCycleAsync(tableClient, invitationService, stoppingToken).ConfigureAwait(false);
@@ -77,14 +79,14 @@ public sealed class TableStorageSignalingOfferService : BackgroundService
             }
             catch (OperationCanceledException)
             {
-                // Graceful termination
+                // Termination
                 break;
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "[{MeshId}] Error during WebRTC Table Storage offer signaling cycle gracefully intercepted.", meshId);
+                logger.LogError(ex, "[{MeshId}] Error during WebRTC Table Storage offer signaling cycle intercepted.", meshId);
                 
-                // Prevent tight loops natively on continuous failures
+                // Prevent tight loops on continuous failures
                 await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken).ConfigureAwait(false);
             }
         }
@@ -110,7 +112,7 @@ public sealed class TableStorageSignalingOfferService : BackgroundService
 
                 if (!string.IsNullOrWhiteSpace(model.AnswerSdp))
                 {
-                    logger.LogInformation("[{MeshId}] Received WebRTC signaling answer properly mapped for connection {ConnectionId}.", meshId, currentOfferConnectionId.Value);
+                    logger.LogInformation("[{MeshId}] Received WebRTC signaling answer mapped for connection {ConnectionId}.", meshId, currentOfferConnectionId.Value);
                     
                     await invitationService.FinalizeInvitationAsync(currentOfferConnectionId.Value, model.AnswerSdp, cancellationToken).ConfigureAwait(false);
                     await tableClient.DeleteEntityAsync(meshId, currentOfferConnectionId.Value.ToString(), cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -121,7 +123,7 @@ public sealed class TableStorageSignalingOfferService : BackgroundService
                 {
                     if (model.CreatedAt < DateTimeOffset.UtcNow.Subtract(options.OfferExpiration))
                     {
-                        // Clean up explicitly timed out offers appropriately ensuring proper table hygiene natively
+                        // Clean up timed out offers ensuring proper table hygiene
                         await tableClient.DeleteEntityAsync(meshId, currentOfferConnectionId.Value.ToString(), cancellationToken: cancellationToken).ConfigureAwait(false);
                         currentOfferConnectionId = null;
                     }
@@ -129,12 +131,12 @@ public sealed class TableStorageSignalingOfferService : BackgroundService
             }
             catch (RequestFailedException ex) when (ex.Status == 404)
             {
-                // Active localized offer deleted cleanly out-of-band organically
+                // Active localized offer deleted out-of-band
                 currentOfferConnectionId = null;
             }
         }
 
-        // Generate natively bounded local offers explicitly ensuring robust network topology discovery
+        // Generate local offers ensuring robust network topology discovery
         if (!currentOfferConnectionId.HasValue && options.EnableOfferGeneration)
         {
             var invitationResult = await invitationService.CreateInvitationAsync(cancellationToken).ConfigureAwait(false);

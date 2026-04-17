@@ -3,7 +3,9 @@ namespace Ama.Enterprise.P2p.WebRTC.TableStorage.Models;
 using System;
 
 /// <summary>
-/// Configuration options for the out-of-band WebRTC signaling service utilizing Azure Table Storage seamlessly.
+/// Configuration options for the out-of-band WebRTC signaling service using Azure Table Storage.
+/// When enabled, nodes will continuously poll the shared table to generate and answer SDP invitations,
+/// automatically building a full P2P network containing all active nodes.
 /// </summary>
 public sealed class TableStorageSignalingOptions : IEquatable<TableStorageSignalingOptions>
 {
@@ -13,7 +15,7 @@ public sealed class TableStorageSignalingOptions : IEquatable<TableStorageSignal
     public string ConnectionString { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the name of the table to use for signaling records securely.
+    /// Gets or sets the name of the table to use for signaling records.
     /// </summary>
     public string TableName { get; set; } = "WebRtcSignaling";
 
@@ -23,17 +25,17 @@ public sealed class TableStorageSignalingOptions : IEquatable<TableStorageSignal
     public TimeSpan PollingInterval { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// Gets or sets the duration after which an unanswered SDP offer is considered expired and safely removed.
+    /// Gets or sets the duration after which an unanswered SDP offer is considered expired and removed.
     /// </summary>
     public TimeSpan OfferExpiration { get; set; } = TimeSpan.FromMinutes(5);
 
     /// <summary>
-    /// Gets or sets a value indicating whether the node should explicitly generate outgoing SDP offers dynamically.
+    /// Gets or sets a value indicating whether the node should generate outgoing SDP offers to interconnect the mesh.
     /// </summary>
     public bool EnableOfferGeneration { get; set; } = true;
 
     /// <summary>
-    /// Gets or sets a value indicating whether the node should continuously poll and accept remote peer SDP offers securely.
+    /// Gets or sets a value indicating whether the node should continuously poll and accept remote peer SDP offers.
     /// </summary>
     public bool EnableOfferAcceptance { get; set; } = true;
 

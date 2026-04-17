@@ -5,12 +5,12 @@ using Ama.Enterprise.P2p.WebRTC.TableStorage.Models;
 using Azure.Data.Tables;
 
 /// <summary>
-/// Extension methods explicitly mapping strongly typed signaling models to TableEntities avoiding reflection completely safely.
+/// Extension methods mapping strongly typed signaling models to TableEntities avoiding reflection.
 /// </summary>
 public static class TableStorageSignalingModelExtensions
 {
     /// <summary>
-    /// Converts a native TableEntity to a strongly typed WebRtcSignalingModel safely.
+    /// Converts a native TableEntity to a strongly typed WebRtcSignalingModel.
     /// </summary>
     /// <param name="entity">The Azure Table Storage entity.</param>
     /// <returns>The strongly typed signaling model.</returns>
@@ -49,7 +49,7 @@ public static class TableStorageSignalingModelExtensions
     }
 
     /// <summary>
-    /// Converts a strongly typed WebRtcSignalingModel into a native Azure TableEntity natively.
+    /// Converts a strongly typed WebRtcSignalingModel into a native Azure TableEntity.
     /// </summary>
     /// <param name="model">The strongly typed signaling model.</param>
     /// <returns>The mapped TableEntity.</returns>
