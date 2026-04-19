@@ -35,7 +35,7 @@
   <Project Path="Ama.Enterprise.CRDT.Distributed.TableStorage/Ama.Enterprise.CRDT.Distributed.TableStorage.csproj" Id="b760640c-c398-4458-a771-53ea772b31d2" />
   <Project Path="Ama.Enterprise.CRDT.Distributed.UnitTests/Ama.Enterprise.CRDT.Distributed.UnitTests.csproj" Id="2048c2a6-0842-4d57-a42e-94919ded6fa4" />
   <Project Path="Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj" Id="2fe2382f-1652-48b6-b2e4-6f07cb4214dc" />
-  <Project Path="Ama.Enterprise.CRDT.MessagePack/Ama.Enterprise.CRDT.MessagePack.csproj" Id="a96ff158-4583-485b-9d64-eb52b2b25123" />
+  <Project Path="Ama.Enterprise.CRDT.MemoryPack/Ama.Enterprise.CRDT.MemoryPack.csproj" Id="f0f76679-d0a0-41fc-a832-5b09055fcfd0" />
   <Project Path="Ama.Enterprise.CRDT.TableStorage/Ama.Enterprise.CRDT.TableStorage.csproj" Id="807a871d-7aad-43f6-83c2-48e62e019c07" />
   <Project Path="Ama.Enterprise.P2p.IntegrationTests/Ama.Enterprise.P2p.IntegrationTests.csproj" Id="15a7eaaf-b3d8-4ec7-a32b-25a409f265c7" />
   <Project Path="Ama.Enterprise.P2p.Kestrel.IntegrationTests/Ama.Enterprise.P2p.Kestrel.IntegrationTests.csproj" Id="03fa3a9e-d41d-41d5-a113-b8d2cfce7298" />

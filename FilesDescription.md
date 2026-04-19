@@ -111,7 +111,13 @@
 | `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/MessageDispatcherTests.cs` | Adjusted tests strictly adapting the newly refactored `ApplicationPayloadDispatcher` confirming explicit decoupling of generic envelopes completely safely intelligently smoothly intelligently natively. |
 | `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/RandomPeerSelectorTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/TimeBasedFailureDetectorTests.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid/Ama.Enterprise.P2p.WebRTC.AzureEventGrid.csproj` | No description provided. |
+| `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid/Ama.Enterprise.P2p.WebRTC.AzureEventGrid.csproj` | AOT-friendly class library encompassing the WebRTC MQTT Azure Event Grid signaling integrations. |
+| `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid/Extensions/ServiceCollectionExtensions.cs` | Registers background hosted services pushing MQTT WebRTC connection pipelines explicitly mapped within localized generic meshes. |
+| `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid/Models/MqttSignalingAnswerPayload.cs` | DTO structure carrying target localized SDP answers propagated back to MQTT origin points. |
+| `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid/Models/MqttSignalingJsonContext.cs` | AOT JSON reflection context guaranteeing explicit serialization boundaries for native MQTT messaging payloads. |
+| `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid/Models/MqttSignalingOfferPayload.cs` | DTO structure representing the outbound WebRTC connection offer distributed via MQTT topics. |
+| `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid/Models/MqttSignalingOptions.cs` | Configuration structure holding explicit MQTT credentials, endpoint mapping, and polling boundaries. |
+| `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid/Services/MqttSignalingService.cs` | Consolidated background service maintaining an active MQTT loop handling synchronized full-duplex WebRTC out-of-band signaling discovery. |
 | `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Ama.Enterprise.P2p.WebRTC.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Services/WebRtcTransportIntegrationTests.cs` | Updated `TestMessage` explicitly implementing the newly enforced `ProtocolVersion` natively satisfying `IMeshMessage` securely. |
 | `$/Ama.Enterprise.P2p.WebRTC.TableStorage/Ama.Enterprise.P2p.WebRTC.TableStorage.csproj` | No description provided. |
