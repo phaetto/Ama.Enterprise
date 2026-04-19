@@ -1,0 +1,9 @@
+{
+  "MqttSignaling": {
+    "Host": "test.mosquitto.org",
+    "Port": 1883,
+    "UseTls": false,
+    "Username": "",
+    "Password": ""
+  }
+}

@@ -111,15 +111,20 @@
 | `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/MessageDispatcherTests.cs` | Adjusted tests strictly adapting the newly refactored `ApplicationPayloadDispatcher` confirming explicit decoupling of generic envelopes completely safely intelligently smoothly intelligently natively. |
 | `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/RandomPeerSelectorTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/TimeBasedFailureDetectorTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid.IntegrationTests/Ama.Enterprise.P2p.WebRTC.AzureEventGrid.IntegrationTests.csproj` | Added correct project references mapping base WebRTC capabilities explicitly alongside configuring local settings natively. |
+| `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid.IntegrationTests/Services/MqttSignalingIntegrationTests.cs` | Updated integration tests accurately verifying the newly refined presence-driven MQTT WebRTC topologies flawlessly. |
+| `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid.IntegrationTests/local.settings.json` | Explicit local configuration settings decoupled to hold active MQTT credentials efficiently without committing secrets directly. |
 | `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid/Ama.Enterprise.P2p.WebRTC.AzureEventGrid.csproj` | AOT-friendly class library encompassing the WebRTC MQTT Azure Event Grid signaling integrations. |
 | `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid/Extensions/ServiceCollectionExtensions.cs` | Registers background hosted services pushing MQTT WebRTC connection pipelines explicitly mapped within localized generic meshes. |
 | `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid/Models/MqttSignalingAnswerPayload.cs` | DTO structure carrying target localized SDP answers propagated back to MQTT origin points. |
 | `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid/Models/MqttSignalingJsonContext.cs` | AOT JSON reflection context guaranteeing explicit serialization boundaries for native MQTT messaging payloads. |
 | `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid/Models/MqttSignalingOfferPayload.cs` | DTO structure representing the outbound WebRTC connection offer distributed via MQTT topics. |
 | `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid/Models/MqttSignalingOptions.cs` | Configuration structure holding explicit MQTT credentials, endpoint mapping, and polling boundaries. |
-| `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid/Services/MqttSignalingService.cs` | Consolidated background service maintaining an active MQTT loop handling synchronized full-duplex WebRTC out-of-band signaling discovery. |
-| `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Ama.Enterprise.P2p.WebRTC.IntegrationTests.csproj` | No description provided. |
+| `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid/Services/MqttSignalingService.cs` | Completely decoupled broadcast WebRTC offers transitioning into decentralized targeted peer-to-peer presence-driven interactions eliminating connection collisions efficiently safely cleanly reliably. |
+| `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Ama.Enterprise.P2p.WebRTC.IntegrationTests.csproj` | Added project references mapping MQTT signaling capabilities alongside copying explicit local settings explicitly. |
+| `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Services/MqttSignalingIntegrationTests.cs` | End-to-end multi-node integration test simulating a full localized generic WebRTC mesh mapped completely via asynchronous MQTT SDP exchanges securely tracking data channels flawlessly. |
 | `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Services/WebRtcTransportIntegrationTests.cs` | Updated `TestMessage` explicitly implementing the newly enforced `ProtocolVersion` natively satisfying `IMeshMessage` securely. |
+| `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/local.settings.json` | Explicit local configuration settings securely decoupling active MQTT testing credentials natively. |
 | `$/Ama.Enterprise.P2p.WebRTC.TableStorage/Ama.Enterprise.P2p.WebRTC.TableStorage.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.WebRTC.TableStorage/Extensions/ServiceCollectionExtensions.cs` | Registration logic configuring Dependency Injection specifically targeting the Table Storage WebRTC signaling hosted services natively. |
 | `$/Ama.Enterprise.P2p.WebRTC.TableStorage/Extensions/TableStorageSignalingModelExtensions.cs` | Extension methods explicitly mapping TableEntity structures avoiding reflection natively safely. |
