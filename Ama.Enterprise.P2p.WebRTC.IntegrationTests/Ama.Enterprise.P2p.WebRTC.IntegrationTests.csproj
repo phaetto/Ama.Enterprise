@@ -24,7 +24,6 @@
 
 	<ItemGroup>
 	  <ProjectReference Include="..\Ama.Enterprise.P2p.WebRTC\Ama.Enterprise.P2p.WebRTC.csproj" />
-	  <ProjectReference Include="..\Ama.Enterprise.P2p.WebRTC.AzureEventGrid\Ama.Enterprise.P2p.WebRTC.AzureEventGrid.csproj" />
 	  <ProjectReference Include="..\Ama.Enterprise.UnitTests\Ama.Enterprise.UnitTests.csproj" />
 	</ItemGroup>
 

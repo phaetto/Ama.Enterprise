@@ -66,7 +66,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtP2pPayloadHandler.cs` | Refactored `ProcessStateSyncAsync` to retrieve missing journal operations in one single transaction directly avoiding redundant inefficient journal evaluations. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtTopologyObserver.cs` | Observes network connections and hooks directly into the core P2P protocols. Refactored seamlessly resolving graceful `Departed` topology states with instant tombstones freeing log restrictions efficiently while securely protecting `Dead` topology traces protecting offline synchronization completely. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/StorageJournalForwarder.cs` | Injects localized implementations mapping directly back into underlying internal storage architectures acting strictly as the interface wrapper over globally active pipelines. |
-| `$/Ama.Enterprise.CRDT.MessagePack/Ama.Enterprise.CRDT.MessagePack.csproj` | No description provided. |
+| `$/Ama.Enterprise.CRDT.MemoryPack/Ama.Enterprise.CRDT.MemoryPack.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.TableStorage/Ama.Enterprise.CRDT.TableStorage.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.TableStorage/todo.txt` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Testing/Ama.Enterprise.CRDT.Testing.csproj` | No description provided. |
@@ -122,9 +122,7 @@
 | `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid/Models/MqttSignalingOptions.cs` | Configuration structure holding explicit MQTT credentials, endpoint mapping, and polling boundaries. |
 | `$/Ama.Enterprise.P2p.WebRTC.AzureEventGrid/Services/MqttSignalingService.cs` | Completely decoupled broadcast WebRTC offers transitioning into decentralized targeted peer-to-peer presence-driven interactions eliminating connection collisions efficiently safely cleanly reliably. |
 | `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Ama.Enterprise.P2p.WebRTC.IntegrationTests.csproj` | Added project references mapping MQTT signaling capabilities alongside copying explicit local settings explicitly. |
-| `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Services/MqttSignalingIntegrationTests.cs` | End-to-end multi-node integration test simulating a full localized generic WebRTC mesh mapped completely via asynchronous MQTT SDP exchanges securely tracking data channels flawlessly. |
 | `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Services/WebRtcTransportIntegrationTests.cs` | Updated `TestMessage` explicitly implementing the newly enforced `ProtocolVersion` natively satisfying `IMeshMessage` securely. |
-| `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/local.settings.json` | Explicit local configuration settings securely decoupling active MQTT testing credentials natively. |
 | `$/Ama.Enterprise.P2p.WebRTC.TableStorage/Ama.Enterprise.P2p.WebRTC.TableStorage.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.WebRTC.TableStorage/Extensions/ServiceCollectionExtensions.cs` | Registration logic configuring Dependency Injection specifically targeting the Table Storage WebRTC signaling hosted services natively. |
 | `$/Ama.Enterprise.P2p.WebRTC.TableStorage/Extensions/TableStorageSignalingModelExtensions.cs` | Extension methods explicitly mapping TableEntity structures avoiding reflection natively safely. |
