@@ -3,6 +3,7 @@ namespace Ama.Enterprise.P2p.WebRTC.Extensions;
 using System;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Ama.CRDT.Extensions;
 using Ama.CRDT.Services.Serialization;
@@ -49,32 +50,26 @@ public static class ServiceCollectionExtensions
 
         if (!builder.Services.Any(s => s.ServiceType == typeof(IJsonTypeInfoResolver) && (string?)s.ServiceKey == "Ama.CRDT" && s.ImplementationInstance == WebRtcJsonContext.Default))
         {
-            builder.Services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", WebRtcJsonContext.Default);
+            builder.Services.AddCrdtJsonTypeInfoResolver(WebRtcJsonContext.Default);
         }
 
         builder.Services.AddCrdtSerializableType<WebRtcPeerEndpoint>("webrtc-peer-endpoint");
 
-        builder.Services.Configure<JsonSerializerOptions>(options =>
+        builder.Services.AddCrdtJsonModifier(ti =>
         {
-            if (options.TypeInfoResolver is not null)
+            if (ti.Type == typeof(PeerEndpoint))
             {
-                options.TypeInfoResolver = options.TypeInfoResolver.WithAddedModifier(ti =>
+                ti.PolymorphismOptions ??= new JsonPolymorphismOptions
                 {
-                    if (ti.Type == typeof(PeerEndpoint))
-                    {
-                        ti.PolymorphismOptions ??= new JsonPolymorphismOptions
-                        {
-                            TypeDiscriminatorPropertyName = "$type",
-                            IgnoreUnrecognizedTypeDiscriminators = true,
-                            UnknownDerivedTypeHandling = System.Text.Json.Serialization.JsonUnknownDerivedTypeHandling.FallBackToBaseType
-                        };
+                    TypeDiscriminatorPropertyName = "$type",
+                    IgnoreUnrecognizedTypeDiscriminators = true,
+                    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType
+                };
 
-                        if (!ti.PolymorphismOptions.DerivedTypes.Any(dt => dt.DerivedType == typeof(WebRtcPeerEndpoint)))
-                        {
-                            ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(WebRtcPeerEndpoint), "webrtc-peer-endpoint"));
-                        }
-                    }
-                });
+                if (!ti.PolymorphismOptions.DerivedTypes.Any(dt => dt.DerivedType == typeof(WebRtcPeerEndpoint)))
+                {
+                    ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(WebRtcPeerEndpoint), "webrtc-peer-endpoint"));
+                }
             }
         });
 

@@ -17,12 +17,12 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Extension methods for securely registering the Kestrel-based HTTP transport correctly natively gracefully cleanly successfully cleanly smartly logically inherently smartly.
+/// Extension methods for securely registering the Kestrel-based HTTP transport.
 /// </summary>
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the core Kestrel transport explicitly isolated securely mapped to the current mesh context structurally natively gracefully explicitly natively correctly smoothly appropriately cleanly naturally optimally successfully inherently elegantly gracefully thoroughly reliably smartly naturally flawlessly cleanly organically flawlessly successfully completely properly effectively intelligently optimally completely correctly elegantly securely logically logically rationally logically optimally gracefully effortlessly perfectly accurately.
+    /// Registers the core Kestrel transport explicitly isolated securely mapped to the current mesh context structurally.
     /// </summary>
     public static IP2pMeshBuilder AddKestrelTransport(
         this IP2pMeshBuilder builder,
@@ -49,32 +49,26 @@ public static class ServiceCollectionExtensions
 
         if (!builder.Services.Any(s => s.ServiceType == typeof(IJsonTypeInfoResolver) && (string?)s.ServiceKey == "Ama.CRDT" && s.ImplementationInstance == KestrelJsonContext.Default))
         {
-            builder.Services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", KestrelJsonContext.Default);
+            builder.Services.AddCrdtJsonTypeInfoResolver(KestrelJsonContext.Default);
         }
 
         builder.Services.AddCrdtSerializableType<KestrelPeerEndpoint>("kestrel-peer-endpoint");
 
-        builder.Services.Configure<JsonSerializerOptions>(options =>
+        builder.Services.AddCrdtJsonModifier(ti =>
         {
-            if (options.TypeInfoResolver is not null)
+            if (ti.Type == typeof(PeerEndpoint))
             {
-                options.TypeInfoResolver = options.TypeInfoResolver.WithAddedModifier(ti =>
+                ti.PolymorphismOptions ??= new JsonPolymorphismOptions
                 {
-                    if (ti.Type == typeof(PeerEndpoint))
-                    {
-                        ti.PolymorphismOptions ??= new JsonPolymorphismOptions
-                        {
-                            TypeDiscriminatorPropertyName = "$type",
-                            IgnoreUnrecognizedTypeDiscriminators = true,
-                            UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType
-                        };
+                    TypeDiscriminatorPropertyName = "$type",
+                    IgnoreUnrecognizedTypeDiscriminators = true,
+                    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType
+                };
 
-                        if (!ti.PolymorphismOptions.DerivedTypes.Any(dt => dt.DerivedType == typeof(KestrelPeerEndpoint)))
-                        {
-                            ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(KestrelPeerEndpoint), "kestrel-peer-endpoint"));
-                        }
-                    }
-                });
+                if (!ti.PolymorphismOptions.DerivedTypes.Any(dt => dt.DerivedType == typeof(KestrelPeerEndpoint)))
+                {
+                    ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(KestrelPeerEndpoint), "kestrel-peer-endpoint"));
+                }
             }
         });
 
