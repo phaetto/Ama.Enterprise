@@ -207,6 +207,100 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         await nodeB.StopDiscoveryAsync(cts.Token);
     }
 
+    [IntegrationFact]
+    public async Task MqttPeerDiscovery_ShouldMapEndpointsCorrectly_WhenUsingMultipleMeshes()
+    {
+        // Arrange
+        var mesh1Id = $"mqtt-multi-1-{Guid.NewGuid():N}";
+        var mesh2Id = $"mqtt-multi-2-{Guid.NewGuid():N}";
+        
+        var topicPrefix1 = $"integration-test/multi-1/{Guid.NewGuid():N}";
+        var topicPrefix2 = $"integration-test/multi-2/{Guid.NewGuid():N}";
+        
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        
+        var peerAId = new PeerId(Guid.NewGuid());
+        var peerBId = new PeerId(Guid.NewGuid());
+        
+        var portA = 8601;
+        var portB = 8602;
+
+        testOutputHelper.WriteLine("Initializing Multi-Mesh Nodes for MQTT Discovery...");
+        await using var nodeA = CreateMultiMeshNode(peerAId, mesh1Id, mesh2Id, portA, topicPrefix1, topicPrefix2);
+        await using var nodeB = CreateMultiMeshNode(peerBId, mesh1Id, mesh2Id, portB, topicPrefix1, topicPrefix2);
+
+        // Act
+        testOutputHelper.WriteLine("Starting background services...");
+        await nodeA.StartAsync(cts.Token);
+        await nodeB.StartAsync(cts.Token);
+
+        // Assert
+        testOutputHelper.WriteLine("Waiting for discovery broadcasts to synchronize across both meshes...");
+        
+        bool mesh1Discovered = false;
+        bool mesh2Discovered = false;
+        var timeoutTime = DateTime.UtcNow.AddSeconds(30);
+
+        while (DateTime.UtcNow < timeoutTime && !cts.Token.IsCancellationRequested)
+        {
+            if (!mesh1Discovered)
+            {
+                var peers1A = await nodeA.Registry.GetAllPeersAsync(mesh1Id, cts.Token);
+                var peers1B = await nodeB.Registry.GetAllPeersAsync(mesh1Id, cts.Token);
+                
+                var aDiscoveredB1 = peers1A.FirstOrDefault(p => p.Id.Equals(peerBId));
+                var bDiscoveredA1 = peers1B.FirstOrDefault(p => p.Id.Equals(peerAId));
+
+                if (aDiscoveredB1.Endpoint != null && bDiscoveredA1.Endpoint != null)
+                {
+                    aDiscoveredB1.Endpoint.ShouldBeOfType<HttpPeerEndpoint>();
+                    bDiscoveredA1.Endpoint.ShouldBeOfType<HttpPeerEndpoint>();
+                    
+                    var aHttpEndpoint = (HttpPeerEndpoint)aDiscoveredB1.Endpoint;
+                    var bHttpEndpoint = (HttpPeerEndpoint)bDiscoveredA1.Endpoint;
+                    
+                    aHttpEndpoint.Port.ShouldBe(portB);
+                    bHttpEndpoint.Port.ShouldBe(portA);
+                    
+                    mesh1Discovered = true;
+                    testOutputHelper.WriteLine("Mesh 1 (HTTP) synchronized.");
+                }
+            }
+
+            if (!mesh2Discovered)
+            {
+                var peers2A = await nodeA.Registry.GetAllPeersAsync(mesh2Id, cts.Token);
+                var peers2B = await nodeB.Registry.GetAllPeersAsync(mesh2Id, cts.Token);
+                
+                var aDiscoveredB2 = peers2A.FirstOrDefault(p => p.Id.Equals(peerBId));
+                var bDiscoveredA2 = peers2B.FirstOrDefault(p => p.Id.Equals(peerAId));
+
+                if (aDiscoveredB2.Endpoint != null && bDiscoveredA2.Endpoint != null)
+                {
+                    aDiscoveredB2.Endpoint.ShouldBeOfType<MqttPeerEndpoint>();
+                    bDiscoveredA2.Endpoint.ShouldBeOfType<MqttPeerEndpoint>();
+                    
+                    mesh2Discovered = true;
+                    testOutputHelper.WriteLine("Mesh 2 (MQTT) synchronized.");
+                }
+            }
+
+            if (mesh1Discovered && mesh2Discovered)
+            {
+                break;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(500), cts.Token);
+        }
+
+        mesh1Discovered.ShouldBeTrue("Nodes failed to discover each other on Mesh 1 (HTTP).");
+        mesh2Discovered.ShouldBeTrue("Nodes failed to discover each other on Mesh 2 (MQTT).");
+
+        testOutputHelper.WriteLine("Stopping discovery loops...");
+        await nodeA.StopAsync(cts.Token);
+        await nodeB.StopAsync(cts.Token);
+    }
+
     private MqttDiscoveryTestNode CreateDiscoveryTestNode(string meshId, PeerId peerId, string topicPrefix, bool useHttpTransport = false, int httpPort = 0)
     {
         var services = new ServiceCollection();
@@ -270,6 +364,77 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         );
     }
 
+    private MultiMeshMqttTestNode CreateMultiMeshNode(
+        PeerId peerId,
+        string mesh1Id,
+        string mesh2Id,
+        int mesh1HttpPort,
+        string topicPrefix1,
+        string topicPrefix2)
+    {
+        var services = new ServiceCollection();
+
+        services.AddCrdt();
+
+        services.AddLogging(builder => 
+        {
+            builder.AddXunit(testOutputHelper);
+            builder.SetMinimumLevel(LogLevel.Trace);
+        });
+        
+        services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
+
+        services.AddP2pMesh(mesh1Id, options =>
+        {
+            options.LocalPeerId = peerId.Value;
+        })
+        .AddGossipNetwork()
+        .AddHttpTransport(options =>
+        {
+            options.ListenHost = "localhost";
+            options.ListenPort = mesh1HttpPort;
+            options.PathPrefix = "/p2p/mesh1/";
+        })
+        .AddMqttPeerDiscovery(options =>
+        {
+            options.Host = "test.mosquitto.org";
+            options.Port = 1883;
+            options.TopicPrefix = topicPrefix1;
+            options.DiscoveryInterval = TimeSpan.FromSeconds(5);
+            options.DiscoveryTimeout = TimeSpan.FromSeconds(10);
+            options.DiscoveryTopicSuffix = "discovery";
+        });
+
+        services.AddP2pMesh(mesh2Id, options =>
+        {
+            options.LocalPeerId = peerId.Value;
+        })
+        .AddPushPullGossipNetwork()
+        .AddMqttTransport(options =>
+        {
+            options.Host = "test.mosquitto.org";
+            options.Port = 1883;
+            options.TopicPrefix = topicPrefix2;
+        })
+        .AddMqttPeerDiscovery(options =>
+        {
+            options.Host = "test.mosquitto.org";
+            options.Port = 1883;
+            options.TopicPrefix = topicPrefix2;
+            options.DiscoveryInterval = TimeSpan.FromSeconds(5);
+            options.DiscoveryTimeout = TimeSpan.FromSeconds(10);
+            options.DiscoveryTopicSuffix = "discovery";
+        });
+
+        var provider = services.BuildServiceProvider();
+
+        return new MultiMeshMqttTestNode(
+            provider,
+            peerId,
+            provider.GetRequiredService<IPeerRegistry>()
+        );
+    }
+
     private sealed record MqttDiscoveryTestNode(
         ServiceProvider Provider,
         PeerId Id,
@@ -295,6 +460,36 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         public async ValueTask DisposeAsync()
         {
             await StopDiscoveryAsync(CancellationToken.None);
+            await Provider.DisposeAsync();
+        }
+    }
+
+    private sealed record MultiMeshMqttTestNode(
+        ServiceProvider Provider,
+        PeerId Id,
+        IPeerRegistry Registry) : IAsyncDisposable
+    {
+        public async Task StartAsync(CancellationToken cancellationToken)
+        {
+            var hostedServices = Provider.GetServices<IHostedService>();
+            foreach (var hostedService in hostedServices)
+            {
+                await hostedService.StartAsync(cancellationToken);
+            }
+        }
+
+        public async Task StopAsync(CancellationToken cancellationToken)
+        {
+            var hostedServices = Provider.GetServices<IHostedService>();
+            foreach (var hostedService in hostedServices.Reverse())
+            {
+                await hostedService.StopAsync(cancellationToken);
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await StopAsync(CancellationToken.None);
             await Provider.DisposeAsync();
         }
     }
