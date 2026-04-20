@@ -78,6 +78,12 @@ public static class ServiceCollectionExtensions
             }
         });
 
+        builder.Services.AddKeyedSingleton<PeerEndpoint>(builder.MeshId, (sp, key) =>
+        {
+            var nodeOptions = sp.GetRequiredService<IOptionsMonitor<P2pNodeOptions>>().Get((string)key!);
+            return new WebRtcPeerEndpoint(nodeOptions.LocalPeerId);
+        });
+
         builder.Services.AddKeyedSingleton<WebRtcConnectionManager>(builder.MeshId, (sp, key) =>
             new WebRtcConnectionManager(
                 (string)key!,

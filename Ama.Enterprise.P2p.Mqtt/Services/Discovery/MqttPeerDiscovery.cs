@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Mqtt.Models;
 using Ama.Enterprise.P2p.Services.Core;
@@ -21,11 +22,12 @@ using MQTTnet;
 public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposable
 {
     private readonly string meshId;
-    private readonly IOptionsMonitor<MqttTransportOptions> transportOptionsMonitor;
     private readonly IOptionsMonitor<MqttDiscoveryOptions> discoveryOptionsMonitor;
     private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
+    private readonly PeerEndpoint localEndpoint;
     private readonly ILogger<MqttPeerDiscovery> logger;
     private readonly IPeerRegistry peerRegistry;
+    private readonly ICrdtSerializer serializer;
     private readonly IPeerAuthenticator authenticator;
     private readonly IFailureDetector failureDetector;
 
@@ -38,22 +40,34 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
     /// <summary>
     /// Initializes a new instance of the <see cref="MqttPeerDiscovery"/> class.
     /// </summary>
+    /// <param name="meshId">The mesh context identifier.</param>
+    /// <param name="discoveryOptionsMonitor">The MQTT discovery configuration options monitor.</param>
+    /// <param name="nodeOptionsMonitor">The global node configuration options monitor.</param>
+    /// <param name="localEndpoint">The local network endpoint to advertise.</param>
+    /// <param name="logger">The logger instance.</param>
+    /// <param name="peerRegistry">The peer registry to populate with discovered nodes.</param>
+    /// <param name="serializer">The centralized CRDT serializer.</param>
+    /// <param name="authenticator">The peer authenticator to validate remote node connections.</param>
+    /// <param name="failureDetector">The failure detector to track heartbeat signals during discovery pings.</param>
+    /// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
     public MqttPeerDiscovery(
         string meshId,
-        IOptionsMonitor<MqttTransportOptions> transportOptionsMonitor,
         IOptionsMonitor<MqttDiscoveryOptions> discoveryOptionsMonitor,
         IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
+        PeerEndpoint localEndpoint,
         ILogger<MqttPeerDiscovery> logger,
         IPeerRegistry peerRegistry,
+        ICrdtSerializer serializer,
         IPeerAuthenticator authenticator,
         IFailureDetector failureDetector)
     {
         this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-        this.transportOptionsMonitor = transportOptionsMonitor ?? throw new ArgumentNullException(nameof(transportOptionsMonitor));
         this.discoveryOptionsMonitor = discoveryOptionsMonitor ?? throw new ArgumentNullException(nameof(discoveryOptionsMonitor));
         this.nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
+        this.localEndpoint = localEndpoint ?? throw new ArgumentNullException(nameof(localEndpoint));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
         this.peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
+        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.authenticator = authenticator ?? throw new ArgumentNullException(nameof(authenticator));
         this.failureDetector = failureDetector ?? throw new ArgumentNullException(nameof(failureDetector));
 
@@ -75,7 +89,6 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
         {
             await ConnectAndSubscribeAsync(cancellationToken).ConfigureAwait(false);
             
-            var transOptions = transportOptionsMonitor.Get(meshId);
             var nodeOptions = nodeOptionsMonitor.Get(meshId);
             
             logger.LogInformation("[{MeshId}] Connected to MQTT broker for discovery as {ClientId}.", meshId, $"{nodeOptions.LocalPeerId:N}-discovery");
@@ -126,14 +139,14 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
             return Enumerable.Empty<PeerNode>();
         }
 
-        var transOptions = transportOptionsMonitor.Get(meshId);
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
         var discOptions = discoveryOptionsMonitor.Get(meshId);
 
-        var topic = GetDiscoveryTopic(transOptions.TopicPrefix, discOptions.DiscoveryTopicSuffix);
+        var topic = GetDiscoveryTopic(discOptions.TopicPrefix, discOptions.DiscoveryTopicSuffix);
         var localId = new PeerId(nodeOptions.LocalPeerId);
+        var localNode = new PeerNode(localId, localEndpoint);
 
-        var payload = localId.Value.ToByteArray();
+        var payload = serializer.SerializeToBytes(localNode);
 
         var message = new MqttApplicationMessageBuilder()
             .WithTopic(topic)
@@ -161,29 +174,28 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
 
     private async Task ConnectAndSubscribeAsync(CancellationToken token)
     {
-        var transOptions = transportOptionsMonitor.Get(meshId);
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
         var discOptions = discoveryOptionsMonitor.Get(meshId);
 
         var clientId = $"{nodeOptions.LocalPeerId:N}-discovery";
 
         var builder = new MqttClientOptionsBuilder()
-            .WithTcpServer(transOptions.Host, transOptions.Port)
+            .WithTcpServer(discOptions.Host, discOptions.Port)
             .WithClientId(clientId);
 
-        if (!string.IsNullOrWhiteSpace(transOptions.Username))
+        if (!string.IsNullOrWhiteSpace(discOptions.Username))
         {
-            builder.WithCredentials(transOptions.Username, transOptions.Password);
+            builder.WithCredentials(discOptions.Username, discOptions.Password);
         }
 
-        if (transOptions.UseTls)
+        if (discOptions.UseTls)
         {
             builder.WithTlsOptions(o => o.UseTls());
         }
 
         await mqttClient.ConnectAsync(builder.Build(), token).ConfigureAwait(false);
 
-        var topic = GetDiscoveryTopic(transOptions.TopicPrefix, discOptions.DiscoveryTopicSuffix);
+        var topic = GetDiscoveryTopic(discOptions.TopicPrefix, discOptions.DiscoveryTopicSuffix);
         var subscribeOptions = new MqttClientFactory().CreateSubscribeOptionsBuilder()
             .WithTopicFilter(f => f.WithTopic(topic))
             .Build();
@@ -200,18 +212,10 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
 
         try
         {
-            if (payload.Length != 16)
+            var remoteNode = serializer.DeserializeFromBytes<PeerNode>(payload.ToArray());
+
+            if (remoteNode.Id.Value != nodeOptions.LocalPeerId && remoteNode.Id.Value != Guid.Empty)
             {
-                logger.LogTrace("[{MeshId}] Received an invalid MQTT discovery payload of length {Length}.", meshId, payload.Length);
-                return;
-            }
-
-            var remoteIdValue = new Guid(payload.ToArray());
-
-            if (remoteIdValue != nodeOptions.LocalPeerId && remoteIdValue != Guid.Empty)
-            {
-                var remoteNode = new PeerNode(new PeerId(remoteIdValue), new MqttPeerEndpoint(remoteIdValue.ToString("N")));
-
                 var isAuthenticated = await authenticator.AuthenticateAsync(remoteNode, ReadOnlyMemory<byte>.Empty, CancellationToken.None).ConfigureAwait(false);
 
                 if (isAuthenticated)
@@ -222,12 +226,13 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
                 }
                 else
                 {
-                    logger.LogDebug("[{MeshId}] Incoming MQTT discovery presence from {PeerId} failed authentication.", meshId, remoteIdValue);
+                    logger.LogDebug("[{MeshId}] Incoming MQTT discovery presence from {PeerId} failed authentication.", meshId, remoteNode.Id.Value);
                 }
             }
         }
         catch (Exception ex)
         {
+            // Ignore parsing errors from alien network packets
             logger.LogTrace(ex, "[{MeshId}] An error occurred while processing an MQTT discovery broadcast.", meshId);
         }
     }

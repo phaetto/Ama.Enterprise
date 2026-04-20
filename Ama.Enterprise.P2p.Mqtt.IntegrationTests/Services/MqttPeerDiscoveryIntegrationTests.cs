@@ -7,7 +7,9 @@ using System.Threading.Tasks;
 using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.Models.Core;
+using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.Mqtt.Extensions;
+using Ama.Enterprise.P2p.Mqtt.Models;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
@@ -57,8 +59,15 @@ public sealed class MqttPeerDiscoveryIntegrationTests
             var peersA = await nodeA.Registry.GetAllPeersAsync(meshId, cts.Token);
             var peersB = await nodeB.Registry.GetAllPeersAsync(meshId, cts.Token);
 
-            if (peersA.Any(p => p.Id.Equals(peerBId)) && peersB.Any(p => p.Id.Equals(peerAId)))
+            var aDiscoveredB = peersA.FirstOrDefault(p => p.Id.Equals(peerBId));
+            var bDiscoveredA = peersB.FirstOrDefault(p => p.Id.Equals(peerAId));
+
+            if (aDiscoveredB.Endpoint != null && bDiscoveredA.Endpoint != null)
             {
+                // Verify the dynamically distributed generic endpoints correctly match standard MQTT parameters naturally
+                aDiscoveredB.Endpoint.ShouldBeOfType<MqttPeerEndpoint>();
+                bDiscoveredA.Endpoint.ShouldBeOfType<MqttPeerEndpoint>();
+
                 discovered = true;
                 
                 testOutputHelper.WriteLine($"Node A discovered {peersA.Count()} peers.");
@@ -100,7 +109,7 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         }
 
         // Delay sufficiently to guarantee both nodes have connected their MQTT subscriptions successfully before pinging
-        await Task.Delay(TimeSpan.FromSeconds(3), cts.Token);
+        await Task.Delay(TimeSpan.FromSeconds(30), cts.Token);
 
         // Act & Assert - Explicitly loop manual pings resolving initial broker subscription latencies effectively
         testOutputHelper.WriteLine("Firing explicit DiscoverPeersAsync roundtrips from Node A...");
@@ -123,7 +132,7 @@ public sealed class MqttPeerDiscoveryIntegrationTests
             }
 
             // Await briefly before retrying to prevent network spam
-            await Task.Delay(TimeSpan.FromSeconds(2), cts.Token);
+            await Task.Delay(TimeSpan.FromSeconds(5), cts.Token);
         }
 
         manuallyDiscovered.ShouldBeTrue("Node A failed to manually discover Node B within the timeout bound natively.");
@@ -136,7 +145,69 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         await nodeB.StopDiscoveryAsync(cts.Token);
     }
 
-    private MqttDiscoveryTestNode CreateDiscoveryTestNode(string meshId, PeerId peerId, string topicPrefix)
+    [IntegrationFact]
+    public async Task MqttPeerDiscovery_WithHttpTransport_DiscoversHttpEndpoints_Succeeds()
+    {
+        // Arrange
+        var meshId = $"mqtt-http-disc-{Guid.NewGuid():N}";
+        var topicPrefix = $"integration-test/http-disc/{Guid.NewGuid():N}";
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+
+        var peerAId = new PeerId(Guid.NewGuid());
+        var peerBId = new PeerId(Guid.NewGuid());
+        
+        var portA = 8401;
+        var portB = 8402;
+
+        testOutputHelper.WriteLine("Initializing HTTP Nodes for MQTT Discovery...");
+        await using var nodeA = CreateDiscoveryTestNode(meshId, peerAId, topicPrefix, useHttpTransport: true, httpPort: portA);
+        await using var nodeB = CreateDiscoveryTestNode(meshId, peerBId, topicPrefix, useHttpTransport: true, httpPort: portB);
+
+        // Act
+        testOutputHelper.WriteLine("Starting MQTT Peer Discovery background services for HTTP endpoints...");
+        await nodeA.StartDiscoveryAsync(cts.Token);
+        await nodeB.StartDiscoveryAsync(cts.Token);
+
+        // Assert
+        testOutputHelper.WriteLine("Waiting for discovery broadcasts to synchronize across the broker...");
+        
+        bool discovered = false;
+        var timeoutTime = DateTime.UtcNow.AddSeconds(20);
+
+        while (DateTime.UtcNow < timeoutTime && !cts.Token.IsCancellationRequested)
+        {
+            var peersA = await nodeA.Registry.GetAllPeersAsync(meshId, cts.Token);
+            var peersB = await nodeB.Registry.GetAllPeersAsync(meshId, cts.Token);
+
+            if (!peersA.Any(p => p.Id.Equals(peerBId)) || !peersB.Any(p => p.Id.Equals(peerAId)))
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(500), cts.Token);
+                continue;
+            }
+
+            var aDiscoveredB = peersA.FirstOrDefault(p => p.Id.Equals(peerBId));
+            var bDiscoveredA = peersB.FirstOrDefault(p => p.Id.Equals(peerAId));
+
+            // Verify correctly that the polymorphic JSON serializer maintained the HTTP endpoints over the MQTT stream natively
+            aDiscoveredB.Endpoint.ShouldBeOfType<HttpPeerEndpoint>();
+            bDiscoveredA.Endpoint.ShouldBeOfType<HttpPeerEndpoint>();
+
+            var bHttpEndpoint = (HttpPeerEndpoint)aDiscoveredB.Endpoint;
+            bHttpEndpoint.Host.ShouldBe("localhost");
+            bHttpEndpoint.Port.ShouldBe(portB);
+
+            discovered = true;
+            break;
+        }
+
+        discovered.ShouldBeTrue("Nodes failed to discover each other's HTTP endpoints within the expected timeout limit natively.");
+
+        testOutputHelper.WriteLine("Stopping discovery loops...");
+        await nodeA.StopDiscoveryAsync(cts.Token);
+        await nodeB.StopDiscoveryAsync(cts.Token);
+    }
+
+    private MqttDiscoveryTestNode CreateDiscoveryTestNode(string meshId, PeerId peerId, string topicPrefix, bool useHttpTransport = false, int httpPort = 0)
     {
         var services = new ServiceCollection();
 
@@ -152,25 +223,42 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         // Core P2P dependencies inherently required by discovery
         services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
 
-        services.Configure<P2pNodeOptions>(meshId, options =>
+        var meshBuilder = services.AddP2pMesh(meshId, options =>
         {
             options.LocalPeerId = peerId.Value;
-        });
+        })
+        .AddGossipNetwork();
 
-        services.AddP2pMesh(meshId)
-            .AddGossipNetwork() 
-            .AddMqttTransport(options =>
+        if (useHttpTransport)
+        {
+            // Explicitly evaluate injecting HTTP endpoints through MQTT discovery streams securely
+            meshBuilder.AddHttpTransport(options =>
+            {
+                options.ListenHost = "localhost";
+                options.ListenPort = httpPort;
+                options.PathPrefix = "/p2p/gossip/";
+            });
+        }
+        else
+        {
+            // Standard localized MQTT endpoint integration natively
+            meshBuilder.AddMqttTransport(options =>
             {
                 options.Host = "test.mosquitto.org";
                 options.Port = 1883;
                 options.TopicPrefix = topicPrefix;
-            })
-            .AddMqttPeerDiscovery(options =>
-            {
-                options.DiscoveryInterval = TimeSpan.FromSeconds(5);
-                options.DiscoveryTimeout = TimeSpan.FromSeconds(5);
-                options.DiscoveryTopicSuffix = "discovery";
             });
+        }
+
+        meshBuilder.AddMqttPeerDiscovery(options =>
+        {
+            options.Host = "test.mosquitto.org";
+            options.Port = 1883;
+            options.TopicPrefix = topicPrefix;
+            options.DiscoveryInterval = TimeSpan.FromSeconds(5);
+            options.DiscoveryTimeout = TimeSpan.FromSeconds(10);
+            options.DiscoveryTopicSuffix = "discovery";
+        });
 
         var provider = services.BuildServiceProvider();
 

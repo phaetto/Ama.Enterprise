@@ -79,6 +79,12 @@ public static class ServiceCollectionExtensions
             }
         });
 
+        builder.Services.AddKeyedSingleton<PeerEndpoint>(builder.MeshId, (sp, key) =>
+        {
+            var nodeOptions = sp.GetRequiredService<IOptionsMonitor<P2pNodeOptions>>().Get((string)key!);
+            return new MqttPeerEndpoint(nodeOptions.LocalPeerId.ToString());
+        });
+
         builder.Services.AddKeyedSingleton<MqttClientManager>(builder.MeshId, (sp, key) =>
             new MqttClientManager(
                 (string)key!,
@@ -130,11 +136,12 @@ public static class ServiceCollectionExtensions
         builder.Services.AddKeyedSingleton<IPeerDiscovery>(builder.MeshId, (sp, key) =>
             new MqttPeerDiscovery(
                 (string)key!,
-                sp.GetRequiredService<IOptionsMonitor<MqttTransportOptions>>(),
                 sp.GetRequiredService<IOptionsMonitor<MqttDiscoveryOptions>>(),
                 sp.GetRequiredService<IOptionsMonitor<P2pNodeOptions>>(),
+                sp.GetRequiredKeyedService<PeerEndpoint>(key),
                 sp.GetRequiredService<ILogger<MqttPeerDiscovery>>(),
                 sp.GetRequiredService<IPeerRegistry>(),
+                sp.GetRequiredService<ICrdtSerializer>(),
                 sp.GetRequiredKeyedService<IPeerAuthenticator>(key),
                 sp.GetRequiredKeyedService<IFailureDetector>(key)));
 
