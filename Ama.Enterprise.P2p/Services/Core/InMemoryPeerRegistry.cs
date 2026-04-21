@@ -10,7 +10,7 @@ using Ama.Enterprise.P2p.Models.Core;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Implements an in-memory thread-safe registry tracking peering topology globally across configured multiplexed networks mapped exclusively by mesh identifiers explicitly cleanly properly successfully logically natively securely elegantly robustly appropriately reliably cleanly effectively cleanly properly.
+/// Implements an in-memory thread-safe registry tracking peering topology globally across configured multiplexed networks.
 /// </summary>
 public sealed class InMemoryPeerRegistry(
     IEnumerable<IPeerTopologyObserver> topologyObservers,
@@ -19,8 +19,7 @@ public sealed class InMemoryPeerRegistry(
     private readonly IEnumerable<IPeerTopologyObserver> topologyObservers = topologyObservers ?? throw new ArgumentNullException(nameof(topologyObservers));
     private readonly ILogger<InMemoryPeerRegistry> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-    // Maps MeshId -> (PeerId -> PeerEntry)
-    private readonly ConcurrentDictionary<string, ConcurrentDictionary<PeerId, PeerEntry>> meshes = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<PeerRegistryKey, PeerEntry> peers = new();
 
     /// <inheritdoc />
     public async Task AddOrUpdatePeerAsync(string meshId, PeerNode node, PeerStatus status, CancellationToken cancellationToken)
@@ -35,14 +34,13 @@ public sealed class InMemoryPeerRegistry(
             throw new ArgumentException("Peer ID cannot be empty.", nameof(node));
         }
 
-        var meshPeers = meshes.GetOrAdd(meshId, _ => new ConcurrentDictionary<PeerId, PeerEntry>());
-
+        var key = new PeerRegistryKey(meshId, node.Id);
+        var entry = new PeerEntry(meshId, node, status);
         var isNew = false;
         PeerStatus? oldStatus = null;
-        var entry = new PeerEntry(node, status);
 
-        meshPeers.AddOrUpdate(
-            node.Id,
+        peers.AddOrUpdate(
+            key,
             _ =>
             {
                 isNew = true;
@@ -79,7 +77,8 @@ public sealed class InMemoryPeerRegistry(
             throw new ArgumentException("Peer ID cannot be empty.", nameof(peerId));
         }
 
-        if (meshes.TryGetValue(meshId, out var meshPeers) && meshPeers.TryRemove(peerId, out _))
+        var key = new PeerRegistryKey(meshId, peerId);
+        if (peers.TryRemove(key, out _))
         {
             logger.LogInformation("[{MeshId}] Peer {PeerId} was removed from the registry.", meshId, peerId.Value);
             await NotifyObserversAsync(observer => observer.OnPeerDepartedAsync(meshId, peerId, cancellationToken)).ConfigureAwait(false);
@@ -89,30 +88,37 @@ public sealed class InMemoryPeerRegistry(
     /// <inheritdoc />
     public Task<IEnumerable<PeerNode>> GetAllPeersAsync(string meshId, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (meshes.TryGetValue(meshId, out var meshPeers))
+        if (string.IsNullOrWhiteSpace(meshId))
         {
-            return Task.FromResult<IEnumerable<PeerNode>>(meshPeers.Values.Select(entry => entry.Node).ToList());
+            throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshId));
         }
 
-        return Task.FromResult(Enumerable.Empty<PeerNode>());
+        cancellationToken.ThrowIfCancellationRequested();
+        
+        var result = peers.Values
+            .Where(entry => string.Equals(entry.MeshId, meshId, StringComparison.Ordinal))
+            .Select(entry => entry.Node)
+            .ToList();
+
+        return Task.FromResult<IEnumerable<PeerNode>>(result);
     }
 
     /// <inheritdoc />
     public Task<IEnumerable<PeerNode>> GetPeersByStatusAsync(string meshId, PeerStatus status, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (meshes.TryGetValue(meshId, out var meshPeers))
+        if (string.IsNullOrWhiteSpace(meshId))
         {
-            var filteredPeers = meshPeers.Values
-                .Where(entry => entry.Status == status)
-                .Select(entry => entry.Node)
-                .ToList();
-
-            return Task.FromResult<IEnumerable<PeerNode>>(filteredPeers);
+            throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshId));
         }
 
-        return Task.FromResult(Enumerable.Empty<PeerNode>());
+        cancellationToken.ThrowIfCancellationRequested();
+        
+        var result = peers.Values
+            .Where(entry => string.Equals(entry.MeshId, meshId, StringComparison.Ordinal) && entry.Status == status)
+            .Select(entry => entry.Node)
+            .ToList();
+
+        return Task.FromResult<IEnumerable<PeerNode>>(result);
     }
 
     private async Task NotifyObserversAsync(Func<IPeerTopologyObserver, Task> action)
@@ -130,5 +136,7 @@ public sealed class InMemoryPeerRegistry(
         }
     }
 
-    private readonly record struct PeerEntry(PeerNode Node, PeerStatus Status);
+    private readonly record struct PeerRegistryKey(string MeshId, PeerId PeerId);
+
+    private readonly record struct PeerEntry(string MeshId, PeerNode Node, PeerStatus Status);
 }

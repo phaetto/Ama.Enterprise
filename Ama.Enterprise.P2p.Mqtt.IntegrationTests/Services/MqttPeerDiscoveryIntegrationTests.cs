@@ -409,7 +409,7 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         {
             options.LocalPeerId = peerId.Value;
         })
-        .AddPushPullGossipNetwork()
+        .AddPushPullGossipNetwork() // TODO: This chain of extensible, another mesh, should not need an algorithm
         .AddMqttTransport(options =>
         {
             options.Host = "test.mosquitto.org";
