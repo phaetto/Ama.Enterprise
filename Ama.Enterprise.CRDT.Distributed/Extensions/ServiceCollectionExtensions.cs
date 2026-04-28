@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.CRDT.Distributed.Extensions;
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using Ama.CRDT.Extensions;
 using Ama.CRDT.Models;
 using Ama.CRDT.Services.Decorators;
@@ -86,7 +87,7 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Registers a generic domain service scoped securely within the dynamic CRDT lifecycle natively.
     /// </summary>
-    public static IServiceCollection AddDistributedCrdtService<TService, TImplementation>(this IServiceCollection services) 
+    public static IServiceCollection AddDistributedCrdtService<TService, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>(this IServiceCollection services) 
         where TService : class 
         where TImplementation : class, TService
     {
