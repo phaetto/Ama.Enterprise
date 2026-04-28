@@ -13,7 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 /// <summary>
-/// Extension methods for registering completely generic distributed CRDT state logic gracefully elegantly cleanly intelligently.
+/// Extension methods for registering distributed CRDT state logic.
 /// </summary>
 public static class ServiceCollectionExtensions
 {
@@ -50,7 +50,11 @@ public static class ServiceCollectionExtensions
                 .AddCrdtAotContext(new DistributedCrdtSystemAotContext())
                 .AddCrdtSerializableType<CrdtRegistryEntry>("crdt-registry-entry");
 
-        services.TryAddSingleton<IDistributedCrdtStorage, MemoryCrdtStorage>();
+        // Provide memory storage as the default 'primary' keyed fallback
+        services.TryAddKeyedSingleton<IDistributedCrdtStorage>("primary", (sp, key) => ActivatorUtilities.CreateInstance<MemoryCrdtStorage>(sp));
+        
+        // Register the composite storage router strictly acting as the unified storage global entry-point
+        services.TryAddSingleton<IDistributedCrdtStorage, CompositeCrdtStorage>();
 
         services.AddCrdtJournaling<StorageJournalForwarder>();
 
@@ -85,7 +89,7 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers a generic domain service scoped securely within the dynamic CRDT lifecycle natively.
+    /// Registers a generic domain service scoped within the dynamic CRDT lifecycle.
     /// </summary>
     public static IServiceCollection AddDistributedCrdtService<TService, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>(this IServiceCollection services) 
         where TService : class 
@@ -101,7 +105,7 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Injects the generic CRDT routing dispatchers and anti-entropy background processors directly into the targeted P2P Mesh pipeline securely decoupled from underlying algorithm gracefully.
+    /// Injects the generic CRDT routing dispatchers and anti-entropy background processors directly into the targeted P2P Mesh pipeline decoupled from underlying algorithm.
     /// </summary>
     public static IServiceCollection AddDistributedCrdtP2p(this IServiceCollection services, string meshId)
     {
@@ -111,6 +115,35 @@ public static class ServiceCollectionExtensions
         services.AddKeyedSingleton<IApplicationPayloadHandler, CrdtP2pPayloadHandler>(meshId);
         services.AddSingleton<IPeerTopologyObserver, CrdtTopologyObserver>();
         services.AddHostedService<CrdtAntiEntropyService>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers a generic distributed CRDT storage mechanism acting as the primary store.
+    /// </summary>
+    public static IServiceCollection AddDistributedCrdtStorage<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TStorage>(this IServiceCollection services) 
+        where TStorage : class, IDistributedCrdtStorage
+    {
+        return services.AddDistributedCrdtStorage<TStorage>("primary");
+    }
+
+    /// <summary>
+    /// Registers a generic distributed CRDT storage mechanism mapped strictly to a specific dynamic document alias.
+    /// </summary>
+    public static IServiceCollection AddDistributedCrdtStorage<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TStorage>(this IServiceCollection services, string storageKey) 
+        where TStorage : class, IDistributedCrdtStorage
+    {
+        if (services == null) throw new ArgumentNullException(nameof(services));
+        if (string.IsNullOrWhiteSpace(storageKey)) throw new ArgumentException("Storage key cannot be null or empty.", nameof(storageKey));
+
+        services.RemoveAllKeyed(typeof(IDistributedCrdtStorage), storageKey);
+        services.AddKeyedSingleton<IDistributedCrdtStorage, TStorage>(storageKey);
+
+        if (storageKey != "primary")
+        {
+            services.AddSingleton(new CrdtStorageRegistration(storageKey));
+        }
 
         return services;
     }

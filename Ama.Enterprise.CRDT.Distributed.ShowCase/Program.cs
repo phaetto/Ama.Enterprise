@@ -17,7 +17,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Entry point for demonstrating Multiple Distributed CRDTs dynamically orchestrated via a global registry.
+/// Entry point for demonstrating Multiple Distributed CRDTs orchestrated via a global registry.
 /// </summary>
 public static class Program
 {
@@ -43,10 +43,10 @@ public static class Program
             builder.AddProvider(new LockedConsoleLoggerProvider());
         });
 
-        // Register Showcase file-based unified CRDT storage explicitly to override memory fallbacks
-        services.AddSingleton<IDistributedCrdtStorage, ShowCaseCrdtStorage>();
+        // Register Showcase file-based unified CRDT storage explicitly overriding memory fallbacks as the primary target
+        services.AddDistributedCrdtStorage<ShowCaseCrdtStorage>();
 
-        // Add core CRDT distributed services and dynamically resolve the orchestrator
+        // Add core CRDT distributed services and resolve the orchestrator
         services.AddDistributedCrdtCore(options =>
         {
             options.ReplicaId = replicaId;
@@ -62,7 +62,7 @@ public static class Program
                 .AddCrdtSerializableType<TaskItem>("task-item")
                 .AddCrdtSerializableType<DeviceStatus>("device-status");
 
-        // Register document types dynamically into the orchestrator and expose generic interfaces via explicit transparent forwarders seamlessly
+        // Register document types into the orchestrator and expose generic interfaces via explicit transparent forwarders
         services.AddDistributedDocumentType<TaskListState>("task-list");
         services.AddDistributedCrdtService<ITaskManager, TaskManager>();
 
@@ -211,7 +211,7 @@ public static class Program
         }
         finally
         {
-            logger.LogInformation("Shutting down dynamically orchestrated services...");
+            logger.LogInformation("Shutting down orchestrated services...");
             foreach (var service in hostedServices)
             {
                 await service.StopAsync(CancellationToken.None).ConfigureAwait(false);
@@ -256,7 +256,7 @@ public static class Program
             Console.WriteLine(" fset <docId> <deviceId> <true|false> <batt>    - Adds/Updates a fleet device");
             Console.WriteLine(" fdel <docId> <deviceId>                        - Removes a fleet device");
             Console.WriteLine(" clone                                          - Spawns a new node process");
-            Console.WriteLine(" exit                                           - Shuts down the node gracefully");
+            Console.WriteLine(" exit                                           - Shuts down the node");
             Console.WriteLine("=================================================\n");
         }
     }
