@@ -12,21 +12,14 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Background service responsible for repeatedly broadcasting the local synchronization state of all registered CRDTs to trigger convergence.
 /// </summary>
-public sealed class CrdtAntiEntropyService : BackgroundService
+public sealed class CrdtAntiEntropyService(
+    DistributedCrdtScopeProvider scopeProvider,
+    IOptions<DistributedCrdtOptions> options,
+    ILogger<CrdtAntiEntropyService> logger) : BackgroundService
 {
-    private readonly DistributedCrdtScopeProvider scopeProvider;
-    private readonly IOptions<DistributedCrdtOptions> options;
-    private readonly ILogger<CrdtAntiEntropyService> logger;
-
-    public CrdtAntiEntropyService(
-        DistributedCrdtScopeProvider scopeProvider,
-        IOptions<DistributedCrdtOptions> options,
-        ILogger<CrdtAntiEntropyService> logger)
-    {
-        this.scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
-        this.options = options ?? throw new ArgumentNullException(nameof(options));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly DistributedCrdtScopeProvider scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
+    private readonly IOptions<DistributedCrdtOptions> options = options ?? throw new ArgumentNullException(nameof(options));
+    private readonly ILogger<CrdtAntiEntropyService> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

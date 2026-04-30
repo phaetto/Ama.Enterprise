@@ -19,16 +19,11 @@ using Microsoft.Extensions.Logging;
 using Shouldly;
 using Xunit;
 
-public sealed class WebRtcTransportIntegrationTests
+public sealed class WebRtcTransportIntegrationTests(ITestOutputHelper testOutputHelper)
 {
     private sealed record DummyPeerEndpoint : PeerEndpoint;
 
-    private readonly ITestOutputHelper testOutputHelper;
-
-    public WebRtcTransportIntegrationTests(ITestOutputHelper testOutputHelper)
-    {
-        this.testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
-    }
+    private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
 
     [IntegrationFact]
     public async Task WebRtcTransport_EndToEndMessageExchange_Succeeds()

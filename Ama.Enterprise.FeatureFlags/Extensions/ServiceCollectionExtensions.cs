@@ -67,6 +67,7 @@ public static class ServiceCollectionExtensions
         // Wire up the abstracted P2P network layer specifically for Feature Flags completely encapsulating internals seamlessly
         if (!string.IsNullOrWhiteSpace(ffOpts.InternalMeshId))
         {
+            // TODO: Have different options somehow for diffrent discovery and handshake
             services.AddP2pMesh(ffOpts.InternalMeshId)
                     .AddGossipNetwork(options =>
                     {
@@ -87,6 +88,7 @@ public static class ServiceCollectionExtensions
                         options.DiscoveryInterval = ffOpts.UdpDiscovery.DiscoveryInterval;
                         options.DiscoveryTimeout = ffOpts.UdpDiscovery.DiscoveryTimeout;
                     })
+                    // TODO: Add peer handshake
                     .AddWebRtcTransport(options => 
                     {
                         options.IceServers = ffOpts.WebRtc.IceServers;

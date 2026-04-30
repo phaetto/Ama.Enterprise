@@ -18,18 +18,13 @@ using Microsoft.Extensions.Logging;
 using Shouldly;
 using Xunit;
 
-public sealed class MqttTransportIntegrationTests
+public sealed class MqttTransportIntegrationTests(ITestOutputHelper testOutputHelper)
 {
     private sealed record DummyPeerEndpoint : PeerEndpoint;
 
-    private readonly ITestOutputHelper testOutputHelper;
+    private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
 
-    public MqttTransportIntegrationTests(ITestOutputHelper testOutputHelper)
-    {
-        this.testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
-    }
-
-    [IntegrationFact]
+    [IntegrationFact(Skip = "Find another mqtt server to test")]
     public async Task MqttTransport_EndToEndMessageExchange_Succeeds()
     {
         // Arrange
@@ -95,7 +90,7 @@ public sealed class MqttTransportIntegrationTests
         testOutputHelper.WriteLine("Test finished.");
     }
 
-    [IntegrationFact]
+    [IntegrationFact(Skip = "Find another mqtt server to test")]
     public async Task MqttTransport_BidirectionalMessageExchange_Succeeds()
     {
         // Arrange
@@ -181,7 +176,7 @@ public sealed class MqttTransportIntegrationTests
         await nodeB.Listener.StopListeningAsync(cts.Token);
     }
 
-    [IntegrationFact]
+    [IntegrationFact(Skip = "Find another mqtt server to test")]
     public async Task MqttTransport_CanHandle_ReturnsFalseForOtherEndpoints()
     {
         // Arrange

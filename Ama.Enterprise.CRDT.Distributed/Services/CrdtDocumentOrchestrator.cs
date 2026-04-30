@@ -17,30 +17,22 @@ using Microsoft.Extensions.Logging;
 /// <summary>
 /// Centralized generic orchestrator managing global active P2P CRDT document bindings.
 /// </summary>
-public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDisposable
+public sealed class CrdtDocumentOrchestrator(
+    IServiceProvider serviceProvider,
+    IDistributedCrdtStorage storage,
+    ICrdtPatcher patcher,
+    ILogger<CrdtDocumentOrchestrator> logger) : ICrdtDocumentOrchestrator, IDisposable
 {
-    private readonly IServiceProvider serviceProvider;
-    private readonly IDistributedCrdtStorage storage;
-    private readonly ICrdtPatcher patcher;
-    private readonly ILogger<CrdtDocumentOrchestrator> logger;
+    private readonly IServiceProvider serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+    private readonly IDistributedCrdtStorage storage = storage ?? throw new ArgumentNullException(nameof(storage));
+    private readonly ICrdtPatcher patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
+    private readonly ILogger<CrdtDocumentOrchestrator> logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly ConcurrentDictionary<string, IDistributedCrdtDocument> activeDocuments = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim syncLock = new(1, 1);
     
     public IDistributedCrdtDocument<CrdtRegistryState> Registry { get; private set; } = null!;
 
     public event EventHandler? DocumentsChanged;
-
-    public CrdtDocumentOrchestrator(
-        IServiceProvider serviceProvider,
-        IDistributedCrdtStorage storage,
-        ICrdtPatcher patcher,
-        ILogger<CrdtDocumentOrchestrator> logger)
-    {
-        this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-        this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
-        this.patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {

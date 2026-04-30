@@ -21,17 +21,12 @@ using System.Threading.Tasks;
 using Xunit;
 
 /// <summary>
-/// Contains integration tests focusing on the UDP multicast discovery mechanism.
+/// Contains integration tests focusing on the Two-Phase UDP multicast discovery mechanism.
 /// </summary>
-public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
+public sealed class UdpPeerDiscoveryIntegrationTests(ITestOutputHelper testOutputHelper) : IDisposable
 {
-    private readonly ITestOutputHelper testOutputHelper;
+    private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
     private readonly IList<ServiceProvider> serviceProviders = new List<ServiceProvider>();
-
-    public UdpPeerDiscoveryIntegrationTests(ITestOutputHelper testOutputHelper)
-    {
-        this.testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
-    }
 
     [IntegrationFact]
     public async Task DiscoverPeersAsync_ShouldFindOtherNodes_WhenTheyAreListening()
@@ -46,18 +41,21 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
         var port2 = 8302;
         var port3 = 8303;
 
-        // Use a distinct multicast port specifically for this test to avoid local execution collisions
-        var multicastPort = 8035; 
+        // Use distinct ports specifically for this test to avoid local execution collisions
+        var multicastPort = 8035;
+        
+        var handshakePort1 = 8601;
+        var handshakePort2 = 8602;
+        var handshakePort3 = 8603;
 
-        var node1 = CreateDiscoveryNode(nodeId1, port1, multicastPort);
-        var node2 = CreateDiscoveryNode(nodeId2, port2, multicastPort);
-        var node3 = CreateDiscoveryNode(nodeId3, port3, multicastPort);
+        var node1 = CreateDiscoveryNode(nodeId1, port1, multicastPort, handshakePort1);
+        var node2 = CreateDiscoveryNode(nodeId2, port2, multicastPort, handshakePort2);
+        var node3 = CreateDiscoveryNode(nodeId3, port3, multicastPort, handshakePort3);
 
-        // Start all nodes so their UDP background listeners bind and become active
-        // By calling StartAsync on the P2pHostedService orchestrator, it cascades StartAsync to the tied UdpPeerDiscovery instance
-        await node1.HostedService.StartAsync(cancellationSource.Token);
-        await node2.HostedService.StartAsync(cancellationSource.Token);
-        await node3.HostedService.StartAsync(cancellationSource.Token);
+        // Start all hosted services (including the generic P2P mesh and the Phase 2 UDP handshakers)
+        await StartAllHostedServicesAsync(node1.HostedServices, cancellationSource.Token);
+        await StartAllHostedServicesAsync(node2.HostedServices, cancellationSource.Token);
+        await StartAllHostedServicesAsync(node3.HostedServices, cancellationSource.Token);
 
         // Provide a short delay for sockets to fully bind on the OS level
         await Task.Delay(500, cancellationSource.Token);
@@ -76,9 +74,9 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
         peersList.Any(p => p.Id.Value == nodeId1).ShouldBeFalse();
 
         // Cleanup
-        await node1.HostedService.StopAsync(cancellationSource.Token);
-        await node2.HostedService.StopAsync(cancellationSource.Token);
-        await node3.HostedService.StopAsync(cancellationSource.Token);
+        await StopAllHostedServicesAsync(node1.HostedServices, cancellationSource.Token);
+        await StopAllHostedServicesAsync(node2.HostedServices, cancellationSource.Token);
+        await StopAllHostedServicesAsync(node3.HostedServices, cancellationSource.Token);
     }
 
     [IntegrationFact]
@@ -102,13 +100,22 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
         var multicastPort1 = 8036; 
         var multicastPort2 = 8037; 
 
-        var node1 = CreateMultiMeshNode(nodeId1, node1Mesh1Port, node1Mesh2Port, multicastPort1, multicastPort2);
-        var node2 = CreateMultiMeshNode(nodeId2, node2Mesh1Port, node2Mesh2Port, multicastPort1, multicastPort2);
-        var node3 = CreateMultiMeshNode(nodeId3, node3Mesh1Port, node3Mesh2Port, multicastPort1, multicastPort2);
+        var node1Mesh1Handshake = 8701;
+        var node1Mesh2Handshake = 8801;
+        
+        var node2Mesh1Handshake = 8702;
+        var node2Mesh2Handshake = 8802;
+        
+        var node3Mesh1Handshake = 8703;
+        var node3Mesh2Handshake = 8803;
 
-        await node1.HostedService.StartAsync(cancellationSource.Token);
-        await node2.HostedService.StartAsync(cancellationSource.Token);
-        await node3.HostedService.StartAsync(cancellationSource.Token);
+        var node1 = CreateMultiMeshNode(nodeId1, node1Mesh1Port, node1Mesh2Port, multicastPort1, multicastPort2, node1Mesh1Handshake, node1Mesh2Handshake);
+        var node2 = CreateMultiMeshNode(nodeId2, node2Mesh1Port, node2Mesh2Port, multicastPort1, multicastPort2, node2Mesh1Handshake, node2Mesh2Handshake);
+        var node3 = CreateMultiMeshNode(nodeId3, node3Mesh1Port, node3Mesh2Port, multicastPort1, multicastPort2, node3Mesh1Handshake, node3Mesh2Handshake);
+
+        await StartAllHostedServicesAsync(node1.HostedServices, cancellationSource.Token);
+        await StartAllHostedServicesAsync(node2.HostedServices, cancellationSource.Token);
+        await StartAllHostedServicesAsync(node3.HostedServices, cancellationSource.Token);
 
         await Task.Delay(500, cancellationSource.Token);
 
@@ -140,9 +147,9 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
         peer3Mesh2.ShouldNotBe(default);
         peer3Mesh2.Endpoint.ShouldBeOfType<HttpPeerEndpoint>().Port.ShouldBe(node3Mesh2Port);
 
-        await node1.HostedService.StopAsync(cancellationSource.Token);
-        await node2.HostedService.StopAsync(cancellationSource.Token);
-        await node3.HostedService.StopAsync(cancellationSource.Token);
+        await StopAllHostedServicesAsync(node1.HostedServices, cancellationSource.Token);
+        await StopAllHostedServicesAsync(node2.HostedServices, cancellationSource.Token);
+        await StopAllHostedServicesAsync(node3.HostedServices, cancellationSource.Token);
     }
 
     public void Dispose()
@@ -155,7 +162,7 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
         serviceProviders.Clear();
     }
 
-    private SingleMeshTestNode CreateDiscoveryNode(Guid peerId, int listenPort, int multicastPort)
+    private SingleMeshTestNode CreateDiscoveryNode(Guid peerId, int listenPort, int multicastPort, int handshakePort)
     {
         var services = new ServiceCollection();
 
@@ -184,7 +191,13 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
             {
                 options.MulticastAddress = "239.255.0.1"; 
                 options.MulticastPort = multicastPort;
+                options.AdvertisedHandshakePort = handshakePort;
                 options.DiscoveryTimeout = TimeSpan.FromSeconds(5);
+            })
+            .AddUdpPeerHandshake(options => 
+            {
+                options.ListenPort = handshakePort;
+                options.HandshakeTimeout = TimeSpan.FromSeconds(5);
             });
 
         services.AddKeyedSingleton<IFailureDetector>(meshId, (sp, key) => new TimeBasedFailureDetector((string)key!, sp.GetRequiredService<IOptionsMonitor<FailureDetectorOptions>>(), sp.GetRequiredService<ILogger<TimeBasedFailureDetector>>()));
@@ -194,12 +207,12 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
         serviceProviders.Add(provider);
 
         var discovery = provider.GetRequiredKeyedService<IPeerDiscovery>(meshId);
-        var hostedService = provider.GetServices<IHostedService>().OfType<P2pHostedService>().First();
+        var hostedServices = provider.GetServices<IHostedService>().ToList();
 
-        return new SingleMeshTestNode(discovery, hostedService);
+        return new SingleMeshTestNode(discovery, hostedServices);
     }
 
-    private MultiMeshTestNode CreateMultiMeshNode(Guid peerId, int mesh1Port, int mesh2Port, int multicastPort1, int multicastPort2)
+    private MultiMeshTestNode CreateMultiMeshNode(Guid peerId, int mesh1Port, int mesh2Port, int multicastPort1, int multicastPort2, int mesh1HandshakePort, int mesh2HandshakePort)
     {
         var services = new ServiceCollection();
         
@@ -229,7 +242,13 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
             {
                 options.MulticastAddress = "239.255.0.1"; 
                 options.MulticastPort = multicastPort1;
+                options.AdvertisedHandshakePort = mesh1HandshakePort;
                 options.DiscoveryTimeout = TimeSpan.FromSeconds(5);
+            })
+            .AddUdpPeerHandshake(options =>
+            {
+                options.ListenPort = mesh1HandshakePort;
+                options.HandshakeTimeout = TimeSpan.FromSeconds(5);
             });
 
         services.AddKeyedSingleton<IFailureDetector>(mesh1Id, (sp, key) => new TimeBasedFailureDetector((string)key!, sp.GetRequiredService<IOptionsMonitor<FailureDetectorOptions>>(), sp.GetRequiredService<ILogger<TimeBasedFailureDetector>>()));
@@ -250,7 +269,13 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
             {
                 options.MulticastAddress = "239.255.0.1"; 
                 options.MulticastPort = multicastPort2;
+                options.AdvertisedHandshakePort = mesh2HandshakePort;
                 options.DiscoveryTimeout = TimeSpan.FromSeconds(5);
+            })
+            .AddUdpPeerHandshake(options =>
+            {
+                options.ListenPort = mesh2HandshakePort;
+                options.HandshakeTimeout = TimeSpan.FromSeconds(5);
             });
 
         services.AddKeyedSingleton<IFailureDetector>(mesh2Id, (sp, key) => new TimeBasedFailureDetector((string)key!, sp.GetRequiredService<IOptionsMonitor<FailureDetectorOptions>>(), sp.GetRequiredService<ILogger<TimeBasedFailureDetector>>()));
@@ -259,12 +284,28 @@ public sealed class UdpPeerDiscoveryIntegrationTests : IDisposable
         var provider = services.BuildServiceProvider();
         serviceProviders.Add(provider);
 
-        var hostedService = provider.GetServices<IHostedService>().OfType<P2pHostedService>().First();
+        var hostedServices = provider.GetServices<IHostedService>().ToList();
 
-        return new MultiMeshTestNode(provider, hostedService);
+        return new MultiMeshTestNode(provider, hostedServices);
+    }
+    
+    private static async Task StartAllHostedServicesAsync(IEnumerable<IHostedService> services, CancellationToken cancellationToken)
+    {
+        foreach (var service in services)
+        {
+            await service.StartAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
-    private readonly record struct SingleMeshTestNode(IPeerDiscovery Discovery, IHostedService HostedService);
+    private static async Task StopAllHostedServicesAsync(IEnumerable<IHostedService> services, CancellationToken cancellationToken)
+    {
+        foreach (var service in services.Reverse())
+        {
+            await service.StopAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
 
-    private readonly record struct MultiMeshTestNode(ServiceProvider Provider, IHostedService HostedService);
+    private readonly record struct SingleMeshTestNode(IPeerDiscovery Discovery, IEnumerable<IHostedService> HostedServices);
+
+    private readonly record struct MultiMeshTestNode(ServiceProvider Provider, IEnumerable<IHostedService> HostedServices);
 }

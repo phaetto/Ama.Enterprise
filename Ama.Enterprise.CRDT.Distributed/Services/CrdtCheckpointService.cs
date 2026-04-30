@@ -17,33 +17,22 @@ using Microsoft.Extensions.Options;
 /// Background service responsible for periodically saving the full in-memory state of all registered CRDTs to persistent storage
 /// and trimming operational journals.
 /// </summary>
-public sealed class CrdtCheckpointService : BackgroundService
+public sealed class CrdtCheckpointService(
+    DistributedCrdtScopeProvider scopeProvider,
+    IClusterStateTracker clusterTracker,
+    IDistributedCrdtStorage storage,
+    IVersionVectorSyncService syncService,
+    ICrdtEvictionService evictionService,
+    IOptions<DistributedCrdtOptions> options,
+    ILogger<CrdtCheckpointService> logger) : BackgroundService
 {
-    private readonly DistributedCrdtScopeProvider scopeProvider;
-    private readonly IClusterStateTracker clusterTracker;
-    private readonly IDistributedCrdtStorage storage;
-    private readonly IVersionVectorSyncService syncService;
-    private readonly ICrdtEvictionService evictionService;
-    private readonly IOptions<DistributedCrdtOptions> options;
-    private readonly ILogger<CrdtCheckpointService> logger;
-
-    public CrdtCheckpointService(
-        DistributedCrdtScopeProvider scopeProvider,
-        IClusterStateTracker clusterTracker,
-        IDistributedCrdtStorage storage,
-        IVersionVectorSyncService syncService,
-        ICrdtEvictionService evictionService,
-        IOptions<DistributedCrdtOptions> options,
-        ILogger<CrdtCheckpointService> logger)
-    {
-        this.scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
-        this.clusterTracker = clusterTracker ?? throw new ArgumentNullException(nameof(clusterTracker));
-        this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
-        this.syncService = syncService ?? throw new ArgumentNullException(nameof(syncService));
-        this.evictionService = evictionService ?? throw new ArgumentNullException(nameof(evictionService));
-        this.options = options ?? throw new ArgumentNullException(nameof(options));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly DistributedCrdtScopeProvider scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
+    private readonly IClusterStateTracker clusterTracker = clusterTracker ?? throw new ArgumentNullException(nameof(clusterTracker));
+    private readonly IDistributedCrdtStorage storage = storage ?? throw new ArgumentNullException(nameof(storage));
+    private readonly IVersionVectorSyncService syncService = syncService ?? throw new ArgumentNullException(nameof(syncService));
+    private readonly ICrdtEvictionService evictionService = evictionService ?? throw new ArgumentNullException(nameof(evictionService));
+    private readonly IOptions<DistributedCrdtOptions> options = options ?? throw new ArgumentNullException(nameof(options));
+    private readonly ILogger<CrdtCheckpointService> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

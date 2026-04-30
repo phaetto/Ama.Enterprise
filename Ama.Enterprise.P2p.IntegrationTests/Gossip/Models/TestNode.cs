@@ -12,63 +12,52 @@ using Microsoft.Extensions.Hosting;
 /// <summary>
 /// Represents a fully configured test node mapping its internal services.
 /// </summary>
-public sealed class TestNode : IAsyncDisposable
+/// <remarks>
+/// Initializes a new instance of the <see cref="TestNode"/> class.
+/// </remarks>
+public sealed class TestNode(
+    ServiceProvider provider,
+    PeerId id,
+    PeerEndpoint endpoint,
+    TestMessageHandler handler,
+    IHostedService hostedService,
+    IP2pProtocol protocol,
+    IPeerRegistry registry) : IAsyncDisposable
 {
     /// <summary>
     /// Gets the underlying service provider.
     /// </summary>
-    public ServiceProvider Provider { get; }
+    public ServiceProvider Provider { get; } = provider ?? throw new ArgumentNullException(nameof(provider));
 
     /// <summary>
     /// Gets the unique peer identity.
     /// </summary>
-    public PeerId Id { get; }
+    public PeerId Id { get; } = id;
 
     /// <summary>
     /// Gets the local binding endpoint.
     /// </summary>
-    public PeerEndpoint Endpoint { get; }
+    public PeerEndpoint Endpoint { get; } = endpoint;
 
     /// <summary>
     /// Gets the mock test handler tracking received messages.
     /// </summary>
-    public TestMessageHandler Handler { get; }
+    public TestMessageHandler Handler { get; } = handler ?? throw new ArgumentNullException(nameof(handler));
 
     /// <summary>
     /// Gets the generic host wrapper driving the protocol loops.
     /// </summary>
-    public IHostedService HostedService { get; }
+    public IHostedService HostedService { get; } = hostedService ?? throw new ArgumentNullException(nameof(hostedService));
 
     /// <summary>
     /// Gets the generic protocol instance.
     /// </summary>
-    public IP2pProtocol Protocol { get; }
+    public IP2pProtocol Protocol { get; } = protocol ?? throw new ArgumentNullException(nameof(protocol));
 
     /// <summary>
     /// Gets the routing registry instance.
     /// </summary>
-    public IPeerRegistry Registry { get; }
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="TestNode"/> class.
-    /// </summary>
-    public TestNode(
-        ServiceProvider provider,
-        PeerId id,
-        PeerEndpoint endpoint,
-        TestMessageHandler handler,
-        IHostedService hostedService,
-        IP2pProtocol protocol,
-        IPeerRegistry registry)
-    {
-        Provider = provider ?? throw new ArgumentNullException(nameof(provider));
-        Id = id;
-        Endpoint = endpoint;
-        Handler = handler ?? throw new ArgumentNullException(nameof(handler));
-        HostedService = hostedService ?? throw new ArgumentNullException(nameof(hostedService));
-        Protocol = protocol ?? throw new ArgumentNullException(nameof(protocol));
-        Registry = registry ?? throw new ArgumentNullException(nameof(registry));
-    }
+    public IPeerRegistry Registry { get; } = registry ?? throw new ArgumentNullException(nameof(registry));
 
     /// <inheritdoc />
     public async ValueTask DisposeAsync()

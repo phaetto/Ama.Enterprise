@@ -16,13 +16,21 @@ using SIPSorcery.Net;
 /// <summary>
 /// Implements the management of WebRTC connections and out-of-band signaling using SIPSorcery.
 /// </summary>
-public sealed class WebRtcConnectionManager : IWebRtcConnectionManager, IWebRtcInvitationService, IDisposable
+/// <remarks>
+/// Initializes a new instance of the <see cref="WebRtcConnectionManager"/> class.
+/// </remarks>
+public sealed class WebRtcConnectionManager(
+    string meshId,
+    IOptionsMonitor<WebRtcOptions> optionsMonitor,
+    IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
+    IPeerRegistry peerRegistry,
+    ILogger<WebRtcConnectionManager> logger) : IWebRtcConnectionManager, IWebRtcInvitationService, IDisposable
 {
-    private readonly string meshId;
-    private readonly IOptionsMonitor<WebRtcOptions> optionsMonitor;
-    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
-    private readonly IPeerRegistry peerRegistry;
-    private readonly ILogger<WebRtcConnectionManager> logger;
+    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
+    private readonly IOptionsMonitor<WebRtcOptions> optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
+    private readonly IPeerRegistry peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
+    private readonly ILogger<WebRtcConnectionManager> logger = logger ?? throw new ArgumentNullException(nameof(logger));
     
     private readonly ConcurrentDictionary<Guid, PeerConnectionState> connections = new();
 
@@ -31,23 +39,6 @@ public sealed class WebRtcConnectionManager : IWebRtcConnectionManager, IWebRtcI
 
     /// <inheritdoc />
     public event Action<Guid, string>? OnConnectionStateChanged;
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="WebRtcConnectionManager"/> class.
-    /// </summary>
-    public WebRtcConnectionManager(
-        string meshId,
-        IOptionsMonitor<WebRtcOptions> optionsMonitor,
-        IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
-        IPeerRegistry peerRegistry,
-        ILogger<WebRtcConnectionManager> logger)
-    {
-        this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-        this.optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
-        this.nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
-        this.peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
 
     /// <inheritdoc />
     public async Task<WebRtcInvitationOffer> CreateInvitationAsync(CancellationToken cancellationToken)
@@ -326,15 +317,9 @@ public sealed class WebRtcConnectionManager : IWebRtcConnectionManager, IWebRtcI
         connections.Clear();
     }
 
-    private sealed class PeerConnectionState
+    private sealed class PeerConnectionState(RTCPeerConnection peerConnection, RTCDataChannel? dataChannel)
     {
-        public RTCPeerConnection PeerConnection { get; }
-        public RTCDataChannel? DataChannel { get; set; }
-
-        public PeerConnectionState(RTCPeerConnection peerConnection, RTCDataChannel? dataChannel)
-        {
-            PeerConnection = peerConnection;
-            DataChannel = dataChannel;
-        }
+        public RTCPeerConnection PeerConnection { get; } = peerConnection;
+        public RTCDataChannel? DataChannel { get; set; } = dataChannel;
     }
 }

@@ -26,18 +26,13 @@ using Xunit;
 /// <summary>
 /// Integration tests verifying the structured Push-Pull Anti-Entropy gossip capabilities natively.
 /// </summary>
-public sealed class PushPullGossipIntegrationTests
+/// <remarks>
+/// Initializes a new instance of the <see cref="PushPullGossipIntegrationTests"/> class.
+/// </remarks>
+public sealed class PushPullGossipIntegrationTests(ITestOutputHelper testOutputHelper)
 {
-    private readonly ITestOutputHelper testOutputHelper;
+    private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
     private const string TestMeshId = "PushPullIntegrationMesh";
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="PushPullGossipIntegrationTests"/> class.
-    /// </summary>
-    public PushPullGossipIntegrationTests(ITestOutputHelper testOutputHelper)
-    {
-        this.testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
-    }
 
     [IntegrationFact]
     public async Task Network_ShouldRecoverMissingMessages_ViaPushPullAntiEntropy()

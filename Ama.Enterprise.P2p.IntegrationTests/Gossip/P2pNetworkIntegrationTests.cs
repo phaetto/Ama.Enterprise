@@ -28,15 +28,10 @@ using Ama.Enterprise.P2p.Models.Transports;
 /// <summary>
 /// Contains complex integration tests validating actual TCP/HTTP binding, protocol cycles, and payload distributions.
 /// </summary>
-public sealed class P2pNetworkIntegrationTests
+public sealed class P2pNetworkIntegrationTests(ITestOutputHelper testOutputHelper)
 {
-    private readonly ITestOutputHelper testOutputHelper;
+    private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
     private const string TestMeshId = "BasicIntegrationMesh";
-
-    public P2pNetworkIntegrationTests(ITestOutputHelper testOutputHelper)
-    {
-        this.testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
-    }
 
     [IntegrationFact]
     public async Task Network_ShouldPropagateMessage_ToAllConnectedNodes()

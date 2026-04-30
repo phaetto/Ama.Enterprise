@@ -11,18 +11,12 @@ using Microsoft.Extensions.Logging;
 /// <summary>
 /// Background service eagerly bootstrapping the singleton feature flags global state.
 /// </summary>
-internal sealed class FeatureFlagBootstrapper : IHostedService
+internal sealed class FeatureFlagBootstrapper(
+    DistributedCrdtScopeProvider scopeProvider,
+    ILogger<FeatureFlagBootstrapper> logger) : IHostedService
 {
-    private readonly DistributedCrdtScopeProvider scopeProvider;
-    private readonly ILogger<FeatureFlagBootstrapper> logger;
-
-    public FeatureFlagBootstrapper(
-        DistributedCrdtScopeProvider scopeProvider,
-        ILogger<FeatureFlagBootstrapper> logger)
-    {
-        this.scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly DistributedCrdtScopeProvider scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
+    private readonly ILogger<FeatureFlagBootstrapper> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {

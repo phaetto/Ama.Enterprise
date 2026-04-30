@@ -18,29 +18,21 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Implements isolated inbound network listener, strictly binding configurations specific to a single mesh via ASP.NET Core Kestrel efficiently.
 /// </summary>
-public sealed class KestrelTransportListener : ITransportListener, IDisposable
+/// <remarks>
+/// Initializes a new instance of the <see cref="KestrelTransportListener"/> class.
+/// </remarks>
+public sealed class KestrelTransportListener(
+    string meshId,
+    IOptionsMonitor<KestrelTransportOptions> optionsMonitor,
+    ICrdtSerializer serializer,
+    ILogger<KestrelTransportListener> logger) : ITransportListener, IDisposable
 {
-    private readonly string meshId;
-    private readonly IOptionsMonitor<KestrelTransportOptions> optionsMonitor;
-    private readonly ICrdtSerializer serializer;
-    private readonly ILogger<KestrelTransportListener> logger;
+    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
+    private readonly IOptionsMonitor<KestrelTransportOptions> optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+    private readonly ILogger<KestrelTransportListener> logger = logger ?? throw new ArgumentNullException(nameof(logger));
     
     private WebApplication? app;
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="KestrelTransportListener"/> class.
-    /// </summary>
-    public KestrelTransportListener(
-        string meshId,
-        IOptionsMonitor<KestrelTransportOptions> optionsMonitor,
-        ICrdtSerializer serializer,
-        ILogger<KestrelTransportListener> logger)
-    {
-        this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-        this.optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
-        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
 
     /// <inheritdoc />
     public async Task StartListeningAsync(Func<IMeshMessage, Task> onMessageReceived, CancellationToken cancellationToken)

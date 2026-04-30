@@ -19,18 +19,13 @@ using Microsoft.Extensions.Logging;
 using Shouldly;
 using Xunit;
 
-public sealed class KestrelTransportIntegrationTests
+public sealed class KestrelTransportIntegrationTests(ITestOutputHelper testOutputHelper)
 {
     private sealed record DummyPeerEndpoint : PeerEndpoint;
 
     private static int portCounter = 50000;
     
-    private readonly ITestOutputHelper testOutputHelper;
-
-    public KestrelTransportIntegrationTests(ITestOutputHelper testOutputHelper)
-    {
-        this.testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
-    }
+    private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
 
     private static int GetNextPort() => Interlocked.Increment(ref portCounter);
 

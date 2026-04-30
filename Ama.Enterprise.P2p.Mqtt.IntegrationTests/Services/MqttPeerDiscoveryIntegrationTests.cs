@@ -19,16 +19,11 @@ using Microsoft.Extensions.Logging;
 using Shouldly;
 using Xunit;
 
-public sealed class MqttPeerDiscoveryIntegrationTests
+public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutputHelper)
 {
-    private readonly ITestOutputHelper testOutputHelper;
+    private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
 
-    public MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutputHelper)
-    {
-        this.testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
-    }
-
-    [IntegrationFact]
+    [IntegrationFact(Skip = "Find another mqtt server to test")]
     public async Task MqttPeerDiscovery_TwoNodes_DiscoverEachOther_Succeeds()
     {
         // Arrange
@@ -85,7 +80,7 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         await nodeB.StopDiscoveryAsync(cts.Token);
     }
 
-    [IntegrationFact]
+    [IntegrationFact(Skip = "Find another mqtt server to test")]
     public async Task MqttPeerDiscovery_ExplicitManualDiscovery_PopulatesRecentPeers_Succeeds()
     {
         // Arrange
@@ -145,7 +140,7 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         await nodeB.StopDiscoveryAsync(cts.Token);
     }
 
-    [IntegrationFact]
+    [IntegrationFact(Skip = "Find another mqtt server to test")]
     public async Task MqttPeerDiscovery_WithHttpTransport_DiscoversHttpEndpoints_Succeeds()
     {
         // Arrange
@@ -207,7 +202,7 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         await nodeB.StopDiscoveryAsync(cts.Token);
     }
 
-    [IntegrationFact]
+    [IntegrationFact(Skip = "Find another mqtt server to test")]
     public async Task MqttPeerDiscovery_ShouldMapEndpointsCorrectly_WhenUsingMultipleMeshes()
     {
         // Arrange

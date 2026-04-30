@@ -16,32 +16,23 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Orchestrates the Gossip protocol algorithm across multiple meshes.
 /// </summary>
-public sealed class GossipProtocol : IP2pProtocol, IDisposable
+/// <remarks>
+/// Initializes a new instance of the <see cref="GossipProtocol"/> class.
+/// </remarks>
+public sealed class GossipProtocol(
+    IServiceProvider serviceProvider,
+    IEnumerable<P2pMeshMetadata> meshes,
+    IOptionsMonitor<GossipOptions> gossipOptionsMonitor,
+    IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
+    ILogger<GossipProtocol> logger) : IP2pProtocol, IDisposable
 {
-    private readonly IServiceProvider serviceProvider;
-    private readonly IEnumerable<P2pMeshMetadata> meshes;
-    private readonly IOptionsMonitor<GossipOptions> gossipOptionsMonitor;
-    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
-    private readonly ILogger<GossipProtocol> logger;
+    private readonly IServiceProvider serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+    private readonly IEnumerable<P2pMeshMetadata> meshes = meshes ?? throw new ArgumentNullException(nameof(meshes));
+    private readonly IOptionsMonitor<GossipOptions> gossipOptionsMonitor = gossipOptionsMonitor ?? throw new ArgumentNullException(nameof(gossipOptionsMonitor));
+    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
+    private readonly ILogger<GossipProtocol> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     private readonly ConcurrentDictionary<string, MeshState> activeMeshes = new();
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="GossipProtocol"/> class.
-    /// </summary>
-    public GossipProtocol(
-        IServiceProvider serviceProvider,
-        IEnumerable<P2pMeshMetadata> meshes,
-        IOptionsMonitor<GossipOptions> gossipOptionsMonitor,
-        IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
-        ILogger<GossipProtocol> logger)
-    {
-        this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-        this.meshes = meshes ?? throw new ArgumentNullException(nameof(meshes));
-        this.gossipOptionsMonitor = gossipOptionsMonitor ?? throw new ArgumentNullException(nameof(gossipOptionsMonitor));
-        this.nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
@@ -361,14 +352,20 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
         }
     }
 
-    private sealed class MeshState : IDisposable
+    private sealed class MeshState(
+        ITransportRouter transportRouter,
+        IInboundMessageQueue<GossipMessage> inboundQueue,
+        IPeerSelector peerSelector,
+        IApplicationPayloadDispatcher dispatcher,
+        IFailureDetector failureDetector,
+        IPeerRegistry peerRegistry) : IDisposable
     {
-        public ITransportRouter TransportRouter { get; }
-        public IInboundMessageQueue<GossipMessage> InboundQueue { get; }
-        public IPeerSelector PeerSelector { get; }
-        public IApplicationPayloadDispatcher Dispatcher { get; }
-        public IFailureDetector FailureDetector { get; }
-        public IPeerRegistry PeerRegistry { get; }
+        public ITransportRouter TransportRouter { get; } = transportRouter;
+        public IInboundMessageQueue<GossipMessage> InboundQueue { get; } = inboundQueue;
+        public IPeerSelector PeerSelector { get; } = peerSelector;
+        public IApplicationPayloadDispatcher Dispatcher { get; } = dispatcher;
+        public IFailureDetector FailureDetector { get; } = failureDetector;
+        public IPeerRegistry PeerRegistry { get; } = peerRegistry;
 
         public ConcurrentDictionary<Guid, DateTimeOffset> SeenMessages { get; } = new();
         public ConcurrentQueue<GossipMessage> MessageQueue { get; } = new();
@@ -377,22 +374,6 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
         public Task? BackgroundLoopTask { get; set; }
         public Task? InboundLoopTask { get; set; }
         public Task? HealthCheckLoopTask { get; set; }
-
-        public MeshState(
-            ITransportRouter transportRouter,
-            IInboundMessageQueue<GossipMessage> inboundQueue,
-            IPeerSelector peerSelector,
-            IApplicationPayloadDispatcher dispatcher,
-            IFailureDetector failureDetector,
-            IPeerRegistry peerRegistry)
-        {
-            TransportRouter = transportRouter;
-            InboundQueue = inboundQueue;
-            PeerSelector = peerSelector;
-            Dispatcher = dispatcher;
-            FailureDetector = failureDetector;
-            PeerRegistry = peerRegistry;
-        }
 
         public void Dispose()
         {

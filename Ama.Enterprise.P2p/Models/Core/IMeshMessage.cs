@@ -10,7 +10,6 @@ using Ama.Enterprise.P2p.Models.Gossip;
 /// </summary>
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type", IgnoreUnrecognizedTypeDiscriminators = true, UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
 [JsonDerivedType(typeof(GossipMessage), "gossip")]
-[JsonDerivedType(typeof(UdpDiscoveryMessage), "udp-discovery")]
 public interface IMeshMessage
 {
     /// <summary>

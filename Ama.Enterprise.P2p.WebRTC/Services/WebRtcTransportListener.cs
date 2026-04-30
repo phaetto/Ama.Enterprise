@@ -11,29 +11,21 @@ using Microsoft.Extensions.Logging;
 /// <summary>
 /// Implements generalized inbound data queue listeners hooked inherently directly to the Data Channel bindings safely cleanly gracefully securely seamlessly elegantly properly natively effectively dynamically safely accurately smoothly elegantly efficiently.
 /// </summary>
-public sealed class WebRtcTransportListener : ITransportListener, IDisposable
+/// <remarks>
+/// Initializes a new instance of the <see cref="WebRtcTransportListener"/> class.
+/// </remarks>
+public sealed class WebRtcTransportListener(
+    string meshId,
+    IWebRtcConnectionManager connectionManager,
+    ICrdtSerializer serializer,
+    ILogger<WebRtcTransportListener> logger) : ITransportListener, IDisposable
 {
-    private readonly string meshId;
-    private readonly IWebRtcConnectionManager connectionManager;
-    private readonly ICrdtSerializer serializer;
-    private readonly ILogger<WebRtcTransportListener> logger;
+    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
+    private readonly IWebRtcConnectionManager connectionManager = connectionManager ?? throw new ArgumentNullException(nameof(connectionManager));
+    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+    private readonly ILogger<WebRtcTransportListener> logger = logger ?? throw new ArgumentNullException(nameof(logger));
     
     private Func<IMeshMessage, Task>? onMessageReceivedCallback;
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="WebRtcTransportListener"/> class.
-    /// </summary>
-    public WebRtcTransportListener(
-        string meshId,
-        IWebRtcConnectionManager connectionManager,
-        ICrdtSerializer serializer,
-        ILogger<WebRtcTransportListener> logger)
-    {
-        this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-        this.connectionManager = connectionManager ?? throw new ArgumentNullException(nameof(connectionManager));
-        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
 
     /// <inheritdoc />
     public Task StartListeningAsync(Func<IMeshMessage, Task> onMessageReceived, CancellationToken cancellationToken)

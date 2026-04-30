@@ -2,7 +2,6 @@ namespace Ama.Enterprise.P2p.Mqtt.Extensions;
 
 using System;
 using System.Linq;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Ama.CRDT.Extensions;

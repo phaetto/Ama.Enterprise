@@ -12,27 +12,19 @@ using Microsoft.Extensions.Logging;
 /// <summary>
 /// Outbound transport mechanism routing P2P messages over isolated MQTT channels.
 /// </summary>
-public sealed class MqttTransport : ITransport
+/// <remarks>
+/// Initializes a new instance of the <see cref="MqttTransport"/> class.
+/// </remarks>
+public sealed class MqttTransport(
+    string meshId,
+    IMqttClientManager clientManager,
+    ICrdtSerializer serializer,
+    ILogger<MqttTransport> logger) : ITransport
 {
-    private readonly string meshId;
-    private readonly IMqttClientManager clientManager;
-    private readonly ICrdtSerializer serializer;
-    private readonly ILogger<MqttTransport> logger;
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="MqttTransport"/> class.
-    /// </summary>
-    public MqttTransport(
-        string meshId,
-        IMqttClientManager clientManager,
-        ICrdtSerializer serializer,
-        ILogger<MqttTransport> logger)
-    {
-        this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-        this.clientManager = clientManager ?? throw new ArgumentNullException(nameof(clientManager));
-        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
+    private readonly IMqttClientManager clientManager = clientManager ?? throw new ArgumentNullException(nameof(clientManager));
+    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+    private readonly ILogger<MqttTransport> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
     public bool CanHandle(PeerEndpoint endpoint) => endpoint is MqttPeerEndpoint;

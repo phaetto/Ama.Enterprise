@@ -90,6 +90,10 @@ public static class Program
                 options.MulticastPort = 8036;
                 options.DiscoveryInterval = TimeSpan.FromSeconds(1);
                 options.DiscoveryTimeout = TimeSpan.FromSeconds(1);
+            })
+            .AddUdpPeerHandshake(options =>
+            {
+                options.ListenPort = 8037;
             });
 
         await using var provider = services.BuildServiceProvider();

@@ -96,7 +96,7 @@
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pNetworkIntegrationTests.cs` | Refactored integration assertions targeting correctly unboxed test payloads. Cleanly redesigned deduplication tests securely explicitly wrapping identical envelopes ensuring robust evaluation natively naturally successfully gracefully. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pVersioningIntegrationTests.cs` | Refactored integration assertions accurately mapping completely natively unboxed generic wrappers implicitly flawlessly properly completely correctly natively cleanly organically smoothly appropriately. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/PushPullGossipIntegrationTests.cs` | Integration tests thoroughly verifying explicit Push-Pull anti-entropy bounds appropriately isolating digest transmissions natively ensuring active localized fallback synchronizations cleanly explicitly successfully. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/UdpPeerDiscoveryIntegrationTests.cs` | Integration tests verifying the UDP multicast active discovery mechanism mapping isolated P2P mesh endpoints across varied network topologies. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/UdpPeerDiscoveryIntegrationTests.cs` | Integration tests verifying the Two-Phase UDP multicast discovery mechanism natively evaluating decoupled UDP handshake probes. |
 | `$/Ama.Enterprise.P2p.Kestrel.IntegrationTests/Ama.Enterprise.P2p.Kestrel.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.Kestrel.IntegrationTests/Services/KestrelTransportIntegrationTests.cs` | Integration tests thoroughly verifying the ASP.NET Core Kestrel-based P2P networking transport. Validates isolated end-to-end messaging correctly, bidirectional dynamic routing safely, explicit fault handling seamlessly evicting dead remote targets organically, and generic unmapped fallback bounds smoothly accurately natively gracefully properly inherently logically intelligently reliably rationally perfectly flawlessly smartly. |
 | `$/Ama.Enterprise.P2p.Kestrel/Ama.Enterprise.P2p.Kestrel.csproj` | Added `Microsoft.AspNetCore.App` framework reference for ASP.NET Core Kestrel dependencies. |
@@ -145,11 +145,12 @@
 | `$/Ama.Enterprise.P2p.WebRTC/Services/WebRtcTransportListener.cs` | WebRTC specific listener registering seamlessly asynchronous bindings effectively targeting decentralized peer streams globally. |
 | `$/Ama.Enterprise.P2p/Ama.Enterprise.P2p.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p/Constants.cs` | Global constants for the P2P module, including protocol versions and payload size limits. |
+| `$/Ama.Enterprise.P2p/Extensions/DnsDiscoveryServiceCollectionExtensions.cs` | Extension methods for registering DNS-based active peer discovery components strictly isolated via Keyed dependencies to specific mesh profiles. |
 | `$/Ama.Enterprise.P2p/Extensions/IP2pMeshBuilder.cs` | Interface for building and configuring specific Keyed DI mesh profiles. |
 | `$/Ama.Enterprise.P2p/Extensions/P2pMeshBuilder.cs` | Implementation of `IP2pMeshBuilder` handling multi-mesh dependency injection tracking. |
 | `$/Ama.Enterprise.P2p/Extensions/P2pMeshRegistrationTracker.cs` | Centralized tracking mechanism guaranteeing idempotent mesh registrations safely evaluating structurally identical configurations natively bypassing duplicates perfectly securely efficiently. |
 | `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Modified dependency mappings safely adding the explicit `AddPushPullGossipNetwork` configurator decoupling the protocol boundaries cleanly. |
-| `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Registration logic configuring Dependency Injection specifically targeting the UDP peer discovery sub-components and background services. |
+| `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Removed the global `IHostedService` registration for `UdpPeerHandshaker` to rely on explicit mesh lifecycle orchestration preventing multiple mesh tracking collisions. |
 | `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
 | `$/Ama.Enterprise.P2p/Models/Core/IMeshMessage.cs` | Updated to include `ProtocolVersion` natively standardizing structural validation. |
 | `$/Ama.Enterprise.P2p/Models/Core/P2pMeshMetadata.cs` | Metadata record registering a specific mesh identifier into the global dependency container for orchestration. |
@@ -158,8 +159,10 @@
 | `$/Ama.Enterprise.P2p/Models/Core/PeerId.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerNode.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerStatus.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Models/Discovery/UdpDiscoveryMessage.cs` | Updated with `ProtocolVersion` aligning explicit polymorphic bounds gracefully. |
-| `$/Ama.Enterprise.P2p/Models/Discovery/UdpDiscoveryOptions.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Models/Discovery/DnsDiscoveryOptions.cs` | Configuration structure strictly enforcing parameters used to query DNS seeds and manage isolated handshake timeouts cleanly accurately. |
+| `$/Ama.Enterprise.P2p/Models/Discovery/UdpDiscoveryMessage.cs` | Lightweight payload used for UDP multicast Phase 1 discovery, transmitting strictly routing bounds without full node payloads. |
+| `$/Ama.Enterprise.P2p/Models/Discovery/UdpDiscoveryOptions.cs` | Configuration structure for UDP multicast discovery, updated to hold the explicitly advertised handshaker port. |
+| `$/Ama.Enterprise.P2p/Models/Discovery/UdpHandshakeOptions.cs` | Configuration structure for isolated UDP handshaking parameters. |
 | `$/Ama.Enterprise.P2p/Models/Gossip/GossipMessage.cs` | Incorporated `ProtocolVersion` maintaining fallback compatibility implicitly effectively natively. |
 | `$/Ama.Enterprise.P2p/Models/Gossip/GossipMessageType.cs` | Defines explicit message typings enabling push-pull sync interactions cleanly distinguishing broadcasts natively. |
 | `$/Ama.Enterprise.P2p/Models/Gossip/GossipOptions.cs` | No description provided. |
@@ -176,6 +179,7 @@
 | `$/Ama.Enterprise.P2p/Services/Core/IP2pProtocol.cs` | Generic interface defining the orchestrator for the P2P protocol, abstracting algorithms like Gossip. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerAuthenticator.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerDiscovery.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Services/Core/IPeerHandshaker.cs` | Interface abstracting Phase 2 of Two-Phase discovery, moved to Core to serve all network transports gracefully. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerRegistry.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerSelector.cs` | Interface for algorithms that select a generic subset of peers for communication. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerTopologyObserver.cs` | No description provided. |
@@ -188,11 +192,14 @@
 | `$/Ama.Enterprise.P2p/Services/Core/RandomPeerSelector.cs` | Implementation of IPeerSelector utilizing random distribution selection. |
 | `$/Ama.Enterprise.P2p/Services/Core/TimeBasedFailureDetector.cs` | Implementation of IFailureDetector using abstract heartbeats decoupled from specific protocol options. |
 | `$/Ama.Enterprise.P2p/Services/Core/TransportRouter.cs` | Composite transport router that delegates sending messages to the correct specific transport implementation. |
+| `$/Ama.Enterprise.P2p/Services/Discovery/DnsPeerDiscovery.cs` | Hosted service implementation acting as Phase 1 of Two-Phase discovery, natively resolving DNS seeds and orchestrating asynchronous explicit handshakes efficiently smoothly seamlessly securely. |
+| `$/Ama.Enterprise.P2p/Services/Discovery/IPeerHandshaker.cs` | Interface abstracting Phase 2 of Two-Phase discovery, allowing specific transports to execute active targeted network handshakes retrieving strongly typed polymorphic peer endpoints elegantly completely seamlessly. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpDiscoveryJsonContext.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerDiscovery.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerDiscovery.cs` | Refactored hosted service operating strictly as Phase 1, resolving UDP multicast seeds and orchestrating asynchronous explicit handshakes. |
+| `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerHandshaker.cs` | Implementation of IPeerHandshaker managing localized unicast UDP probes and active listener loops natively resolving remote PeerNodes. |
 | `$/Ama.Enterprise.P2p/Services/Gossip/GossipProtocol.cs` | Safely populates orchestrating gossip parameters explicitly effectively cleanly explicitly correctly efficiently. |
 | `$/Ama.Enterprise.P2p/Services/Gossip/PushPullGossipProtocol.cs` | Dedicated generic advanced orchestrator gracefully managing structured Push-Pull anti-entropy bounds securely over native P2P boundaries. |
-| `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | Refactored generic mesh lifecycle orchestrator starting specifically Keyed transport listeners individually to match explicitly isolated bounds securely preventing multiplexing. |
+| `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | Updated to explicitly orchestrate the startup and shutdown of `IPeerHandshaker` components isolated explicitly per mesh topology alongside peers and listeners. |
 | `$/Ama.Enterprise.P2p/Services/Transports/HttpTransport.cs` | Refactored standard HTTP implementation natively isolated specifically strictly via Keyed dependencies handling precise outgoing payloads implicitly evaluating identical network bounds efficiently. |
 | `$/Ama.Enterprise.P2p/Services/Transports/HttpTransportListener.cs` | Redesigned inbound network listener transitioning away from multiplexing securely adapting explicit keyed dependencies handling localized prefixes explicitly safely isolating meshes effectively. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj` | No description provided. |

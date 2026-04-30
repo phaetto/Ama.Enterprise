@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.Services.Discovery;
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
@@ -15,60 +16,39 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Implementation of IPeerDiscovery using UDP multicast for local network discovery bound to a specific mesh.
+/// Implementation of IPeerDiscovery acting as Phase 1, using UDP multicast to resolve IPs and delegating negotiation to the handshaker.
 /// </summary>
-public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposable
+/// <remarks>
+/// Initializes a new instance of the <see cref="UdpPeerDiscovery"/> class.
+/// </remarks>
+public sealed class UdpPeerDiscovery(
+    string meshId,
+    IOptionsMonitor<UdpDiscoveryOptions> discoveryOptionsMonitor,
+    IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
+    PeerEndpoint localEndpoint,
+    IPeerHandshaker handshaker,
+    ILogger<UdpPeerDiscovery> logger,
+    IPeerRegistry peerRegistry,
+    ICrdtSerializer serializer,
+    IPeerAuthenticator authenticator,
+    IFailureDetector failureDetector) : IPeerDiscovery, IHostedService, IDisposable
 {
-    private readonly string meshId;
-    private readonly IOptionsMonitor<UdpDiscoveryOptions> discoveryOptionsMonitor;
-    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
-    private readonly PeerEndpoint localEndpoint;
-    private readonly ILogger<UdpPeerDiscovery> logger;
-    private readonly IPeerRegistry peerRegistry;
-    private readonly ICrdtSerializer serializer;
-    private readonly IPeerAuthenticator authenticator;
-    private readonly IFailureDetector failureDetector;
-    
+    private readonly string meshId = meshId;
+    private readonly IOptionsMonitor<UdpDiscoveryOptions> discoveryOptionsMonitor = discoveryOptionsMonitor;
+    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor = nodeOptionsMonitor;
+    private readonly PeerEndpoint localEndpoint = localEndpoint;
+    private readonly IPeerHandshaker handshaker = handshaker;
+    private readonly ILogger<UdpPeerDiscovery> logger = logger;
+    private readonly IPeerRegistry peerRegistry = peerRegistry;
+    private readonly ICrdtSerializer serializer = serializer;
+    private readonly IPeerAuthenticator authenticator = authenticator;
+    private readonly IFailureDetector failureDetector = failureDetector;
+
     private UdpClient? listener;
     private CancellationTokenSource? backgroundTaskCancellationSource;
     private Task? listenTask;
     private Task? discoveryTask;
     private bool isDisposed;
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="UdpPeerDiscovery"/> class.
-    /// </summary>
-    /// <param name="meshId">The mesh context identifier.</param>
-    /// <param name="discoveryOptionsMonitor">The UDP discovery configuration options monitor.</param>
-    /// <param name="nodeOptionsMonitor">The global node configuration options monitor.</param>
-    /// <param name="localEndpoint">The local network endpoint to advertise.</param>
-    /// <param name="logger">The logger instance.</param>
-    /// <param name="peerRegistry">The peer registry to populate with discovered nodes.</param>
-    /// <param name="serializer">The centralized CRDT serializer.</param>
-    /// <param name="authenticator">The peer authenticator to validate remote node connections.</param>
-    /// <param name="failureDetector">The failure detector to track heartbeat signals during discovery pings.</param>
-    /// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
-    public UdpPeerDiscovery(
-        string meshId,
-        IOptionsMonitor<UdpDiscoveryOptions> discoveryOptionsMonitor, 
-        IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor, 
-        PeerEndpoint localEndpoint,
-        ILogger<UdpPeerDiscovery> logger,
-        IPeerRegistry peerRegistry,
-        ICrdtSerializer serializer,
-        IPeerAuthenticator authenticator,
-        IFailureDetector failureDetector)
-    {
-        this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-        this.discoveryOptionsMonitor = discoveryOptionsMonitor ?? throw new ArgumentNullException(nameof(discoveryOptionsMonitor));
-        this.nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
-        this.localEndpoint = localEndpoint ?? throw new ArgumentNullException(nameof(localEndpoint));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        this.peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
-        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-        this.authenticator = authenticator ?? throw new ArgumentNullException(nameof(authenticator));
-        this.failureDetector = failureDetector ?? throw new ArgumentNullException(nameof(failureDetector));
-    }
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
@@ -77,13 +57,13 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
 
         var options = discoveryOptionsMonitor.Get(meshId);
         backgroundTaskCancellationSource = new CancellationTokenSource();
-        
+
         var localIpEndpoint = new IPEndPoint(IPAddress.Any, options.MulticastPort);
         listener = new UdpClient(AddressFamily.InterNetwork);
-        
+
         listener.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
         listener.Client.Bind(localIpEndpoint);
-        
+
         var multicastAddress = IPAddress.Parse(options.MulticastAddress);
         listener.JoinMulticastGroup(multicastAddress);
 
@@ -91,9 +71,9 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
         discoveryTask = DiscoveryLoopAsync(backgroundTaskCancellationSource.Token);
 
         logger.LogInformation(
-            "[{MeshId}] UDP Peer Discovery started listening on multicast group {Address}:{Port}", 
+            "[{MeshId}] UDP Peer Discovery started listening on multicast group {Address}:{Port}",
             meshId,
-            options.MulticastAddress, 
+            options.MulticastAddress,
             options.MulticastPort);
 
         return Task.CompletedTask;
@@ -110,7 +90,6 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
         await backgroundTaskCancellationSource.CancelAsync().ConfigureAwait(false);
 
         var tasksToWait = new List<Task>();
-
         if (listenTask is not null) tasksToWait.Add(listenTask);
         if (discoveryTask is not null) tasksToWait.Add(discoveryTask);
 
@@ -133,65 +112,90 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
 
         var options = discoveryOptionsMonitor.Get(meshId);
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
-        var discoveredPeers = new HashSet<PeerNode>();
-        
+        var discoveredPeers = new ConcurrentBag<PeerNode>();
+
         using var client = new UdpClient(AddressFamily.InterNetwork);
         client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-        client.Client.Bind(new IPEndPoint(IPAddress.Any, 0)); 
-        
-        var localId = new PeerId(nodeOptions.LocalPeerId);
-        var localNode = new PeerNode(localId, localEndpoint);
-        
-        var requestBytes = serializer.SerializeToBytes(localNode);
+        client.Client.Bind(new IPEndPoint(IPAddress.Any, 0));
+
+        var discoveryPayload = new UdpDiscoveryMessage
+        {
+            MeshId = meshId,
+            AdvertisedHandshakePort = options.AdvertisedHandshakePort
+        };
+
+        var requestBytes = serializer.SerializeToBytes(discoveryPayload);
         var targetEndpoint = new IPEndPoint(IPAddress.Parse(options.MulticastAddress), options.MulticastPort);
-        
+
         await client.SendAsync(requestBytes, requestBytes.Length, targetEndpoint).ConfigureAwait(false);
-        
-        using var timeoutCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCancellationSource.CancelAfter(options.DiscoveryTimeout);
-        
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(options.DiscoveryTimeout);
+
+        var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), localEndpoint);
+        var handshakeTasks = new List<Task>();
+
         try
         {
-            while (!timeoutCancellationSource.Token.IsCancellationRequested)
+            while (!timeoutCts.Token.IsCancellationRequested)
             {
-                var result = await client.ReceiveAsync(timeoutCancellationSource.Token).ConfigureAwait(false);
-                var payload = result.Buffer;
+                var result = await client.ReceiveAsync(timeoutCts.Token).ConfigureAwait(false);
 
                 try
                 {
-                    var node = serializer.DeserializeFromBytes<PeerNode>(payload);
+                    var pong = serializer.DeserializeFromBytes<UdpDiscoveryMessage>(result.Buffer);
 
-                    if (node.Id.Value != nodeOptions.LocalPeerId && node.Id.Value != Guid.Empty)
+                    if (pong.MeshId == meshId)
                     {
-                        var isAuthenticated = await authenticator.AuthenticateAsync(node, ReadOnlyMemory<byte>.Empty, timeoutCancellationSource.Token).ConfigureAwait(false);
-                        
-                        if (isAuthenticated)
+                        var remoteIpEndpoint = new IPEndPoint(result.RemoteEndPoint.Address, pong.AdvertisedHandshakePort);
+
+                        handshakeTasks.Add(Task.Run(async () =>
                         {
-                            await failureDetector.RecordHeartbeatAsync(node.Id, timeoutCancellationSource.Token).ConfigureAwait(false);
-                            discoveredPeers.Add(node);
-                        }
+                            var remoteNode = await handshaker.HandshakeAsync(localNode, remoteIpEndpoint, timeoutCts.Token).ConfigureAwait(false);
+
+                            if (!remoteNode.HasValue || remoteNode.Value.Id.Value == nodeOptions.LocalPeerId || remoteNode.Value.Id.Value == Guid.Empty)
+                            {
+                                return;
+                            }
+
+                            var isAuthenticated = await authenticator.AuthenticateAsync(remoteNode.Value, ReadOnlyMemory<byte>.Empty, timeoutCts.Token).ConfigureAwait(false);
+
+                            if (isAuthenticated)
+                            {
+                                await failureDetector.RecordHeartbeatAsync(remoteNode.Value.Id, timeoutCts.Token).ConfigureAwait(false);
+                                discoveredPeers.Add(remoteNode.Value);
+                            }
+                        }, timeoutCts.Token));
                     }
                 }
-                catch(Exception ex)
+                catch (Exception ex)
                 {
-                    // Ignore parsing errors from alien network packets
-                    logger.LogTrace(ex, "[{MeshId}] An error occurred while deserializing UDP discovery responses.", meshId);
+                    logger.LogTrace(ex, "[{MeshId}] Error processing UDP multicast response.", meshId);
                 }
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex)
+
+        if (handshakeTasks.Count > 0)
         {
-            logger.LogWarning(ex, "[{MeshId}] An error occurred while receiving UDP discovery responses.", meshId);
+            try
+            {
+                await Task.WhenAll(handshakeTasks).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { }
         }
-        
+
         return discoveredPeers;
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
-        if (isDisposed) return;
+        if (isDisposed)
+        {
+            return;
+        }
+
         backgroundTaskCancellationSource?.Cancel();
         backgroundTaskCancellationSource?.Dispose();
         listener?.Dispose();
@@ -201,53 +205,40 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     private async Task ListenLoopAsync(CancellationToken token)
     {
         if (listener is null) return;
+        var options = discoveryOptionsMonitor.Get(meshId);
 
         try
         {
             while (!token.IsCancellationRequested)
             {
                 var result = await listener.ReceiveAsync(token).ConfigureAwait(false);
-                var nodeOptions = nodeOptionsMonitor.Get(meshId);
-                
+
                 try
                 {
-                    var remoteNode = serializer.DeserializeFromBytes<PeerNode>(result.Buffer);
+                    var ping = serializer.DeserializeFromBytes<UdpDiscoveryMessage>(result.Buffer);
 
-                    if (remoteNode.Id.Value != nodeOptions.LocalPeerId && remoteNode.Id.Value != Guid.Empty)
+                    if (ping.MeshId == meshId)
                     {
-                        var isAuthenticated = await authenticator.AuthenticateAsync(remoteNode, ReadOnlyMemory<byte>.Empty, token).ConfigureAwait(false);
-                        
-                        if (isAuthenticated)
+                        var pong = new UdpDiscoveryMessage
                         {
-                            await failureDetector.RecordHeartbeatAsync(remoteNode.Id, token).ConfigureAwait(false);
-                            await peerRegistry.AddOrUpdatePeerAsync(meshId, remoteNode, PeerStatus.Active, token).ConfigureAwait(false);
+                            MeshId = meshId,
+                            AdvertisedHandshakePort = options.AdvertisedHandshakePort
+                        };
 
-                            var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), localEndpoint);
-                            var responseBytes = serializer.SerializeToBytes(localNode);
-                            
-                            await listener.SendAsync(responseBytes, responseBytes.Length, result.RemoteEndPoint).ConfigureAwait(false);
-                        }
-                        else
-                        {
-                            logger.LogDebug("[{MeshId}] Incoming UDP discovery ping from {PeerId} failed authentication.", meshId, remoteNode.Id.Value);
-                        }
+                        var responseBytes = serializer.SerializeToBytes(pong);
+                        await listener.SendAsync(responseBytes, responseBytes.Length, result.RemoteEndPoint).ConfigureAwait(false);
                     }
                 }
                 catch (Exception ex)
                 {
-                    // Ignore parsing errors from alien network packets
-                    logger.LogTrace(ex, "[{MeshId}] An error occurred while serializing UDP discovery responses.", meshId);
+                    logger.LogTrace(ex, "[{MeshId}] Ignored malformed UDP multicast ping.", meshId);
                 }
             }
         }
         catch (OperationCanceledException) { }
         catch (SocketException ex)
         {
-            logger.LogDebug(ex, "[{MeshId}] UDP listener socket exception during shutdown or network configuration change.", meshId);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "[{MeshId}] Unexpected error in UDP peer discovery background listen loop.", meshId);
+            logger.LogDebug(ex, "[{MeshId}] UDP multicast listener socket exception.", meshId);
         }
     }
 
@@ -265,11 +256,11 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
         while (!token.IsCancellationRequested)
         {
             var options = discoveryOptionsMonitor.Get(meshId);
-            
+
             try
             {
                 var discoveredPeers = await DiscoverPeersAsync(token).ConfigureAwait(false);
-                
+
                 foreach (var peer in discoveredPeers)
                 {
                     await peerRegistry.AddOrUpdatePeerAsync(meshId, peer, PeerStatus.Active, token).ConfigureAwait(false);

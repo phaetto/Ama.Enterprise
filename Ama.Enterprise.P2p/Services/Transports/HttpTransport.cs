@@ -16,33 +16,23 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Implements isolated outbound transport using HTTP POST requests mapped specifically to a target mesh.
 /// </summary>
-public sealed class HttpTransport : ITransport
+/// <remarks>
+/// Initializes a new instance of the <see cref="HttpTransport"/> class.
+/// </remarks>
+public sealed class HttpTransport(
+    string meshId,
+    IOptionsMonitor<HttpTransportOptions> optionsMonitor,
+    IHttpClientFactory httpClientFactory,
+    ICrdtSerializer serializer,
+    IPeerRegistry peerRegistry,
+    ILogger<HttpTransport> logger) : ITransport
 {
-    private readonly string meshId;
-    private readonly IOptionsMonitor<HttpTransportOptions> optionsMonitor;
-    private readonly IHttpClientFactory httpClientFactory;
-    private readonly ICrdtSerializer serializer;
-    private readonly IPeerRegistry peerRegistry;
-    private readonly ILogger<HttpTransport> logger;
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="HttpTransport"/> class.
-    /// </summary>
-    public HttpTransport(
-        string meshId,
-        IOptionsMonitor<HttpTransportOptions> optionsMonitor,
-        IHttpClientFactory httpClientFactory,
-        ICrdtSerializer serializer,
-        IPeerRegistry peerRegistry,
-        ILogger<HttpTransport> logger)
-    {
-        this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-        this.optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
-        this.httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-        this.peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
+    private readonly IOptionsMonitor<HttpTransportOptions> optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+    private readonly IHttpClientFactory httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+    private readonly IPeerRegistry peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
+    private readonly ILogger<HttpTransport> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
     public bool CanHandle(PeerEndpoint endpoint)

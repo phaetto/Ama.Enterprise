@@ -10,14 +10,12 @@ using Ama.CRDT.Attributes;
 using Ama.CRDT.Extensions;
 using Ama.CRDT.Models;
 using Ama.CRDT.Models.Aot;
-using Ama.CRDT.Services.Journaling;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.UnitTests.Attributes;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
-using Shouldly;
 
 [CrdtAotType(typeof(CompositeStorageIntegrationTests.TestState))]
 public sealed partial class CompositeTestAotContext : CrdtAotContext

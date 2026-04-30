@@ -27,15 +27,10 @@ using Ama.Enterprise.P2p.Models.Transports;
 /// <summary>
 /// Integration tests verifying backwards compatibility and protocol versioning constraints.
 /// </summary>
-public sealed class P2pVersioningIntegrationTests
+public sealed class P2pVersioningIntegrationTests(ITestOutputHelper testOutputHelper)
 {
-    private readonly ITestOutputHelper testOutputHelper;
+    private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
     private const string TestMeshId = "VersioningIntegrationMesh";
-
-    public P2pVersioningIntegrationTests(ITestOutputHelper testOutputHelper)
-    {
-        this.testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
-    }
 
     [IntegrationFact]
     public async Task Network_ShouldRejectMessages_WithIncompatibleMajorProtocolVersion()

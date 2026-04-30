@@ -19,27 +19,18 @@ using Microsoft.Extensions.Logging;
 /// Deserializes incoming network application payloads and routes the parsed CRDT intents to the distributed document manager.
 /// Agnostic to the underlying distribution algorithm.
 /// </summary>
-public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler
+public sealed class CrdtP2pPayloadHandler(
+    DistributedCrdtScopeProvider scopeProvider,
+    IClusterStateTracker clusterTracker,
+    ICrdtSerializer serializer,
+    ICrdtEvictionService evictionService,
+    ILogger<CrdtP2pPayloadHandler> logger) : IApplicationPayloadHandler
 {
-    private readonly DistributedCrdtScopeProvider scopeProvider;
-    private readonly IClusterStateTracker clusterTracker;
-    private readonly ICrdtSerializer serializer;
-    private readonly ICrdtEvictionService evictionService;
-    private readonly ILogger<CrdtP2pPayloadHandler> logger;
-
-    public CrdtP2pPayloadHandler(
-        DistributedCrdtScopeProvider scopeProvider,
-        IClusterStateTracker clusterTracker,
-        ICrdtSerializer serializer,
-        ICrdtEvictionService evictionService,
-        ILogger<CrdtP2pPayloadHandler> logger)
-    {
-        this.scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
-        this.clusterTracker = clusterTracker ?? throw new ArgumentNullException(nameof(clusterTracker));
-        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-        this.evictionService = evictionService ?? throw new ArgumentNullException(nameof(evictionService));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly DistributedCrdtScopeProvider scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
+    private readonly IClusterStateTracker clusterTracker = clusterTracker ?? throw new ArgumentNullException(nameof(clusterTracker));
+    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+    private readonly ICrdtEvictionService evictionService = evictionService ?? throw new ArgumentNullException(nameof(evictionService));
+    private readonly ILogger<CrdtP2pPayloadHandler> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
     public async Task HandlePayloadAsync(string meshId, PeerId senderId, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)

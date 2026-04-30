@@ -17,33 +17,23 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Implements isolated outbound transport using HTTP POST requests mapped specifically to a target Kestrel mesh listener.
 /// </summary>
-public sealed class KestrelTransport : ITransport
+/// <remarks>
+/// Initializes a new instance of the <see cref="KestrelTransport"/> class.
+/// </remarks>
+public sealed class KestrelTransport(
+    string meshId,
+    IOptionsMonitor<KestrelTransportOptions> optionsMonitor,
+    IHttpClientFactory httpClientFactory,
+    ICrdtSerializer serializer,
+    IPeerRegistry peerRegistry,
+    ILogger<KestrelTransport> logger) : ITransport
 {
-    private readonly string meshId;
-    private readonly IOptionsMonitor<KestrelTransportOptions> optionsMonitor;
-    private readonly IHttpClientFactory httpClientFactory;
-    private readonly ICrdtSerializer serializer;
-    private readonly IPeerRegistry peerRegistry;
-    private readonly ILogger<KestrelTransport> logger;
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="KestrelTransport"/> class.
-    /// </summary>
-    public KestrelTransport(
-        string meshId,
-        IOptionsMonitor<KestrelTransportOptions> optionsMonitor,
-        IHttpClientFactory httpClientFactory,
-        ICrdtSerializer serializer,
-        IPeerRegistry peerRegistry,
-        ILogger<KestrelTransport> logger)
-    {
-        this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-        this.optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
-        this.httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-        this.peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
+    private readonly IOptionsMonitor<KestrelTransportOptions> optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+    private readonly IHttpClientFactory httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+    private readonly IPeerRegistry peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
+    private readonly ILogger<KestrelTransport> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
     public bool CanHandle(PeerEndpoint endpoint)

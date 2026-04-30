@@ -17,21 +17,14 @@ using Microsoft.Extensions.Options;
 /// Hosted service responsible for initializing all registered distributed CRDT documents upon application startup.
 /// This ensures that persistent storage providers load saved states directly into securely maintained memory scopes seamlessly.
 /// </summary>
-public sealed class CrdtInitializationService : IHostedService
+public sealed class CrdtInitializationService(
+    DistributedCrdtScopeProvider scopeProvider,
+    IServiceProvider rootServiceProvider,
+    ILogger<CrdtInitializationService> logger) : IHostedService
 {
-    private readonly DistributedCrdtScopeProvider scopeProvider;
-    private readonly IServiceProvider rootServiceProvider;
-    private readonly ILogger<CrdtInitializationService> logger;
-
-    public CrdtInitializationService(
-        DistributedCrdtScopeProvider scopeProvider,
-        IServiceProvider rootServiceProvider,
-        ILogger<CrdtInitializationService> logger)
-    {
-        this.scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
-        this.rootServiceProvider = rootServiceProvider ?? throw new ArgumentNullException(nameof(rootServiceProvider));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly DistributedCrdtScopeProvider scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
+    private readonly IServiceProvider rootServiceProvider = rootServiceProvider ?? throw new ArgumentNullException(nameof(rootServiceProvider));
+    private readonly ILogger<CrdtInitializationService> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
     public async Task StartAsync(CancellationToken cancellationToken)

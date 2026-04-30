@@ -14,18 +14,12 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Implementation of the generic CRDT eviction service.
 /// </summary>
-public sealed class CrdtEvictionService : ICrdtEvictionService
+public sealed class CrdtEvictionService(
+    DistributedCrdtScopeProvider scopeProvider,
+    ILogger<CrdtEvictionService> logger) : ICrdtEvictionService
 {
-    private readonly DistributedCrdtScopeProvider scopeProvider;
-    private readonly ILogger<CrdtEvictionService> logger;
-
-    public CrdtEvictionService(
-        DistributedCrdtScopeProvider scopeProvider,
-        ILogger<CrdtEvictionService> logger)
-    {
-        this.scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly DistributedCrdtScopeProvider scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
+    private readonly ILogger<CrdtEvictionService> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
     public async Task EvictPeersAsync(IReadOnlyList<string> replicaIds, CancellationToken cancellationToken = default)

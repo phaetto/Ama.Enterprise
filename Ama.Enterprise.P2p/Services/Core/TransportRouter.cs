@@ -10,18 +10,13 @@ using Ama.Enterprise.P2p.Models.Core;
 /// <summary>
 /// Composite transport router.
 /// </summary>
-public sealed class TransportRouter : ITransportRouter
+/// <remarks>
+/// Initializes a new instance of the <see cref="TransportRouter"/> class.
+/// </remarks>
+/// <param name="transports">The collection of available transports.</param>
+public sealed class TransportRouter(IEnumerable<ITransport> transports) : ITransportRouter
 {
-    private readonly IEnumerable<ITransport> transports;
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="TransportRouter"/> class.
-    /// </summary>
-    /// <param name="transports">The collection of available transports.</param>
-    public TransportRouter(IEnumerable<ITransport> transports)
-    {
-        this.transports = transports ?? throw new ArgumentNullException(nameof(transports));
-    }
+    private readonly IEnumerable<ITransport> transports = transports ?? throw new ArgumentNullException(nameof(transports));
 
     /// <inheritdoc />
     public bool CanHandle(PeerEndpoint endpoint) => transports.Any(t => t.CanHandle(endpoint));

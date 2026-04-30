@@ -11,29 +11,21 @@ using Microsoft.Extensions.Logging;
 /// <summary>
 /// Inbound listener that handles receiving data from the subscribed MQTT topic.
 /// </summary>
-public sealed class MqttTransportListener : ITransportListener, IDisposable
+/// <remarks>
+/// Initializes a new instance of the <see cref="MqttTransportListener"/> class.
+/// </remarks>
+public sealed class MqttTransportListener(
+    string meshId,
+    IMqttClientManager clientManager,
+    ICrdtSerializer serializer,
+    ILogger<MqttTransportListener> logger) : ITransportListener, IDisposable
 {
-    private readonly string meshId;
-    private readonly IMqttClientManager clientManager;
-    private readonly ICrdtSerializer serializer;
-    private readonly ILogger<MqttTransportListener> logger;
+    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
+    private readonly IMqttClientManager clientManager = clientManager ?? throw new ArgumentNullException(nameof(clientManager));
+    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+    private readonly ILogger<MqttTransportListener> logger = logger ?? throw new ArgumentNullException(nameof(logger));
     
     private Func<IMeshMessage, Task>? onMessageReceivedCallback;
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="MqttTransportListener"/> class.
-    /// </summary>
-    public MqttTransportListener(
-        string meshId,
-        IMqttClientManager clientManager,
-        ICrdtSerializer serializer,
-        ILogger<MqttTransportListener> logger)
-    {
-        this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-        this.clientManager = clientManager ?? throw new ArgumentNullException(nameof(clientManager));
-        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
 
     /// <inheritdoc />
     public async Task StartListeningAsync(Func<IMeshMessage, Task> onMessageReceived, CancellationToken cancellationToken)

@@ -6,14 +6,9 @@ using System;
 /// <summary>
 /// Provider for creating XunitLogger instances.
 /// </summary>
-public sealed class XunitLoggerProvider : ILoggerProvider
+public sealed class XunitLoggerProvider(ITestOutputHelper testOutputHelper) : ILoggerProvider
 {
-    private readonly ITestOutputHelper testOutputHelper;
-
-    public XunitLoggerProvider(ITestOutputHelper testOutputHelper)
-    {
-        this.testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
-    }
+    private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
 
     public ILogger CreateLogger(string categoryName)
     {

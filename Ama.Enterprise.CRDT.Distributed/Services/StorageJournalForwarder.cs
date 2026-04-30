@@ -10,14 +10,9 @@ using Ama.CRDT.Services.Journaling;
 /// Forwards journaling operations from the core CRDT pipeline to the unified distributed storage.
 /// Ensures the active IJournalManager utilizes the shared registered storage backend implicitly.
 /// </summary>
-internal sealed class StorageJournalForwarder : ICrdtOperationJournal
+internal sealed class StorageJournalForwarder(IDistributedCrdtStorage storage) : ICrdtOperationJournal
 {
-    private readonly IDistributedCrdtStorage storage;
-
-    public StorageJournalForwarder(IDistributedCrdtStorage storage)
-    {
-        this.storage = storage;
-    }
+    private readonly IDistributedCrdtStorage storage = storage;
 
     public void Append(string documentId, IReadOnlyList<CrdtOperation> operationsList) => storage.Append(documentId, operationsList);
 

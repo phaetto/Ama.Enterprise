@@ -3,59 +3,54 @@ namespace Ama.Enterprise.P2p.Models.Discovery;
 using System;
 
 /// <summary>
-/// Configuration options for tuning the behavior of UDP multicast peer discovery.
+/// Configuration options for UDP multicast peer discovery.
 /// </summary>
-public sealed class UdpDiscoveryOptions : IEquatable<UdpDiscoveryOptions>
+public sealed record UdpDiscoveryOptions
 {
-    /// <summary>
-    /// Gets or sets the multicast IP address used for sending and listening to discovery requests.
-    /// </summary>
-    public string MulticastAddress { get; set; } = "239.255.255.250";
+    private TimeSpan discoveryInterval = TimeSpan.FromSeconds(30);
+    private TimeSpan discoveryTimeout = TimeSpan.FromSeconds(5);
+    private string multicastAddress = "239.0.0.1";
 
     /// <summary>
-    /// Gets or sets the network port used for multicast discovery.
+    /// Gets or sets the UDP multicast address.
     /// </summary>
-    public int MulticastPort { get; set; } = 8021;
-
-    /// <summary>
-    /// Gets or sets the duration to wait for discovery responses before returning the result.
-    /// </summary>
-    public TimeSpan DiscoveryTimeout { get; set; } = TimeSpan.FromSeconds(1);
-
-    /// <summary>
-    /// Gets or sets the interval at which the background service will actively broadcast discovery requests.
-    /// </summary>
-    public TimeSpan DiscoveryInterval { get; set; } = TimeSpan.FromSeconds(1);
-
-    /// <inheritdoc />
-    public bool Equals(UdpDiscoveryOptions? other)
+    public string MulticastAddress
     {
-        if (other is null)
-        {
-            return false;
-        }
-
-        if (ReferenceEquals(this, other))
-        {
-            return true;
-        }
-
-        return MulticastPort == other.MulticastPort &&
-               DiscoveryTimeout.Equals(other.DiscoveryTimeout) &&
-               DiscoveryInterval.Equals(other.DiscoveryInterval) &&
-               string.Equals(MulticastAddress, other.MulticastAddress, StringComparison.OrdinalIgnoreCase);
+        get => multicastAddress;
+        set => multicastAddress = string.IsNullOrWhiteSpace(value) 
+            ? throw new ArgumentException("Multicast address cannot be null or whitespace.", nameof(value)) 
+            : value;
     }
 
-    /// <inheritdoc />
-    public override bool Equals(object? obj) => Equals(obj as UdpDiscoveryOptions);
+    /// <summary>
+    /// Gets or sets the UDP multicast port.
+    /// </summary>
+    public int MulticastPort { get; set; } = 5000;
 
-    /// <inheritdoc />
-    public override int GetHashCode()
+    /// <summary>
+    /// Gets or sets the port number this node advertises to other peers to initiate Phase 2 handshakes.
+    /// </summary>
+    public int AdvertisedHandshakePort { get; set; }
+
+    /// <summary>
+    /// Gets or sets the interval between active discovery multicast broadcasts.
+    /// </summary>
+    public TimeSpan DiscoveryInterval
     {
-        return HashCode.Combine(
-            StringComparer.OrdinalIgnoreCase.GetHashCode(MulticastAddress ?? string.Empty),
-            MulticastPort,
-            DiscoveryTimeout,
-            DiscoveryInterval);
+        get => discoveryInterval;
+        set => discoveryInterval = value > TimeSpan.Zero 
+            ? value 
+            : throw new ArgumentOutOfRangeException(nameof(value), "Discovery interval must be strictly positive.");
+    }
+
+    /// <summary>
+    /// Gets or sets the timeout for listening to multicast responses.
+    /// </summary>
+    public TimeSpan DiscoveryTimeout
+    {
+        get => discoveryTimeout;
+        set => discoveryTimeout = value > TimeSpan.Zero 
+            ? value 
+            : throw new ArgumentOutOfRangeException(nameof(value), "Discovery timeout must be strictly positive.");
     }
 }

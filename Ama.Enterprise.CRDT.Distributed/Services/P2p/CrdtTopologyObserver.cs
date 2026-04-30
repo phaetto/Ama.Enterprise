@@ -12,25 +12,17 @@ using Microsoft.Extensions.Logging;
 /// Observes network connections and instantly forces an anti-entropy synchronization for all registered CRDTs on the very first peer discovery.
 /// Safely cleans up underlying cluster tracking states seamlessly when a peer drops inherently natively.
 /// </summary>
-public sealed class CrdtTopologyObserver : IPeerTopologyObserver
+public sealed class CrdtTopologyObserver(
+    DistributedCrdtScopeProvider scopeProvider,
+    IClusterStateTracker clusterTracker,
+    ICrdtEvictionService evictionService,
+    ILogger<CrdtTopologyObserver> logger) : IPeerTopologyObserver
 {
-    private readonly DistributedCrdtScopeProvider scopeProvider;
-    private readonly IClusterStateTracker clusterTracker;
-    private readonly ICrdtEvictionService evictionService;
-    private readonly ILogger<CrdtTopologyObserver> logger;
+    private readonly DistributedCrdtScopeProvider scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
+    private readonly IClusterStateTracker clusterTracker = clusterTracker ?? throw new ArgumentNullException(nameof(clusterTracker));
+    private readonly ICrdtEvictionService evictionService = evictionService ?? throw new ArgumentNullException(nameof(evictionService));
+    private readonly ILogger<CrdtTopologyObserver> logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private int hasConnected;
-
-    public CrdtTopologyObserver(
-        DistributedCrdtScopeProvider scopeProvider,
-        IClusterStateTracker clusterTracker,
-        ICrdtEvictionService evictionService,
-        ILogger<CrdtTopologyObserver> logger)
-    {
-        this.scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
-        this.clusterTracker = clusterTracker ?? throw new ArgumentNullException(nameof(clusterTracker));
-        this.evictionService = evictionService ?? throw new ArgumentNullException(nameof(evictionService));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
 
     /// <inheritdoc />
     public async Task OnPeerJoinedAsync(string meshId, PeerNode node, CancellationToken cancellationToken)

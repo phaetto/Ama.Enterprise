@@ -25,15 +25,10 @@ using Ama.Enterprise.P2p.Models.Transports;
 /// <summary>
 /// Contains advanced integration tests focusing on edge cases, high concurrency, and specific network topologies.
 /// </summary>
-public sealed class P2pAdvancedIntegrationTests
+public sealed class P2pAdvancedIntegrationTests(ITestOutputHelper testOutputHelper)
 {
-    private readonly ITestOutputHelper testOutputHelper;
+    private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
     private const string TestMeshId = "AdvancedIntegrationMesh";
-
-    public P2pAdvancedIntegrationTests(ITestOutputHelper testOutputHelper)
-    {
-        this.testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
-    }
 
     [IntegrationFact]
     public async Task Network_ShouldPropagateOverMultipleHops_InChainTopology()

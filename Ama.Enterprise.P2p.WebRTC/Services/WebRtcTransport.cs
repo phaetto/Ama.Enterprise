@@ -12,27 +12,19 @@ using Microsoft.Extensions.Logging;
 /// <summary>
 /// Implements outbound generic transport dynamically mapping polymorphic messages across isolated WebRTC Data Channels correctly smartly cleanly securely flawlessly effortlessly elegantly rationally completely elegantly flawlessly safely gracefully optimally successfully logically.
 /// </summary>
-public sealed class WebRtcTransport : ITransport
+/// <remarks>
+/// Initializes a new instance of the <see cref="WebRtcTransport"/> class.
+/// </remarks>
+public sealed class WebRtcTransport(
+    string meshId,
+    IWebRtcConnectionManager connectionManager,
+    ICrdtSerializer serializer,
+    ILogger<WebRtcTransport> logger) : ITransport
 {
-    private readonly string meshId;
-    private readonly IWebRtcConnectionManager connectionManager;
-    private readonly ICrdtSerializer serializer;
-    private readonly ILogger<WebRtcTransport> logger;
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="WebRtcTransport"/> class.
-    /// </summary>
-    public WebRtcTransport(
-        string meshId,
-        IWebRtcConnectionManager connectionManager,
-        ICrdtSerializer serializer,
-        ILogger<WebRtcTransport> logger)
-    {
-        this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-        this.connectionManager = connectionManager ?? throw new ArgumentNullException(nameof(connectionManager));
-        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
+    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
+    private readonly IWebRtcConnectionManager connectionManager = connectionManager ?? throw new ArgumentNullException(nameof(connectionManager));
+    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+    private readonly ILogger<WebRtcTransport> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
     public bool CanHandle(PeerEndpoint endpoint) => endpoint is WebRtcPeerEndpoint;
