@@ -1,7 +1,6 @@
 namespace Ama.Enterprise.P2p.Models.Core;
 
 using System.Text.Json.Serialization;
-using Ama.Enterprise.P2p.Models.Discovery;
 using Ama.Enterprise.P2p.Models.Gossip;
 
 /// <summary>

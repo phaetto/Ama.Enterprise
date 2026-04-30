@@ -16,66 +16,43 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Implementation of IPeerDiscovery using DNS resolution (Phase 1) paired with abstract active handshaking (Phase 2).
 /// </summary>
-public sealed class DnsPeerDiscovery : IPeerDiscovery, IHostedService, IDisposable
+/// <remarks>
+/// Initializes a new instance of the <see cref="DnsPeerDiscovery"/> class.
+/// </remarks>
+/// <param name="meshId">The mesh context identifier.</param>
+/// <param name="discoveryOptionsMonitor">The DNS discovery configuration options monitor.</param>
+/// <param name="nodeOptionsMonitor">The global node configuration options monitor.</param>
+/// <param name="localEndpoint">The local network endpoint to advertise.</param>
+/// <param name="handshaker">The active handshaker implementation handling target resolution.</param>
+/// <param name="logger">The logger instance.</param>
+/// <param name="peerRegistry">The peer registry to populate with discovered nodes.</param>
+/// <param name="authenticator">The peer authenticator to validate remote node connections.</param>
+/// <param name="failureDetector">The failure detector to track heartbeat signals during discovery pings.</param>
+/// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
+public sealed class DnsPeerDiscovery(
+    string meshId,
+    IOptionsMonitor<DnsDiscoveryOptions> discoveryOptionsMonitor,
+    IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
+    PeerEndpoint localEndpoint,
+    IPeerHandshaker handshaker,
+    ILogger<DnsPeerDiscovery> logger,
+    IPeerRegistry peerRegistry,
+    IPeerAuthenticator authenticator,
+    IFailureDetector failureDetector) : IPeerDiscovery, IHostedService, IDisposable
 {
-    private readonly string meshId;
-    private readonly IOptionsMonitor<DnsDiscoveryOptions> discoveryOptionsMonitor;
-    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
-    private readonly PeerEndpoint localEndpoint;
-    private readonly IPeerHandshaker handshaker;
-    private readonly ILogger<DnsPeerDiscovery> logger;
-    private readonly IPeerRegistry peerRegistry;
-    private readonly IPeerAuthenticator authenticator;
-    private readonly IFailureDetector failureDetector;
+    private readonly string meshId = meshId;
+    private readonly IOptionsMonitor<DnsDiscoveryOptions> discoveryOptionsMonitor = discoveryOptionsMonitor;
+    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor = nodeOptionsMonitor;
+    private readonly PeerEndpoint localEndpoint = localEndpoint;
+    private readonly IPeerHandshaker handshaker = handshaker;
+    private readonly ILogger<DnsPeerDiscovery> logger = logger;
+    private readonly IPeerRegistry peerRegistry = peerRegistry;
+    private readonly IPeerAuthenticator authenticator = authenticator;
+    private readonly IFailureDetector failureDetector = failureDetector;
 
     private CancellationTokenSource? backgroundTaskCancellationSource;
     private Task? discoveryTask;
     private bool isDisposed;
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="DnsPeerDiscovery"/> class.
-    /// </summary>
-    /// <param name="meshId">The mesh context identifier.</param>
-    /// <param name="discoveryOptionsMonitor">The DNS discovery configuration options monitor.</param>
-    /// <param name="nodeOptionsMonitor">The global node configuration options monitor.</param>
-    /// <param name="localEndpoint">The local network endpoint to advertise.</param>
-    /// <param name="handshaker">The active handshaker implementation handling target resolution.</param>
-    /// <param name="logger">The logger instance.</param>
-    /// <param name="peerRegistry">The peer registry to populate with discovered nodes.</param>
-    /// <param name="authenticator">The peer authenticator to validate remote node connections.</param>
-    /// <param name="failureDetector">The failure detector to track heartbeat signals during discovery pings.</param>
-    /// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
-    public DnsPeerDiscovery(
-        string meshId,
-        IOptionsMonitor<DnsDiscoveryOptions> discoveryOptionsMonitor,
-        IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
-        PeerEndpoint localEndpoint,
-        IPeerHandshaker handshaker,
-        ILogger<DnsPeerDiscovery> logger,
-        IPeerRegistry peerRegistry,
-        IPeerAuthenticator authenticator,
-        IFailureDetector failureDetector)
-    {
-        ArgumentNullException.ThrowIfNull(meshId);
-        ArgumentNullException.ThrowIfNull(discoveryOptionsMonitor);
-        ArgumentNullException.ThrowIfNull(nodeOptionsMonitor);
-        ArgumentNullException.ThrowIfNull(localEndpoint);
-        ArgumentNullException.ThrowIfNull(handshaker);
-        ArgumentNullException.ThrowIfNull(logger);
-        ArgumentNullException.ThrowIfNull(peerRegistry);
-        ArgumentNullException.ThrowIfNull(authenticator);
-        ArgumentNullException.ThrowIfNull(failureDetector);
-
-        this.meshId = meshId;
-        this.discoveryOptionsMonitor = discoveryOptionsMonitor;
-        this.nodeOptionsMonitor = nodeOptionsMonitor;
-        this.localEndpoint = localEndpoint;
-        this.handshaker = handshaker;
-        this.logger = logger;
-        this.peerRegistry = peerRegistry;
-        this.authenticator = authenticator;
-        this.failureDetector = failureDetector;
-    }
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)

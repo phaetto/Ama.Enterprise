@@ -19,17 +19,22 @@ using Microsoft.Extensions.Logging;
 using Shouldly;
 using Xunit;
 
-public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutputHelper)
+public sealed class MqttPeerDiscoveryIntegrationTests
 {
-    private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
+    private readonly ITestOutputHelper testOutputHelper;
 
-    [IntegrationFact(Skip = "Find another mqtt server to test")]
+    public MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutputHelper)
+    {
+        this.testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
+    }
+
+    [IntegrationFact]
     public async Task MqttPeerDiscovery_TwoNodes_DiscoverEachOther_Succeeds()
     {
         // Arrange
         var meshId = $"mqtt-disc-{Guid.NewGuid():N}";
         var topicPrefix = $"integration-test/disc/{Guid.NewGuid():N}";
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
         var peerAId = new PeerId(Guid.NewGuid());
         var peerBId = new PeerId(Guid.NewGuid());
@@ -43,11 +48,11 @@ public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutp
         await nodeA.StartDiscoveryAsync(cts.Token);
         await nodeB.StartDiscoveryAsync(cts.Token);
 
-        // Assert - Use a polling loop to cleanly wait for public broker subscriptions and broadcasts to propagate natively
+        // Assert - Use a polling loop to wait for public broker subscriptions and broadcasts to propagate
         testOutputHelper.WriteLine("Waiting for discovery broadcasts to synchronize across the broker...");
         
         bool discovered = false;
-        var timeoutTime = DateTime.UtcNow.AddSeconds(20);
+        var timeoutTime = DateTime.UtcNow.AddSeconds(60);
 
         while (DateTime.UtcNow < timeoutTime && !cts.Token.IsCancellationRequested)
         {
@@ -59,7 +64,6 @@ public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutp
 
             if (aDiscoveredB.Endpoint != null && bDiscoveredA.Endpoint != null)
             {
-                // Verify the dynamically distributed generic endpoints correctly match standard MQTT parameters naturally
                 aDiscoveredB.Endpoint.ShouldBeOfType<MqttPeerEndpoint>();
                 bDiscoveredA.Endpoint.ShouldBeOfType<MqttPeerEndpoint>();
 
@@ -80,13 +84,13 @@ public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutp
         await nodeB.StopDiscoveryAsync(cts.Token);
     }
 
-    [IntegrationFact(Skip = "Find another mqtt server to test")]
+    [IntegrationFact]
     public async Task MqttPeerDiscovery_ExplicitManualDiscovery_PopulatesRecentPeers_Succeeds()
     {
         // Arrange
         var meshId = $"mqtt-manual-disc-{Guid.NewGuid():N}";
         var topicPrefix = $"integration-test/manual/{Guid.NewGuid():N}";
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
         var peerAId = new PeerId(Guid.NewGuid());
         var peerBId = new PeerId(Guid.NewGuid());
@@ -94,30 +98,25 @@ public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutp
         await using var nodeA = CreateDiscoveryTestNode(meshId, peerAId, topicPrefix);
         await using var nodeB = CreateDiscoveryTestNode(meshId, peerBId, topicPrefix);
 
-        // We only start Node B's background listener so it can respond to Node A's manual ping natively
         await nodeB.StartDiscoveryAsync(cts.Token);
 
-        // Node A just starts its hosted service to establish the baseline MQTT connection without waiting for the loop
         if (nodeA.Discovery is IHostedService hostedA)
         {
             await hostedA.StartAsync(cts.Token);
         }
 
-        // Delay sufficiently to guarantee both nodes have connected their MQTT subscriptions successfully before pinging
-        await Task.Delay(TimeSpan.FromSeconds(30), cts.Token);
+        await Task.Delay(TimeSpan.FromSeconds(5), cts.Token);
 
-        // Act & Assert - Explicitly loop manual pings resolving initial broker subscription latencies effectively
+        // Act & Assert
         testOutputHelper.WriteLine("Firing explicit DiscoverPeersAsync roundtrips from Node A...");
         
         bool manuallyDiscovered = false;
-        var timeoutTime = DateTime.UtcNow.AddSeconds(20);
+        var timeoutTime = DateTime.UtcNow.AddSeconds(45);
         
         while (DateTime.UtcNow < timeoutTime && !cts.Token.IsCancellationRequested)
         {
             var discoveredByA = await nodeA.Discovery.DiscoverPeersAsync(cts.Token);
             
-            // Due to public broker latencies, the response might fall slightly outside the DiscoverPeersAsync internal timeout
-            // but the background subscriber will catch it and push it into the registry natively.
             var registeredPeers = await nodeA.Registry.GetAllPeersAsync(meshId, cts.Token);
             
             if (discoveredByA.Any(n => n.Id.Equals(peerBId)) || registeredPeers.Any(p => p.Id.Equals(peerBId)))
@@ -126,11 +125,10 @@ public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutp
                 break;
             }
 
-            // Await briefly before retrying to prevent network spam
-            await Task.Delay(TimeSpan.FromSeconds(5), cts.Token);
+            await Task.Delay(TimeSpan.FromSeconds(2), cts.Token);
         }
 
-        manuallyDiscovered.ShouldBeTrue("Node A failed to manually discover Node B within the timeout bound natively.");
+        manuallyDiscovered.ShouldBeTrue("Node A failed to manually discover Node B within the timeout bound.");
 
         // Cleanup
         if (nodeA.Discovery is IHostedService cleanupHostedA)
@@ -140,13 +138,13 @@ public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutp
         await nodeB.StopDiscoveryAsync(cts.Token);
     }
 
-    [IntegrationFact(Skip = "Find another mqtt server to test")]
+    [IntegrationFact]
     public async Task MqttPeerDiscovery_WithHttpTransport_DiscoversHttpEndpoints_Succeeds()
     {
         // Arrange
         var meshId = $"mqtt-http-disc-{Guid.NewGuid():N}";
         var topicPrefix = $"integration-test/http-disc/{Guid.NewGuid():N}";
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var peerAId = new PeerId(Guid.NewGuid());
         var peerBId = new PeerId(Guid.NewGuid());
@@ -167,7 +165,7 @@ public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutp
         testOutputHelper.WriteLine("Waiting for discovery broadcasts to synchronize across the broker...");
         
         bool discovered = false;
-        var timeoutTime = DateTime.UtcNow.AddSeconds(20);
+        var timeoutTime = DateTime.UtcNow.AddSeconds(45);
 
         while (DateTime.UtcNow < timeoutTime && !cts.Token.IsCancellationRequested)
         {
@@ -183,7 +181,6 @@ public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutp
             var aDiscoveredB = peersA.FirstOrDefault(p => p.Id.Equals(peerBId));
             var bDiscoveredA = peersB.FirstOrDefault(p => p.Id.Equals(peerAId));
 
-            // Verify correctly that the polymorphic JSON serializer maintained the HTTP endpoints over the MQTT stream natively
             aDiscoveredB.Endpoint.ShouldBeOfType<HttpPeerEndpoint>();
             bDiscoveredA.Endpoint.ShouldBeOfType<HttpPeerEndpoint>();
 
@@ -195,14 +192,14 @@ public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutp
             break;
         }
 
-        discovered.ShouldBeTrue("Nodes failed to discover each other's HTTP endpoints within the expected timeout limit natively.");
+        discovered.ShouldBeTrue("Nodes failed to discover each other's HTTP endpoints within the expected timeout limit.");
 
         testOutputHelper.WriteLine("Stopping discovery loops...");
         await nodeA.StopDiscoveryAsync(cts.Token);
         await nodeB.StopDiscoveryAsync(cts.Token);
     }
 
-    [IntegrationFact(Skip = "Find another mqtt server to test")]
+    [IntegrationFact]
     public async Task MqttPeerDiscovery_ShouldMapEndpointsCorrectly_WhenUsingMultipleMeshes()
     {
         // Arrange
@@ -212,7 +209,7 @@ public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutp
         var topicPrefix1 = $"integration-test/multi-1/{Guid.NewGuid():N}";
         var topicPrefix2 = $"integration-test/multi-2/{Guid.NewGuid():N}";
         
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         
         var peerAId = new PeerId(Guid.NewGuid());
         var peerBId = new PeerId(Guid.NewGuid());
@@ -234,7 +231,7 @@ public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutp
         
         bool mesh1Discovered = false;
         bool mesh2Discovered = false;
-        var timeoutTime = DateTime.UtcNow.AddSeconds(30);
+        var timeoutTime = DateTime.UtcNow.AddSeconds(60);
 
         while (DateTime.UtcNow < timeoutTime && !cts.Token.IsCancellationRequested)
         {
@@ -300,7 +297,6 @@ public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutp
     {
         var services = new ServiceCollection();
 
-        // Register core CRDT capabilities natively
         services.AddCrdt();
 
         services.AddLogging(builder => 
@@ -309,8 +305,12 @@ public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutp
             builder.SetMinimumLevel(LogLevel.Trace);
         });
         
-        // Core P2P dependencies inherently required by discovery
         services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
+
+        services.Configure<FailureDetectorOptions>(meshId, options => 
+        {
+            options.HeartbeatInterval = TimeSpan.FromSeconds(120);
+        });
 
         var meshBuilder = services.AddP2pMesh(meshId, options =>
         {
@@ -320,7 +320,6 @@ public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutp
 
         if (useHttpTransport)
         {
-            // Explicitly evaluate injecting HTTP endpoints through MQTT discovery streams securely
             meshBuilder.AddHttpTransport(options =>
             {
                 options.ListenHost = "localhost";
@@ -330,18 +329,25 @@ public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutp
         }
         else
         {
-            // Standard localized MQTT endpoint integration natively
             meshBuilder.AddMqttTransport(options =>
             {
-                options.Host = "test.mosquitto.org";
+                options.Host = "broker.hivemq.com";
                 options.Port = 1883;
                 options.TopicPrefix = topicPrefix;
             });
         }
 
+        meshBuilder.AddMqttPeerHandshake(options =>
+        {
+            options.Host = "broker.hivemq.com";
+            options.Port = 1883;
+            options.TopicPrefix = topicPrefix;
+            options.HandshakeTimeout = TimeSpan.FromSeconds(10);
+        });
+
         meshBuilder.AddMqttPeerDiscovery(options =>
         {
-            options.Host = "test.mosquitto.org";
+            options.Host = "broker.hivemq.com";
             options.Port = 1883;
             options.TopicPrefix = topicPrefix;
             options.DiscoveryInterval = TimeSpan.FromSeconds(5);
@@ -379,6 +385,16 @@ public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutp
         
         services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
 
+        services.Configure<FailureDetectorOptions>(mesh1Id, options => 
+        {
+            options.HeartbeatInterval = TimeSpan.FromSeconds(120);
+        });
+
+        services.Configure<FailureDetectorOptions>(mesh2Id, options => 
+        {
+            options.HeartbeatInterval = TimeSpan.FromSeconds(120);
+        });
+
         services.AddP2pMesh(mesh1Id, options =>
         {
             options.LocalPeerId = peerId.Value;
@@ -390,9 +406,16 @@ public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutp
             options.ListenPort = mesh1HttpPort;
             options.PathPrefix = "/p2p/mesh1/";
         })
+        .AddMqttPeerHandshake(options =>
+        {
+            options.Host = "broker.hivemq.com";
+            options.Port = 1883;
+            options.TopicPrefix = topicPrefix1;
+            options.HandshakeTimeout = TimeSpan.FromSeconds(10);
+        })
         .AddMqttPeerDiscovery(options =>
         {
-            options.Host = "test.mosquitto.org";
+            options.Host = "broker.hivemq.com";
             options.Port = 1883;
             options.TopicPrefix = topicPrefix1;
             options.DiscoveryInterval = TimeSpan.FromSeconds(5);
@@ -404,16 +427,23 @@ public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutp
         {
             options.LocalPeerId = peerId.Value;
         })
-        .AddPushPullGossipNetwork() // TODO: This chain of extensible, another mesh, should not need an algorithm
+        .AddPushPullGossipNetwork()
         .AddMqttTransport(options =>
         {
-            options.Host = "test.mosquitto.org";
+            options.Host = "broker.hivemq.com";
             options.Port = 1883;
             options.TopicPrefix = topicPrefix2;
         })
+        .AddMqttPeerHandshake(options =>
+        {
+            options.Host = "broker.hivemq.com";
+            options.Port = 1883;
+            options.TopicPrefix = topicPrefix2;
+            options.HandshakeTimeout = TimeSpan.FromSeconds(10);
+        })
         .AddMqttPeerDiscovery(options =>
         {
-            options.Host = "test.mosquitto.org";
+            options.Host = "broker.hivemq.com";
             options.Port = 1883;
             options.TopicPrefix = topicPrefix2;
             options.DiscoveryInterval = TimeSpan.FromSeconds(5);
@@ -438,17 +468,19 @@ public sealed class MqttPeerDiscoveryIntegrationTests(ITestOutputHelper testOutp
     {
         public async Task StartDiscoveryAsync(CancellationToken cancellationToken)
         {
-            if (Discovery is IHostedService hosted)
+            var hostedServices = Provider.GetServices<IHostedService>();
+            foreach (var hostedService in hostedServices)
             {
-                await hosted.StartAsync(cancellationToken);
+                await hostedService.StartAsync(cancellationToken);
             }
         }
 
         public async Task StopDiscoveryAsync(CancellationToken cancellationToken)
         {
-            if (Discovery is IHostedService hosted)
+            var hostedServices = Provider.GetServices<IHostedService>();
+            foreach (var hostedService in hostedServices.Reverse())
             {
-                await hosted.StopAsync(cancellationToken);
+                await hostedService.StopAsync(cancellationToken);
             }
         }
 

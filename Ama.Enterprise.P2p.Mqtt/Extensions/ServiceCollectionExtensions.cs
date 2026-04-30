@@ -11,7 +11,6 @@ using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.Mqtt.Models;
 using Ama.Enterprise.P2p.Mqtt.Services;
-using Ama.Enterprise.P2p.Mqtt.Services.Discovery;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -21,6 +20,39 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public static class ServiceCollectionExtensions
 {
+    private sealed record MqttSerializationMarker;
+
+    internal static void TryAddMqttSerialization(IServiceCollection services)
+    {
+        var tracker = P2pMeshRegistrationTracker.GetOrCreate(services);
+        if (!tracker.TryRegister<MqttSerializationMarker>("MqttSerialization_Core", null))
+        {
+            return;
+        }
+
+        services.AddCrdtJsonTypeInfoResolver(MqttJsonContext.Default);
+
+        services.AddCrdtSerializableType<MqttPeerEndpoint>("mqtt-peer-endpoint");
+
+        services.AddCrdtJsonModifier(ti =>
+        {
+            if (ti.Type == typeof(PeerEndpoint))
+            {
+                ti.PolymorphismOptions ??= new JsonPolymorphismOptions
+                {
+                    TypeDiscriminatorPropertyName = "$type",
+                    IgnoreUnrecognizedTypeDiscriminators = true,
+                    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType
+                };
+
+                if (!ti.PolymorphismOptions.DerivedTypes.Any(dt => dt.DerivedType == typeof(MqttPeerEndpoint)))
+                {
+                    ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(MqttPeerEndpoint), "mqtt-peer-endpoint"));
+                }
+            }
+        });
+    }
+
     /// <summary>
     /// Registers standalone MQTT transport services.
     /// </summary>
@@ -48,30 +80,7 @@ public static class ServiceCollectionExtensions
             builder.Services.Configure(builder.MeshId, configureOptions);
         }
 
-        if (!builder.Services.Any(s => s.ServiceType == typeof(IJsonTypeInfoResolver) && (string?)s.ServiceKey == "Ama.CRDT" && s.ImplementationInstance == MqttJsonContext.Default))
-        {
-            builder.Services.AddCrdtJsonTypeInfoResolver(MqttJsonContext.Default);
-        }
-
-        builder.Services.AddCrdtSerializableType<MqttPeerEndpoint>("mqtt-peer-endpoint");
-
-        builder.Services.AddCrdtJsonModifier(ti =>
-        {
-            if (ti.Type == typeof(PeerEndpoint))
-            {
-                ti.PolymorphismOptions ??= new JsonPolymorphismOptions
-                {
-                    TypeDiscriminatorPropertyName = "$type",
-                    IgnoreUnrecognizedTypeDiscriminators = true,
-                    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType
-                };
-
-                if (!ti.PolymorphismOptions.DerivedTypes.Any(dt => dt.DerivedType == typeof(MqttPeerEndpoint)))
-                {
-                    ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(MqttPeerEndpoint), "mqtt-peer-endpoint"));
-                }
-            }
-        });
+        TryAddMqttSerialization(builder.Services);
 
         builder.Services.AddKeyedSingleton<PeerEndpoint>(builder.MeshId, (sp, key) =>
         {
@@ -102,45 +111,6 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredKeyedService<IMqttClientManager>(key),
                 sp.GetRequiredService<ICrdtSerializer>(),
                 sp.GetRequiredService<ILogger<MqttTransportListener>>()));
-
-        return builder;
-    }
-
-    /// <summary>
-    /// Registers MQTT-based peer discovery mechanisms for the specified mesh.
-    /// </summary>
-    public static IP2pMeshBuilder AddMqttPeerDiscovery(
-        this IP2pMeshBuilder builder,
-        Action<MqttDiscoveryOptions>? configureOptions = null)
-    {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
-
-        if (configureOptions is null)
-        {
-            builder.Services.Configure<MqttDiscoveryOptions>(builder.MeshId, _ => { });
-        }
-        else
-        {
-            builder.Services.Configure(builder.MeshId, configureOptions);
-        }
-
-        builder.Services.AddKeyedSingleton<IPeerDiscovery>(builder.MeshId, (sp, key) =>
-            new MqttPeerDiscovery(
-                (string)key!,
-                sp.GetRequiredService<IOptionsMonitor<MqttDiscoveryOptions>>(),
-                sp.GetRequiredService<IOptionsMonitor<P2pNodeOptions>>(),
-                sp.GetRequiredKeyedService<PeerEndpoint>(key),
-                sp.GetRequiredService<ILogger<MqttPeerDiscovery>>(),
-                sp.GetRequiredService<IPeerRegistry>(),
-                sp.GetRequiredService<ICrdtSerializer>(),
-                sp.GetRequiredKeyedService<IPeerAuthenticator>(key),
-                sp.GetRequiredKeyedService<IFailureDetector>(key)));
-
-        builder.Services.AddHostedService(sp =>
-            (MqttPeerDiscovery)sp.GetRequiredKeyedService<IPeerDiscovery>(builder.MeshId));
 
         return builder;
     }

@@ -24,7 +24,7 @@ public sealed class MqttTransportIntegrationTests(ITestOutputHelper testOutputHe
 
     private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
 
-    [IntegrationFact(Skip = "Find another mqtt server to test")]
+    [IntegrationFact]
     public async Task MqttTransport_EndToEndMessageExchange_Succeeds()
     {
         // Arrange
@@ -90,7 +90,7 @@ public sealed class MqttTransportIntegrationTests(ITestOutputHelper testOutputHe
         testOutputHelper.WriteLine("Test finished.");
     }
 
-    [IntegrationFact(Skip = "Find another mqtt server to test")]
+    [IntegrationFact]
     public async Task MqttTransport_BidirectionalMessageExchange_Succeeds()
     {
         // Arrange
@@ -176,7 +176,7 @@ public sealed class MqttTransportIntegrationTests(ITestOutputHelper testOutputHe
         await nodeB.Listener.StopListeningAsync(cts.Token);
     }
 
-    [IntegrationFact(Skip = "Find another mqtt server to test")]
+    [IntegrationFact]
     public async Task MqttTransport_CanHandle_ReturnsFalseForOtherEndpoints()
     {
         // Arrange
@@ -224,7 +224,7 @@ public sealed class MqttTransportIntegrationTests(ITestOutputHelper testOutputHe
             .AddGossipNetwork() // Installs AOT contexts explicitly bridging GossipMessage serialization
             .AddMqttTransport(options =>
             {
-                options.Host = "test.mosquitto.org";
+                options.Host = "broker.hivemq.com";
                 options.Port = 1883;
                 options.TopicPrefix = topicPrefix;
             });

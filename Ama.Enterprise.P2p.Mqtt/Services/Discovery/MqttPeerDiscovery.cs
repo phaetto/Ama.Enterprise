@@ -25,6 +25,7 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
     private readonly IOptionsMonitor<MqttDiscoveryOptions> discoveryOptionsMonitor;
     private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
     private readonly PeerEndpoint localEndpoint;
+    private readonly IPeerHandshaker handshaker;
     private readonly ILogger<MqttPeerDiscovery> logger;
     private readonly IPeerRegistry peerRegistry;
     private readonly ICrdtSerializer serializer;
@@ -32,7 +33,6 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
     private readonly IFailureDetector failureDetector;
 
     private readonly IMqttClient mqttClient;
-    private readonly ConcurrentDictionary<Guid, PeerNode> recentPeers = new();
     private CancellationTokenSource? backgroundTaskCancellationSource;
     private Task? discoveryTask;
     private bool isDisposed;
@@ -40,21 +40,12 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
     /// <summary>
     /// Initializes a new instance of the <see cref="MqttPeerDiscovery"/> class.
     /// </summary>
-    /// <param name="meshId">The mesh context identifier.</param>
-    /// <param name="discoveryOptionsMonitor">The MQTT discovery configuration options monitor.</param>
-    /// <param name="nodeOptionsMonitor">The global node configuration options monitor.</param>
-    /// <param name="localEndpoint">The local network endpoint to advertise.</param>
-    /// <param name="logger">The logger instance.</param>
-    /// <param name="peerRegistry">The peer registry to populate with discovered nodes.</param>
-    /// <param name="serializer">The centralized CRDT serializer.</param>
-    /// <param name="authenticator">The peer authenticator to validate remote node connections.</param>
-    /// <param name="failureDetector">The failure detector to track heartbeat signals during discovery pings.</param>
-    /// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
     public MqttPeerDiscovery(
         string meshId,
         IOptionsMonitor<MqttDiscoveryOptions> discoveryOptionsMonitor,
         IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
         PeerEndpoint localEndpoint,
+        IPeerHandshaker handshaker,
         ILogger<MqttPeerDiscovery> logger,
         IPeerRegistry peerRegistry,
         ICrdtSerializer serializer,
@@ -65,6 +56,7 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
         this.discoveryOptionsMonitor = discoveryOptionsMonitor ?? throw new ArgumentNullException(nameof(discoveryOptionsMonitor));
         this.nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
         this.localEndpoint = localEndpoint ?? throw new ArgumentNullException(nameof(localEndpoint));
+        this.handshaker = handshaker ?? throw new ArgumentNullException(nameof(handshaker));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
         this.peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
@@ -91,7 +83,7 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
             
             var nodeOptions = nodeOptionsMonitor.Get(meshId);
             
-            logger.LogInformation("[{MeshId}] Connected to MQTT broker for discovery as {ClientId}.", meshId, $"{nodeOptions.LocalPeerId:N}-discovery");
+            logger.LogInformation("[{MeshId}] Connected to MQTT broker for Phase 1 discovery as {ClientId}.", meshId, $"{nodeOptions.LocalPeerId:N}-discovery");
 
             discoveryTask = DiscoveryLoopAsync(backgroundTaskCancellationSource.Token);
         }
@@ -132,72 +124,159 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
-        recentPeers.Clear();
-
         if (!mqttClient.IsConnected)
         {
             return Enumerable.Empty<PeerNode>();
         }
 
+        var options = discoveryOptionsMonitor.Get(meshId);
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
-        var discOptions = discoveryOptionsMonitor.Get(meshId);
+        var discoveredPeers = new ConcurrentBag<PeerNode>();
 
-        var topic = GetDiscoveryTopic(discOptions.TopicPrefix, discOptions.DiscoveryTopicSuffix);
-        var localId = new PeerId(nodeOptions.LocalPeerId);
-        var localNode = new PeerNode(localId, localEndpoint);
+        var factory = new MqttClientFactory();
+        using var tempClient = factory.CreateMqttClient();
 
-        var payload = serializer.SerializeToBytes(localNode);
+        var builder = new MqttClientOptionsBuilder()
+            .WithTcpServer(options.Host, options.Port)
+            .WithClientId($"{nodeOptions.LocalPeerId:N}-disc-{Guid.NewGuid():N}");
 
-        var message = new MqttApplicationMessageBuilder()
-            .WithTopic(topic)
-            .WithPayload(payload)
-            .WithQualityOfServiceLevel(MQTTnet.Protocol.MqttQualityOfServiceLevel.AtMostOnce)
-            .Build();
+        if (!string.IsNullOrWhiteSpace(options.Username)) builder.WithCredentials(options.Username, options.Password);
+        if (options.UseTls) builder.WithTlsOptions(o => o.UseTls());
 
         try
         {
-            await mqttClient.PublishAsync(message, cancellationToken).ConfigureAwait(false);
+            await tempClient.ConnectAsync(builder.Build(), cancellationToken).ConfigureAwait(false);
+
+            var replyTopic = $"{options.TopicPrefix.TrimEnd('/')}/{options.DiscoveryTopicSuffix.TrimStart('/')}/replies/{Guid.NewGuid():N}";
+            var subscribeOptions = factory.CreateSubscribeOptionsBuilder().WithTopicFilter(f => f.WithTopic(replyTopic)).Build();
+            
+            await tempClient.SubscribeAsync(subscribeOptions, cancellationToken).ConfigureAwait(false);
+
+            var discoveryPayload = new MqttDiscoveryMessage
+            {
+                MeshId = meshId,
+                ClientId = nodeOptions.LocalPeerId.ToString("N"),
+                ReplyToTopic = replyTopic
+            };
+
+            var requestBytes = serializer.SerializeToBytes(discoveryPayload);
+            var broadcastTopic = $"{options.TopicPrefix.TrimEnd('/')}/{options.DiscoveryTopicSuffix.TrimStart('/')}";
+
+            var message = new MqttApplicationMessageBuilder()
+                .WithTopic(broadcastTopic)
+                .WithPayload(requestBytes)
+                .WithQualityOfServiceLevel(MQTTnet.Protocol.MqttQualityOfServiceLevel.AtMostOnce)
+                .Build();
+
+            await tempClient.PublishAsync(message, cancellationToken).ConfigureAwait(false);
+
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(options.DiscoveryTimeout);
+
+            var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), localEndpoint);
+            var handshakeTasks = new List<Task>();
+
+            tempClient.ApplicationMessageReceivedAsync += e =>
+            {
+                try
+                {
+                    var pong = serializer.DeserializeFromBytes<MqttDiscoveryMessage>(e.ApplicationMessage.Payload.ToArray());
+                    
+                    if (pong.MeshId == meshId && pong.ClientId != nodeOptions.LocalPeerId.ToString("N"))
+                    {
+                        var remoteEndpoint = new MqttRoutingEndPoint(pong.ClientId);
+
+                        handshakeTasks.Add(Task.Run(async () =>
+                        {
+                            var remoteNode = await handshaker.HandshakeAsync(localNode, remoteEndpoint, timeoutCts.Token).ConfigureAwait(false);
+
+                            if (!remoteNode.HasValue || remoteNode.Value.Id.Value == nodeOptions.LocalPeerId || remoteNode.Value.Id.Value == Guid.Empty)
+                            {
+                                return;
+                            }
+
+                            var isAuthenticated = await authenticator.AuthenticateAsync(remoteNode.Value, ReadOnlyMemory<byte>.Empty, timeoutCts.Token).ConfigureAwait(false);
+
+                            if (isAuthenticated)
+                            {
+                                await failureDetector.RecordHeartbeatAsync(remoteNode.Value.Id, timeoutCts.Token).ConfigureAwait(false);
+                                discoveredPeers.Add(remoteNode.Value);
+                            }
+                        }, timeoutCts.Token));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogTrace(ex, "[{MeshId}] Error processing MQTT discovery response.", meshId);
+                }
+                
+                return Task.CompletedTask;
+            };
+
+            try
+            {
+                await Task.Delay(options.DiscoveryTimeout, timeoutCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { }
+
+            if (handshakeTasks.Count > 0)
+            {
+                try
+                {
+                    await Task.WhenAll(handshakeTasks).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) { }
+            }
+
+            await tempClient.DisconnectAsync(new MqttClientDisconnectOptionsBuilder().WithReason(MqttClientDisconnectOptionsReason.NormalDisconnection).Build(), CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "[{MeshId}] Failed to publish MQTT discovery presence ping.", meshId);
+            logger.LogTrace(ex, "[{MeshId}] Failed to execute active MQTT discovery.", meshId);
         }
 
-        try
-        {
-            await Task.Delay(discOptions.DiscoveryTimeout, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) { }
+        return discoveredPeers;
+    }
 
-        return recentPeers.Values.ToList();
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (isDisposed) return;
+        backgroundTaskCancellationSource?.Cancel();
+        backgroundTaskCancellationSource?.Dispose();
+        mqttClient.ApplicationMessageReceivedAsync -= HandleIncomingMessageAsync;
+        mqttClient.DisconnectedAsync -= HandleDisconnectedAsync;
+        mqttClient.Dispose();
+        isDisposed = true;
     }
 
     private async Task ConnectAndSubscribeAsync(CancellationToken token)
     {
+        var options = discoveryOptionsMonitor.Get(meshId);
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
-        var discOptions = discoveryOptionsMonitor.Get(meshId);
 
-        var clientId = $"{nodeOptions.LocalPeerId:N}-discovery";
+        var clientId = $"{nodeOptions.LocalPeerId:N}-{meshId}-discovery";
 
         var builder = new MqttClientOptionsBuilder()
-            .WithTcpServer(discOptions.Host, discOptions.Port)
+            .WithTcpServer(options.Host, options.Port)
             .WithClientId(clientId);
 
-        if (!string.IsNullOrWhiteSpace(discOptions.Username))
+        if (!string.IsNullOrWhiteSpace(options.Username))
         {
-            builder.WithCredentials(discOptions.Username, discOptions.Password);
+            builder.WithCredentials(options.Username, options.Password);
         }
 
-        if (discOptions.UseTls)
+        if (options.UseTls)
         {
             builder.WithTlsOptions(o => o.UseTls());
         }
 
         await mqttClient.ConnectAsync(builder.Build(), token).ConfigureAwait(false);
 
-        var topic = GetDiscoveryTopic(discOptions.TopicPrefix, discOptions.DiscoveryTopicSuffix);
+        var broadcastTopic = $"{options.TopicPrefix.TrimEnd('/')}/{options.DiscoveryTopicSuffix.TrimStart('/')}";
+
         var subscribeOptions = new MqttClientFactory().CreateSubscribeOptionsBuilder()
-            .WithTopicFilter(f => f.WithTopic(topic))
+            .WithTopicFilter(f => f.WithTopic(broadcastTopic))
             .Build();
 
         await mqttClient.SubscribeAsync(subscribeOptions, token).ConfigureAwait(false);
@@ -208,32 +287,36 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
         var payload = args.ApplicationMessage.Payload;
         if (payload.Length == 0) return;
 
+        var options = discoveryOptionsMonitor.Get(meshId);
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
 
         try
         {
-            var remoteNode = serializer.DeserializeFromBytes<PeerNode>(payload.ToArray());
+            var message = serializer.DeserializeFromBytes<MqttDiscoveryMessage>(payload.ToArray());
 
-            if (remoteNode.Id.Value != nodeOptions.LocalPeerId && remoteNode.Id.Value != Guid.Empty)
+            if (message.MeshId == meshId && message.ClientId != nodeOptions.LocalPeerId.ToString("N") && !string.IsNullOrWhiteSpace(message.ReplyToTopic))
             {
-                var isAuthenticated = await authenticator.AuthenticateAsync(remoteNode, ReadOnlyMemory<byte>.Empty, CancellationToken.None).ConfigureAwait(false);
+                var pong = new MqttDiscoveryMessage
+                {
+                    MeshId = meshId,
+                    ClientId = nodeOptions.LocalPeerId.ToString("N"),
+                    ReplyToTopic = string.Empty
+                };
 
-                if (isAuthenticated)
-                {
-                    await failureDetector.RecordHeartbeatAsync(remoteNode.Id, CancellationToken.None).ConfigureAwait(false);
-                    await peerRegistry.AddOrUpdatePeerAsync(meshId, remoteNode, PeerStatus.Active, CancellationToken.None).ConfigureAwait(false);
-                    recentPeers[remoteNode.Id.Value] = remoteNode;
-                }
-                else
-                {
-                    logger.LogDebug("[{MeshId}] Incoming MQTT discovery presence from {PeerId} failed authentication.", meshId, remoteNode.Id.Value);
-                }
+                var responseBytes = serializer.SerializeToBytes(pong);
+
+                var responseMessage = new MqttApplicationMessageBuilder()
+                    .WithTopic(message.ReplyToTopic)
+                    .WithPayload(responseBytes)
+                    .WithQualityOfServiceLevel(MQTTnet.Protocol.MqttQualityOfServiceLevel.AtMostOnce)
+                    .Build();
+
+                await mqttClient.PublishAsync(responseMessage, CancellationToken.None).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
         {
-            // Ignore parsing errors from alien network packets
-            logger.LogTrace(ex, "[{MeshId}] An error occurred while processing an MQTT discovery broadcast.", meshId);
+            logger.LogTrace(ex, "[{MeshId}] Ignored malformed MQTT discovery message.", meshId);
         }
     }
 
@@ -262,7 +345,7 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
     {
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(2), token).ConfigureAwait(false);
+            await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { return; }
 
@@ -293,22 +376,5 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
             }
             catch (OperationCanceledException) { }
         }
-    }
-
-    private static string GetDiscoveryTopic(string prefix, string suffix)
-    {
-        return $"{prefix.TrimEnd('/')}/{suffix.TrimStart('/')}";
-    }
-
-    /// <inheritdoc />
-    public void Dispose()
-    {
-        if (isDisposed) return;
-        backgroundTaskCancellationSource?.Cancel();
-        backgroundTaskCancellationSource?.Dispose();
-        mqttClient.ApplicationMessageReceivedAsync -= HandleIncomingMessageAsync;
-        mqttClient.DisconnectedAsync -= HandleDisconnectedAsync;
-        mqttClient.Dispose();
-        isDisposed = true;
     }
 }
