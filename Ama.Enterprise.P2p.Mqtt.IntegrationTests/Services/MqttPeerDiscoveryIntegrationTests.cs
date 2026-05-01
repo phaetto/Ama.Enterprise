@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.Mqtt.IntegrationTests.Services;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -136,6 +137,73 @@ public sealed class MqttPeerDiscoveryIntegrationTests
             await cleanupHostedA.StopAsync(cts.Token);
         }
         await nodeB.StopDiscoveryAsync(cts.Token);
+    }
+    
+    [IntegrationFact]
+    public async Task MqttPeerDiscovery_FiveNodes_ShouldDiscoverEachOther_Succeeds()
+    {
+        // Arrange
+        var meshId = $"mqtt-five-disc-{Guid.NewGuid():N}";
+        var topicPrefix = $"integration-test/five-disc/{Guid.NewGuid():N}";
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120)); // Generous timeout for multiple nodes hitting public broker
+        
+        var peers = Enumerable.Range(0, 5).Select(_ => new PeerId(Guid.NewGuid())).ToList();
+        var nodes = new List<MqttDiscoveryTestNode>();
+
+        testOutputHelper.WriteLine("Initializing 5 Nodes for MQTT Discovery...");
+        foreach (var peerId in peers)
+        {
+            nodes.Add(CreateDiscoveryTestNode(meshId, peerId, topicPrefix));
+        }
+
+        try
+        {
+            // Act
+            testOutputHelper.WriteLine("Starting MQTT Peer Discovery background services for 5 nodes concurrently...");
+            var startTasks = nodes.Select(n => n.StartDiscoveryAsync(cts.Token));
+            await Task.WhenAll(startTasks);
+
+            // Assert
+            testOutputHelper.WriteLine("Waiting for discovery broadcasts to synchronize across the broker for all 5 nodes...");
+            
+            bool allSynchronized = false;
+            var timeoutTime = DateTime.UtcNow.AddSeconds(90);
+
+            while (DateTime.UtcNow < timeoutTime && !cts.Token.IsCancellationRequested)
+            {
+                allSynchronized = true;
+
+                foreach (var node in nodes)
+                {
+                    var registryPeers = await node.Registry.GetAllPeersAsync(meshId, cts.Token);
+                    var missing = peers.Where(p => p != node.Id && !registryPeers.Any(rp => rp.Id.Equals(p) && rp.Endpoint != null)).ToList();
+                    
+                    if (missing.Any())
+                    {
+                        allSynchronized = false;
+                        break;
+                    }
+                }
+
+                if (allSynchronized)
+                {
+                    testOutputHelper.WriteLine("All 5 nodes successfully discovered each other.");
+                    break;
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(1000), cts.Token);
+            }
+
+            allSynchronized.ShouldBeTrue("The 5-node cluster failed to fully discover each other within the expected timeout limit. This verifies cluster stabilization and bounds validation with multiple concurrent topic publications.");
+        }
+        finally
+        {
+            testOutputHelper.WriteLine("Stopping discovery loops and cleaning up nodes...");
+            foreach (var node in nodes)
+            {
+                await node.DisposeAsync();
+            }
+        }
     }
 
     [IntegrationFact]

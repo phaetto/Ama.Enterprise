@@ -28,11 +28,6 @@ public sealed record UdpDiscoveryOptions
     public int MulticastPort { get; set; } = 5000;
 
     /// <summary>
-    /// Gets or sets the port number this node advertises to other peers to initiate Phase 2 handshakes.
-    /// </summary>
-    public int AdvertisedHandshakePort { get; set; }
-
-    /// <summary>
     /// Gets or sets the interval between active discovery multicast broadcasts.
     /// </summary>
     public TimeSpan DiscoveryInterval

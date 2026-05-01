@@ -23,9 +23,9 @@ public sealed record DnsDiscoveryOptions
     }
 
     /// <summary>
-    /// Gets or sets the default port number to associate with resolved IP addresses.
+    /// Gets or sets the fixed target port that the underlying handshaker relies on for resolved DNS IPs.
     /// </summary>
-    public int Port { get; set; }
+    public int TargetPort { get; set; } = 8081;
 
     /// <summary>
     /// Gets or sets the interval between active DNS resolutions.

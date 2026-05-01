@@ -12,11 +12,17 @@ using Ama.Enterprise.P2p.Models.Core;
 public interface IPeerHandshaker
 {
     /// <summary>
-    /// Initiates an active connection to the specified endpoint to exchange node identities.
+    /// Gets the localized port this specific handshaker is actively listening on.
+    /// This allows generic Phase 1 discovery mechanisms to broadcast the correct Phase 2 target natively.
     /// </summary>
-    /// <param name="localNode">The local node identity to present to the remote endpoint.</param>
-    /// <param name="targetEndpoint">The target network endpoint to connect to.</param>
+    int LocalHandshakePort { get; }
+
+    /// <summary>
+    /// Initiates an active connection to the specified endpoint identifier to exchange node identities.
+    /// </summary>
+    /// <param name="localNode">The local node identity to present to the remote peer.</param>
+    /// <param name="endpoint">The target network endpoint containing IP and designated Handshake port.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The remote peer's fully formed node details, or null if the handshake fails.</returns>
-    Task<PeerNode?> HandshakeAsync(PeerNode localNode, EndPoint targetEndpoint, CancellationToken cancellationToken);
+    Task<PeerNode?> HandshakeAsync(PeerNode localNode, IPEndPoint endpoint, CancellationToken cancellationToken);
 }

@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.Kestrel.IntegrationTests.Services;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading;
@@ -56,12 +57,12 @@ public sealed class KestrelPeerHandshakeIntegrationTests
         // Give Kestrel servers a moment to bind and start listening
         await Task.Delay(TimeSpan.FromMilliseconds(500), cts.Token);
 
-        testOutputHelper.WriteLine($"Node A firing manual HandshakeAsync to Node B on port {portB}...");
+        testOutputHelper.WriteLine($"Node A firing manual HandshakeAsync to Node B explicitly unmapped as 127.0.0.1...");
         
-        var targetEndpoint = new IPEndPoint(IPAddress.Loopback, portB);
         var localNodeA = new PeerNode(peerAId, new KestrelPeerEndpoint("127.0.0.1", portA));
         
-        var discoveredNode = await nodeA.Handshaker.HandshakeAsync(localNodeA, targetEndpoint, cts.Token);
+        var endpointB = new IPEndPoint(IPAddress.Parse("127.0.0.1"), portB);
+        var discoveredNode = await nodeA.Handshaker.HandshakeAsync(localNodeA, endpointB, cts.Token);
 
         // Assert
         discoveredNode.ShouldNotBeNull("Handshake failed to return a valid PeerNode.");
@@ -100,7 +101,7 @@ public sealed class KestrelPeerHandshakeIntegrationTests
         await nodeB.StartAsync(cts.Token);
 
         // Assert - Polling loop for UDP multicasts and isolated Kestrel handshakes
-        testOutputHelper.WriteLine("Waiting for Phase 1 (UDP) and Phase 2 (Kestrel) to synchronize endpoints...");
+        testOutputHelper.WriteLine("Waiting for Phase 1 (UDP) and Phase 2 (Kestrel) to synchronize endpoints natively decoupled...");
         
         bool discovered = false;
         var timeoutTime = DateTime.UtcNow.AddSeconds(45);
@@ -128,7 +129,77 @@ public sealed class KestrelPeerHandshakeIntegrationTests
             await Task.Delay(TimeSpan.FromMilliseconds(500), cts.Token);
         }
 
-        discovered.ShouldBeTrue("Nodes failed to discover each other via UDP multicast and Kestrel HTTP handshakes within the limit.");
+        discovered.ShouldBeTrue("Nodes failed to discover each other via UDP multicast and Kestrel HTTP handshakes implicitly mapping explicit target ports explicitly securely effectively safely within limits.");
+    }
+
+    [IntegrationFact]
+    public async Task KestrelPeerHandshaker_FiveNodes_ShouldFormClusterAndSynchronize()
+    {
+        // Arrange
+        var meshId = $"kestrel-five-{Guid.NewGuid():N}";
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+
+        var peers = Enumerable.Range(0, 5).Select(_ => new PeerId(Guid.NewGuid())).ToList();
+        var ports = Enumerable.Range(0, 5).Select(_ => GetNextPort()).ToList();
+        
+        var multicastGroup = "239.5.5.5";
+        var multicastPort = GetNextPort();
+
+        var nodes = new List<KestrelTestNode>();
+        testOutputHelper.WriteLine("Initializing 5 Nodes for Kestrel/UDP Topology...");
+        
+        for (int i = 0; i < 5; i++)
+        {
+            nodes.Add(CreateTestNode(meshId, peers[i], ports[i], multicastGroup, multicastPort));
+        }
+
+        try
+        {
+            // Act
+            testOutputHelper.WriteLine("Starting all 5 nodes concurrently...");
+            var startTasks = nodes.Select(n => n.StartAsync(cts.Token));
+            await Task.WhenAll(startTasks);
+
+            // Assert
+            testOutputHelper.WriteLine("Waiting for 5-node cluster to fully synchronize via Gossip...");
+            bool allSynchronized = false;
+            var timeoutTime = DateTime.UtcNow.AddSeconds(60);
+
+            while (DateTime.UtcNow < timeoutTime && !cts.Token.IsCancellationRequested)
+            {
+                allSynchronized = true;
+                foreach (var node in nodes)
+                {
+                    var registryPeers = await node.Registry.GetAllPeersAsync(meshId, cts.Token);
+                    // A node should systematically know about all other 4 peers appropriately across the distributed boundaries
+                    var missing = peers.Where(p => p != node.Id && !registryPeers.Any(rp => rp.Id.Equals(p) && rp.Endpoint != null)).ToList();
+                    
+                    if (missing.Any())
+                    {
+                        allSynchronized = false;
+                        break;
+                    }
+                }
+
+                if (allSynchronized)
+                {
+                    break;
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(1000), cts.Token);
+            }
+
+            allSynchronized.ShouldBeTrue("The 5-node cluster failed to fully synchronize its peer registry within the timeout. This checks if the multi-node gossip handles the topology completely.");
+        }
+        finally
+        {
+            // Cleanup
+            testOutputHelper.WriteLine("Cleaning up 5-node cluster gracefully...");
+            foreach (var node in nodes)
+            {
+                await node.DisposeAsync();
+            }
+        }
     }
 
     [IntegrationFact]
@@ -154,7 +225,7 @@ public sealed class KestrelPeerHandshakeIntegrationTests
         var multicastGroup2 = "239.4.4.4";
         var multicastPort2 = GetNextPort();
 
-        testOutputHelper.WriteLine("Initializing Multi-Mesh Nodes using decoupled Kestrel + UDP...");
+        testOutputHelper.WriteLine("Initializing Multi-Mesh Nodes using decoupled Kestrel + UDP natively mapped target ports explicitly securely...");
         await using var nodeA = CreateMultiMeshNode(peerAId, mesh1Id, mesh2Id, mesh1PortA, mesh2PortA, multicastGroup1, multicastPort1, multicastGroup2, multicastPort2);
         await using var nodeB = CreateMultiMeshNode(peerBId, mesh1Id, mesh2Id, mesh1PortB, mesh2PortB, multicastGroup1, multicastPort1, multicastGroup2, multicastPort2);
 
@@ -224,7 +295,7 @@ public sealed class KestrelPeerHandshakeIntegrationTests
         mesh2Discovered.ShouldBeTrue("Nodes failed to discover each other on implicitly separated Mesh 2 securely.");
     }
 
-    private KestrelTestNode CreateTestNode(string meshId, PeerId peerId, int kestrelPort, string? multicastGroup, int multicastPort)
+    private KestrelTestNode CreateTestNode(string meshId, PeerId peerId, int kestrelListenPort, string? multicastGroup, int multicastPort)
     {
         var services = new ServiceCollection();
 
@@ -238,8 +309,7 @@ public sealed class KestrelPeerHandshakeIntegrationTests
         
         services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
 
-        // Manually inject the Keyed Endpoint to correctly identify natively inside purely handshaker focused integrations
-        services.AddKeyedSingleton<PeerEndpoint>(meshId, new KestrelPeerEndpoint("127.0.0.1", kestrelPort));
+        services.AddKeyedSingleton<PeerEndpoint>(meshId, new KestrelPeerEndpoint("127.0.0.1", kestrelListenPort));
 
         services.Configure<FailureDetectorOptions>(meshId, options => 
         {
@@ -253,8 +323,8 @@ public sealed class KestrelPeerHandshakeIntegrationTests
         .AddGossipNetwork()
         .AddKestrelPeerHandshake(options =>
         {
-            options.ListenHost = "127.0.0.1";
-            options.ListenPort = kestrelPort;
+            options.ListenHost = "+";
+            options.ListenPort = kestrelListenPort;
             options.HandshakeTimeout = TimeSpan.FromSeconds(10);
         });
 
@@ -282,8 +352,8 @@ public sealed class KestrelPeerHandshakeIntegrationTests
         PeerId peerId,
         string mesh1Id,
         string mesh2Id,
-        int kestrelPort1,
-        int kestrelPort2,
+        int kestrelListenPort1,
+        int kestrelListenPort2,
         string multicastGroup1,
         int multicastPort1,
         string multicastGroup2,
@@ -301,8 +371,8 @@ public sealed class KestrelPeerHandshakeIntegrationTests
         
         services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
 
-        services.AddKeyedSingleton<PeerEndpoint>(mesh1Id, new KestrelPeerEndpoint("127.0.0.1", kestrelPort1));
-        services.AddKeyedSingleton<PeerEndpoint>(mesh2Id, new KestrelPeerEndpoint("127.0.0.1", kestrelPort2));
+        services.AddKeyedSingleton<PeerEndpoint>(mesh1Id, new KestrelPeerEndpoint("127.0.0.1", kestrelListenPort1));
+        services.AddKeyedSingleton<PeerEndpoint>(mesh2Id, new KestrelPeerEndpoint("127.0.0.1", kestrelListenPort2));
 
         services.Configure<FailureDetectorOptions>(mesh1Id, options => options.HeartbeatInterval = TimeSpan.FromSeconds(120));
         services.Configure<FailureDetectorOptions>(mesh2Id, options => options.HeartbeatInterval = TimeSpan.FromSeconds(120));
@@ -311,8 +381,8 @@ public sealed class KestrelPeerHandshakeIntegrationTests
             .AddGossipNetwork()
             .AddKestrelPeerHandshake(options =>
             {
-                options.ListenHost = "127.0.0.1";
-                options.ListenPort = kestrelPort1;
+                options.ListenHost = "+";
+                options.ListenPort = kestrelListenPort1;
                 options.HandshakeTimeout = TimeSpan.FromSeconds(10);
             })
             .AddUdpPeerDiscovery(options =>
@@ -326,8 +396,8 @@ public sealed class KestrelPeerHandshakeIntegrationTests
             .AddPushPullGossipNetwork()
             .AddKestrelPeerHandshake(options =>
             {
-                options.ListenHost = "127.0.0.1";
-                options.ListenPort = kestrelPort2;
+                options.ListenHost = "+";
+                options.ListenPort = kestrelListenPort2;
                 options.HandshakeTimeout = TimeSpan.FromSeconds(10);
             })
             .AddUdpPeerDiscovery(options =>

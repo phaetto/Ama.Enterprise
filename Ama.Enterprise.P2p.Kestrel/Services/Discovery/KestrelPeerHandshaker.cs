@@ -22,9 +22,6 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Implementation of IPeerHandshaker managing isolated Kestrel HTTP probes.
 /// </summary>
-/// <remarks>
-/// Initializes a new instance of the <see cref="KestrelPeerHandshaker"/> class.
-/// </remarks>
 public sealed class KestrelPeerHandshaker(
     string meshId,
     IOptionsMonitor<KestrelHandshakeOptions> optionsMonitor,
@@ -36,6 +33,9 @@ public sealed class KestrelPeerHandshaker(
 {
     private IHost? webHost;
     private bool isDisposed;
+
+    /// <inheritdoc />
+    public int LocalHandshakePort => optionsMonitor.Get(meshId).ListenPort;
 
     /// <inheritdoc />
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -98,29 +98,10 @@ public sealed class KestrelPeerHandshaker(
     }
 
     /// <inheritdoc />
-    public async Task<PeerNode?> HandshakeAsync(PeerNode localNode, EndPoint targetEndpoint, CancellationToken cancellationToken)
+    public async Task<PeerNode?> HandshakeAsync(PeerNode localNode, IPEndPoint endpoint, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
-        ArgumentNullException.ThrowIfNull(targetEndpoint);
-
-        string host;
-        int port;
-
-        if (targetEndpoint is DnsEndPoint dnsEndPoint)
-        {
-            host = dnsEndPoint.Host;
-            port = dnsEndPoint.Port;
-        }
-        else if (targetEndpoint is IPEndPoint ipEndPoint)
-        {
-            host = ipEndPoint.Address.ToString();
-            port = ipEndPoint.Port;
-        }
-        else
-        {
-            logger.LogWarning("[{MeshId}] Target endpoint must be DnsEndPoint or IPEndPoint for Kestrel handshakes.", meshId);
-            return null;
-        }
+        ArgumentNullException.ThrowIfNull(endpoint);
 
         var options = optionsMonitor.Get(meshId);
         var client = httpClientFactory.CreateClient("P2pKestrelHandshaker");
@@ -130,7 +111,7 @@ public sealed class KestrelPeerHandshaker(
 
         try
         {
-            var uri = new Uri($"http://{host}:{port}/{meshId}/handshake");
+            var uri = new Uri($"http://{endpoint.Address}:{endpoint.Port}/{meshId}/handshake");
             var requestBytes = serializer.SerializeToBytes(localNode);
             using var content = new ByteArrayContent(requestBytes);
             content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
@@ -147,12 +128,12 @@ public sealed class KestrelPeerHandshaker(
         }
         catch (OperationCanceledException)
         {
-            logger.LogTrace("[{MeshId}] Kestrel handshake timed out for {Target}.", meshId, targetEndpoint);
+            logger.LogTrace("[{MeshId}] Kestrel handshake timed out for {Target}.", meshId, endpoint);
             return null;
         }
         catch (Exception ex)
         {
-            logger.LogTrace(ex, "[{MeshId}] Kestrel handshake failed for {Target}.", meshId, targetEndpoint);
+            logger.LogTrace(ex, "[{MeshId}] Kestrel handshake failed for {Target}.", meshId, endpoint);
             return null;
         }
     }

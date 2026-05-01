@@ -18,9 +18,6 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Implementation of IPeerDiscovery acting as Phase 1, using UDP multicast to resolve IPs and delegating negotiation to the handshaker.
 /// </summary>
-/// <remarks>
-/// Initializes a new instance of the <see cref="UdpPeerDiscovery"/> class.
-/// </remarks>
 public sealed class UdpPeerDiscovery(
     string meshId,
     IOptionsMonitor<UdpDiscoveryOptions> discoveryOptionsMonitor,
@@ -121,7 +118,7 @@ public sealed class UdpPeerDiscovery(
         var discoveryPayload = new UdpDiscoveryMessage
         {
             MeshId = meshId,
-            AdvertisedHandshakePort = options.AdvertisedHandshakePort
+            HandshakePort = handshaker.LocalHandshakePort
         };
 
         var requestBytes = serializer.SerializeToBytes(discoveryPayload);
@@ -147,11 +144,13 @@ public sealed class UdpPeerDiscovery(
 
                     if (pong.MeshId == meshId)
                     {
-                        var remoteIpEndpoint = new IPEndPoint(result.RemoteEndPoint.Address, pong.AdvertisedHandshakePort);
+                        var remoteIp = result.RemoteEndPoint.Address;
+                        var remotePort = pong.HandshakePort;
 
                         handshakeTasks.Add(Task.Run(async () =>
                         {
-                            var remoteNode = await handshaker.HandshakeAsync(localNode, remoteIpEndpoint, timeoutCts.Token).ConfigureAwait(false);
+                            var endpoint = new IPEndPoint(remoteIp, remotePort);
+                            var remoteNode = await handshaker.HandshakeAsync(localNode, endpoint, timeoutCts.Token).ConfigureAwait(false);
 
                             if (!remoteNode.HasValue || remoteNode.Value.Id.Value == nodeOptions.LocalPeerId || remoteNode.Value.Id.Value == Guid.Empty)
                             {
@@ -205,7 +204,6 @@ public sealed class UdpPeerDiscovery(
     private async Task ListenLoopAsync(CancellationToken token)
     {
         if (listener is null) return;
-        var options = discoveryOptionsMonitor.Get(meshId);
 
         try
         {
@@ -222,7 +220,7 @@ public sealed class UdpPeerDiscovery(
                         var pong = new UdpDiscoveryMessage
                         {
                             MeshId = meshId,
-                            AdvertisedHandshakePort = options.AdvertisedHandshakePort
+                            HandshakePort = handshaker.LocalHandshakePort
                         };
 
                         var responseBytes = serializer.SerializeToBytes(pong);

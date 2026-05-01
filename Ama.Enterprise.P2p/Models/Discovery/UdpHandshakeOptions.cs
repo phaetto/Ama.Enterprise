@@ -12,7 +12,7 @@ public sealed record UdpHandshakeOptions
     /// <summary>
     /// Gets or sets the local UDP port to listen for incoming handshake requests.
     /// </summary>
-    public int ListenPort { get; set; }
+    public int ListenPort { get; set; } = 8081;
 
     /// <summary>
     /// Gets or sets the timeout for individual node handshake attempts.

@@ -57,6 +57,9 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IHostedService, IDispos
     }
 
     /// <inheritdoc />
+    public int LocalHandshakePort => optionsMonitor.Get(meshId).ListenPort;
+
+    /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
@@ -96,15 +99,10 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IHostedService, IDispos
     }
 
     /// <inheritdoc />
-    public async Task<PeerNode?> HandshakeAsync(PeerNode localNode, EndPoint targetEndpoint, CancellationToken cancellationToken)
+    public async Task<PeerNode?> HandshakeAsync(PeerNode localNode, IPEndPoint endpoint, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
-
-        if (targetEndpoint is not IPEndPoint ipEndpoint)
-        {
-            logger.LogWarning("[{MeshId}] Target endpoint must be an IPEndPoint for UDP handshakes.", meshId);
-            return null;
-        }
+        ArgumentNullException.ThrowIfNull(endpoint);
 
         var options = optionsMonitor.Get(meshId);
         using var client = new UdpClient(AddressFamily.InterNetwork);
@@ -116,20 +114,19 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IHostedService, IDispos
 
         try
         {
-            // SendAsync with (byte[], int, IPEndPoint) does not take a cancellation token
-            await client.SendAsync(requestBytes, requestBytes.Length, ipEndpoint).ConfigureAwait(false);
+            await client.SendAsync(requestBytes, requestBytes.Length, endpoint).ConfigureAwait(false);
             var result = await client.ReceiveAsync(timeoutCts.Token).ConfigureAwait(false);
 
             return serializer.DeserializeFromBytes<PeerNode>(result.Buffer);
         }
         catch (OperationCanceledException)
         {
-            logger.LogTrace("[{MeshId}] UDP handshake timed out for {Target}.", meshId, ipEndpoint);
+            logger.LogTrace("[{MeshId}] UDP handshake timed out for {Target}.", meshId, endpoint);
             return null;
         }
         catch (Exception ex)
         {
-            logger.LogTrace(ex, "[{MeshId}] UDP handshake failed for {Target}.", meshId, ipEndpoint);
+            logger.LogTrace(ex, "[{MeshId}] UDP handshake failed for {Target}.", meshId, endpoint);
             return null;
         }
     }
@@ -168,7 +165,6 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IHostedService, IDispos
                         var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), localEndpoint);
                         var responseBytes = serializer.SerializeToBytes(localNode);
 
-                        // SendAsync with (byte[], int, IPEndPoint) does not take a cancellation token
                         await listener.SendAsync(responseBytes, responseBytes.Length, result.RemoteEndPoint).ConfigureAwait(false);
                     }
                 }

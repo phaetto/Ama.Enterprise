@@ -16,19 +16,6 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Implementation of IPeerDiscovery using DNS resolution (Phase 1) paired with abstract active handshaking (Phase 2).
 /// </summary>
-/// <remarks>
-/// Initializes a new instance of the <see cref="DnsPeerDiscovery"/> class.
-/// </remarks>
-/// <param name="meshId">The mesh context identifier.</param>
-/// <param name="discoveryOptionsMonitor">The DNS discovery configuration options monitor.</param>
-/// <param name="nodeOptionsMonitor">The global node configuration options monitor.</param>
-/// <param name="localEndpoint">The local network endpoint to advertise.</param>
-/// <param name="handshaker">The active handshaker implementation handling target resolution.</param>
-/// <param name="logger">The logger instance.</param>
-/// <param name="peerRegistry">The peer registry to populate with discovered nodes.</param>
-/// <param name="authenticator">The peer authenticator to validate remote node connections.</param>
-/// <param name="failureDetector">The failure detector to track heartbeat signals during discovery pings.</param>
-/// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
 public sealed class DnsPeerDiscovery(
     string meshId,
     IOptionsMonitor<DnsDiscoveryOptions> discoveryOptionsMonitor,
@@ -121,10 +108,9 @@ public sealed class DnsPeerDiscovery(
                 using var timeoutCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeoutCancellationSource.CancelAfter(options.HandshakeTimeout);
 
-                var targetEndpoint = new IPEndPoint(ip, options.Port);
-                var remoteNode = await handshaker.HandshakeAsync(localNode, targetEndpoint, timeoutCancellationSource.Token).ConfigureAwait(false);
+                var endpoint = new IPEndPoint(ip, options.TargetPort);
+                var remoteNode = await handshaker.HandshakeAsync(localNode, endpoint, timeoutCancellationSource.Token).ConfigureAwait(false);
 
-                // Check .HasValue since PeerNode? maps to Nullable<PeerNode> struct bounds
                 if (remoteNode.HasValue && remoteNode.Value.Id.Value != nodeOptions.LocalPeerId && remoteNode.Value.Id.Value != Guid.Empty)
                 {
                     var isAuthenticated = await authenticator.AuthenticateAsync(remoteNode.Value, ReadOnlyMemory<byte>.Empty, timeoutCancellationSource.Token).ConfigureAwait(false);
@@ -172,7 +158,6 @@ public sealed class DnsPeerDiscovery(
     {
         try
         {
-            // Initial jitter delay
             await Task.Delay(TimeSpan.FromSeconds(2), token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)

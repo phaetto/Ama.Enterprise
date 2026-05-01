@@ -5,6 +5,8 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
@@ -156,6 +158,8 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
             {
                 MeshId = meshId,
                 ClientId = nodeOptions.LocalPeerId.ToString("N"),
+                IpAddress = GetLocalIpAddress(),
+                HandshakePort = handshaker.LocalHandshakePort,
                 ReplyToTopic = replyTopic
             };
 
@@ -184,25 +188,29 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
                     
                     if (pong.MeshId == meshId && pong.ClientId != nodeOptions.LocalPeerId.ToString("N"))
                     {
-                        var remoteEndpoint = new MqttRoutingEndPoint(pong.ClientId);
-
-                        handshakeTasks.Add(Task.Run(async () =>
+                        if (IPAddress.TryParse(pong.IpAddress, out var remoteIp))
                         {
-                            var remoteNode = await handshaker.HandshakeAsync(localNode, remoteEndpoint, timeoutCts.Token).ConfigureAwait(false);
-
-                            if (!remoteNode.HasValue || remoteNode.Value.Id.Value == nodeOptions.LocalPeerId || remoteNode.Value.Id.Value == Guid.Empty)
+                            var remotePort = pong.HandshakePort;
+                            
+                            handshakeTasks.Add(Task.Run(async () =>
                             {
-                                return;
-                            }
+                                var endpoint = new IPEndPoint(remoteIp, remotePort);
+                                var remoteNode = await handshaker.HandshakeAsync(localNode, endpoint, timeoutCts.Token).ConfigureAwait(false);
 
-                            var isAuthenticated = await authenticator.AuthenticateAsync(remoteNode.Value, ReadOnlyMemory<byte>.Empty, timeoutCts.Token).ConfigureAwait(false);
+                                if (!remoteNode.HasValue || remoteNode.Value.Id.Value == nodeOptions.LocalPeerId || remoteNode.Value.Id.Value == Guid.Empty)
+                                {
+                                    return;
+                                }
 
-                            if (isAuthenticated)
-                            {
-                                await failureDetector.RecordHeartbeatAsync(remoteNode.Value.Id, timeoutCts.Token).ConfigureAwait(false);
-                                discoveredPeers.Add(remoteNode.Value);
-                            }
-                        }, timeoutCts.Token));
+                                var isAuthenticated = await authenticator.AuthenticateAsync(remoteNode.Value, ReadOnlyMemory<byte>.Empty, timeoutCts.Token).ConfigureAwait(false);
+
+                                if (isAuthenticated)
+                                {
+                                    await failureDetector.RecordHeartbeatAsync(remoteNode.Value.Id, timeoutCts.Token).ConfigureAwait(false);
+                                    discoveredPeers.Add(remoteNode.Value);
+                                }
+                            }, timeoutCts.Token));
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -287,7 +295,6 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
         var payload = args.ApplicationMessage.Payload;
         if (payload.Length == 0) return;
 
-        var options = discoveryOptionsMonitor.Get(meshId);
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
 
         try
@@ -300,6 +307,8 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
                 {
                     MeshId = meshId,
                     ClientId = nodeOptions.LocalPeerId.ToString("N"),
+                    IpAddress = GetLocalIpAddress(),
+                    HandshakePort = handshaker.LocalHandshakePort,
                     ReplyToTopic = string.Empty
                 };
 
@@ -375,6 +384,33 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
                 await Task.Delay(options.DiscoveryInterval, token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) { }
+        }
+    }
+
+    private static string GetLocalIpAddress()
+    {
+        try
+        {
+            using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0);
+            socket.Connect("8.8.8.8", 65530);
+            var endPoint = socket.LocalEndPoint as IPEndPoint;
+            return endPoint?.Address.ToString() ?? "127.0.0.1";
+        }
+        catch
+        {
+            try
+            {
+                var host = Dns.GetHostEntry(Dns.GetHostName());
+                foreach (var ip in host.AddressList)
+                {
+                    if (ip.AddressFamily == AddressFamily.InterNetwork)
+                    {
+                        return ip.ToString();
+                    }
+                }
+            }
+            catch { }
+            return "127.0.0.1";
         }
     }
 }

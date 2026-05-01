@@ -4,6 +4,7 @@ using System;
 using System.Buffers;
 using System.Linq;
 using System.Net;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
@@ -58,6 +59,9 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
     }
 
     /// <inheritdoc />
+    public int LocalHandshakePort => optionsMonitor.Get(meshId).HandshakePort;
+
+    /// <inheritdoc />
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
@@ -74,8 +78,8 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
             await ConnectAndSubscribeAsync(cancellationToken).ConfigureAwait(false);
 
             var options = optionsMonitor.Get(meshId);
-            var nodeOptions = nodeOptionsMonitor.Get(meshId);
-            var topic = $"{options.TopicPrefix.TrimEnd('/')}/{options.HandshakeTopicSuffix.TrimStart('/')}/{nodeOptions.LocalPeerId:N}";
+            var endpointStr = options.HandshakePort > 0 ? $"{GetLocalIpAddress()}:{options.HandshakePort}" : GetLocalIpAddress();
+            var topic = $"{options.TopicPrefix.TrimEnd('/')}/{options.HandshakeTopicSuffix.TrimStart('/')}/{endpointStr}";
             
             logger.LogInformation("[{MeshId}] MQTT Peer Handshaker started listening on localized topic: {Topic}", meshId, topic);
         }
@@ -103,15 +107,10 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
     }
 
     /// <inheritdoc />
-    public async Task<PeerNode?> HandshakeAsync(PeerNode localNode, EndPoint targetEndpoint, CancellationToken cancellationToken)
+    public async Task<PeerNode?> HandshakeAsync(PeerNode localNode, IPEndPoint endpoint, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
-
-        if (targetEndpoint is not MqttRoutingEndPoint routingEndpoint)
-        {
-            logger.LogWarning("[{MeshId}] Target endpoint must be an MqttRoutingEndPoint to facilitate MQTT handshakes.", meshId);
-            return null;
-        }
+        ArgumentNullException.ThrowIfNull(endpoint);
 
         var options = optionsMonitor.Get(meshId);
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
@@ -143,7 +142,9 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
             };
             
             var requestBytes = serializer.SerializeToBytes(handshakeMessage);
-            var targetTopic = $"{options.TopicPrefix.TrimEnd('/')}/{options.HandshakeTopicSuffix.TrimStart('/')}/{routingEndpoint.ClientId}";
+
+            var endpointStr = endpoint.Port > 0 ? endpoint.ToString() : endpoint.Address.ToString();
+            var targetTopic = $"{options.TopicPrefix.TrimEnd('/')}/{options.HandshakeTopicSuffix.TrimStart('/')}/{endpointStr}";
 
             var message = new MqttApplicationMessageBuilder()
                 .WithTopic(targetTopic)
@@ -182,12 +183,12 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
         }
         catch (OperationCanceledException)
         {
-            logger.LogTrace("[{MeshId}] MQTT handshake timed out for {Target}.", meshId, routingEndpoint.ClientId);
+            logger.LogTrace("[{MeshId}] MQTT handshake timed out for {Target}.", meshId, endpoint);
             return null;
         }
         catch (Exception ex)
         {
-            logger.LogTrace(ex, "[{MeshId}] MQTT handshake failed for {Target}.", meshId, routingEndpoint.ClientId);
+            logger.LogTrace(ex, "[{MeshId}] MQTT handshake failed for {Target}.", meshId, endpoint);
             return null;
         }
     }
@@ -225,7 +226,8 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
 
         await listener!.ConnectAsync(builder.Build(), token).ConfigureAwait(false);
 
-        var topic = $"{options.TopicPrefix.TrimEnd('/')}/{options.HandshakeTopicSuffix.TrimStart('/')}/{nodeOptions.LocalPeerId:N}";
+        var endpointStr = options.HandshakePort > 0 ? $"{GetLocalIpAddress()}:{options.HandshakePort}" : GetLocalIpAddress();
+        var topic = $"{options.TopicPrefix.TrimEnd('/')}/{options.HandshakeTopicSuffix.TrimStart('/')}/{endpointStr}";
         var subscribeOptions = new MqttClientFactory().CreateSubscribeOptionsBuilder()
             .WithTopicFilter(f => f.WithTopic(topic))
             .Build();
@@ -291,6 +293,33 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
         catch (Exception ex)
         {
             logger.LogError(ex, "[{MeshId}] Failed to reconnect MQTT handshaker.", meshId);
+        }
+    }
+
+    private static string GetLocalIpAddress()
+    {
+        try
+        {
+            using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0);
+            socket.Connect("8.8.8.8", 65530);
+            var endPoint = socket.LocalEndPoint as IPEndPoint;
+            return endPoint?.Address.ToString() ?? "127.0.0.1";
+        }
+        catch
+        {
+            try
+            {
+                var host = Dns.GetHostEntry(Dns.GetHostName());
+                foreach (var ip in host.AddressList)
+                {
+                    if (ip.AddressFamily == AddressFamily.InterNetwork)
+                    {
+                        return ip.ToString();
+                    }
+                }
+            }
+            catch { }
+            return "127.0.0.1";
         }
     }
 }

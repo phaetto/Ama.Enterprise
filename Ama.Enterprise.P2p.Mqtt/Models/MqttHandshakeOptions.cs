@@ -47,6 +47,11 @@ public sealed class MqttHandshakeOptions : IEquatable<MqttHandshakeOptions>
     /// </summary>
     public string HandshakeTopicSuffix { get; set; } = "handshake";
 
+    /// <summary>
+    /// Gets or sets an explicit pseudo-port identifier natively isolating topic handshakes when sharing a single IP locally.
+    /// </summary>
+    public int HandshakePort { get; set; }
+
     /// <inheritdoc />
     public bool Equals(MqttHandshakeOptions? other)
     {
@@ -60,7 +65,8 @@ public sealed class MqttHandshakeOptions : IEquatable<MqttHandshakeOptions>
                string.Equals(Password, other.Password, StringComparison.Ordinal) &&
                UseTls == other.UseTls &&
                HandshakeTimeout.Equals(other.HandshakeTimeout) &&
-               string.Equals(HandshakeTopicSuffix, other.HandshakeTopicSuffix, StringComparison.Ordinal);
+               string.Equals(HandshakeTopicSuffix, other.HandshakeTopicSuffix, StringComparison.Ordinal) &&
+               HandshakePort == other.HandshakePort;
     }
 
     /// <inheritdoc />
@@ -78,6 +84,7 @@ public sealed class MqttHandshakeOptions : IEquatable<MqttHandshakeOptions>
         hash.Add(UseTls);
         hash.Add(HandshakeTimeout);
         hash.Add(HandshakeTopicSuffix, StringComparer.Ordinal);
+        hash.Add(HandshakePort);
         return hash.ToHashCode();
     }
 }
