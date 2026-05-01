@@ -41,8 +41,8 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         var peerBId = new PeerId(Guid.NewGuid());
 
         testOutputHelper.WriteLine("Initializing Nodes for Discovery...");
-        await using var nodeA = CreateDiscoveryTestNode(meshId, peerAId, topicPrefix);
-        await using var nodeB = CreateDiscoveryTestNode(meshId, peerBId, topicPrefix);
+        await using var nodeA = CreateDiscoveryTestNode(meshId, peerAId, topicPrefix, handshakePort: 9001);
+        await using var nodeB = CreateDiscoveryTestNode(meshId, peerBId, topicPrefix, handshakePort: 9002);
 
         // Act
         testOutputHelper.WriteLine("Starting MQTT Peer Discovery background services...");
@@ -96,8 +96,8 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         var peerAId = new PeerId(Guid.NewGuid());
         var peerBId = new PeerId(Guid.NewGuid());
 
-        await using var nodeA = CreateDiscoveryTestNode(meshId, peerAId, topicPrefix);
-        await using var nodeB = CreateDiscoveryTestNode(meshId, peerBId, topicPrefix);
+        await using var nodeA = CreateDiscoveryTestNode(meshId, peerAId, topicPrefix, handshakePort: 9011);
+        await using var nodeB = CreateDiscoveryTestNode(meshId, peerBId, topicPrefix, handshakePort: 9012);
 
         await nodeB.StartDiscoveryAsync(cts.Token);
 
@@ -151,9 +151,10 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         var nodes = new List<MqttDiscoveryTestNode>();
 
         testOutputHelper.WriteLine("Initializing 5 Nodes for MQTT Discovery...");
+        int basePort = 9020;
         foreach (var peerId in peers)
         {
-            nodes.Add(CreateDiscoveryTestNode(meshId, peerId, topicPrefix));
+            nodes.Add(CreateDiscoveryTestNode(meshId, peerId, topicPrefix, handshakePort: ++basePort));
         }
 
         try
@@ -221,8 +222,8 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         var portB = 8402;
 
         testOutputHelper.WriteLine("Initializing HTTP Nodes for MQTT Discovery...");
-        await using var nodeA = CreateDiscoveryTestNode(meshId, peerAId, topicPrefix, useHttpTransport: true, httpPort: portA);
-        await using var nodeB = CreateDiscoveryTestNode(meshId, peerBId, topicPrefix, useHttpTransport: true, httpPort: portB);
+        await using var nodeA = CreateDiscoveryTestNode(meshId, peerAId, topicPrefix, useHttpTransport: true, httpPort: portA, handshakePort: 9031);
+        await using var nodeB = CreateDiscoveryTestNode(meshId, peerBId, topicPrefix, useHttpTransport: true, httpPort: portB, handshakePort: 9032);
 
         // Act
         testOutputHelper.WriteLine("Starting MQTT Peer Discovery background services for HTTP endpoints...");
@@ -286,8 +287,8 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         var portB = 8602;
 
         testOutputHelper.WriteLine("Initializing Multi-Mesh Nodes for MQTT Discovery...");
-        await using var nodeA = CreateMultiMeshNode(peerAId, mesh1Id, mesh2Id, portA, topicPrefix1, topicPrefix2);
-        await using var nodeB = CreateMultiMeshNode(peerBId, mesh1Id, mesh2Id, portB, topicPrefix1, topicPrefix2);
+        await using var nodeA = CreateMultiMeshNode(peerAId, mesh1Id, mesh2Id, portA, topicPrefix1, topicPrefix2, 9041, 9042);
+        await using var nodeB = CreateMultiMeshNode(peerBId, mesh1Id, mesh2Id, portB, topicPrefix1, topicPrefix2, 9051, 9052);
 
         // Act
         testOutputHelper.WriteLine("Starting background services...");
@@ -361,7 +362,7 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         await nodeB.StopAsync(cts.Token);
     }
 
-    private MqttDiscoveryTestNode CreateDiscoveryTestNode(string meshId, PeerId peerId, string topicPrefix, bool useHttpTransport = false, int httpPort = 0)
+    private MqttDiscoveryTestNode CreateDiscoveryTestNode(string meshId, PeerId peerId, string topicPrefix, bool useHttpTransport = false, int httpPort = 0, int handshakePort = 0)
     {
         var services = new ServiceCollection();
 
@@ -399,7 +400,9 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         {
             meshBuilder.AddMqttTransport(options =>
             {
-                options.Host = "broker.hivemq.com";
+                options.Host = "broker.freemqtt.com";
+                options.Username = "freemqtt";
+                options.Password = "public";
                 options.Port = 1883;
                 options.TopicPrefix = topicPrefix;
             });
@@ -407,15 +410,23 @@ public sealed class MqttPeerDiscoveryIntegrationTests
 
         meshBuilder.AddMqttPeerHandshake(options =>
         {
-            options.Host = "broker.hivemq.com";
+            options.Host = "broker.freemqtt.com";
+            options.Username = "freemqtt";
+            options.Password = "public";
             options.Port = 1883;
             options.TopicPrefix = topicPrefix;
             options.HandshakeTimeout = TimeSpan.FromSeconds(10);
+            if (handshakePort > 0)
+            {
+                options.HandshakePort = handshakePort;
+            }
         });
 
         meshBuilder.AddMqttPeerDiscovery(options =>
         {
-            options.Host = "broker.hivemq.com";
+            options.Host = "broker.freemqtt.com";
+            options.Username = "freemqtt";
+            options.Password = "public";
             options.Port = 1883;
             options.TopicPrefix = topicPrefix;
             options.DiscoveryInterval = TimeSpan.FromSeconds(5);
@@ -439,7 +450,9 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         string mesh2Id,
         int mesh1HttpPort,
         string topicPrefix1,
-        string topicPrefix2)
+        string topicPrefix2,
+        int handshakePort1,
+        int handshakePort2)
     {
         var services = new ServiceCollection();
 
@@ -476,14 +489,22 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         })
         .AddMqttPeerHandshake(options =>
         {
-            options.Host = "broker.hivemq.com";
+            options.Host = "broker.freemqtt.com";
+            options.Username = "freemqtt";
+            options.Password = "public";
             options.Port = 1883;
             options.TopicPrefix = topicPrefix1;
             options.HandshakeTimeout = TimeSpan.FromSeconds(10);
+            if (handshakePort1 > 0)
+            {
+                options.HandshakePort = handshakePort1;
+            }
         })
         .AddMqttPeerDiscovery(options =>
         {
-            options.Host = "broker.hivemq.com";
+            options.Host = "broker.freemqtt.com";
+            options.Username = "freemqtt";
+            options.Password = "public";
             options.Port = 1883;
             options.TopicPrefix = topicPrefix1;
             options.DiscoveryInterval = TimeSpan.FromSeconds(5);
@@ -498,20 +519,30 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         .AddPushPullGossipNetwork()
         .AddMqttTransport(options =>
         {
-            options.Host = "broker.hivemq.com";
+            options.Host = "broker.freemqtt.com";
+            options.Username = "freemqtt";
+            options.Password = "public";
             options.Port = 1883;
             options.TopicPrefix = topicPrefix2;
         })
         .AddMqttPeerHandshake(options =>
         {
-            options.Host = "broker.hivemq.com";
+            options.Host = "broker.freemqtt.com";
+            options.Username = "freemqtt";
+            options.Password = "public";
             options.Port = 1883;
             options.TopicPrefix = topicPrefix2;
             options.HandshakeTimeout = TimeSpan.FromSeconds(10);
+            if (handshakePort2 > 0)
+            {
+                options.HandshakePort = handshakePort2;
+            }
         })
         .AddMqttPeerDiscovery(options =>
         {
-            options.Host = "broker.hivemq.com";
+            options.Host = "broker.freemqtt.com";
+            options.Username = "freemqtt";
+            options.Password = "public";
             options.Port = 1883;
             options.TopicPrefix = topicPrefix2;
             options.DiscoveryInterval = TimeSpan.FromSeconds(5);
