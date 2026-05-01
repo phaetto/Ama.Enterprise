@@ -24,8 +24,15 @@ public sealed record DnsDiscoveryOptions
 
     /// <summary>
     /// Gets or sets the fixed target port that the underlying handshaker relies on for resolved DNS IPs.
+    /// Ignored if <see cref="UseSrvRecords"/> is true.
     /// </summary>
     public int TargetPort { get; set; } = 8081;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether to query SRV records to discover both hostnames and ports dynamically.
+    /// Requires an <see cref="Ama.Enterprise.P2p.Services.Discovery.IDnsSrvResolver"/> to be registered in the dependency injection container.
+    /// </summary>
+    public bool UseSrvRecords { get; set; }
 
     /// <summary>
     /// Gets or sets the interval between active DNS resolutions.

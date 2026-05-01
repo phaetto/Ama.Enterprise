@@ -170,7 +170,8 @@
 | `$/Ama.Enterprise.P2p/Models/Core/PeerId.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerNode.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerStatus.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Models/Discovery/DnsDiscoveryOptions.cs` | Added explicit `TargetPort` parameter, retaining Phase 2 resolution paths backing unmapped DNS record resolutions. |
+| `$/Ama.Enterprise.P2p/Models/Discovery/DnsDiscoveryOptions.cs` | Configuration options for DNS-based peer discovery, extended to support SRV record resolution flags. |
+| `$/Ama.Enterprise.P2p/Models/Discovery/SrvRecordTarget.cs` | Data structure representing a resolved target hostname and port from a DNS SRV query. |
 | `$/Ama.Enterprise.P2p/Models/Discovery/UdpDiscoveryMessage.cs` | Introduced `HandshakePort` property natively mapping dynamically assigned Phase 2 protocol sockets. |
 | `$/Ama.Enterprise.P2p/Models/Discovery/UdpDiscoveryOptions.cs` | Removed the AdvertisedHandshakePort, standardizing decoupled generic mesh boundaries. |
 | `$/Ama.Enterprise.P2p/Models/Discovery/UdpHandshakeOptions.cs` | Removed obsolete `TargetPort` decoupling configurations enabling generic mapped payload allocations dynamically discovering inbound target bounds. |
@@ -202,7 +203,8 @@
 | `$/Ama.Enterprise.P2p/Services/Core/RandomPeerSelector.cs` | Implementation of IPeerSelector utilizing random distribution selection. |
 | `$/Ama.Enterprise.P2p/Services/Core/TimeBasedFailureDetector.cs` | Implementation of IFailureDetector using abstract heartbeats decoupled from specific protocol options. |
 | `$/Ama.Enterprise.P2p/Services/Core/TransportRouter.cs` | Composite transport router that delegates sending messages to the correct specific transport implementation. |
-| `$/Ama.Enterprise.P2p/Services/Discovery/DnsPeerDiscovery.cs` | Refactored mapping isolated IP addresses dynamically evaluating bound target port arguments resolving the Phase 2 interface constraint. |
+| `$/Ama.Enterprise.P2p/Services/Discovery/DnsPeerDiscovery.cs` | Extended DNS peer discovery to dynamically handle optional SRV record resolutions bridging isolated port configurations. |
+| `$/Ama.Enterprise.P2p/Services/Discovery/IDnsSrvResolver.cs` | Interface defining the contract for resolving DNS SRV records, allowing abstraction over third-party DNS packages natively. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpDiscoveryJsonContext.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerDiscovery.cs` | Extracted explicit localized options mapping parameters natively referencing decoupled `IPeerHandshaker` bounds dynamically assigning ports via generic interfaces. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerHandshaker.cs` | Added `LocalHandshakePort` property natively extracting localized internal constraints standardizing interface. |
