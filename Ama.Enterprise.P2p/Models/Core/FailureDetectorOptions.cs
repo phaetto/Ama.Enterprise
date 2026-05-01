@@ -7,7 +7,7 @@ public sealed class FailureDetectorOptions : IEquatable<FailureDetectorOptions>
     /// <summary>
     /// Gets or sets the expected base interval between heartbeats or communications.
     /// </summary>
-    public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(1);
+    public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Gets or sets the multiplier applied to the HeartbeatInterval to determine when a node is considered Suspect.

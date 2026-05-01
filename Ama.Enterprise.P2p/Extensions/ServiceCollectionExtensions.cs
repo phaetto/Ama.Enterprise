@@ -133,16 +133,6 @@ public static class ServiceCollectionExtensions
             builder.Services.Configure(builder.MeshId, configureOptions);
         }
 
-        builder.Services.AddOptions<FailureDetectorOptions>(builder.MeshId)
-            .Configure<IOptionsMonitor<GossipOptions>>((failureOptions, gossipOptionsMonitor) =>
-            {
-                var gossipOptions = gossipOptionsMonitor.Get(builder.MeshId);
-                if (gossipOptions is not null)
-                {
-                    failureOptions.HeartbeatInterval = gossipOptions.GossipInterval;
-                }
-            });
-
         if (!builder.Services.Any(s => s.ServiceType == typeof(IJsonTypeInfoResolver) && s.ServiceKey as string == "Ama.CRDT" && s.ImplementationInstance == P2pJsonSerializerContext.Default))
         {
             builder.Services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", P2pJsonSerializerContext.Default);
@@ -206,16 +196,6 @@ public static class ServiceCollectionExtensions
             builder.Services.Configure(builder.MeshId, configureOptions);
         }
 
-        builder.Services.AddOptions<FailureDetectorOptions>(builder.MeshId)
-            .Configure<IOptionsMonitor<PushPullGossipOptions>>((failureOptions, pushPullOptionsMonitor) =>
-            {
-                var options = pushPullOptionsMonitor.Get(builder.MeshId);
-                if (options is not null)
-                {
-                    failureOptions.HeartbeatInterval = options.GossipInterval;
-                }
-            });
-
         if (!builder.Services.Any(s => s.ServiceType == typeof(IJsonTypeInfoResolver) && s.ServiceKey as string == "Ama.CRDT" && s.ImplementationInstance == P2pJsonSerializerContext.Default))
         {
             builder.Services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", P2pJsonSerializerContext.Default);
@@ -253,6 +233,26 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<ILogger<ApplicationPayloadDispatcher>>()));
         
         builder.Services.TryAddSingleton<IP2pProtocol, PushPullGossipProtocol>();
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Configures the failure detector options explicitly allocating custom limits like HeartbeatInterval decoupled from overarching protocol constraints.
+    /// </summary>
+    public static IP2pMeshBuilder ConfigureFailureDetector(
+        this IP2pMeshBuilder builder, 
+        Action<FailureDetectorOptions> configureOptions)
+    {
+        ArgumentNullException.ThrowIfNull(configureOptions);
+
+        var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
+        if (!tracker.TryRegister(builder.MeshId, configureOptions))
+        {
+            return builder;
+        }
+
+        builder.Services.Configure(builder.MeshId, configureOptions);
 
         return builder;
     }

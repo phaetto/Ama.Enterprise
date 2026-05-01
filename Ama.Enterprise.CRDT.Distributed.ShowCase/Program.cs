@@ -31,6 +31,7 @@ public static class Program
             currentPort = GetNextAvailablePort(8100);
         }
 
+        var currentHandshakePort = GetNextAvailablePort(8037);
         var replicaId = $"node-{currentPort}";
         var services = new ServiceCollection();
 
@@ -93,7 +94,11 @@ public static class Program
             })
             .AddUdpPeerHandshake(options =>
             {
-                options.ListenPort = 8037;
+                options.ListenPort = currentHandshakePort;
+            })
+            .ConfigureFailureDetector(options =>
+            {
+                options.HeartbeatInterval = TimeSpan.FromSeconds(5);
             });
 
         await using var provider = services.BuildServiceProvider();
@@ -111,7 +116,7 @@ public static class Program
 
         try
         {
-            logger.LogInformation("Starting Dynamic Multi-CRDT orchestrated node on port {Port}...", currentPort);
+            logger.LogInformation("Starting Dynamic Multi-CRDT orchestrated node on HTTP port {Port} and UDP Handshake port {HandshakePort}...", currentPort, currentHandshakePort);
 
             foreach (var service in hostedServices)
             {
