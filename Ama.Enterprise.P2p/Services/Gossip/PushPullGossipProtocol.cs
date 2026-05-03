@@ -3,6 +3,7 @@ namespace Ama.Enterprise.P2p.Services.Gossip;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,20 +21,87 @@ using Microsoft.Extensions.Options;
 /// <remarks>
 /// Initializes a new instance of the <see cref="PushPullGossipProtocol"/> class.
 /// </remarks>
-public sealed class PushPullGossipProtocol(
-    IServiceProvider serviceProvider,
-    IEnumerable<P2pMeshMetadata> meshes,
-    IOptionsMonitor<PushPullGossipOptions> pushPullOptionsMonitor,
-    IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
-    ILogger<PushPullGossipProtocol> logger) : IP2pProtocol, IDisposable
+public sealed class PushPullGossipProtocol : IP2pProtocol, IDisposable
 {
-    private readonly IServiceProvider serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-    private readonly IEnumerable<P2pMeshMetadata> meshes = meshes ?? throw new ArgumentNullException(nameof(meshes));
-    private readonly IOptionsMonitor<PushPullGossipOptions> pushPullOptionsMonitor = pushPullOptionsMonitor ?? throw new ArgumentNullException(nameof(pushPullOptionsMonitor));
-    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
-    private readonly ILogger<PushPullGossipProtocol> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IServiceProvider serviceProvider;
+    private readonly IEnumerable<P2pMeshMetadata> meshes;
+    private readonly IOptionsMonitor<PushPullGossipOptions> pushPullOptionsMonitor;
+    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
+    private readonly ILogger<PushPullGossipProtocol> logger;
 
     private readonly ConcurrentDictionary<string, MeshState> activeMeshes = new();
+
+    private readonly Meter meter;
+    private readonly Counter<long> messagesSentCounter;
+    private readonly Counter<long> messagesReceivedCounter;
+    private readonly Counter<long> digestsSentCounter;
+    private readonly Counter<long> pullRequestsSentCounter;
+    private readonly Counter<long> directFulfillmentsCounter;
+    private readonly Histogram<long> payloadBytesHistogram;
+
+    public PushPullGossipProtocol(
+        IServiceProvider serviceProvider,
+        IEnumerable<P2pMeshMetadata> meshes,
+        IOptionsMonitor<PushPullGossipOptions> pushPullOptionsMonitor,
+        IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
+        ILogger<PushPullGossipProtocol> logger)
+    {
+        this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        this.meshes = meshes ?? throw new ArgumentNullException(nameof(meshes));
+        this.pushPullOptionsMonitor = pushPullOptionsMonitor ?? throw new ArgumentNullException(nameof(pushPullOptionsMonitor));
+        this.nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        var meterFactory = serviceProvider.GetService<IMeterFactory>();
+        this.meter = meterFactory?.Create("Ama.Enterprise.P2p.PushPullGossip") 
+            ?? new Meter("Ama.Enterprise.P2p.PushPullGossip");
+
+        this.messagesSentCounter = this.meter.CreateCounter<long>(
+            "p2p.pushpull.messages_sent", 
+            "messages", 
+            "Total messages dispatched through push-pull gossip");
+            
+        this.messagesReceivedCounter = this.meter.CreateCounter<long>(
+            "p2p.pushpull.messages_received", 
+            "messages", 
+            "Total inbound messages received by push-pull gossip");
+            
+        this.digestsSentCounter = this.meter.CreateCounter<long>(
+            "p2p.pushpull.digests_sent", 
+            "digests", 
+            "Total periodic digest structures explicitly dispatched");
+            
+        this.pullRequestsSentCounter = this.meter.CreateCounter<long>(
+            "p2p.pushpull.pull_requests_sent", 
+            "requests", 
+            "Total explicit pull requests targeting missing payloads");
+            
+        this.directFulfillmentsCounter = this.meter.CreateCounter<long>(
+            "p2p.pushpull.direct_fulfillments", 
+            "messages", 
+            "Total missing explicit payloads fulfilled point-to-point");
+            
+        this.payloadBytesHistogram = this.meter.CreateHistogram<long>(
+            "p2p.pushpull.payload_bytes", 
+            "bytes", 
+            "Size of outbound payload in bytes");
+
+        this.meter.CreateObservableGauge(
+            "p2p.pushpull.queue_size", 
+            () => activeMeshes.Select(kvp => new Measurement<int>(
+                kvp.Value.MessageQueue.Count, 
+                new KeyValuePair<string, object?>("mesh_id", kvp.Key))), 
+            "messages", 
+            "Current depth of the outbound network queue");
+
+        this.meter.CreateObservableGauge(
+            "p2p.pushpull.cache_size", 
+            () => activeMeshes.Select(kvp => new Measurement<int>(
+                kvp.Value.MessageCache.Count, 
+                new KeyValuePair<string, object?>("mesh_id", kvp.Key))), 
+            "messages", 
+            "Current count of temporarily cached messages available for fulfillment");
+    }
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
@@ -174,6 +242,10 @@ public sealed class PushPullGossipProtocol(
                 null,
                 payload);
 
+            var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId), new("message_type", "broadcast") };
+            messagesSentCounter.Add(1, tags);
+            payloadBytesHistogram.Record(payload.Length, tags);
+
             logger.LogDebug("[{MeshId}] Wrapping payload and broadcasting newly mapped envelope {MessageId} locally from {NodeId}.", meshId, message.MessageId, nodeOptions.LocalPeerId);
 
             state.SeenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow);
@@ -195,6 +267,7 @@ public sealed class PushPullGossipProtocol(
         }
 
         activeMeshes.Clear();
+        meter.Dispose();
     }
 
     private async Task ProcessInboundQueueAsync(string meshId, MeshState state, CancellationToken cancellationToken)
@@ -321,6 +394,7 @@ public sealed class PushPullGossipProtocol(
         }
 
         var sendTasks = new List<Task>();
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId), new("message_type", "forward") };
 
         foreach (var peer in peers)
         {
@@ -333,6 +407,7 @@ public sealed class PushPullGossipProtocol(
                 {
                     try
                     {
+                        messagesSentCounter.Add(1, tags);
                         await state.TransportRouter.SendAsync(currentPeer.Endpoint, currentMessage, cancellationToken).ConfigureAwait(false);
                     }
                     catch (Exception ex)
@@ -373,6 +448,8 @@ public sealed class PushPullGossipProtocol(
 
         try
         {
+            var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
+            digestsSentCounter.Add(1, tags);
             await state.TransportRouter.SendAsync(targetPeer.Endpoint, digestMessage, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -383,6 +460,9 @@ public sealed class PushPullGossipProtocol(
 
     private async Task HandleIncomingMessageAsync(string meshId, MeshState state, GossipMessage message)
     {
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId), new("message_type", message.MessageType.ToString()) };
+        messagesReceivedCounter.Add(1, tags);
+
         try
         {
             var token = state.LoopCts?.Token ?? default;
@@ -469,6 +549,10 @@ public sealed class PushPullGossipProtocol(
 
             var peer = peerMatches[0];
             logger.LogDebug("[{MeshId}] Requesting {Count} missing payloads via PullRequest from {PeerId}.", meshId, missingIds.Count, message.SenderId.Value);
+            
+            var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
+            pullRequestsSentCounter.Add(1, tags);
+
             await state.TransportRouter.SendAsync(peer.Endpoint, pullRequest, CancellationToken.None).ConfigureAwait(false);
         }
     }
@@ -487,6 +571,7 @@ public sealed class PushPullGossipProtocol(
         }
 
         var peer = peerMatches[0];
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
 
         foreach (var requestedId in message.DigestIds)
         {
@@ -497,6 +582,8 @@ public sealed class PushPullGossipProtocol(
                     logger.LogDebug("[{MeshId}] Fulfilling PullRequest by sending payload {MessageId} directly to {PeerId}.", meshId, cachedMessage.MessageId, message.SenderId.Value);
                     
                     var directMessage = cachedMessage with { TimeToLive = 1 };
+                    directFulfillmentsCounter.Add(1, tags);
+                    
                     await state.TransportRouter.SendAsync(peer.Endpoint, directMessage, CancellationToken.None).ConfigureAwait(false);
                 }
                 catch (Exception ex)

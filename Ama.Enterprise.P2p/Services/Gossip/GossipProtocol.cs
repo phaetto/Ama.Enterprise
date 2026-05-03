@@ -3,6 +3,7 @@ namespace Ama.Enterprise.P2p.Services.Gossip;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -19,20 +20,61 @@ using Microsoft.Extensions.Options;
 /// <remarks>
 /// Initializes a new instance of the <see cref="GossipProtocol"/> class.
 /// </remarks>
-public sealed class GossipProtocol(
-    IServiceProvider serviceProvider,
-    IEnumerable<P2pMeshMetadata> meshes,
-    IOptionsMonitor<GossipOptions> gossipOptionsMonitor,
-    IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
-    ILogger<GossipProtocol> logger) : IP2pProtocol, IDisposable
+public sealed class GossipProtocol : IP2pProtocol, IDisposable
 {
-    private readonly IServiceProvider serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-    private readonly IEnumerable<P2pMeshMetadata> meshes = meshes ?? throw new ArgumentNullException(nameof(meshes));
-    private readonly IOptionsMonitor<GossipOptions> gossipOptionsMonitor = gossipOptionsMonitor ?? throw new ArgumentNullException(nameof(gossipOptionsMonitor));
-    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
-    private readonly ILogger<GossipProtocol> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IServiceProvider serviceProvider;
+    private readonly IEnumerable<P2pMeshMetadata> meshes;
+    private readonly IOptionsMonitor<GossipOptions> gossipOptionsMonitor;
+    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
+    private readonly ILogger<GossipProtocol> logger;
 
     private readonly ConcurrentDictionary<string, MeshState> activeMeshes = new();
+
+    private readonly Meter meter;
+    private readonly Counter<long> messagesSentCounter;
+    private readonly Counter<long> messagesReceivedCounter;
+    private readonly Histogram<long> payloadBytesHistogram;
+
+    public GossipProtocol(
+        IServiceProvider serviceProvider,
+        IEnumerable<P2pMeshMetadata> meshes,
+        IOptionsMonitor<GossipOptions> gossipOptionsMonitor,
+        IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
+        ILogger<GossipProtocol> logger)
+    {
+        this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        this.meshes = meshes ?? throw new ArgumentNullException(nameof(meshes));
+        this.gossipOptionsMonitor = gossipOptionsMonitor ?? throw new ArgumentNullException(nameof(gossipOptionsMonitor));
+        this.nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        var meterFactory = serviceProvider.GetService<IMeterFactory>();
+        this.meter = meterFactory?.Create("Ama.Enterprise.P2p.Gossip") 
+            ?? new Meter("Ama.Enterprise.P2p.Gossip");
+
+        this.messagesSentCounter = this.meter.CreateCounter<long>(
+            "p2p.gossip.messages_sent", 
+            "messages", 
+            "Total messages dispatched through gossip");
+            
+        this.messagesReceivedCounter = this.meter.CreateCounter<long>(
+            "p2p.gossip.messages_received", 
+            "messages", 
+            "Total inbound messages received by gossip");
+            
+        this.payloadBytesHistogram = this.meter.CreateHistogram<long>(
+            "p2p.gossip.payload_bytes", 
+            "bytes", 
+            "Size of outbound payload in bytes");
+
+        this.meter.CreateObservableGauge(
+            "p2p.gossip.queue_size", 
+            () => activeMeshes.Select(kvp => new Measurement<int>(
+                kvp.Value.MessageQueue.Count, 
+                new KeyValuePair<string, object?>("mesh_id", kvp.Key))), 
+            "messages", 
+            "Current depth of the outbound network queue");
+    }
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
@@ -161,6 +203,10 @@ public sealed class GossipProtocol(
                 gossipOptions.DefaultTimeToLive,
                 payload);
 
+            var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId), new("message_type", "broadcast") };
+            messagesSentCounter.Add(1, tags);
+            payloadBytesHistogram.Record(payload.Length, tags);
+
             logger.LogDebug("[{MeshId}] Wrapping payload and broadcasting newly mapped envelope {MessageId} locally from {NodeId}.", meshId, message.MessageId, nodeOptions.LocalPeerId);
 
             state.SeenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow);
@@ -181,6 +227,7 @@ public sealed class GossipProtocol(
         }
 
         activeMeshes.Clear();
+        meter.Dispose();
     }
 
     private async Task ProcessInboundQueueAsync(string meshId, MeshState state, CancellationToken cancellationToken)
@@ -279,6 +326,7 @@ public sealed class GossipProtocol(
         }
 
         var sendTasks = new List<Task>();
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId), new("message_type", "forward") };
 
         foreach (var peer in peers)
         {
@@ -291,6 +339,7 @@ public sealed class GossipProtocol(
                 {
                     try
                     {
+                        messagesSentCounter.Add(1, tags);
                         await state.TransportRouter.SendAsync(currentPeer.Endpoint, currentMessage, cancellationToken).ConfigureAwait(false);
                     }
                     catch (Exception ex)
@@ -306,6 +355,9 @@ public sealed class GossipProtocol(
 
     private async Task HandleIncomingMessageAsync(string meshId, MeshState state, GossipMessage message)
     {
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
+        messagesReceivedCounter.Add(1, tags);
+
         try
         {
             var token = state.LoopCts?.Token ?? default;

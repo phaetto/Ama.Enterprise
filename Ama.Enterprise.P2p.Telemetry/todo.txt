@@ -1,3 +1,0 @@
-- Add metric providers and readers
-- Use CRDTs to post changes to the metrics over the network
-- This will work only on 'ama-enterprise-admin' mesh, not internal
