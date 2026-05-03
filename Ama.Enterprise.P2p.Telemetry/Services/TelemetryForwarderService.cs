@@ -9,7 +9,6 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
-using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.Telemetry.Models;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -25,7 +24,7 @@ public sealed class TelemetryForwarderService : BackgroundService
     
     private readonly IOptionsMonitor<TelemetryOptions> optionsMonitor;
     private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
-    private readonly IEnumerable<IP2pProtocol> p2pProtocols;
+    private readonly TelemetryPushProtocol telemetryProtocol;
     private readonly ILogger<TelemetryForwarderService> logger;
 
     /// <summary>
@@ -34,12 +33,12 @@ public sealed class TelemetryForwarderService : BackgroundService
     public TelemetryForwarderService(
         IOptionsMonitor<TelemetryOptions> optionsMonitor,
         IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
-        IEnumerable<IP2pProtocol> p2pProtocols,
+        TelemetryPushProtocol telemetryProtocol,
         ILogger<TelemetryForwarderService> logger)
     {
         this.optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         this.nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
-        this.p2pProtocols = p2pProtocols ?? throw new ArgumentNullException(nameof(p2pProtocols));
+        this.telemetryProtocol = telemetryProtocol ?? throw new ArgumentNullException(nameof(telemetryProtocol));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         meterListener.InstrumentPublished = (instrument, listener) =>
@@ -194,15 +193,9 @@ public sealed class TelemetryForwarderService : BackgroundService
 
         var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payload, TelemetryJsonContext.Default.TelemetryPayloadDto);
 
-        var dispatchTasks = new List<Task>();
-        foreach (var protocol in p2pProtocols)
-        {
-            dispatchTasks.Add(protocol.BroadcastAsync(payloadBytes, cancellationToken));
-        }
+        logger.LogDebug("Evaluating {Count} telemetry snapshot boundaries broadcasting isolated metrics natively.", snapshots.Count);
 
-        logger.LogDebug("Evaluating {Count} telemetry snapshot boundaries broadcasting securely isolated metrics natively.", snapshots.Count);
-
-        await Task.WhenAll(dispatchTasks).ConfigureAwait(false);
+        await telemetryProtocol.BroadcastAsync(payloadBytes, cancellationToken).ConfigureAwait(false);
     }
 
     private sealed class MetricState
