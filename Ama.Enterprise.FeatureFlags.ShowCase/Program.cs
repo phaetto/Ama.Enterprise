@@ -3,6 +3,7 @@ namespace Ama.Enterprise.FeatureFlags.ShowCase;
 using Ama.Enterprise.FeatureFlags.Extensions;
 using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Services;
+using Ama.Enterprise.P2p.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -20,6 +21,7 @@ public static class Program
 {
     private static readonly object ConsoleLock = new();
     private static int currentPort;
+    private static int currentHandshakePort;
 
     public static async Task Main(string[] args)
     {
@@ -28,6 +30,8 @@ public static class Program
         {
             currentPort = 8080 + Random.Shared.Next(0, 1000);
         }
+
+        currentHandshakePort = 8080 + Random.Shared.Next(0, 1000);
 
         var replicaId = $"node-{currentPort}";
         var services = new ServiceCollection();
@@ -45,21 +49,40 @@ public static class Program
             builder.AddProvider(new LockedConsoleLoggerProvider());
         });
 
-        // 1. Add Plug-and-Play Feature Flags Product with internal P2P setup naturally encapsulated
+        // 1. Add Plug-and-Play Feature Flags Product domain abstractions
         services.AddFeatureFlags(options =>
         {
             options.Crdt.ReplicaId = replicaId;
             options.Crdt.ActiveSyncEnabled = true;
             options.Crdt.CheckpointIntervalSeconds = 120;
-            options.Http.ListenPort = currentPort;
-            options.Http.ListenHost = "localhost";
-            options.UdpDiscovery.MulticastAddress = "239.255.0.1";
-            options.UdpDiscovery.MulticastPort = 8035;
-            options.UdpDiscovery.DiscoveryInterval = TimeSpan.FromSeconds(1);
-            options.UdpDiscovery.DiscoveryTimeout = TimeSpan.FromSeconds(10);
-            options.Gossip.GossipInterval = TimeSpan.FromMilliseconds(1500);
-            options.Gossip.DefaultTimeToLive = 3;
+            options.Crdt.AntiEntropyIntervalSeconds = (int)TimeSpan.FromHours(1).TotalSeconds;
+            options.Crdt.AntiEntropyInitialDelaySeconds = 1;
         });
+
+        // 2. Wire up the generic P2P mesh network specifically configured for this feature's underlying topology
+        services.AddP2pMesh("feature-flags-internal-mesh")
+                .AddGossipNetwork(options =>
+                {
+                    options.GossipInterval = TimeSpan.FromMilliseconds(1500);
+                    options.Fanout = 3;
+                    options.DefaultTimeToLive = 3;
+                })
+                .AddHttpTransport(options =>
+                {
+                    options.ListenPort = currentPort;
+                    options.ListenHost = "localhost";
+                })
+                .AddUdpPeerDiscovery(options =>
+                {
+                    options.MulticastAddress = "239.255.0.1";
+                    options.MulticastPort = 8035;
+                    options.DiscoveryInterval = TimeSpan.FromSeconds(1);
+                    options.DiscoveryTimeout = TimeSpan.FromSeconds(10);
+                })
+                .AddUdpPeerHandshake(options =>
+                {
+                    options.ListenPort = currentHandshakePort;
+                });
 
         await using var provider = services.BuildServiceProvider();
         var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("ShowCase");
@@ -249,7 +272,7 @@ public static class Program
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
-        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Debug;
+        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Information;
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {

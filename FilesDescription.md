@@ -76,12 +76,12 @@
 | `$/Ama.Enterprise.CRDT.Testing/todo.txt` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Ama.Enterprise.FeatureFlags.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj` | Showcase console application project displaying P2P feature flags integration, AOT readiness, and UDP cluster discovery. |
-| `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Updated showcase application reflecting the refactored categorical options assignments. |
+| `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Application entry point decoupled to explicitly map and inject required generic P2P structures directly bypassing monolithic dependency wrappers natively. |
 | `$/Ama.Enterprise.FeatureFlags.UnitTests/Ama.Enterprise.FeatureFlags.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj` | No description provided. |
-| `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | Modified dependency mappings redirecting nested option properties directly to the underlying P2P dependencies. Updated to use configurable mesh IDs and registered the new Admin WebRTC interface. |
+| `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | Removed hardcoded transport mechanisms from the service configuration, cleanly decoupling the domain CRDT models from P2P infrastructural setup implementations. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlag.cs` | Data structure representing a single feature flag. |
-| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagOptions.cs` | Configuration structure broken into typed categories encompassing all underlying network and CRDT discovery options to prevent field duplication. Updated to include configurable Internal and Admin WebRTC mesh IDs. |
+| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagOptions.cs` | Configuration structure for feature flags. Removed hardcoded network abstractions, delegating topology management dynamically to the host. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagState.cs` | Inherits `IDistributedCrdtState` and maps generic constraints bridging properties. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsCrdtAotContext.cs` | AOT context for the feature flags models. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsJsonContext.cs` | JSON context for the feature flags models. |

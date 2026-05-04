@@ -6,8 +6,6 @@ using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Services;
-using Ama.Enterprise.P2p.Extensions;
-using Ama.Enterprise.P2p.WebRTC.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
@@ -16,8 +14,8 @@ using Microsoft.Extensions.DependencyInjection;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Adds the complete, plug-and-play feature flags system to the service collection,
-    /// abstracting away all internal P2P cluster mesh configurations natively.
+    /// Adds the complete, plug-and-play feature flags system to the service collection.
+    /// P2P network transports and configurations must be registered by the application independently.
     /// </summary>
     public static IServiceCollection AddFeatureFlags(this IServiceCollection services, Action<FeatureFlagOptions>? configure = null)
     {
@@ -63,55 +61,6 @@ public static class ServiceCollectionExtensions
 
         // Delegate routing orchestrations and background services completely to the distributed core
         services.AddDistributedCrdtP2p(ffOpts.InternalMeshId);
-
-        // Wire up the abstracted P2P network layer specifically for Feature Flags completely encapsulating internals seamlessly
-        if (!string.IsNullOrWhiteSpace(ffOpts.InternalMeshId))
-        {
-            // TODO: Have different options somehow for diffrent discovery and handshake
-            services.AddP2pMesh(ffOpts.InternalMeshId)
-                    .AddGossipNetwork(options =>
-                    {
-                        options.GossipInterval = ffOpts.Gossip.GossipInterval;
-                        options.Fanout = ffOpts.Gossip.Fanout;
-                        options.DefaultTimeToLive = ffOpts.Gossip.DefaultTimeToLive;
-                    })
-                    .AddHttpTransport(options =>
-                    {
-                        options.ListenPort = ffOpts.Http.ListenPort;
-                        options.ListenHost = ffOpts.Http.ListenHost;
-                        options.PathPrefix = ffOpts.Http.PathPrefix;
-                    })
-                    .AddUdpPeerDiscovery(options =>
-                    {
-                        options.MulticastAddress = ffOpts.UdpDiscovery.MulticastAddress;
-                        options.MulticastPort = ffOpts.UdpDiscovery.MulticastPort;
-                        options.DiscoveryInterval = ffOpts.UdpDiscovery.DiscoveryInterval;
-                        options.DiscoveryTimeout = ffOpts.UdpDiscovery.DiscoveryTimeout;
-                    })
-                    // TODO: Add peer handshake
-                    .AddWebRtcTransport(options => 
-                    {
-                        options.IceServers = ffOpts.WebRtc.IceServers;
-                        options.IceGatheringTimeout = ffOpts.WebRtc.IceGatheringTimeout;
-                    });
-        }
-
-        // Add the mesh that sends data to the admin panel, usually using WebRTC
-        if (!string.IsNullOrWhiteSpace(ffOpts.AdminMeshId))
-        {
-            services.AddP2pMesh(ffOpts.AdminMeshId)
-                    .AddGossipNetwork(options =>
-                    {
-                        options.GossipInterval = ffOpts.Gossip.GossipInterval;
-                        options.Fanout = ffOpts.Gossip.Fanout;
-                        options.DefaultTimeToLive = ffOpts.Gossip.DefaultTimeToLive;
-                    })
-                    .AddWebRtcTransport(options =>
-                    {
-                        options.IceServers = ffOpts.AdminWebRtc.IceServers;
-                        options.IceGatheringTimeout = ffOpts.AdminWebRtc.IceGatheringTimeout;
-                    });
-        }
 
         return services;
     }
