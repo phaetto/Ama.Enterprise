@@ -54,6 +54,11 @@ public static class ServiceCollectionExtensions
             services.AddHostedService<P2pHostedService>();
         }
 
+        if (!services.Any(s => s.ImplementationType == typeof(DirectMessageSender)))
+        {
+            services.TryAddSingleton<IDirectMessageSender, DirectMessageSender>();
+        }
+
         services.AddSingleton(new P2pMeshMetadata(meshId));
 
         return new P2pMeshBuilder(services, meshId);

@@ -38,7 +38,7 @@ public sealed class CrdtAntiEntropyService(
             try
             {
                 var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-                await orchestrator.BroadcastGlobalStateAsync(stoppingToken).ConfigureAwait(false);
+                await orchestrator.DispatchAntiEntropyStateAsync(stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -46,7 +46,7 @@ public sealed class CrdtAntiEntropyService(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "An error occurred during CRDT distributed anti-entropy global state broadcast.");
+                logger.LogError(ex, "An error occurred during CRDT targeted anti-entropy state dispatch.");
             }
 
             try

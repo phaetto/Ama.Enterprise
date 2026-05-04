@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
 using Ama.Enterprise.CRDT.Distributed.Models;
+using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
 /// Defines the generic, non-typed interface for a distributed CRDT document manager.
@@ -36,9 +37,9 @@ public interface IDistributedCrdtDocument
     Task ApplyOperationsAsync(IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Serializes the current local state and broadcasts it as a snapshot to the network after detecting an unrecoverable journal truncation gap.
+    /// Serializes the current local state and dispatches it directly as a targeted snapshot following an unrecoverable journal truncation gap.
     /// </summary>
-    Task ProvideSnapshotAsync(string targetReplicaId, CancellationToken cancellationToken = default);
+    Task ProvideSnapshotAsync(string targetReplicaId, PeerId targetPeerId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Applies a completely materialized snapshot payload superseding local structure dependencies alongside explicitly targeted overarching global bounds.

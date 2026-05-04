@@ -65,6 +65,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         services.AddDistributedCrdtP2p(TestMeshId);
 
         services.AddSingleton(Mock.Of<IP2pProtocol>());
+        services.AddSingleton(Mock.Of<IDirectMessageSender>());
 
         configureExtra?.Invoke(services);
 
@@ -75,14 +76,14 @@ public sealed class AntiEntropyStateSyncIntegrationTests
     public async Task ProcessStateSyncAsync_ShouldRetrieveMissingOpsOnce_AndBroadcastPerDocument_Correctly()
     {
         // Arrange
-        var mockP2p = new Mock<IP2pProtocol>();
-        var capturedBroadcasts = new List<ReadOnlyMemory<byte>>();
-        mockP2p.Setup(p => p.BroadcastAsync(Capture.In(capturedBroadcasts), It.IsAny<CancellationToken>()))
+        var mockSender = new Mock<IDirectMessageSender>();
+        var capturedDirectSends = new List<ReadOnlyMemory<byte>>();
+        mockSender.Setup(p => p.SendDirectAsync(It.IsAny<PeerId>(), Capture.In(capturedDirectSends), It.IsAny<CancellationToken>()))
                .Returns(Task.CompletedTask);
 
         var sp = BuildNode("Replica1", services =>
         {
-            services.Replace(ServiceDescriptor.Singleton(mockP2p.Object));
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
         });
 
         var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
@@ -120,10 +121,10 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         await handler.HandlePayloadAsync(TestMeshId, new PeerId(Guid.NewGuid()), wrapperBytes, CancellationToken.None);
 
         // Assert
-        capturedBroadcasts.ShouldNotBeEmpty();
+        capturedDirectSends.ShouldNotBeEmpty();
 
         var broadcastedDocIds = new HashSet<string>();
-        foreach (var payload in capturedBroadcasts)
+        foreach (var payload in capturedDirectSends)
         {
             var msgWrapper = serializer.DeserializeFromBytes<CrdtMessageWrapper>(payload.ToArray());
             msgWrapper.MessageType.ShouldBe("CrdtOps");

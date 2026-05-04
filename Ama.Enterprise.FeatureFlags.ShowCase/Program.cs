@@ -56,7 +56,7 @@ public static class Program
             options.Crdt.ActiveSyncEnabled = true;
             options.Crdt.CheckpointIntervalSeconds = 120;
             options.Crdt.AntiEntropyIntervalSeconds = (int)TimeSpan.FromHours(1).TotalSeconds;
-            options.Crdt.AntiEntropyInitialDelaySeconds = 1;
+            options.Crdt.AntiEntropyInitialDelaySeconds = 10;
         });
 
         // 2. Wire up the generic P2P mesh network specifically configured for this feature's underlying topology

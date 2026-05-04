@@ -69,6 +69,7 @@ public sealed class BackgroundAndStorageIntegrationTests
         services.AddDistributedCrdtP2p(TestMeshId);
 
         services.AddSingleton(Mock.Of<IP2pProtocol>());
+        services.AddSingleton(Mock.Of<IDirectMessageSender>());
 
         configureExtra?.Invoke(services);
 
@@ -118,10 +119,10 @@ public sealed class BackgroundAndStorageIntegrationTests
     public async Task CrdtTopologyObserver_ShouldBroadcastOnFirstPeer_Correctly()
     {
         // Arrange
-        var mockP2p = new Mock<IP2pProtocol>();
+        var mockSender = new Mock<IDirectMessageSender>();
         var sp = BuildNode("Replica1", services =>
         {
-            services.Replace(ServiceDescriptor.Singleton(mockP2p.Object));
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
         });
 
         var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
@@ -137,13 +138,13 @@ public sealed class BackgroundAndStorageIntegrationTests
         await observer.OnPeerJoinedAsync(TestMeshId, peerNode, CancellationToken.None);
         
         // Assert - The observer should explicitly smoothly dynamically trigger document state sync broadcast seamlessly (1 documents: Registry and our test doc)
-        mockP2p.Verify(p => p.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
+        mockSender.Verify(p => p.SendToRandomPeerAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
         
         // Act - Trigger again explicitly testing the thread-safe connection check structurally
         await observer.OnPeerJoinedAsync(TestMeshId, new PeerNode(new PeerId(Guid.NewGuid()), new HttpPeerEndpoint("http://localhost2", 5001)), CancellationToken.None);
         
         // Assert - Only triggered on the FIRST connected peer perfectly seamlessly safely natively correctly explicitly properly
-        mockP2p.Verify(p => p.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
+        mockSender.Verify(p => p.SendToRandomPeerAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
     }
 
     [IntegrationFact]
@@ -200,8 +201,15 @@ public sealed class BackgroundAndStorageIntegrationTests
         var serializer = sp.GetRequiredService<ICrdtSerializer>();
         
         // Prepare a complete fully bound fallback snapshot explicitly cleanly logically
+        var context = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
         var globalDvv = new DottedVersionVector();
         globalDvv.Versions["RemoteA"] = 10;
+        
+        // Ensure local operations are encompassed so concurrency rejection is evaded safely.
+        lock (context.GlobalVersionVector)
+        {
+            globalDvv.Merge(context.GlobalVersionVector);
+        }
         
         var docManager = orchestrator.GetDocument<StorageTestState>("storage-doc")!;
         var metadataManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtMetadataManager>();
@@ -223,7 +231,6 @@ public sealed class BackgroundAndStorageIntegrationTests
         // Assert
         docManager.Document.Data.Field.ShouldBe("SnapshotData");
         
-        var context = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
         context.GlobalVersionVector.Versions["RemoteA"].ShouldBe(10);
     }
 

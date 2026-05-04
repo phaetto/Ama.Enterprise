@@ -101,7 +101,7 @@ public sealed class CrdtP2pPayloadHandler(
             }
 
             var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
-            var p2pProtocol = scopeProvider.Scope.ServiceProvider.GetRequiredService<IP2pProtocol>();
+            var directSender = scopeProvider.Scope.ServiceProvider.GetRequiredService<IDirectMessageSender>();
             var syncService = scopeProvider.Scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
             var journalManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IJournalManager>();
 
@@ -133,10 +133,10 @@ public sealed class CrdtP2pPayloadHandler(
 
             if (syncResult.SnapshotRequired)
             {
-                logger.LogWarning("Journal bounds trimmed. Cannot map operations for replica {ReplicaId}. Triggering full snapshots for active documents.", syncMsg.ReplicaId);
+                logger.LogWarning("Journal bounds trimmed. Cannot map operations for replica {ReplicaId}. Dispatching full snapshots directly.", syncMsg.ReplicaId);
                 foreach (var targetDoc in documents)
                 {
-                    await targetDoc.ProvideSnapshotAsync(syncMsg.ReplicaId, cancellationToken).ConfigureAwait(false);
+                    await targetDoc.ProvideSnapshotAsync(syncMsg.ReplicaId, senderId, cancellationToken).ConfigureAwait(false);
                 }
             }
             else if (syncResult.Operations.Count > 0)
@@ -149,7 +149,7 @@ public sealed class CrdtP2pPayloadHandler(
                 {
                     if (opsByDoc.TryGetValue(targetDoc.DocumentId, out var docOps) && docOps.Length > 0)
                     {
-                        logger.LogDebug("Sending {Count} missing operations for document {DocumentId} to replica {ReplicaId}", docOps.Length, targetDoc.DocumentId, syncMsg.ReplicaId);
+                        logger.LogDebug("Targeting direct delivery of {Count} missing operations for document {DocumentId} to peer {PeerId}", docOps.Length, targetDoc.DocumentId, senderId.Value);
                         
                         var opsMsg = new CrdtOperationsMessage(replicaContext.ReplicaId, docOps);
                         var opsPayload = serializer.SerializeToBytes(opsMsg);
@@ -157,7 +157,7 @@ public sealed class CrdtP2pPayloadHandler(
                         var replyWrapper = new CrdtMessageWrapper(targetDoc.DocumentId, "CrdtOps", opsPayload);
                         var replyBytes = serializer.SerializeToBytes(replyWrapper);
 
-                        await p2pProtocol.BroadcastAsync(replyBytes, cancellationToken).ConfigureAwait(false);
+                        await directSender.SendDirectAsync(senderId, replyBytes, cancellationToken).ConfigureAwait(false);
                     }
                 }
             }
@@ -214,7 +214,24 @@ public sealed class CrdtP2pPayloadHandler(
                 return;
             }
 
-            logger.LogInformation("Receiving full state network snapshot for document {DocumentId}.", targetDoc.DocumentId);
+            var syncService = scopeProvider.Scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
+            
+            DottedVersionVector safeLocalState;
+            lock (replicaContext.GlobalVersionVector)
+            {
+                safeLocalState = replicaContext.GlobalVersionVector.DeepClone();
+            }
+
+            // DVV Concurrency Check: Verify if our local state contains offline dimensions completely absent from the incoming snapshot.
+            var ourEditsNotIncluded = syncService.CalculateRequirement(resMsg.ReplicaId, resMsg.GlobalState, replicaContext.ReplicaId, safeLocalState);
+
+            if (ourEditsNotIncluded.IsBehind)
+            {
+                logger.LogWarning("Rejecting incoming snapshot for document {DocumentId}. Local state possesses concurrent offline modifications. Applying the snapshot would cause irreversible data amnesia.", targetDoc.DocumentId);
+                return;
+            }
+
+            logger.LogInformation("Receiving mathematically safe full state network snapshot for document {DocumentId}.", targetDoc.DocumentId);
             
             clusterTracker.UpdatePeerState(resMsg.ReplicaId, senderId.Value.ToString(), resMsg.GlobalState);
             

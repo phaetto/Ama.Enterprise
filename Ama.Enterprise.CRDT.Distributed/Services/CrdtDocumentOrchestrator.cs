@@ -156,12 +156,12 @@ public sealed class CrdtDocumentOrchestrator(
         }
     }
 
-    public async Task BroadcastGlobalStateAsync(CancellationToken cancellationToken = default)
+    public async Task DispatchAntiEntropyStateAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
-            var p2pProtocol = serviceProvider.GetRequiredService<IP2pProtocol>();
+            var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
             var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
 
             DottedVersionVector globalState;
@@ -176,13 +176,13 @@ public sealed class CrdtDocumentOrchestrator(
             var wrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", payload);
             var finalBytes = serializer.SerializeToBytes(wrapper);
 
-            await p2pProtocol.BroadcastAsync(finalBytes, cancellationToken).ConfigureAwait(false);
+            await directSender.SendToRandomPeerAsync(finalBytes, cancellationToken).ConfigureAwait(false);
             
-            logger.LogTrace("Broadcasted global DVV cluster state sync.");
+            logger.LogTrace("Dispatched targeted global DVV cluster state sync.");
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to broadcast global cluster state.");
+            logger.LogError(ex, "Failed to dispatch point-to-point cluster state sync.");
         }
     }
 

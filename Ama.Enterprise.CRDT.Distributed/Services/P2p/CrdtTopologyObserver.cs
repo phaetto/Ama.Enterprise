@@ -34,7 +34,7 @@ public sealed class CrdtTopologyObserver(
             try
             {
                 var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-                await orchestrator.BroadcastGlobalStateAsync(cancellationToken).ConfigureAwait(false);
+                await orchestrator.DispatchAntiEntropyStateAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

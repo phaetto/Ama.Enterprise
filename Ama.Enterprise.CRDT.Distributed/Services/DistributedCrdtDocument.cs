@@ -11,6 +11,7 @@ using Ama.CRDT.Services.Journaling;
 using Ama.CRDT.Services.Serialization;
 using Ama.CRDT.Services.Versioning;
 using Ama.Enterprise.CRDT.Distributed.Models;
+using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -210,7 +211,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     }
 
     /// <inheritdoc />
-    public async Task ProvideSnapshotAsync(string targetReplicaId, CancellationToken cancellationToken = default)
+    public async Task ProvideSnapshotAsync(string targetReplicaId, PeerId targetPeerId, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -240,14 +241,14 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             var wrapper = new CrdtMessageWrapper(DocumentId, "CrdtSnapshot", payload);
             var finalBytes = serializer.SerializeToBytes(wrapper);
 
-            var p2pProtocol = serviceProvider.GetRequiredService<IP2pProtocol>();
-            await p2pProtocol.BroadcastAsync(finalBytes, cancellationToken).ConfigureAwait(false); 
+            var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
+            await directSender.SendDirectAsync(targetPeerId, finalBytes, cancellationToken).ConfigureAwait(false); 
             
-            logger.LogInformation("Broadcasted complete document snapshot fallback payload for document {DocumentId}.", DocumentId);
+            logger.LogInformation("Dispatched targeted complete document snapshot fallback payload for document {DocumentId} to peer {PeerId}.", DocumentId, targetPeerId.Value);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to broadcast snapshot payload for document {DocumentId}.", DocumentId);
+            logger.LogError(ex, "Failed to dispatch snapshot fallback payload for document {DocumentId}.", DocumentId);
         }
     }
 
@@ -263,8 +264,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                // We discard any conflicting offline local operations because a snapshot represents
-                // a cluster-mandated absolute truth preventing causal resurrection amnesia anomalies.
                 lock (syncRoot)
                 {
                     Document = snapshotDoc;

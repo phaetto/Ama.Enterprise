@@ -52,7 +52,7 @@ public interface ICrdtDocumentOrchestrator
     Task SyncDocumentsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Manually broadcasts the entire global synchronization state vector (DVV) to the cluster natively.
+    /// Dispatches a targeted point-to-point synchronization request to evaluate causal differences avoiding broadcast storms natively.
     /// </summary>
-    Task BroadcastGlobalStateAsync(CancellationToken cancellationToken = default);
+    Task DispatchAntiEntropyStateAsync(CancellationToken cancellationToken = default);
 }

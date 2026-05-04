@@ -63,6 +63,7 @@ public sealed class MainServicesHappyPathIntegrationTests
         
         // Mock P2P Outbound
         services.AddSingleton(Mock.Of<IP2pProtocol>());
+        services.AddSingleton(Mock.Of<IDirectMessageSender>());
 
         configureExtra?.Invoke(services);
 
@@ -128,10 +129,10 @@ public sealed class MainServicesHappyPathIntegrationTests
     public async Task DistributedCrdtDocument_InitializeAndSnapshot_HappyPath()
     {
         // Arrange
-        var mockP2p = new Mock<IP2pProtocol>();
+        var mockSender = new Mock<IDirectMessageSender>();
         var sp = BuildNode("Replica1", services =>
         {
-            services.Replace(ServiceDescriptor.Singleton(mockP2p.Object));
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
         });
 
         var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
@@ -149,10 +150,10 @@ public sealed class MainServicesHappyPathIntegrationTests
         docManager.Document.Data.StateValue.ShouldBe("initial");
 
         // Act - Ask for snapshot
-        await docManager.ProvideSnapshotAsync("RemoteReplica2", CancellationToken.None);
+        await docManager.ProvideSnapshotAsync("RemoteReplica2", new PeerId(Guid.NewGuid()), CancellationToken.None);
 
-        // Assert - Ensure the component actively broadcasted the payload over P2P
-        mockP2p.Verify(p => p.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once);
+        // Assert - Ensure the component actively sent the payload over direct sender
+        mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
     }
 
     [IntegrationFact]
@@ -190,10 +191,10 @@ public sealed class MainServicesHappyPathIntegrationTests
     public async Task CrdtGossipHandler_ProcessesStateSync_HappyPath()
     {
         // Arrange
-        var mockP2p = new Mock<IP2pProtocol>();
+        var mockSender = new Mock<IDirectMessageSender>();
         var sp = BuildNode("Replica1", services =>
         {
-            services.Replace(ServiceDescriptor.Singleton(mockP2p.Object));
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
         });
 
         var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
@@ -207,6 +208,8 @@ public sealed class MainServicesHappyPathIntegrationTests
 
         var remoteDvv = new DottedVersionVector();
         remoteDvv.Versions["RemoteReplica2"] = 15;
+        // We pretend the remote already has our local operations mapped to prevent any missing operations sync payload back
+        remoteDvv.Versions["Replica1"] = 10;
 
         var syncMsg = new CrdtStateSyncMessage("RemoteReplica2", remoteDvv);
         var syncPayload = serializer.SerializeToBytes(syncMsg);
@@ -225,7 +228,7 @@ public sealed class MainServicesHappyPathIntegrationTests
         states.Count.ShouldBe(1);
         states[0].Versions["RemoteReplica2"].ShouldBe(15);
         
-        // Since we didn't have operations locally mapped, it shouldn't have broadcasted any return operations
-        mockP2p.Verify(p => p.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
+        // Since we explicitly configured the remote to already possess our changes, it shouldn't have sent any return operations
+        mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never());
     }
 }

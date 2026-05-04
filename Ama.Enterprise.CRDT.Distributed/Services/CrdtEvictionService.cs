@@ -103,7 +103,7 @@ public sealed class CrdtEvictionService(
             await doc.ResetLocalStateAsync(currentId, cancellationToken).ConfigureAwait(false);
         }
         
-        await orchestrator.BroadcastGlobalStateAsync(cancellationToken).ConfigureAwait(false);
+        await orchestrator.DispatchAntiEntropyStateAsync(cancellationToken).ConfigureAwait(false);
         
         logger.LogInformation("Successfully completed re-bootstrap identity mechanisms.");
     }
