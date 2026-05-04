@@ -88,6 +88,19 @@
 | `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagBootstrapper.cs` | Eager initialization hosted service that hooks into the orchestrator creating the global state, preventing amnesia races. |
 | `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagClusterManager.cs` | Refactored internal DI boundaries utilizing mapped orchestrators ensuring generic dynamic models are cached, decoupling interface requirements. |
 | `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagClusterManager.cs` | Interface for the feature flag cluster manager. |
+| `$/Ama.Enterprise.P2p.AspNetCore/Ama.Enterprise.P2p.AspNetCore.csproj` | Provides an inverted ASP.NET Core package natively routing localized endpoint HTTP payloads down into explicit mesh implementations cleanly securely avoiding duplicated ports. |
+| `$/Ama.Enterprise.P2p.AspNetCore/Extensions/EndpointRouteBuilderExtensions.cs` | Supplies `MapP2pMeshEndpoints` extending minimal APIs resolving inbound payloads passing contexts transparently safely into core pipelines. |
+| `$/Ama.Enterprise.P2p.AspNetCore/Extensions/ServiceCollectionExtensions.cs` | Isolated configuration hooking generic handlers guaranteeing explicitly bound endpoints safely dynamically map AOT generic traits dynamically evaluating paths. |
+| `$/Ama.Enterprise.P2p.AspNetCore/Models/AspNetCoreJsonContext.cs` | Generates isolated strict generic generic interoperability safely processing structured models matching core primitives safely. |
+| `$/Ama.Enterprise.P2p.AspNetCore/Models/AspNetCorePeerEndpoint.cs` | Identifies and bridges standard inbound external mapping boundaries and explicitly routed ports. |
+| `$/Ama.Enterprise.P2p.AspNetCore/Models/AspNetCoreTransportOptions.cs` | Allows explicitly assigning network bounds decoupling public mappings distinctly isolating host constraints structurally. |
+| `$/Ama.Enterprise.P2p.AspNetCore/Services/AspNetCoreTransport.cs` | Implements resilient asynchronous generic outbound mapping reliably dispatching standard payloads tracking structural URLs safely handling standard rejections cleanly. |
+| `$/Ama.Enterprise.P2p.AspNetCore/Services/AspNetCoreTransportListener.cs` | Implements interface boundaries natively attaching explicitly structured delegates avoiding overriding local constraints safely. |
+| `$/Ama.Enterprise.P2p.Http.Core/Ama.Enterprise.P2p.Http.Core.csproj` | Base shared generic library abstracting structural inbound HTTP validations decoupling hosting frameworks purely bounding decentralized P2P mechanisms. |
+| `$/Ama.Enterprise.P2p.Http.Core/Extensions/ServiceCollectionExtensions.cs` | Registers centralized dependency injections resolving decoupled pure generic inbound processing handlers structurally. |
+| `$/Ama.Enterprise.P2p.Http.Core/Models/HttpPayloadProcessResult.cs` | Enumeration strictly identifying deterministic HTTP processing outputs cleanly translating protocol abstractions matching native HTTP responses. |
+| `$/Ama.Enterprise.P2p.Http.Core/Services/HttpInboundDispatcher.cs` | Thread-safe centralized generic HTTP orchestrator extracting stream bytes evaluating explicit meshes cleanly mapping raw payloads natively into designated domains. |
+| `$/Ama.Enterprise.P2p.Http.Core/Services/IHttpInboundDispatcher.cs` | Defines decoupled routing abstraction decoupling ASP.NET framework lifecycles enabling direct pure pipeline pushes reliably routing HTTP payloads into mesh engines. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Ama.Enterprise.P2p.IntegrationTests.csproj` | Integration tests project for validating P2P networking components via HTTP loopbacks. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Architecture/VersioningArchitectureTests.cs` | Architectural tests that parse the CI/CD deployment files ensuring specific deployed versions always possess explicit test coverage. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Discovery/DnsPeerDiscoveryIntegrationTests.cs` | Integration tests verifying DNS peer discovery natively resolves target domains and dispatches accurate Phase 2 handshakes against discovered IPs. |
@@ -101,16 +114,16 @@
 | `$/Ama.Enterprise.P2p.Kestrel.IntegrationTests/Ama.Enterprise.P2p.Kestrel.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.Kestrel.IntegrationTests/Services/KestrelPeerHandshakeIntegrationTests.cs` | Refactored removing hardcoded target port references mapping dynamic endpoint models cleanly against decoupled Phase 1 and Phase 2 loopback network tests natively solving multi-instance integration constraints. |
 | `$/Ama.Enterprise.P2p.Kestrel.IntegrationTests/Services/KestrelTransportIntegrationTests.cs` | Integration tests verifying the ASP.NET Core Kestrel-based P2P networking transport. Validates isolated end-to-end messaging, bidirectional dynamic routing, fault handling evicting dead remote targets, and generic unmapped fallback bounds. |
-| `$/Ama.Enterprise.P2p.Kestrel/Ama.Enterprise.P2p.Kestrel.csproj` | Added `Microsoft.AspNetCore.App` framework reference for ASP.NET Core Kestrel dependencies. |
+| `$/Ama.Enterprise.P2p.Kestrel/Ama.Enterprise.P2p.Kestrel.csproj` | Updated to reference generic HTTP processing library natively separating decoupled networking boundaries seamlessly resolving cross framework capabilities. |
 | `$/Ama.Enterprise.P2p.Kestrel/Extensions/KestrelDiscoveryServiceCollectionExtensions.cs` | Updated to execute isolated AOT serialization bindings ensuring Kestrel peer handshaking operates for standalone DI profiles. |
-| `$/Ama.Enterprise.P2p.Kestrel/Extensions/ServiceCollectionExtensions.cs` | Centralized Kestrel JSON AOT polymorphic registration within an idempotent block supporting disconnected dependency initialization limits. |
+| `$/Ama.Enterprise.P2p.Kestrel/Extensions/ServiceCollectionExtensions.cs` | Refactored explicitly initializing generic shared HTTP core boundaries guaranteeing underlying standalone Kestrel instances leverage generic centralized pipelines. |
 | `$/Ama.Enterprise.P2p.Kestrel/Models/KestrelHandshakeOptions.cs` | Removed hardcoded `TargetPort` allowing dynamic handshaker negotiations across locally identical IPs. |
 | `$/Ama.Enterprise.P2p.Kestrel/Models/KestrelJsonContext.cs` | Source-generated JSON serialization context ensuring AOT compatibility for Kestrel networking payload primitives. |
 | `$/Ama.Enterprise.P2p.Kestrel/Models/KestrelPeerEndpoint.cs` | Inherited model distinguishing HTTP transports operated over decoupled ASP.NET Kestrel interfaces. |
 | `$/Ama.Enterprise.P2p.Kestrel/Models/KestrelTransportOptions.cs` | Dedicated networking configuration structure wrapping listening prefixes, decoupling underlying bounds. |
 | `$/Ama.Enterprise.P2p.Kestrel/Services/Discovery/KestrelPeerHandshaker.cs` | Standardized `IPeerHandshaker` exposing active local endpoints bounds natively solving generic Phase 1 constraints. |
 | `$/Ama.Enterprise.P2p.Kestrel/Services/KestrelTransport.cs` | Outbound delivery mechanisms operating over customized HTTP targets isolated against configured Kestrel endpoint listeners. |
-| `$/Ama.Enterprise.P2p.Kestrel/Services/KestrelTransportListener.cs` | High-performance isolated generic inbound listener orchestrating active generic hosts internally. |
+| `$/Ama.Enterprise.P2p.Kestrel/Services/KestrelTransportListener.cs` | Offloaded internal request parsing natively leveraging generic injected dispatchers dynamically orchestrating standard isolated port configurations securely. |
 | `$/Ama.Enterprise.P2p.Mqtt.IntegrationTests/Ama.Enterprise.P2p.Mqtt.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.Mqtt.IntegrationTests/Services/MqttPeerDiscoveryIntegrationTests.cs` | Integration tests verifying the active MQTT peer discovery background service mapping decoupled mesh architectures. |
 | `$/Ama.Enterprise.P2p.Mqtt.IntegrationTests/Services/MqttTransportIntegrationTests.cs` | Integration tests verifying end-to-end MQTT transport functionality evaluating isolated inbound subscriptions. |

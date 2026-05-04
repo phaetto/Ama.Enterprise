@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.Kestrel.Extensions;
+namespace Ama.Enterprise.P2p.AspNetCore.Extensions;
 
 using System;
 using System.Linq;
@@ -6,11 +6,11 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Ama.CRDT.Extensions;
 using Ama.CRDT.Services.Serialization;
+using Ama.Enterprise.P2p.AspNetCore.Models;
+using Ama.Enterprise.P2p.AspNetCore.Services;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.Http.Core.Extensions;
 using Ama.Enterprise.P2p.Http.Core.Services;
-using Ama.Enterprise.P2p.Kestrel.Models;
-using Ama.Enterprise.P2p.Kestrel.Services;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,23 +18,23 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Extension methods for securely registering the Kestrel-based HTTP transport.
+/// Extension methods configuring standard isolated dependencies natively mapping internal shared boundaries guaranteeing valid ASP.NET architectures decoupled securely.
 /// </summary>
 public static class ServiceCollectionExtensions
 {
-    private sealed record KestrelSerializationMarker;
+    private sealed record AspNetCoreSerializationMarker;
 
-    internal static void TryAddKestrelSerialization(IServiceCollection services)
+    internal static void TryAddAspNetCoreSerialization(IServiceCollection services)
     {
         var tracker = P2pMeshRegistrationTracker.GetOrCreate(services);
-        if (!tracker.TryRegister<KestrelSerializationMarker>("KestrelSerialization_Core", null))
+        if (!tracker.TryRegister<AspNetCoreSerializationMarker>("AspNetCoreSerialization_Core", null))
         {
             return;
         }
 
-        services.AddCrdtJsonTypeInfoResolver(KestrelJsonContext.Default);
+        services.AddCrdtJsonTypeInfoResolver(AspNetCoreJsonContext.Default);
 
-        services.AddCrdtSerializableType<KestrelPeerEndpoint>("kestrel-peer-endpoint");
+        services.AddCrdtSerializableType<AspNetCorePeerEndpoint>("aspnetcore-peer-endpoint");
 
         services.AddCrdtJsonModifier(ti =>
         {
@@ -47,27 +47,27 @@ public static class ServiceCollectionExtensions
                     UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType
                 };
 
-                if (!ti.PolymorphismOptions.DerivedTypes.Any(dt => dt.DerivedType == typeof(KestrelPeerEndpoint)))
+                if (!ti.PolymorphismOptions.DerivedTypes.Any(dt => dt.DerivedType == typeof(AspNetCorePeerEndpoint)))
                 {
-                    ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(KestrelPeerEndpoint), "kestrel-peer-endpoint"));
+                    ti.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(AspNetCorePeerEndpoint), "aspnetcore-peer-endpoint"));
                 }
             }
         });
     }
 
     /// <summary>
-    /// Registers the core Kestrel transport explicitly isolated securely mapped to the current mesh context structurally.
+    /// Registers tracking explicit decoupled inbound handlers abstracting internal dependencies mapping standard underlying mesh generic environments gracefully.
     /// </summary>
-    public static IP2pMeshBuilder AddKestrelTransport(
+    public static IP2pMeshBuilder AddAspNetCoreTransport(
         this IP2pMeshBuilder builder,
-        Action<KestrelTransportOptions>? configureOptions = null)
+        Action<AspNetCoreTransportOptions>? configureOptions = null)
     {
         if (builder is null)
         {
             throw new ArgumentNullException(nameof(builder));
         }
 
-        Action<KestrelTransportOptions> configAction = options => 
+        Action<AspNetCoreTransportOptions> configAction = options => 
         {
             options.IsEnabled = true;
             configureOptions?.Invoke(options);
@@ -81,38 +81,33 @@ public static class ServiceCollectionExtensions
 
         builder.Services.Configure(builder.MeshId, configAction);
 
-        TryAddKestrelSerialization(builder.Services);
-        
-        // Add shared core HTTP processing components
+        TryAddAspNetCoreSerialization(builder.Services);
+
+        // Map unified Core HTTP dispatcher mechanisms globally across explicit isolated meshes safely.
         builder.Services.AddP2pHttpCore();
 
-        builder.Services.AddHttpClient("P2pKestrelTransport");
+        builder.Services.AddHttpClient("P2pAspNetCoreTransport");
 
         builder.Services.AddKeyedSingleton<PeerEndpoint>(builder.MeshId, (sp, key) =>
         {
-            var options = sp.GetRequiredService<IOptionsMonitor<KestrelTransportOptions>>().Get((string)key!);
-            var host = string.Equals(options.ListenHost, "+", StringComparison.OrdinalIgnoreCase) 
-                ? "localhost" 
-                : options.ListenHost;
-                
-            return new KestrelPeerEndpoint(host, options.ListenPort);
+            var options = sp.GetRequiredService<IOptionsMonitor<AspNetCoreTransportOptions>>().Get((string)key!);
+            return new AspNetCorePeerEndpoint(options.AdvertisedHost, options.AdvertisedPort);
         });
 
         builder.Services.AddKeyedSingleton<ITransport>(builder.MeshId, (sp, key) =>
-            new KestrelTransport(
+            new AspNetCoreTransport(
                 (string)key!,
-                sp.GetRequiredService<IOptionsMonitor<KestrelTransportOptions>>(),
+                sp.GetRequiredService<IOptionsMonitor<AspNetCoreTransportOptions>>(),
                 sp.GetRequiredService<IHttpClientFactory>(),
                 sp.GetRequiredService<ICrdtSerializer>(),
                 sp.GetRequiredService<IPeerRegistry>(),
-                sp.GetRequiredService<ILogger<KestrelTransport>>()));
+                sp.GetRequiredService<ILogger<AspNetCoreTransport>>()));
 
         builder.Services.AddKeyedSingleton<ITransportListener>(builder.MeshId, (sp, key) =>
-            new KestrelTransportListener(
+            new AspNetCoreTransportListener(
                 (string)key!,
-                sp.GetRequiredService<IOptionsMonitor<KestrelTransportOptions>>(),
                 sp.GetRequiredService<IHttpInboundDispatcher>(),
-                sp.GetRequiredService<ILogger<KestrelTransportListener>>()));
+                sp.GetRequiredService<ILogger<AspNetCoreTransportListener>>()));
 
         return builder;
     }

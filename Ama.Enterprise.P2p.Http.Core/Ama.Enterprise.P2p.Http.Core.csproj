@@ -10,14 +10,14 @@
 
 	<PropertyGroup>
 		<IsPackable>true</IsPackable>
-		<PackageId>Ama.Enterprise.P2p.Kestrel</PackageId>
+		<PackageId>Ama.Enterprise.P2p.Http.Core</PackageId>
 		<Version>0.0.0</Version>
 		<Authors>Alexander Mantzoukas</Authors>
-		<Description></Description>
+		<Description>Shared core HTTP processing logic decoupling inbound P2P mesh network traffic for ASP.NET Core, Kestrel, and Serverless hostings.</Description>
 		<RepositoryUrl>https://github.com/phaetto/Ama.Enterprise</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageLicenseExpression>Proprietary</PackageLicenseExpression>
-		<PackageTags>p2p;webrtc;gossip;distributed-systems;networking;transport</PackageTags>
+		<PackageTags>p2p;http;gossip;distributed-systems;networking;core</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 
 		<!-- SourceLink and Symbol Configuration -->
@@ -33,11 +33,6 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<FrameworkReference Include="Microsoft.AspNetCore.App" />
-	</ItemGroup>
-
-	<ItemGroup>
-		<ProjectReference Include="..\Ama.Enterprise.P2p.Http.Core\Ama.Enterprise.P2p.Http.Core.csproj" />
 		<ProjectReference Include="..\Ama.Enterprise.P2p\Ama.Enterprise.P2p.csproj" />
 	</ItemGroup>
 

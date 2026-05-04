@@ -1,11 +1,10 @@
 namespace Ama.Enterprise.P2p.Kestrel.Services;
 
 using System;
-using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Ama.CRDT.Services.Serialization;
-using Ama.Enterprise.P2p;
+using Ama.Enterprise.P2p.Http.Core.Models;
+using Ama.Enterprise.P2p.Http.Core.Services;
 using Ama.Enterprise.P2p.Kestrel.Models;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
@@ -24,12 +23,12 @@ using Microsoft.Extensions.Options;
 public sealed class KestrelTransportListener(
     string meshId,
     IOptionsMonitor<KestrelTransportOptions> optionsMonitor,
-    ICrdtSerializer serializer,
+    IHttpInboundDispatcher dispatcher,
     ILogger<KestrelTransportListener> logger) : ITransportListener, IDisposable
 {
     private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
     private readonly IOptionsMonitor<KestrelTransportOptions> optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
-    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+    private readonly IHttpInboundDispatcher dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
     private readonly ILogger<KestrelTransportListener> logger = logger ?? throw new ArgumentNullException(nameof(logger));
     
     private WebApplication? app;
@@ -49,8 +48,10 @@ public sealed class KestrelTransportListener(
             return;
         }
 
+        dispatcher.RegisterListener(meshId, onMessageReceived);
+
         var builder = WebApplication.CreateSlimBuilder();
-        builder.Logging.ClearProviders(); // We manage our own logging context to avoid global noise
+        builder.Logging.ClearProviders();
 
         var host = string.IsNullOrWhiteSpace(options.ListenHost) ? "+" : options.ListenHost;
         var listenUrl = $"http://{host}:{options.ListenPort}";
@@ -69,7 +70,7 @@ public sealed class KestrelTransportListener(
             path = path.TrimEnd('/');
         }
 
-        app.MapPost(path, async (HttpContext context) => await ProcessRequestAsync(context, onMessageReceived, cancellationToken));
+        app.MapPost(path, async (HttpContext context) => await ProcessRequestAsync(context, cancellationToken));
 
         try
         {
@@ -86,6 +87,8 @@ public sealed class KestrelTransportListener(
     /// <inheritdoc />
     public async Task StopListeningAsync(CancellationToken cancellationToken)
     {
+        dispatcher.UnregisterListener(meshId);
+
         if (app is not null)
         {
             try
@@ -106,81 +109,28 @@ public sealed class KestrelTransportListener(
         logger.LogInformation("[{MeshId}] Kestrel transport listener explicitly stopped.", meshId);
     }
 
-    private async Task ProcessRequestAsync(HttpContext context, Func<IMeshMessage, Task> onMessageReceived, CancellationToken cancellationToken)
+    private async Task ProcessRequestAsync(HttpContext context, CancellationToken cancellationToken)
     {
-        try
+        var incomingVersion = context.Request.Headers["X-P2P-Protocol-Version"].ToString();
+        var result = await dispatcher.ProcessPayloadAsync(meshId, incomingVersion, context.Request.Body, cancellationToken).ConfigureAwait(false);
+
+        context.Response.StatusCode = result switch
         {
-            var incomingVersion = context.Request.Headers["X-P2P-Protocol-Version"].ToString();
-            if (!string.IsNullOrWhiteSpace(incomingVersion) && !IsMajorVersionCompatible(incomingVersion, Constants.ProtocolVersion))
-            {
-                throw new NotSupportedException($"Header protocol version {incomingVersion} is not compatible with local version {Constants.ProtocolVersion}.");
-            }
-
-            using var memoryStream = new MemoryStream();
-            await context.Request.Body.CopyToAsync(memoryStream, cancellationToken).ConfigureAwait(false);
-            
-            var payload = memoryStream.ToArray();
-            var message = serializer.DeserializeFromBytes<IMeshMessage>(payload);
-
-            if (message is not null) 
-            {
-                if (!IsMajorVersionCompatible(message.ProtocolVersion, Constants.ProtocolVersion))
-                {
-                    throw new NotSupportedException($"Internal message protocol version {message.ProtocolVersion} is not compatible with local version {Constants.ProtocolVersion}.");
-                }
-
-                if (!string.Equals(message.MeshId, meshId, StringComparison.Ordinal))
-                {
-                    logger.LogWarning("[{MeshId}] Rejected Kestrel message targeting foreign mesh ID {ForeignMeshId}.", meshId, message.MeshId);
-                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                    return;
-                }
-
-                try
-                {
-                    await onMessageReceived(message).ConfigureAwait(false);
-                    context.Response.StatusCode = StatusCodes.Status202Accepted;
-                }
-                catch (NotSupportedException ex)
-                {
-                    logger.LogWarning(ex, "[{MeshId}] Message rejected by inner payload handler natively: Protocol version not supported.", meshId);
-                    context.Response.StatusCode = StatusCodes.Status505HttpVersionNotsupported;
-                }
-            }
-            else
-            {
-                logger.LogWarning("[{MeshId}] Failed to deserialize incoming Kestrel message. Invalid format.", meshId);
-                context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            }
-        }
-        catch (NotSupportedException ex)
-        {
-            logger.LogWarning(ex, "[{MeshId}] Kestrel message rejected: Protocol version not supported.", meshId);
-            context.Response.StatusCode = StatusCodes.Status505HttpVersionNotsupported;
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "[{MeshId}] Error processing incoming Kestrel HTTP request natively.", meshId);
-            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-        }
-    }
-
-    private static bool IsMajorVersionCompatible(string? version1, string? version2)
-    {
-        if (string.IsNullOrWhiteSpace(version1) || string.IsNullOrWhiteSpace(version2)) 
-        {
-            return true;
-        }
-
-        var v1Major = version1.Split('.')[0];
-        var v2Major = version2.Split('.')[0];
-
-        return string.Equals(v1Major, v2Major, StringComparison.Ordinal);
+            HttpPayloadProcessResult.Success => StatusCodes.Status202Accepted,
+            HttpPayloadProcessResult.BadRequest => StatusCodes.Status400BadRequest,
+            HttpPayloadProcessResult.Forbidden => StatusCodes.Status403Forbidden,
+            HttpPayloadProcessResult.UnsupportedVersion => StatusCodes.Status505HttpVersionNotsupported,
+            HttpPayloadProcessResult.ServiceUnavailable => StatusCodes.Status503ServiceUnavailable,
+            HttpPayloadProcessResult.InternalServerError => StatusCodes.Status500InternalServerError,
+            _ => StatusCodes.Status500InternalServerError
+        };
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
+        dispatcher.UnregisterListener(meshId);
+
         if (app is not null)
         {
             _ = app.DisposeAsync().AsTask();
