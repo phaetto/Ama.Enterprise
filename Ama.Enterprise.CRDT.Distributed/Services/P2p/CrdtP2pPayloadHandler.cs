@@ -133,7 +133,7 @@ public sealed class CrdtP2pPayloadHandler(
 
             if (syncResult.SnapshotRequired)
             {
-                logger.LogWarning("Journal bounds trimmed. Cannot map operations for replica {ReplicaId}. Dispatching full snapshots directly.", syncMsg.ReplicaId);
+                logger.LogWarning("Journal bounds trimmed or not available in this node. Cannot map operations for replica {ReplicaId}. Dispatching full snapshots directly.", syncMsg.ReplicaId);
                 foreach (var targetDoc in documents)
                 {
                     await targetDoc.ProvideSnapshotAsync(syncMsg.ReplicaId, senderId, cancellationToken).ConfigureAwait(false);

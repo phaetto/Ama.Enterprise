@@ -55,8 +55,8 @@ public static class Program
             options.Crdt.ReplicaId = replicaId;
             options.Crdt.ActiveSyncEnabled = true;
             options.Crdt.CheckpointIntervalSeconds = (int)TimeSpan.FromHours(1).TotalSeconds;
-            options.Crdt.AntiEntropyIntervalSeconds = 10;
-            options.Crdt.AntiEntropyInitialDelaySeconds = 10;
+            options.Crdt.AntiEntropyIntervalSeconds = 1;
+            options.Crdt.AntiEntropyInitialDelaySeconds = 1;
         });
 
         // 2. Wire up the generic P2P mesh network specifically configured for this feature's underlying topology
