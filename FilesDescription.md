@@ -154,7 +154,7 @@
 | `$/Ama.Enterprise.P2p.Telemetry/Models/TelemetryOptions.cs` | Configuration specifically targeting defining how and when mapped telemetry metrics broadcast generically isolated. |
 | `$/Ama.Enterprise.P2p.Telemetry/Models/TelemetryPayloadDto.cs` | DTO defining the top-level explicitly network transmission payloads natively wrapping internally batched generic metrics safely mapping AOT configurations. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryForwarderService.cs` | Substituted general P2P broadcast generic array loops with the isolated `TelemetryPushProtocol` explicit instance natively mapping payloads purely bounding topology routing. |
-| `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryPushProtocol.cs` | Dedicated protocol handling un-forwarded one-hop payloads configured exclusively for isolating metrics bounding explicit network topology meshes natively avoiding recursion overhead. |
+| `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryPushProtocol.cs` | Dedicated protocol handling un-forwarded one-hop payloads explicitly utilizing `IDirectMessageSender` securely bypassing duplicative network enveloping and strictly bounding explicit network topology routing internally natively. |
 | `$/Ama.Enterprise.P2p.Telemetry/todo.txt` | No description provided. |
 | `$/Ama.Enterprise.P2p.UnitTests/Ama.Enterprise.P2p.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/GossipProtocolTests.cs` | Refactored mock structures to validate `IApplicationPayloadDispatcher` verifying unwrapped domain payload transmissions. |

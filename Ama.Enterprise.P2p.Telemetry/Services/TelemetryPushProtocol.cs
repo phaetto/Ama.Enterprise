@@ -20,14 +20,13 @@ public sealed class TelemetryPushProtocol : IP2pProtocol, IDisposable
 {
     private readonly IServiceProvider serviceProvider;
     private readonly IOptionsMonitor<TelemetryOptions> telemetryOptionsMonitor;
-    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
+    private readonly IDirectMessageSender directMessageSender;
     private readonly ILogger<TelemetryPushProtocol> logger;
 
     private CancellationTokenSource? loopCts;
     private Task? inboundLoopTask;
     private Task? healthCheckLoopTask;
 
-    private ITransportRouter? transportRouter;
     private IInboundMessageQueue<GossipMessage>? inboundQueue;
     private IApplicationPayloadDispatcher? dispatcher;
     private IFailureDetector? failureDetector;
@@ -41,12 +40,12 @@ public sealed class TelemetryPushProtocol : IP2pProtocol, IDisposable
     public TelemetryPushProtocol(
         IServiceProvider serviceProvider,
         IOptionsMonitor<TelemetryOptions> telemetryOptionsMonitor,
-        IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
+        IDirectMessageSender directMessageSender,
         ILogger<TelemetryPushProtocol> logger)
     {
         this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         this.telemetryOptionsMonitor = telemetryOptionsMonitor ?? throw new ArgumentNullException(nameof(telemetryOptionsMonitor));
-        this.nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
+        this.directMessageSender = directMessageSender ?? throw new ArgumentNullException(nameof(directMessageSender));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -68,7 +67,6 @@ public sealed class TelemetryPushProtocol : IP2pProtocol, IDisposable
 
         logger.LogInformation("[{MeshId}] Starting Telemetry Push Protocol...", meshId);
 
-        transportRouter = serviceProvider.GetRequiredKeyedService<ITransportRouter>(meshId);
         inboundQueue = serviceProvider.GetRequiredKeyedService<IInboundMessageQueue<GossipMessage>>(meshId);
         dispatcher = serviceProvider.GetRequiredKeyedService<IApplicationPayloadDispatcher>(meshId);
         failureDetector = serviceProvider.GetRequiredKeyedService<IFailureDetector>(meshId);
@@ -126,27 +124,13 @@ public sealed class TelemetryPushProtocol : IP2pProtocol, IDisposable
     /// <inheritdoc />
     public async Task BroadcastAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
-        if (!isStarted || payload.IsEmpty || transportRouter is null || peerRegistry is null)
+        if (!isStarted || payload.IsEmpty || peerRegistry is null)
         {
             return;
         }
 
         var options = telemetryOptionsMonitor.CurrentValue;
         var meshId = options.TargetMeshId;
-        var nodeOptions = nodeOptionsMonitor.Get(meshId);
-
-        if (nodeOptions is null || nodeOptions.LocalPeerId == Guid.Empty)
-        {
-            return;
-        }
-
-        var message = new GossipMessage(
-            meshId,
-            Ama.Enterprise.P2p.Constants.ProtocolVersion,
-            Guid.NewGuid(),
-            new PeerId(nodeOptions.LocalPeerId),
-            1,
-            payload);
 
         var peers = await peerRegistry.GetAllPeersAsync(meshId, cancellationToken).ConfigureAwait(false);
         var peerList = peers.ToList();
@@ -158,7 +142,7 @@ public sealed class TelemetryPushProtocol : IP2pProtocol, IDisposable
         var sendTasks = new List<Task>(peerList.Count);
         foreach (var peer in peerList)
         {
-            sendTasks.Add(SendToPeerAsync(peer, message, cancellationToken));
+            sendTasks.Add(SendToPeerAsync(peer.Id, payload, cancellationToken));
         }
 
         await Task.WhenAll(sendTasks).ConfigureAwait(false);
@@ -179,18 +163,15 @@ public sealed class TelemetryPushProtocol : IP2pProtocol, IDisposable
         }
     }
 
-    private async Task SendToPeerAsync(PeerNode peer, GossipMessage message, CancellationToken cancellationToken)
+    private async Task SendToPeerAsync(PeerId targetPeerId, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
         try
         {
-            if (transportRouter is not null)
-            {
-                await transportRouter.SendAsync(peer.Endpoint, message, cancellationToken).ConfigureAwait(false);
-            }
+            await directMessageSender.SendDirectAsync(targetPeerId, payload, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to push telemetry payload to peer {PeerId}.", peer.Id.Value);
+            logger.LogWarning(ex, "Failed to push telemetry payload to peer {PeerId}.", targetPeerId.Value);
         }
     }
 
