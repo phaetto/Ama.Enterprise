@@ -149,7 +149,7 @@ public sealed class CrdtP2pPayloadHandler(
                 {
                     if (opsByDoc.TryGetValue(targetDoc.DocumentId, out var docOps) && docOps.Length > 0)
                     {
-                        logger.LogDebug("Targeting direct delivery of {Count} missing operations for document {DocumentId} to peer {PeerId}", docOps.Length, targetDoc.DocumentId, senderId.Value);
+                        logger.LogWarning("Targeting direct delivery of {Count} missing operations for document {DocumentId} to peer {PeerId}", docOps.Length, targetDoc.DocumentId, senderId.Value);
                         
                         var opsMsg = new CrdtOperationsMessage(replicaContext.ReplicaId, docOps);
                         var opsPayload = serializer.SerializeToBytes(opsMsg);

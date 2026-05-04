@@ -204,6 +204,7 @@ public sealed class UdpPeerDiscovery(
     private async Task ListenLoopAsync(CancellationToken token)
     {
         if (listener is null) return;
+        var nodeOptions = nodeOptionsMonitor.Get(meshId);
 
         try
         {
@@ -225,6 +226,39 @@ public sealed class UdpPeerDiscovery(
 
                         var responseBytes = serializer.SerializeToBytes(pong);
                         await listener.SendAsync(responseBytes, responseBytes.Length, result.RemoteEndPoint).ConfigureAwait(false);
+
+                        // Actively reverse handshake to register the discovering peer avoiding one-sided topologies
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                var options = discoveryOptionsMonitor.Get(meshId);
+                                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                                timeoutCts.CancelAfter(options.DiscoveryTimeout);
+
+                                var remoteIp = result.RemoteEndPoint.Address;
+                                var endpoint = new IPEndPoint(remoteIp, ping.HandshakePort);
+                                var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), localEndpoint);
+
+                                var remoteNode = await handshaker.HandshakeAsync(localNode, endpoint, timeoutCts.Token).ConfigureAwait(false);
+
+                                if (remoteNode.HasValue && remoteNode.Value.Id.Value != nodeOptions.LocalPeerId && remoteNode.Value.Id.Value != Guid.Empty)
+                                {
+                                    var isAuthenticated = await authenticator.AuthenticateAsync(remoteNode.Value, ReadOnlyMemory<byte>.Empty, timeoutCts.Token).ConfigureAwait(false);
+
+                                    if (isAuthenticated)
+                                    {
+                                        await failureDetector.RecordHeartbeatAsync(remoteNode.Value.Id, timeoutCts.Token).ConfigureAwait(false);
+                                        await peerRegistry.AddOrUpdatePeerAsync(meshId, remoteNode.Value, PeerStatus.Active, timeoutCts.Token).ConfigureAwait(false);
+                                    }
+                                }
+                            }
+                            catch (OperationCanceledException) { }
+                            catch (Exception ex)
+                            {
+                                logger.LogTrace(ex, "[{MeshId}] Failed to process active reverse handshake.", meshId);
+                            }
+                        }, token);
                     }
                 }
                 catch (Exception ex)

@@ -54,8 +54,8 @@ public static class Program
         {
             options.Crdt.ReplicaId = replicaId;
             options.Crdt.ActiveSyncEnabled = true;
-            options.Crdt.CheckpointIntervalSeconds = 120;
-            options.Crdt.AntiEntropyIntervalSeconds = (int)TimeSpan.FromHours(1).TotalSeconds;
+            options.Crdt.CheckpointIntervalSeconds = (int)TimeSpan.FromHours(1).TotalSeconds;
+            options.Crdt.AntiEntropyIntervalSeconds = 10;
             options.Crdt.AntiEntropyInitialDelaySeconds = 10;
         });
 

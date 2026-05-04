@@ -36,7 +36,7 @@ public sealed class DirectMessageSender(
             var peers = await registry.GetAllPeersAsync(meshId, cancellationToken).ConfigureAwait(false);
             var targetPeer = peers.FirstOrDefault(p => p.Id.Equals(targetPeerId));
 
-            if (targetPeer != null)
+            if (targetPeer.Id.Value != Guid.Empty)
             {
                 await SendToPeerInternalAsync(meshId, targetPeer, payload, cancellationToken).ConfigureAwait(false);
                 return;

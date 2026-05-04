@@ -139,7 +139,7 @@
 | `$/Ama.Enterprise.P2p.Mqtt/Models/MqttPeerEndpoint.cs` | Inherited PeerEndpoint model representing an isolated MQTT destination node defined by its internal client identity identifier. |
 | `$/Ama.Enterprise.P2p.Mqtt/Models/MqttRoutingEndPoint.cs` | Custom end point representing an MQTT routing target identifying an explicit client. |
 | `$/Ama.Enterprise.P2p.Mqtt/Models/MqttTransportOptions.cs` | Configuration record setting broker connection host endpoints credentials and specific topic routing bounds. |
-| `$/Ama.Enterprise.P2p.Mqtt/Services/Discovery/MqttPeerDiscovery.cs` | Restored generic architecture natively parsing mapped pseudo-ports relying uniquely strictly isolated generic bounds avoiding implicit cross dependencies. |
+| `$/Ama.Enterprise.P2p.Mqtt/Services/Discovery/MqttPeerDiscovery.cs` | Implementation of MQTT peer discovery. Updated to actively handshake and register incoming discovery peers when receiving broadcasts, avoiding one-sided peer connections. |
 | `$/Ama.Enterprise.P2p.Mqtt/Services/Discovery/MqttPeerHandshaker.cs` | Refactored implementing interface bindings exposing configured mapped localized endpoints natively. |
 | `$/Ama.Enterprise.P2p.Mqtt/Services/IMqttClientManager.cs` | Interface establishing lifecycle controls for individual MQTT client subscriptions and active payloads publications. |
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttClientManager.cs` | Service controlling the underlying generic MQTTnet connections dispatching messages to scoped route prefixes. |
@@ -231,7 +231,7 @@
 | `$/Ama.Enterprise.P2p/Services/Discovery/DnsPeerDiscovery.cs` | Extended DNS peer discovery to dynamically handle optional SRV record resolutions bridging isolated port configurations. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/IDnsSrvResolver.cs` | Interface defining the contract for resolving DNS SRV records, allowing abstraction over third-party DNS packages natively. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpDiscoveryJsonContext.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerDiscovery.cs` | Extracted explicit localized options mapping parameters natively referencing decoupled `IPeerHandshaker` bounds dynamically assigning ports via generic interfaces. |
+| `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerDiscovery.cs` | Implementation of UDP peer discovery. Updated to actively handshake and register incoming discovery peers when getting discovered, avoiding one-sided peer topologies. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerHandshaker.cs` | Added `LocalHandshakePort` property natively extracting localized internal constraints standardizing interface. |
 | `$/Ama.Enterprise.P2p/Services/Gossip/GossipProtocol.cs` | Integrated `System.Diagnostics.Metrics` defining standard counters and observable gauges to track algorithm health and traffic safely. |
 | `$/Ama.Enterprise.P2p/Services/Gossip/PushPullGossipProtocol.cs` | Integrated `System.Diagnostics.Metrics` adding granular tracking for specific push-pull deterministic explicit interactions natively mapping distinct parameters. |
