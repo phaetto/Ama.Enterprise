@@ -84,6 +84,7 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<IOptionsMonitor<WebRtcOptions>>(),
                 sp.GetRequiredService<IOptionsMonitor<P2pNodeOptions>>(),
                 sp.GetRequiredService<IPeerRegistry>(),
+                sp.GetRequiredService<ICrdtSerializer>(),
                 sp.GetRequiredService<ILogger<WebRtcConnectionManager>>()));
 
         builder.Services.AddKeyedSingleton<IWebRtcConnectionManager>(builder.MeshId, (sp, key) =>

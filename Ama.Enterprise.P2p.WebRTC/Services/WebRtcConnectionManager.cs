@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.WebRTC.Models;
 using Ama.Enterprise.P2p.Services.Core;
@@ -24,12 +25,14 @@ public sealed class WebRtcConnectionManager(
     IOptionsMonitor<WebRtcOptions> optionsMonitor,
     IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
     IPeerRegistry peerRegistry,
+    ICrdtSerializer serializer,
     ILogger<WebRtcConnectionManager> logger) : IWebRtcConnectionManager, IWebRtcInvitationService, IDisposable
 {
     private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
     private readonly IOptionsMonitor<WebRtcOptions> optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
     private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
     private readonly IPeerRegistry peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
+    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
     private readonly ILogger<WebRtcConnectionManager> logger = logger ?? throw new ArgumentNullException(nameof(logger));
     
     private readonly ConcurrentDictionary<Guid, PeerConnectionState> connections = new();
@@ -149,6 +152,17 @@ public sealed class WebRtcConnectionManager(
         return Task.CompletedTask;
     }
 
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        foreach (var state in connections.Values)
+        {
+            state.DataChannel?.close();
+            state.PeerConnection?.Close("Disposing");
+        }
+        connections.Clear();
+    }
+
     private RTCPeerConnection CreatePeerConnection(Guid connectionId)
     {
         var options = optionsMonitor.Get(meshId);
@@ -197,7 +211,7 @@ public sealed class WebRtcConnectionManager(
                 if (data[0] == 0xFF) // Handshake initialization
                 {
                     var jsonBytes = data.AsSpan(1);
-                    var handshake = System.Text.Json.JsonSerializer.Deserialize(jsonBytes, WebRtcJsonContext.Default.WebRtcHandshakeMessage);
+                    var handshake = serializer.DeserializeFromBytes<WebRtcHandshakeMessage>(jsonBytes);
                     
                     if (handshake != null && handshake.PeerId != Guid.Empty)
                     {
@@ -244,7 +258,7 @@ public sealed class WebRtcConnectionManager(
                 var nodeOptions = nodeOptionsMonitor.Get(meshId);
                 var handshake = new WebRtcHandshakeMessage { PeerId = nodeOptions.LocalPeerId };
                 
-                var jsonBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(handshake, WebRtcJsonContext.Default.WebRtcHandshakeMessage);
+                var jsonBytes = serializer.SerializeToBytes(handshake);
                 var buffer = new byte[jsonBytes.Length + 1];
                 buffer[0] = 0xFF; // Handshake prefix
                 jsonBytes.CopyTo(buffer, 1);
@@ -304,17 +318,6 @@ public sealed class WebRtcConnectionManager(
         {
             pc.onicegatheringstatechange -= IceGatheringHandler;
         }
-    }
-
-    /// <inheritdoc />
-    public void Dispose()
-    {
-        foreach (var state in connections.Values)
-        {
-            state.DataChannel?.close();
-            state.PeerConnection?.Close("Disposing");
-        }
-        connections.Clear();
     }
 
     private sealed class PeerConnectionState(RTCPeerConnection peerConnection, RTCDataChannel? dataChannel)

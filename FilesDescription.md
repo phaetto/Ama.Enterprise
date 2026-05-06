@@ -239,6 +239,7 @@
 | `$/Ama.Enterprise.P2p/Services/Transports/HttpTransport.cs` | Refactored standard HTTP implementation isolated via Keyed dependencies handling precise outgoing payloads evaluating identical network bounds. |
 | `$/Ama.Enterprise.P2p/Services/Transports/HttpTransportListener.cs` | Redesigned inbound network listener transitioning away from multiplexing, adapting keyed dependencies handling localized prefixes isolating meshes. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj` | No description provided. |
+| `$/Ama.Enterprise.Project.Analyzers.UnitTests/DirectSerializationUsageAnalyzerTests.cs` | Unit tests for `DirectSerializationUsageAnalyzer` to ensure diagnostics are reported for `System.Text.Json` usages and ignored for correct generic interfaces. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/PropertyInfoUsageAnalyzerTests.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/SystemConvertUsageAnalyzerTests.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers/Ama.Enterprise.Project.Analyzers.csproj` | No description provided. |

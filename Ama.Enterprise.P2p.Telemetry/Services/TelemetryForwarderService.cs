@@ -5,9 +5,9 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
 using System.Linq;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Telemetry.Models;
 using Microsoft.Extensions.Hosting;
@@ -25,6 +25,7 @@ public sealed class TelemetryForwarderService : BackgroundService
     private readonly IOptionsMonitor<TelemetryOptions> optionsMonitor;
     private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
     private readonly TelemetryPushProtocol telemetryProtocol;
+    private readonly ICrdtSerializer serializer;
     private readonly ILogger<TelemetryForwarderService> logger;
 
     /// <summary>
@@ -34,11 +35,13 @@ public sealed class TelemetryForwarderService : BackgroundService
         IOptionsMonitor<TelemetryOptions> optionsMonitor,
         IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
         TelemetryPushProtocol telemetryProtocol,
+        ICrdtSerializer serializer,
         ILogger<TelemetryForwarderService> logger)
     {
         this.optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         this.nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
         this.telemetryProtocol = telemetryProtocol ?? throw new ArgumentNullException(nameof(telemetryProtocol));
+        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         meterListener.InstrumentPublished = (instrument, listener) =>
@@ -191,7 +194,7 @@ public sealed class TelemetryForwarderService : BackgroundService
             Metrics = snapshots
         };
 
-        var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payload, TelemetryJsonContext.Default.TelemetryPayloadDto);
+        var payloadBytes = serializer.SerializeToBytes(payload);
 
         logger.LogDebug("Evaluating {Count} telemetry snapshot boundaries broadcasting isolated metrics natively.", snapshots.Count);
 
