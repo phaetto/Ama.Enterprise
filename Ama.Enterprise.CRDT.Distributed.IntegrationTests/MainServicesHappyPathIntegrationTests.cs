@@ -36,7 +36,7 @@ public sealed partial class HappyPathTestJsonContext : JsonSerializerContext
 
 public sealed class MainServicesHappyPathIntegrationTests
 {
-    public sealed class HappyPathTestState : IDistributedCrdtState
+    public sealed class HappyPathTestState
     {
         public string Id { get; set; } = "happy-doc";
         public string StateValue { get; set; } = "initial";

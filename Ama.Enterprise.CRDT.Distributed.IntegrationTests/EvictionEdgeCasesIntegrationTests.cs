@@ -35,7 +35,7 @@ public sealed partial class EvictionEdgeCasesTestJsonContext : JsonSerializerCon
 
 public class EvictionEdgeCasesIntegrationTests
 {
-    public class TestState : IDistributedCrdtState
+    public class TestState
     {
         public string Id { get; set; } = "test-doc";
         public string Data { get; set; } = "initial";

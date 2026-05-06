@@ -39,7 +39,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
 {
     private const string TestMeshId = "SyncMesh";
 
-    public sealed class SyncTestState : IDistributedCrdtState
+    public sealed class SyncTestState
     {
         public string Id { get; set; } = "sync-doc";
         public Dictionary<string, string> DataMap { get; set; } = new(StringComparer.Ordinal);

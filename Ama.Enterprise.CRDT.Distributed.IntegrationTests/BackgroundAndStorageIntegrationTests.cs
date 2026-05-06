@@ -41,7 +41,7 @@ public sealed class BackgroundAndStorageIntegrationTests
 {
     private const string TestMeshId = "StorageMesh";
 
-    public sealed class StorageTestState : IDistributedCrdtState
+    public sealed class StorageTestState
     {
         public string Id { get; set; } = "storage-doc";
         public string Field { get; set; } = "initial";

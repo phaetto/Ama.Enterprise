@@ -79,7 +79,7 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Registers a specific AOT-compliant CRDT document type.
     /// </summary>
-    public static IServiceCollection AddDistributedDocumentType<TState>(this IServiceCollection services, string typeAlias) where TState : class, IDistributedCrdtState, new()
+    public static IServiceCollection AddDistributedDocumentType<TState>(this IServiceCollection services, string typeAlias) where TState : class, new()
     {
         if (services == null) throw new ArgumentNullException(nameof(services));
         if (string.IsNullOrWhiteSpace(typeAlias)) throw new ArgumentException("Type alias cannot be null or empty.", nameof(typeAlias));

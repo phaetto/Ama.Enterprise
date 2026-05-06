@@ -34,7 +34,7 @@ public interface ICrdtDocumentOrchestrator
     /// <summary>
     /// Retrieves a typed managed generic instance.
     /// </summary>
-    IDistributedCrdtDocument<TState>? GetDocument<TState>(string documentId) where TState : class, IDistributedCrdtState, new();
+    IDistributedCrdtDocument<TState>? GetDocument<TState>(string documentId) where TState : class, new();
 
     /// <summary>
     /// Manually creates mapped distributed state models across the P2P network.

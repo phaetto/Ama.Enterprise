@@ -126,7 +126,7 @@ public sealed class CrdtDocumentOrchestrator(
         return docs;
     }
 
-    public IDistributedCrdtDocument<TState>? GetDocument<TState>(string documentId) where TState : class, IDistributedCrdtState, new()
+    public IDistributedCrdtDocument<TState>? GetDocument<TState>(string documentId) where TState : class, new()
     {
         if (activeDocuments.TryGetValue(documentId, out var doc) && doc is IDistributedCrdtDocument<TState> typedDoc)
         {

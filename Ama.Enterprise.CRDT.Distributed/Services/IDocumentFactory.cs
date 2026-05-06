@@ -1,6 +1,6 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services;
 
-using Ama.Enterprise.CRDT.Distributed.Models;
+using Ama.CRDT.Services.Providers;
 using Microsoft.Extensions.DependencyInjection;
 using System;
 
@@ -18,12 +18,14 @@ public interface IDocumentFactory
 /// <summary>
 /// Strictly typed internal implementation for generating specific document generics.
 /// </summary>
-internal sealed class DocumentFactory<TState> : IDocumentFactory where TState : class, IDistributedCrdtState, new()
+internal sealed class DocumentFactory<TState> : IDocumentFactory where TState : class, new()
 {
     /// <inheritdoc />
     public IDistributedCrdtDocument CreateDocument(IServiceProvider serviceProvider, string documentId)
     {
-        var state = new TState { Id = documentId };
+        var documentIdProvider = serviceProvider.GetRequiredService<IDocumentIdProvider>();
+        var state = documentIdProvider.CreateDocumentWithId<TState>(documentId);
+        
         return ActivatorUtilities.CreateInstance<DistributedCrdtDocument<TState>>(serviceProvider, state);
     }
 }

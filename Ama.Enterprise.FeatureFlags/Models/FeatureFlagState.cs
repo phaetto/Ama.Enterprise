@@ -4,14 +4,15 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Ama.CRDT.Attributes.Strategies;
-using Ama.Enterprise.CRDT.Distributed.Models;
 
 /// <summary>
 /// The root state for the feature flags.
 /// </summary>
-public sealed class FeatureFlagState : IEquatable<FeatureFlagState>, IDistributedCrdtState
+public sealed class FeatureFlagState : IEquatable<FeatureFlagState>
 {
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets or sets the document identifier tracking singleton bounds across instances.
+    /// </summary>
     public string Id { get; set; } = "feature-flags-singleton";
 
     /// <summary>

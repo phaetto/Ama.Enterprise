@@ -40,7 +40,7 @@ public sealed partial class JournalTestJsonContext : JsonSerializerContext
 
 public sealed class JournalingAndSnapshottingIntegrationTests
 {
-    public sealed class JournalTestState : IDistributedCrdtState
+    public sealed class JournalTestState
     {
         public string Id { get; set; } = "journal-doc";
         // Switched to Dictionary explicitly allowing MapSetIntent to correctly and safely map natively via the core Patcher

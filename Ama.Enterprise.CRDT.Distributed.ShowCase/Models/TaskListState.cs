@@ -1,14 +1,15 @@
 namespace Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 
 using System.Collections.Generic;
-using Ama.Enterprise.CRDT.Distributed.Models;
 
 /// <summary>
 /// Root CRDT document model representing a task list.
 /// </summary>
-public sealed class TaskListState : IDistributedCrdtState
+public sealed class TaskListState
 {
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets or sets the explicit string identifier targeting distinct task lists correctly.
+    /// </summary>
     public string Id { get; set; } = string.Empty;
 
     /// <summary>

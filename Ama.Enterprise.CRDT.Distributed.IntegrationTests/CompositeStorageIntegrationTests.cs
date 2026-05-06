@@ -30,7 +30,7 @@ public sealed partial class CompositeTestJsonContext : JsonSerializerContext
 
 public sealed class CompositeStorageIntegrationTests
 {
-    public sealed class TestState : IDistributedCrdtState
+    public sealed class TestState
     {
         public string Id { get; set; } = "default";
     }

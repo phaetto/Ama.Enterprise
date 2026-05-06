@@ -8,6 +8,7 @@ using Ama.CRDT.Extensions;
 using Ama.CRDT.Models;
 using Ama.CRDT.Services;
 using Ama.CRDT.Services.Journaling;
+using Ama.CRDT.Services.Providers;
 using Ama.CRDT.Services.Serialization;
 using Ama.CRDT.Services.Versioning;
 using Ama.Enterprise.CRDT.Distributed.Models;
@@ -20,7 +21,7 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Generic document manager responsible for maintaining consistency and routing P2P actions for a specific CRDT tree.
 /// </summary>
-public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<TState>, IDisposable where TState : class, IDistributedCrdtState, new()
+public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<TState>, IDisposable where TState : class, new()
 {
     private readonly ReplicaContext replicaContext;
     private readonly IAsyncCrdtApplicator applicator;
@@ -58,10 +59,12 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         IServiceProvider serviceProvider,
         ICrdtSerializer serializer,
         IDistributedCrdtStorage storage,
-        ILogger<DistributedCrdtDocument<TState>> logger)
+        ILogger<DistributedCrdtDocument<TState>> logger,
+        IDocumentIdProvider documentIdProvider)
     {
         if (options == null) throw new ArgumentNullException(nameof(options));
         if (initialState == null) throw new ArgumentNullException(nameof(initialState));
+        if (documentIdProvider == null) throw new ArgumentNullException(nameof(documentIdProvider));
         
         this.replicaContext = replicaContext ?? throw new ArgumentNullException(nameof(replicaContext));
         this.applicator = applicator ?? throw new ArgumentNullException(nameof(applicator));
@@ -74,12 +77,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         this.activeSyncEnabled = options.Value.ActiveSyncEnabled;
         this.initialState = initialState;
 
-        DocumentId = initialState.Id;
-        
-        if (string.IsNullOrWhiteSpace(DocumentId))
-        {
-            throw new InvalidOperationException($"The state model '{typeof(TState).Name}' must provide a valid DocumentId.");
-        }
+        DocumentId = documentIdProvider.GetDocumentId(initialState);
         
         var metadata = metadataManager.Initialize(initialState);
         Document = new CrdtDocument<TState>(initialState, metadata);

@@ -31,7 +31,7 @@ public sealed partial class DynamicTestJsonContext : JsonSerializerContext
 
 public sealed class DocumentOrchestratorIntegrationTests
 {
-    public sealed class DynamicTestState : IDistributedCrdtState
+    public sealed class DynamicTestState
     {
         public string Id { get; set; } = "default";
         public int Value { get; set; }

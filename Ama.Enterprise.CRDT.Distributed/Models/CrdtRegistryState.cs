@@ -6,9 +6,11 @@ using System.Collections.Generic;
 /// <summary>
 /// Global P2P synced directory state handling distributed multi-document topologies.
 /// </summary>
-public sealed class CrdtRegistryState : IDistributedCrdtState
+public sealed class CrdtRegistryState
 {
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets or sets the mapped sequence identifier routing this registry state across P2P limits securely.
+    /// </summary>
     public string Id { get; set; } = "system-document-registry";
 
     /// <summary>
