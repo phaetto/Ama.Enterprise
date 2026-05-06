@@ -1,11 +1,12 @@
 namespace Ama.Enterprise.P2p.Telemetry.Extensions;
 
-using System;
+using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.Telemetry.Models;
 using Ama.Enterprise.P2p.Telemetry.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using System;
 
 /// <summary>
 /// Dependency injection registrations ensuring explicit metric forwarding scopes initialize.
@@ -30,6 +31,7 @@ public static class ServiceCollectionExtensions
             services.Configure(configure);
         }
 
+        services.AddCrdtJsonTypeInfoResolver(TelemetryJsonContext.Default);
         services.AddSingleton<TelemetryPushProtocol>();
         services.AddHostedService<TelemetryForwarderService>();
 
@@ -54,6 +56,7 @@ public static class ServiceCollectionExtensions
             throw new ArgumentException("Explicit mesh identifier cannot be null or whitespace mapping generic configurations.", nameof(meshId));
         }
 
+        services.AddCrdtJsonTypeInfoResolver(TelemetryJsonContext.Default);
         services.TryAddSingleton<ITelemetryAggregator, TelemetryAggregator>();
         services.AddKeyedSingleton<IApplicationPayloadHandler, TelemetryPayloadHandler>(meshId);
 

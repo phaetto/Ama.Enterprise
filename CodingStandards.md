@@ -19,6 +19,7 @@ Never use tuples, only construct DTOs to pass ar retrieve data.
 Always introduce models with implementation of `IEquatable<>` and be explicit when the model using ISet, IEnumerable or other deep structures.
 For JSON you should only use System.Text.Json and only AOT mode.
 Same for reflection, never use non friendly for AOT reflection.
+Do not use `using Xunit.Abstractions;` in unit tests, this namespace does not exists anymore.
 
 # Filesystem structure
 

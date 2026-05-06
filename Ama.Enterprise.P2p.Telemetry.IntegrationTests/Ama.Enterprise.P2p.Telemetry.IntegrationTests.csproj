@@ -25,9 +25,9 @@
 	<ItemGroup>
 		<Using Include="Xunit" />
 	</ItemGroup>
-
+	
 	<ItemGroup>
-		<ProjectReference Include="..\Ama.Enterprise.FeatureFlags\Ama.Enterprise.FeatureFlags.csproj" />
+		<ProjectReference Include="..\Ama.Enterprise.P2p.Telemetry\Ama.Enterprise.P2p.Telemetry.csproj" />
 		<ProjectReference Include="..\Ama.Enterprise.UnitTests\Ama.Enterprise.UnitTests.csproj" />
 	</ItemGroup>
 

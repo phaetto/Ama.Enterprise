@@ -145,6 +145,7 @@
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransport.cs` | Generic outbound mesh transport implementing isolated message payload deliveries targeting assigned MQTT topologies. |
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransportListener.cs` | Internal background receiver connecting underlying MQTT topic subscriptions and interpreting generalized mesh envelopes. |
 | `$/Ama.Enterprise.P2p.Telemetry.IntegrationTests/Ama.Enterprise.P2p.Telemetry.IntegrationTests.csproj` | No description provided. |
+| `$/Ama.Enterprise.P2p.Telemetry.IntegrationTests/Services/TelemetryNetworkIntegrationTests.cs` | Integration tests verifying pure asynchronous End-to-End explicitly evaluated decentralized generic telemetry broadcasting mapping decoupled constraints actively securely. |
 | `$/Ama.Enterprise.P2p.Telemetry/Ama.Enterprise.P2p.Telemetry.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.Telemetry/Constants.cs` | Defines the core explicit meter names dynamically evaluated by the telemetry network listeners isolating generic algorithms. |
 | `$/Ama.Enterprise.P2p.Telemetry/Extensions/ServiceCollectionExtensions.cs` | Updated DI to map singletons for the explicit `TelemetryPushProtocol` ensuring bounded generic instance isolation matching background network hooks. |

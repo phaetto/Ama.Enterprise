@@ -36,7 +36,6 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\Ama.Enterprise.CRDT.Distributed\Ama.Enterprise.CRDT.Distributed.csproj" />
-		<ProjectReference Include="..\Ama.Enterprise.P2p.WebRTC\Ama.Enterprise.P2p.WebRTC.csproj" />
 		<ProjectReference Include="..\Ama.Enterprise.P2p\Ama.Enterprise.P2p.csproj" />
 		<ProjectReference Include="..\Ama.Enterprise.Project.Analyzers\Ama.Enterprise.Project.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>

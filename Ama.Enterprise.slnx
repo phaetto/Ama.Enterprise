@@ -12,6 +12,7 @@
     <Project Path="Ama.Enterprise.FeatureFlags.IntegrationTests/Ama.Enterprise.FeatureFlags.IntegrationTests.csproj" Id="da1f1950-e20a-435a-9bbb-63d942458072" />
     <Project Path="Ama.Enterprise.FeatureFlags.UnitTests/Ama.Enterprise.FeatureFlags.UnitTests.csproj" Id="d74539b1-a59f-40bc-81d1-e33de4e85be7" />
     <Project Path="Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj" Id="f29896b4-f84b-45fb-8742-3496884d770e" />
+    <Project Path="Ama.Enterprise.P2p.Telemetry.IntegrationTests/Ama.Enterprise.P2p.Telemetry.IntegrationTests.csproj" Id="c24eaa7a-4b42-434d-aa9e-30abf4a4e40f" />
     <Project Path="Ama.Enterprise.P2p.Telemetry/Ama.Enterprise.P2p.Telemetry.csproj" Id="480acf15-c35b-4d39-bed4-420bcdea75b4" />
   </Folder>
   <Folder Name="/EndProducts/ShowCases/">
