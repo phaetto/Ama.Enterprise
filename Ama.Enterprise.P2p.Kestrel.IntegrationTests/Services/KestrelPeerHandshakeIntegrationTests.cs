@@ -393,7 +393,6 @@ public sealed class KestrelPeerHandshakeIntegrationTests
             });
 
         services.AddP2pMesh(mesh2Id, options => options.LocalPeerId = peerId.Value)
-            .AddPushPullGossipNetwork()
             .AddKestrelPeerHandshake(options =>
             {
                 options.ListenHost = "+";

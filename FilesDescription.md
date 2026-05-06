@@ -183,7 +183,7 @@
 | `$/Ama.Enterprise.P2p/Extensions/IP2pMeshBuilder.cs` | Interface for building and configuring specific Keyed DI mesh profiles. |
 | `$/Ama.Enterprise.P2p/Extensions/P2pMeshBuilder.cs` | Implementation of `IP2pMeshBuilder` handling multi-mesh dependency injection tracking. |
 | `$/Ama.Enterprise.P2p/Extensions/P2pMeshRegistrationTracker.cs` | Centralized tracking mechanism guaranteeing idempotent mesh registrations evaluating structurally identical configurations, bypassing duplicates. |
-| `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Updated injecting explicit standard DI bounds guaranteeing `IDirectMessageSender` securely mappings decoupling point-to-point capabilities natively. |
+| `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Moved common mesh infrastructure registrations into AddP2pMesh to avoid duplication between distinct protocol configurations like AddGossipNetwork and AddPushPullGossipNetwork. |
 | `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Removed tightly coupled injected Handshaker Options isolating generic P2P mesh parameters decoupling explicitly. |
 | `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
 | `$/Ama.Enterprise.P2p/Models/Core/IMeshMessage.cs` | Updated to include `ProtocolVersion` standardizing structural validation. |

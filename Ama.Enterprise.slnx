@@ -21,6 +21,7 @@
     <Project Path="Ama.Enterprise.CRDT.Distributed.ShowCase/Ama.Enterprise.CRDT.Distributed.ShowCase.csproj" Id="9994275b-bff7-448d-8763-3a41999774cb" />
   </Folder>
   <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
     <File Path=".github/workflows/ci.yml" />
     <File Path=".github/workflows/publish-nuget-manual.yml" />
     <File Path=".github/workflows/publish-nuget.yml" />

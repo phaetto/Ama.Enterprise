@@ -24,8 +24,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 {
     private readonly ReplicaContext replicaContext;
     private readonly IAsyncCrdtApplicator applicator;
-    private readonly IJournalManager journalManager;
-    private readonly IVersionVectorSyncService syncService;
     private readonly ICrdtMetadataManager metadataManager;
     private readonly IServiceProvider serviceProvider;
     private readonly ICrdtSerializer serializer;
@@ -55,8 +53,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         TState initialState,
         ReplicaContext replicaContext,
         IAsyncCrdtApplicator applicator,
-        IJournalManager journalManager,
-        IVersionVectorSyncService syncService,
         ICrdtMetadataManager metadataManager,
         IOptions<DistributedCrdtOptions> options,
         IServiceProvider serviceProvider,
@@ -69,8 +65,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         
         this.replicaContext = replicaContext ?? throw new ArgumentNullException(nameof(replicaContext));
         this.applicator = applicator ?? throw new ArgumentNullException(nameof(applicator));
-        this.journalManager = journalManager ?? throw new ArgumentNullException(nameof(journalManager));
-        this.syncService = syncService ?? throw new ArgumentNullException(nameof(syncService));
         this.metadataManager = metadataManager ?? throw new ArgumentNullException(nameof(metadataManager));
         this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));

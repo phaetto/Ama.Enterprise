@@ -516,7 +516,6 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         {
             options.LocalPeerId = peerId.Value;
         })
-        .AddPushPullGossipNetwork()
         .AddMqttTransport(options =>
         {
             options.Host = "broker.freemqtt.com";

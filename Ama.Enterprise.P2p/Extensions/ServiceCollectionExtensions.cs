@@ -59,6 +59,42 @@ public static class ServiceCollectionExtensions
             services.TryAddSingleton<IDirectMessageSender, DirectMessageSender>();
         }
 
+        if (!services.Any(s => s.ServiceType == typeof(IJsonTypeInfoResolver) && s.ServiceKey as string == "Ama.CRDT" && s.ImplementationInstance == P2pJsonSerializerContext.Default))
+        {
+            services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", P2pJsonSerializerContext.Default);
+        }
+
+        services.TryAddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
+
+        services.AddKeyedSingleton<IInboundMessageQueue<GossipMessage>>(meshId, (sp, key) =>
+            new InboundMessageQueue<GossipMessage>());
+
+        services.AddKeyedSingleton<IPeerAuthenticator>(meshId, (sp, key) =>
+            new PassThroughPeerAuthenticator(
+                (string)key!, 
+                sp.GetRequiredService<ILogger<PassThroughPeerAuthenticator>>()));
+
+        services.AddKeyedSingleton<IPeerSelector>(meshId, (sp, key) =>
+            new RandomPeerSelector(
+                (string)key!,
+                sp.GetRequiredService<IPeerRegistry>(),
+                sp.GetRequiredService<ILogger<RandomPeerSelector>>()));
+
+        services.AddKeyedSingleton<IFailureDetector>(meshId, (sp, key) =>
+            new TimeBasedFailureDetector(
+                (string)key!,
+                sp.GetRequiredService<IOptionsMonitor<FailureDetectorOptions>>(),
+                sp.GetRequiredService<ILogger<TimeBasedFailureDetector>>()));
+        
+        services.AddKeyedSingleton<ITransportRouter>(meshId, (sp, key) =>
+            new TransportRouter(sp.GetKeyedServices<ITransport>(key)));
+
+        services.AddKeyedSingleton<IApplicationPayloadDispatcher>(meshId, (sp, key) =>
+            new ApplicationPayloadDispatcher(
+                (string)key!,
+                sp.GetKeyedServices<IApplicationPayloadHandler>(key),
+                sp.GetRequiredService<ILogger<ApplicationPayloadDispatcher>>()));
+
         services.AddSingleton(new P2pMeshMetadata(meshId));
 
         return new P2pMeshBuilder(services, meshId);
@@ -137,42 +173,6 @@ public static class ServiceCollectionExtensions
         {
             builder.Services.Configure(builder.MeshId, configureOptions);
         }
-
-        if (!builder.Services.Any(s => s.ServiceType == typeof(IJsonTypeInfoResolver) && s.ServiceKey as string == "Ama.CRDT" && s.ImplementationInstance == P2pJsonSerializerContext.Default))
-        {
-            builder.Services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", P2pJsonSerializerContext.Default);
-        }
-
-        builder.Services.AddKeyedSingleton<IInboundMessageQueue<GossipMessage>>(builder.MeshId, (sp, key) =>
-            new InboundMessageQueue<GossipMessage>());
-
-        builder.Services.TryAddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
-
-        builder.Services.AddKeyedSingleton<IPeerAuthenticator>(builder.MeshId, (sp, key) =>
-            new PassThroughPeerAuthenticator(
-                (string)key!, 
-                sp.GetRequiredService<ILogger<PassThroughPeerAuthenticator>>()));
-
-        builder.Services.AddKeyedSingleton<IPeerSelector>(builder.MeshId, (sp, key) =>
-            new RandomPeerSelector(
-                (string)key!,
-                sp.GetRequiredService<IPeerRegistry>(),
-                sp.GetRequiredService<ILogger<RandomPeerSelector>>()));
-
-        builder.Services.AddKeyedSingleton<IFailureDetector>(builder.MeshId, (sp, key) =>
-            new TimeBasedFailureDetector(
-                (string)key!,
-                sp.GetRequiredService<IOptionsMonitor<FailureDetectorOptions>>(),
-                sp.GetRequiredService<ILogger<TimeBasedFailureDetector>>()));
-        
-        builder.Services.AddKeyedSingleton<ITransportRouter>(builder.MeshId, (sp, key) =>
-            new TransportRouter(sp.GetKeyedServices<ITransport>(key)));
-
-        builder.Services.AddKeyedSingleton<IApplicationPayloadDispatcher>(builder.MeshId, (sp, key) =>
-            new ApplicationPayloadDispatcher(
-                (string)key!,
-                sp.GetKeyedServices<IApplicationPayloadHandler>(key),
-                sp.GetRequiredService<ILogger<ApplicationPayloadDispatcher>>()));
         
         builder.Services.TryAddSingleton<IP2pProtocol, GossipProtocol>();
 
@@ -200,42 +200,6 @@ public static class ServiceCollectionExtensions
         {
             builder.Services.Configure(builder.MeshId, configureOptions);
         }
-
-        if (!builder.Services.Any(s => s.ServiceType == typeof(IJsonTypeInfoResolver) && s.ServiceKey as string == "Ama.CRDT" && s.ImplementationInstance == P2pJsonSerializerContext.Default))
-        {
-            builder.Services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", P2pJsonSerializerContext.Default);
-        }
-
-        builder.Services.AddKeyedSingleton<IInboundMessageQueue<GossipMessage>>(builder.MeshId, (sp, key) =>
-            new InboundMessageQueue<GossipMessage>());
-
-        builder.Services.TryAddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
-
-        builder.Services.AddKeyedSingleton<IPeerAuthenticator>(builder.MeshId, (sp, key) =>
-            new PassThroughPeerAuthenticator(
-                (string)key!, 
-                sp.GetRequiredService<ILogger<PassThroughPeerAuthenticator>>()));
-
-        builder.Services.AddKeyedSingleton<IPeerSelector>(builder.MeshId, (sp, key) =>
-            new RandomPeerSelector(
-                (string)key!,
-                sp.GetRequiredService<IPeerRegistry>(),
-                sp.GetRequiredService<ILogger<RandomPeerSelector>>()));
-
-        builder.Services.AddKeyedSingleton<IFailureDetector>(builder.MeshId, (sp, key) =>
-            new TimeBasedFailureDetector(
-                (string)key!,
-                sp.GetRequiredService<IOptionsMonitor<FailureDetectorOptions>>(),
-                sp.GetRequiredService<ILogger<TimeBasedFailureDetector>>()));
-        
-        builder.Services.AddKeyedSingleton<ITransportRouter>(builder.MeshId, (sp, key) =>
-            new TransportRouter(sp.GetKeyedServices<ITransport>(key)));
-
-        builder.Services.AddKeyedSingleton<IApplicationPayloadDispatcher>(builder.MeshId, (sp, key) =>
-            new ApplicationPayloadDispatcher(
-                (string)key!,
-                sp.GetKeyedServices<IApplicationPayloadHandler>(key),
-                sp.GetRequiredService<ILogger<ApplicationPayloadDispatcher>>()));
         
         builder.Services.TryAddSingleton<IP2pProtocol, PushPullGossipProtocol>();
 

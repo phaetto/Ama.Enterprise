@@ -261,7 +261,6 @@ public sealed class UdpPeerDiscoveryIntegrationTests(ITestOutputHelper testOutpu
             {
                 nodeOptions.LocalPeerId = peerId;
             })
-            .AddPushPullGossipNetwork()
             .AddHttpTransport(opts => 
             { 
                 opts.ListenPort = mesh2Port; 

@@ -45,8 +45,10 @@ dotnet_diagnostic.xUnit1051.severity = none
 # Collection initialization can be simplified
 dotnet_diagnostic.IDE0028.severity = none
 dotnet_diagnostic.IDE0306.severity = none
+dotnet_diagnostic.IDE0300.severity = none
 
 # === EXPLICITLY ENABLE CA2007 STRICTLY FOR SHIPPED LIBRARY PROJECTS ===
+
 [Ama.Enterprise.CRDT/**/*.cs]
 dotnet_diagnostic.CA2007.severity = error
 
