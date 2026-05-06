@@ -189,7 +189,7 @@
 | `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Moved common mesh infrastructure registrations into AddP2pMesh to avoid duplication between distinct protocol configurations like AddGossipNetwork and AddPushPullGossipNetwork. |
 | `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Removed tightly coupled injected Handshaker Options isolating generic P2P mesh parameters decoupling explicitly. |
 | `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
-| `$/Ama.Enterprise.P2p/Models/Core/IMeshMessage.cs` | Updated to include `ProtocolVersion` standardizing structural validation. |
+| `$/Ama.Enterprise.P2p/Models/Core/IMeshMessage.cs` | Added required standardized `SenderId` bounding origin payloads explicitly decoupled traversing generic algorithms identically. |
 | `$/Ama.Enterprise.P2p/Models/Core/P2pMeshMetadata.cs` | Metadata record registering a specific mesh identifier into the global dependency container for orchestration. |
 | `$/Ama.Enterprise.P2p/Models/Core/P2pNodeOptions.cs` | Centralized generic configuration options holding the core node identity (ID and Endpoint) for the P2P Mesh. Updated to enforce a static, process-wide global peer identifier to satisfy repeatable idempotent tracker validations. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerEndpoint.cs` | Abstract base record for peer endpoints, configured with JSON polymorphic attributes mapping same-assembly derivatives to support standard AOT serialization. |
@@ -236,9 +236,9 @@
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpDiscoveryJsonContext.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerDiscovery.cs` | Implementation of UDP peer discovery. Updated to actively handshake and register incoming discovery peers when getting discovered, avoiding one-sided peer topologies. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerHandshaker.cs` | Added `LocalHandshakePort` property natively extracting localized internal constraints standardizing interface. |
-| `$/Ama.Enterprise.P2p/Services/Gossip/GossipProtocol.cs` | Integrated `System.Diagnostics.Metrics` defining standard counters and observable gauges to track algorithm health and traffic safely. |
-| `$/Ama.Enterprise.P2p/Services/Gossip/PushPullGossipProtocol.cs` | Integrated `System.Diagnostics.Metrics` adding granular tracking for specific push-pull deterministic explicit interactions natively mapping distinct parameters. |
-| `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | Updated to orchestrate the startup and shutdown of `IPeerHandshaker` components isolated per mesh topology alongside peers and listeners. |
+| `$/Ama.Enterprise.P2p/Services/Gossip/GossipProtocol.cs` | Stripped explicit bounds transitioning states cleanly into globally bound generic infrastructures extracting standalone `ProtocolState` natively. |
+| `$/Ama.Enterprise.P2p/Services/Gossip/PushPullGossipProtocol.cs` | Cleaned redundant health and heartbeat mechanics offloading bounds reliably against decoupled host mechanisms dynamically. |
+| `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | Refactored encompassing overarching multi-mesh core states evaluating dynamic incoming deduplications and isolated health evaluations efficiently avoiding duplication. |
 | `$/Ama.Enterprise.P2p/Services/Transports/HttpTransport.cs` | Refactored standard HTTP implementation isolated via Keyed dependencies handling precise outgoing payloads evaluating identical network bounds. |
 | `$/Ama.Enterprise.P2p/Services/Transports/HttpTransportListener.cs` | Redesigned inbound network listener transitioning away from multiplexing, adapting keyed dependencies handling localized prefixes isolating meshes. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj` | No description provided. |

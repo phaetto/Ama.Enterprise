@@ -181,7 +181,6 @@ public sealed class TelemetryNetworkIntegrationTests(ITestOutputHelper testOutpu
             {
                 nodeOptions.LocalPeerId = peerId;
             })
-            .AddGossipNetwork()
             .AddHttpTransport(opts => 
             { 
                 opts.ListenPort = listenPort; 

@@ -16,7 +16,7 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Protocol implementation dedicated to pushing telemetry messages across the configured telemetry mesh natively without extraneous forwarding overhead.
 /// </summary>
-public sealed class TelemetryPushProtocol : IP2pProtocol, IDisposable
+public sealed class TelemetryPushProtocol : IDisposable
 {
     private readonly IServiceProvider serviceProvider;
     private readonly IOptionsMonitor<TelemetryOptions> telemetryOptionsMonitor;
@@ -24,10 +24,8 @@ public sealed class TelemetryPushProtocol : IP2pProtocol, IDisposable
     private readonly ILogger<TelemetryPushProtocol> logger;
 
     private CancellationTokenSource? loopCts;
-    private Task? inboundLoopTask;
     private Task? healthCheckLoopTask;
 
-    private IInboundMessageQueue<GossipMessage>? inboundQueue;
     private IApplicationPayloadDispatcher? dispatcher;
     private IFailureDetector? failureDetector;
     private IPeerRegistry? peerRegistry;
@@ -67,14 +65,12 @@ public sealed class TelemetryPushProtocol : IP2pProtocol, IDisposable
 
         logger.LogInformation("[{MeshId}] Starting Telemetry Push Protocol...", meshId);
 
-        inboundQueue = serviceProvider.GetRequiredKeyedService<IInboundMessageQueue<GossipMessage>>(meshId);
         dispatcher = serviceProvider.GetRequiredKeyedService<IApplicationPayloadDispatcher>(meshId);
         failureDetector = serviceProvider.GetRequiredKeyedService<IFailureDetector>(meshId);
         peerRegistry = serviceProvider.GetRequiredService<IPeerRegistry>();
 
         loopCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        inboundLoopTask = Task.Run(() => ProcessInboundQueueAsync(meshId, loopCts.Token), loopCts.Token);
         healthCheckLoopTask = Task.Run(() => HealthCheckLoopAsync(meshId, loopCts.Token), loopCts.Token);
 
         isStarted = true;
@@ -97,15 +93,6 @@ public sealed class TelemetryPushProtocol : IP2pProtocol, IDisposable
         if (loopCts is not null)
         {
             await loopCts.CancelAsync().ConfigureAwait(false);
-        }
-
-        if (inboundLoopTask is not null)
-        {
-            try
-            {
-                await inboundLoopTask.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) { }
         }
 
         if (healthCheckLoopTask is not null)
@@ -148,6 +135,27 @@ public sealed class TelemetryPushProtocol : IP2pProtocol, IDisposable
         await Task.WhenAll(sendTasks).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Processes an incoming generic mesh message delegating it to the underlying concrete protocol algorithm.
+    /// </summary>
+    /// <param name="message">The incoming mapped protocol message.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>A task that represents the asynchronous processing operation.</returns>
+    public Task ProcessMessageAsync(IMeshMessage message, CancellationToken cancellationToken)
+    {
+        if (!isStarted || dispatcher is null || failureDetector is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (message is GossipMessage gossipMsg)
+        {
+            return ProcessInboundMessageAsync(gossipMsg, cancellationToken);
+        }
+
+        return Task.CompletedTask;
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
@@ -175,40 +183,24 @@ public sealed class TelemetryPushProtocol : IP2pProtocol, IDisposable
         }
     }
 
-    private async Task ProcessInboundQueueAsync(string meshId, CancellationToken cancellationToken)
+    private async Task ProcessInboundMessageAsync(GossipMessage message, CancellationToken cancellationToken)
     {
-        if (inboundQueue is null || dispatcher is null || failureDetector is null)
+        try
         {
-            return;
+            await failureDetector!.RecordHeartbeatAsync(message.SenderId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "[{MeshId}] Failed to record heartbeat for peer {PeerId}.", message.MeshId, message.SenderId.Value);
         }
 
         try
         {
-            await foreach (var message in inboundQueue.ReadAllAsync(cancellationToken).ConfigureAwait(false))
-            {
-                try
-                {
-                    await failureDetector.RecordHeartbeatAsync(message.SenderId, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "[{MeshId}] Failed to record heartbeat for peer {PeerId}.", meshId, message.SenderId.Value);
-                }
-
-                try
-                {
-                    await dispatcher.DispatchAsync(message.MeshId, message.SenderId, message.Payload, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "[{MeshId}] Error pushing unwrapped telemetry payload into local domain {MessageId}.", meshId, message.MessageId);
-                }
-            }
+            await dispatcher!.DispatchAsync(message.MeshId, message.SenderId, message.Payload, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            logger.LogError(ex, "[{MeshId}] An error occurred while processing the inbound message queue.", meshId);
+            logger.LogError(ex, "[{MeshId}] Error pushing unwrapped telemetry payload into local domain {MessageId}.", message.MeshId, message.MessageId);
         }
     }
 

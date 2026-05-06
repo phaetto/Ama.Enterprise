@@ -158,6 +158,7 @@ public sealed class P2pAdvancedIntegrationTests(ITestOutputHelper testOutputHelp
 
     private TestNode CreateTestNode(int port, int defaultTtl = 5)
     {
+        var peerId = new PeerId(Guid.NewGuid());
         var services = new ServiceCollection();
 
         services.AddCrdt();
@@ -168,7 +169,10 @@ public sealed class P2pAdvancedIntegrationTests(ITestOutputHelper testOutputHelp
             builder.SetMinimumLevel(LogLevel.Trace);
         });
 
-        services.AddP2pMesh(TestMeshId)
+        services.AddP2pMesh(TestMeshId, options =>
+            {
+                options.LocalPeerId = peerId.Value;
+            })
             .AddGossipNetwork(options =>
             {
                 options.GossipInterval = TimeSpan.FromMilliseconds(500); 
@@ -182,10 +186,6 @@ public sealed class P2pAdvancedIntegrationTests(ITestOutputHelper testOutputHelp
                 options.PathPrefix = "/p2p/gossip/";
             });
 
-        // Ensure newly mapped keyed interfaces natively resolve bounds explicitly safely
-        services.AddKeyedSingleton<IFailureDetector>(TestMeshId, (sp, key) => new TimeBasedFailureDetector((string)key!, sp.GetRequiredService<IOptionsMonitor<FailureDetectorOptions>>(), sp.GetRequiredService<ILogger<TimeBasedFailureDetector>>()));
-        services.AddKeyedSingleton<IPeerAuthenticator>(TestMeshId, (sp, key) => new PassThroughPeerAuthenticator((string)key!, sp.GetRequiredService<ILogger<PassThroughPeerAuthenticator>>()));
-
         var handler = new TestMessageHandler();
         services.AddSingleton(handler);
         
@@ -195,7 +195,6 @@ public sealed class P2pAdvancedIntegrationTests(ITestOutputHelper testOutputHelp
 
         // Use polymorphic concrete endpoint
         var endpoint = new HttpPeerEndpoint("localhost", port);
-        var peerId = new PeerId(Guid.NewGuid());
 
         return new TestNode(
             provider,

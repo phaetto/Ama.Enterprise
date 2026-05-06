@@ -3,6 +3,7 @@ namespace Ama.Enterprise.P2p.Services.Core;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
 /// Defines the generic orchestrator for the P2P protocol, managing the lifecycle of the P2P node.
@@ -32,4 +33,12 @@ public interface IP2pProtocol
     /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
     /// <returns>A task that represents the asynchronous broadcast operation.</returns>
     Task BroadcastAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Processes an incoming generic mesh message delegating it to the underlying concrete protocol algorithm.
+    /// </summary>
+    /// <param name="message">The incoming mapped protocol message.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>A task that represents the asynchronous processing operation.</returns>
+    Task ProcessMessageAsync(IMeshMessage message, CancellationToken cancellationToken);
 }

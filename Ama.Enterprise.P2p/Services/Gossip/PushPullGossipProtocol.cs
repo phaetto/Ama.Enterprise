@@ -29,7 +29,7 @@ public sealed class PushPullGossipProtocol : IP2pProtocol, IDisposable
     private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
     private readonly ILogger<PushPullGossipProtocol> logger;
 
-    private readonly ConcurrentDictionary<string, MeshState> activeMeshes = new();
+    private readonly ConcurrentDictionary<string, ProtocolState> activeMeshes = new();
 
     private readonly Meter meter;
     private readonly Counter<long> messagesSentCounter;
@@ -117,19 +117,15 @@ public sealed class PushPullGossipProtocol : IP2pProtocol, IDisposable
             var nodeOptions = nodeOptionsMonitor.Get(meshId);
             logger.LogInformation("[{MeshId}] Starting Push-Pull Gossip Protocol for node {NodeId}...", meshId, nodeOptions.LocalPeerId);
 
-            var state = new MeshState(
+            var state = new ProtocolState(
                 serviceProvider.GetRequiredKeyedService<ITransportRouter>(meshId),
-                serviceProvider.GetRequiredKeyedService<IInboundMessageQueue<GossipMessage>>(meshId),
                 serviceProvider.GetRequiredKeyedService<IPeerSelector>(meshId),
                 serviceProvider.GetRequiredKeyedService<IApplicationPayloadDispatcher>(meshId),
-                serviceProvider.GetRequiredKeyedService<IFailureDetector>(meshId),
                 serviceProvider.GetRequiredService<IPeerRegistry>()
             );
 
             state.LoopCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            state.InboundLoopTask = Task.Run(() => ProcessInboundQueueAsync(meshId, state, state.LoopCts.Token), state.LoopCts.Token);
             state.BackgroundLoopTask = Task.Run(() => GossipLoopAsync(meshId, state, state.LoopCts.Token), state.LoopCts.Token);
-            state.HealthCheckLoopTask = Task.Run(() => HealthCheckLoopAsync(meshId, state, state.LoopCts.Token), state.LoopCts.Token);
             state.PushPullLoopTask = Task.Run(() => PushPullLoopAsync(meshId, state, state.LoopCts.Token), state.LoopCts.Token);
 
             activeMeshes.TryAdd(meshId, state);
@@ -159,29 +155,11 @@ public sealed class PushPullGossipProtocol : IP2pProtocol, IDisposable
                         await state.LoopCts.CancelAsync().ConfigureAwait(false);
                     }
 
-                    if (state.InboundLoopTask is not null)
-                    {
-                        try
-                        {
-                            await state.InboundLoopTask.ConfigureAwait(false);
-                        }
-                        catch (OperationCanceledException) { }
-                    }
-
                     if (state.BackgroundLoopTask is not null)
                     {
                         try
                         {
                             await state.BackgroundLoopTask.ConfigureAwait(false);
-                        }
-                        catch (OperationCanceledException) { }
-                    }
-
-                    if (state.HealthCheckLoopTask is not null)
-                    {
-                        try
-                        {
-                            await state.HealthCheckLoopTask.ConfigureAwait(false);
                         }
                         catch (OperationCanceledException) { }
                     }
@@ -248,14 +226,57 @@ public sealed class PushPullGossipProtocol : IP2pProtocol, IDisposable
 
             logger.LogDebug("[{MeshId}] Wrapping payload and broadcasting newly mapped envelope {MessageId} locally from {NodeId}.", meshId, message.MessageId, nodeOptions.LocalPeerId);
 
-            state.SeenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow);
-            state.MessageCache.TryAdd(message.MessageId, message);
+            state.MessageCache.TryAdd(message.MessageId, (message, DateTimeOffset.UtcNow));
             state.MessageQueue.Enqueue(message);
 
             dispatchTasks.Add(state.Dispatcher.DispatchAsync(message.MeshId, message.SenderId, message.Payload, cancellationToken));
         }
 
         return Task.WhenAll(dispatchTasks);
+    }
+
+    /// <inheritdoc />
+    public async Task ProcessMessageAsync(IMeshMessage message, CancellationToken cancellationToken)
+    {
+        if (activeMeshes.TryGetValue(message.MeshId, out var state) && message is GossipMessage gossipMsg)
+        {
+            var tags = new KeyValuePair<string, object?>[] { new("mesh_id", gossipMsg.MeshId), new("message_type", gossipMsg.MessageType.ToString()) };
+            messagesReceivedCounter.Add(1, tags);
+
+            if (gossipMsg.MessageType == GossipMessageType.Digest)
+            {
+                await HandleDigestAsync(gossipMsg.MeshId, state, gossipMsg).ConfigureAwait(false);
+                return;
+            }
+
+            if (gossipMsg.MessageType == GossipMessageType.PullRequest)
+            {
+                await HandlePullRequestAsync(gossipMsg.MeshId, state, gossipMsg).ConfigureAwait(false);
+                return;
+            }
+
+            logger.LogDebug("[{MeshId}] Analyzing mapped P2P algorithm payload {MessageId} from {SenderId}. TTL: {Ttl}", gossipMsg.MeshId, gossipMsg.MessageId, gossipMsg.SenderId.Value, gossipMsg.TimeToLive);
+
+            state.MessageCache.TryAdd(gossipMsg.MessageId, (gossipMsg, DateTimeOffset.UtcNow));
+
+            try
+            {
+                if (state.LoopCts is not null)
+                {
+                    await state.Dispatcher.DispatchAsync(gossipMsg.MeshId, gossipMsg.SenderId, gossipMsg.Payload, state.LoopCts.Token).ConfigureAwait(false);
+                }
+
+                if (gossipMsg.TimeToLive > 1)
+                {
+                    var forwardedMessage = gossipMsg with { TimeToLive = gossipMsg.TimeToLive - 1 };
+                    state.MessageQueue.Enqueue(forwardedMessage);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "[{MeshId}] Error pushing generic unwrapped payload into localized domain {MessageId}.", gossipMsg.MeshId, gossipMsg.MessageId);
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -270,23 +291,7 @@ public sealed class PushPullGossipProtocol : IP2pProtocol, IDisposable
         meter.Dispose();
     }
 
-    private async Task ProcessInboundQueueAsync(string meshId, MeshState state, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await foreach (var message in state.InboundQueue.ReadAllAsync(cancellationToken).ConfigureAwait(false))
-            {
-                await HandleIncomingMessageAsync(meshId, state, message).ConfigureAwait(false);
-            }
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "[{MeshId}] An error occurred while processing the inbound algorithm message queue.", meshId);
-        }
-    }
-
-    private async Task GossipLoopAsync(string meshId, MeshState state, CancellationToken cancellationToken)
+    private async Task GossipLoopAsync(string meshId, ProtocolState state, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -297,7 +302,7 @@ public sealed class PushPullGossipProtocol : IP2pProtocol, IDisposable
 
                 await PerformGossipTickAsync(meshId, state, cancellationToken).ConfigureAwait(false);
                 
-                CleanupSeenMessages(state);
+                CleanupMessageCache(state);
             }
             catch (OperationCanceledException)
             {
@@ -310,7 +315,7 @@ public sealed class PushPullGossipProtocol : IP2pProtocol, IDisposable
         }
     }
 
-    private async Task PushPullLoopAsync(string meshId, MeshState state, CancellationToken cancellationToken)
+    private async Task PushPullLoopAsync(string meshId, ProtocolState state, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -338,47 +343,7 @@ public sealed class PushPullGossipProtocol : IP2pProtocol, IDisposable
         }
     }
 
-    private async Task HealthCheckLoopAsync(string meshId, MeshState state, CancellationToken cancellationToken)
-    {
-        var checkInterval = TimeSpan.FromSeconds(5);
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            try
-            {
-                await Task.Delay(checkInterval, cancellationToken).ConfigureAwait(false);
-                
-                var peers = await state.PeerRegistry.GetAllPeersAsync(meshId, cancellationToken).ConfigureAwait(false);
-                foreach (var peer in peers)
-                {
-                    var health = await state.FailureDetector.EvaluatePeerHealthAsync(peer.Id, cancellationToken).ConfigureAwait(false);
-                    
-                    if (health == PeerStatus.Dead)
-                    {
-                        logger.LogInformation("[{MeshId}] Peer {PeerId} marked as Dead by failure detector. Removing from registry.", meshId, peer.Id.Value);
-                        await state.PeerRegistry.RemovePeerAsync(meshId, peer.Id, cancellationToken).ConfigureAwait(false);
-                    }
-                    else if (health == PeerStatus.Suspect)
-                    {
-                        await state.PeerRegistry.AddOrUpdatePeerAsync(meshId, peer, PeerStatus.Suspect, cancellationToken).ConfigureAwait(false);
-                    }
-                    else 
-                    {
-                        await state.PeerRegistry.AddOrUpdatePeerAsync(meshId, peer, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
-                    }
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "[{MeshId}] An error occurred during the algorithm health check tick.", meshId);
-            }
-        }
-    }
-
-    private async Task PerformGossipTickAsync(string meshId, MeshState state, CancellationToken cancellationToken)
+    private async Task PerformGossipTickAsync(string meshId, ProtocolState state, CancellationToken cancellationToken)
     {
         if (state.MessageQueue.IsEmpty) return;
 
@@ -421,7 +386,7 @@ public sealed class PushPullGossipProtocol : IP2pProtocol, IDisposable
         await Task.WhenAll(sendTasks).ConfigureAwait(false);
     }
 
-    private async Task PerformPushPullTickAsync(string meshId, MeshState state, CancellationToken cancellationToken)
+    private async Task PerformPushPullTickAsync(string meshId, ProtocolState state, CancellationToken cancellationToken)
     {
         var options = pushPullOptionsMonitor.Get(meshId);
         var peers = (await state.PeerSelector.GetPeersAsync(1, cancellationToken).ConfigureAwait(false)).ToList();
@@ -458,67 +423,14 @@ public sealed class PushPullGossipProtocol : IP2pProtocol, IDisposable
         }
     }
 
-    private async Task HandleIncomingMessageAsync(string meshId, MeshState state, GossipMessage message)
-    {
-        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId), new("message_type", message.MessageType.ToString()) };
-        messagesReceivedCounter.Add(1, tags);
-
-        try
-        {
-            var token = state.LoopCts?.Token ?? default;
-            await state.FailureDetector.RecordHeartbeatAsync(message.SenderId, token).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "[{MeshId}] Failed to record heartbeat for peer {PeerId}.", meshId, message.SenderId.Value);
-        }
-
-        if (message.MessageType == GossipMessageType.Digest)
-        {
-            await HandleDigestAsync(meshId, state, message).ConfigureAwait(false);
-            return;
-        }
-
-        if (message.MessageType == GossipMessageType.PullRequest)
-        {
-            await HandlePullRequestAsync(meshId, state, message).ConfigureAwait(false);
-            return;
-        }
-
-        if (state.SeenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow))
-        {
-            logger.LogDebug("[{MeshId}] Received new payload {MessageId} from {SenderId}. TTL: {Ttl}", meshId, message.MessageId, message.SenderId.Value, message.TimeToLive);
-
-            state.MessageCache.TryAdd(message.MessageId, message);
-
-            try
-            {
-                if (state.LoopCts is not null)
-                {
-                    await state.Dispatcher.DispatchAsync(message.MeshId, message.SenderId, message.Payload, state.LoopCts.Token).ConfigureAwait(false);
-                }
-
-                if (message.TimeToLive > 1)
-                {
-                    var forwardedMessage = message with { TimeToLive = message.TimeToLive - 1 };
-                    state.MessageQueue.Enqueue(forwardedMessage);
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "[{MeshId}] Error pushing generic unwrapped payload into localized domain {MessageId}.", meshId, message.MessageId);
-            }
-        }
-    }
-
-    private async Task HandleDigestAsync(string meshId, MeshState state, GossipMessage message)
+    private async Task HandleDigestAsync(string meshId, ProtocolState state, GossipMessage message)
     {
         if (message.DigestIds is null || message.DigestIds.Length == 0) return;
 
         var missingIds = new List<Guid>();
         foreach (var id in message.DigestIds)
         {
-            if (!state.SeenMessages.ContainsKey(id))
+            if (!state.MessageCache.ContainsKey(id))
             {
                 missingIds.Add(id);
             }
@@ -557,7 +469,7 @@ public sealed class PushPullGossipProtocol : IP2pProtocol, IDisposable
         }
     }
 
-    private async Task HandlePullRequestAsync(string meshId, MeshState state, GossipMessage message)
+    private async Task HandlePullRequestAsync(string meshId, ProtocolState state, GossipMessage message)
     {
         if (message.DigestIds is null || message.DigestIds.Length == 0) return;
 
@@ -575,62 +487,58 @@ public sealed class PushPullGossipProtocol : IP2pProtocol, IDisposable
 
         foreach (var requestedId in message.DigestIds)
         {
-            if (state.MessageCache.TryGetValue(requestedId, out var cachedMessage))
+            if (state.MessageCache.TryGetValue(requestedId, out var cached))
             {
                 try
                 {
-                    logger.LogDebug("[{MeshId}] Fulfilling PullRequest by sending payload {MessageId} directly to {PeerId}.", meshId, cachedMessage.MessageId, message.SenderId.Value);
+                    logger.LogDebug("[{MeshId}] Fulfilling PullRequest by sending payload {MessageId} directly to {PeerId}.", meshId, cached.Message.MessageId, message.SenderId.Value);
                     
-                    var directMessage = cachedMessage with { TimeToLive = 1 };
+                    var directMessage = cached.Message with { TimeToLive = 1 };
                     directFulfillmentsCounter.Add(1, tags);
                     
                     await state.TransportRouter.SendAsync(peer.Endpoint, directMessage, CancellationToken.None).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
-                    logger.LogWarning(ex, "[{MeshId}] Failed to fulfill pull request for message {MessageId} to peer {PeerId}.", meshId, cachedMessage.MessageId, message.SenderId.Value);
+                    logger.LogWarning(ex, "[{MeshId}] Failed to fulfill pull request for message {MessageId} to peer {PeerId}.", meshId, cached.Message.MessageId, message.SenderId.Value);
                 }
             }
         }
     }
 
-    private void CleanupSeenMessages(MeshState state)
+    private void CleanupMessageCache(ProtocolState state)
     {
         var threshold = DateTimeOffset.UtcNow.AddMinutes(-5);
-        foreach (var kvp in state.SeenMessages)
+        foreach (var kvp in state.MessageCache)
         {
-            if (kvp.Value < threshold)
+            if (kvp.Value.ReceivedAt < threshold)
             {
-                state.SeenMessages.TryRemove(kvp.Key, out _);
                 state.MessageCache.TryRemove(kvp.Key, out _);
             }
         }
     }
 
-    private sealed class MeshState(
-        ITransportRouter transportRouter,
-        IInboundMessageQueue<GossipMessage> inboundQueue,
-        IPeerSelector peerSelector,
-        IApplicationPayloadDispatcher dispatcher,
-        IFailureDetector failureDetector,
-        IPeerRegistry peerRegistry) : IDisposable
+    private sealed class ProtocolState : IDisposable
     {
-        public ITransportRouter TransportRouter { get; } = transportRouter;
-        public IInboundMessageQueue<GossipMessage> InboundQueue { get; } = inboundQueue;
-        public IPeerSelector PeerSelector { get; } = peerSelector;
-        public IApplicationPayloadDispatcher Dispatcher { get; } = dispatcher;
-        public IFailureDetector FailureDetector { get; } = failureDetector;
-        public IPeerRegistry PeerRegistry { get; } = peerRegistry;
+        public ITransportRouter TransportRouter { get; }
+        public IPeerSelector PeerSelector { get; }
+        public IApplicationPayloadDispatcher Dispatcher { get; }
+        public IPeerRegistry PeerRegistry { get; }
 
-        public ConcurrentDictionary<Guid, DateTimeOffset> SeenMessages { get; } = new();
-        public ConcurrentDictionary<Guid, GossipMessage> MessageCache { get; } = new();
+        public ConcurrentDictionary<Guid, (GossipMessage Message, DateTimeOffset ReceivedAt)> MessageCache { get; } = new();
         public ConcurrentQueue<GossipMessage> MessageQueue { get; } = new();
 
         public CancellationTokenSource? LoopCts { get; set; }
         public Task? BackgroundLoopTask { get; set; }
-        public Task? InboundLoopTask { get; set; }
-        public Task? HealthCheckLoopTask { get; set; }
         public Task? PushPullLoopTask { get; set; }
+
+        public ProtocolState(ITransportRouter transportRouter, IPeerSelector peerSelector, IApplicationPayloadDispatcher dispatcher, IPeerRegistry peerRegistry)
+        {
+            TransportRouter = transportRouter;
+            PeerSelector = peerSelector;
+            Dispatcher = dispatcher;
+            PeerRegistry = peerRegistry;
+        }
 
         public void Dispose()
         {

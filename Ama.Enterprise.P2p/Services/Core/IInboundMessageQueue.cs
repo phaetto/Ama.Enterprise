@@ -3,12 +3,13 @@ namespace Ama.Enterprise.P2p.Services.Core;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
 /// Defines an internal queue for decoupling inbound network listeners from the protocol logic.
 /// </summary>
 /// <typeparam name="TMessage">The type of the message being queued.</typeparam>
-public interface IInboundMessageQueue<TMessage>
+public interface IInboundMessageQueue<TMessage> where TMessage : IMeshMessage
 {
     /// <summary>
     /// Writes a message to the internal queue.

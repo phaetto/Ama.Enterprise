@@ -66,8 +66,8 @@ public static class ServiceCollectionExtensions
 
         services.TryAddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
 
-        services.AddKeyedSingleton<IInboundMessageQueue<GossipMessage>>(meshId, (sp, key) =>
-            new InboundMessageQueue<GossipMessage>());
+        services.AddKeyedSingleton<IInboundMessageQueue<IMeshMessage>>(meshId, (sp, key) =>
+            new InboundMessageQueue<IMeshMessage>());
 
         services.AddKeyedSingleton<IPeerAuthenticator>(meshId, (sp, key) =>
             new PassThroughPeerAuthenticator(
