@@ -1,7 +1,6 @@
 namespace Ama.Enterprise.P2p.Telemetry.Extensions;
 
 using System;
-using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.Telemetry.Models;
 using Ama.Enterprise.P2p.Telemetry.Services;
 using Microsoft.Extensions.DependencyInjection;

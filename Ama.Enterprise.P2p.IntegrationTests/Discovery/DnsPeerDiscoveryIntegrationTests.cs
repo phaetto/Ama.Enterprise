@@ -15,7 +15,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using Shouldly;
-using Xunit;
 
 /// <summary>
 /// Integration tests validating DNS peer discovery effectively resolving remote records and orchestrating active network handshakes.

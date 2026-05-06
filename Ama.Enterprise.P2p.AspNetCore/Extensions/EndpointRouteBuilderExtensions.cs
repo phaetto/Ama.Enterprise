@@ -1,6 +1,5 @@
 namespace Ama.Enterprise.P2p.AspNetCore.Extensions;
 
-using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Http.Core.Models;
 using Ama.Enterprise.P2p.Http.Core.Services;
 using Microsoft.AspNetCore.Builder;

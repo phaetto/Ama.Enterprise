@@ -16,7 +16,6 @@ using Ama.CRDT.Services.Journaling;
 using Ama.CRDT.Services.Serialization;
 using Ama.CRDT.Services.Versioning;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
-using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.UnitTests.Attributes;
