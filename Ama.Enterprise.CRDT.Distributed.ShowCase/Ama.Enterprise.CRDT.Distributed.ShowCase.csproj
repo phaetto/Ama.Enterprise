@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Ama.Enterprise.CRDT.Distributed\Ama.Enterprise.CRDT.Distributed.csproj" />
+    <ProjectReference Include="..\Ama.Enterprise.P2p.Telemetry\Ama.Enterprise.P2p.Telemetry.csproj" />
   </ItemGroup>
 
 </Project>

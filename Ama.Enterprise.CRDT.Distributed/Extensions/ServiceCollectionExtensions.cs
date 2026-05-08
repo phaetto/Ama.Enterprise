@@ -122,28 +122,47 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Registers a generic distributed CRDT storage mechanism acting as the primary store.
     /// </summary>
-    public static IServiceCollection AddDistributedCrdtStorage<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TStorage>(this IServiceCollection services) 
-        where TStorage : class, IDistributedCrdtStorage
-    {
-        return services.AddDistributedCrdtStorage<TStorage>("primary");
-    }
-
-    /// <summary>
-    /// Registers a generic distributed CRDT storage mechanism mapped strictly to a specific dynamic document alias.
-    /// </summary>
-    public static IServiceCollection AddDistributedCrdtStorage<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TStorage>(this IServiceCollection services, string storageKey) 
+    public static IServiceCollection AddPrimaryDistributedCrdtStorage<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TStorage>(this IServiceCollection services) 
         where TStorage : class, IDistributedCrdtStorage
     {
         if (services == null) throw new ArgumentNullException(nameof(services));
-        if (string.IsNullOrWhiteSpace(storageKey)) throw new ArgumentException("Storage key cannot be null or empty.", nameof(storageKey));
+        
+        services.RemoveAllKeyed(typeof(IDistributedCrdtStorage), "primary");
+        services.AddKeyedSingleton<IDistributedCrdtStorage, TStorage>("primary");
+        
+        return services;
+    }
 
-        services.RemoveAllKeyed(typeof(IDistributedCrdtStorage), storageKey);
-        services.AddKeyedSingleton<IDistributedCrdtStorage, TStorage>(storageKey);
+    /// <summary>
+    /// Registers a generic distributed CRDT storage mechanism mapped strictly to a specific dynamic document alias natively explicitly.
+    /// </summary>
+    public static IServiceCollection AddDistributedCrdtStorageForType<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TStorage>(this IServiceCollection services, string typeAlias) 
+        where TStorage : class, IDistributedCrdtStorage
+    {
+        if (services == null) throw new ArgumentNullException(nameof(services));
+        if (string.IsNullOrWhiteSpace(typeAlias)) throw new ArgumentException("Type alias cannot be null or empty.", nameof(typeAlias));
 
-        if (storageKey != "primary")
-        {
-            services.AddSingleton(new CrdtStorageRegistration(storageKey));
-        }
+        var key = $"type:{typeAlias}";
+        services.RemoveAllKeyed(typeof(IDistributedCrdtStorage), key);
+        services.AddKeyedSingleton<IDistributedCrdtStorage, TStorage>(key);
+        services.AddSingleton(new CrdtStorageRegistration(key, typeAlias, CrdtStorageRoutingType.DocumentType));
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers a generic distributed CRDT storage mechanism mapped strictly to a specific explicit active document identity dynamically.
+    /// </summary>
+    public static IServiceCollection AddDistributedCrdtStorageForDocument<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TStorage>(this IServiceCollection services, string documentId) 
+        where TStorage : class, IDistributedCrdtStorage
+    {
+        if (services == null) throw new ArgumentNullException(nameof(services));
+        if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
+
+        var key = $"doc:{documentId}";
+        services.RemoveAllKeyed(typeof(IDistributedCrdtStorage), key);
+        services.AddKeyedSingleton<IDistributedCrdtStorage, TStorage>(key);
+        services.AddSingleton(new CrdtStorageRegistration(key, documentId, CrdtStorageRoutingType.DocumentId));
 
         return services;
     }

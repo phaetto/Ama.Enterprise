@@ -12,6 +12,7 @@ using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 using Ama.Enterprise.CRDT.Distributed.ShowCase.Services;
 using Ama.Enterprise.P2p.Extensions;
+using Ama.Enterprise.P2p.Telemetry.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -23,6 +24,7 @@ public static class Program
 {
     private static readonly object ConsoleLock = new();
     private static int currentPort;
+    private static int currentAdminPort;
 
     public static async Task Main(string[] args)
     {
@@ -32,6 +34,8 @@ public static class Program
         }
 
         var currentHandshakePort = GetNextAvailablePort(8037);
+        var currentAdminHandshakePort = GetNextAvailablePort(currentHandshakePort + 1);
+        currentAdminPort = GetNextAvailablePort(currentPort + 1);
         var replicaId = $"node-{currentPort}";
         var services = new ServiceCollection();
 
@@ -43,10 +47,6 @@ public static class Program
             builder.ClearProviders();
             builder.AddProvider(new LockedConsoleLoggerProvider());
         });
-
-        // Register Showcase file-based unified CRDT storage explicitly overriding memory fallbacks as the primary target
-        services.AddDistributedCrdtStorage<ShowCaseCrdtStorage>();
-
         // Add core CRDT distributed services and resolve the orchestrator
         services.AddDistributedCrdtCore(options =>
         {
@@ -69,6 +69,12 @@ public static class Program
 
         services.AddDistributedDocumentType<FleetState>("fleet-list");
         services.AddDistributedCrdtService<IFleetManager, FleetManager>();
+
+        // Register Showcase file-based CRDT storage overriding memory fallbacks as the primary target decoupled explicitly mapped bounds
+        services.AddDistributedCrdtStorageForType<ShowCaseCrdtStorage>("task-list");
+        services.AddDistributedCrdtStorageForType<ShowCaseCrdtStorage>("fleet-list");
+        // TODO: find more elegant way to do this, this is internal
+        services.AddDistributedCrdtStorageForDocument<ShowCaseCrdtStorage>("system-document-registry");
 
         // Register the background multi-document orchestration and route inbound intents from the network
         services.AddDistributedCrdtP2p("internal");
@@ -95,6 +101,33 @@ public static class Program
             .AddUdpPeerHandshake(options =>
             {
                 options.ListenPort = currentHandshakePort;
+            })
+            .ConfigureFailureDetector(options =>
+            {
+                options.HeartbeatInterval = TimeSpan.FromSeconds(5);
+            });
+
+        services
+            .AddP2pTelemetryForwarder(options =>
+            {
+                options.TargetMeshId = "admin";
+            })
+            .AddP2pMesh("admin")
+            .AddHttpTransport(options =>
+            {
+                options.ListenPort = currentAdminPort;
+                options.ListenHost = "localhost";
+            })
+            .AddUdpPeerDiscovery(options =>
+            {
+                options.MulticastAddress = "239.255.0.3";
+                options.MulticastPort = 8036;
+                options.DiscoveryInterval = TimeSpan.FromSeconds(1);
+                options.DiscoveryTimeout = TimeSpan.FromSeconds(1);
+            })
+            .AddUdpPeerHandshake(options =>
+            {
+                options.ListenPort = currentAdminHandshakePort;
             })
             .ConfigureFailureDetector(options =>
             {

@@ -11,14 +11,15 @@ using Ama.Enterprise.CRDT.Distributed.Models;
 using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
-/// Composite router securely mapping multi-document P2P persistence architectures explicitly isolating distinct underlying database backends natively seamlessly effectively.
+/// Composite router securely mapping multi-document P2P persistence architectures explicitly isolating distinct underlying database backends dynamically.
 /// </summary>
 public sealed class CompositeCrdtStorage : IDistributedCrdtStorage
 {
     private readonly IServiceProvider serviceProvider;
     private readonly IDistributedCrdtStorage primaryStorage;
     private readonly List<IDistributedCrdtStorage> allStorages;
-    private readonly Dictionary<string, IDistributedCrdtStorage> storagesByKey = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IDistributedCrdtStorage> storagesByDocumentType = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IDistributedCrdtStorage> storagesByDocumentId = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IDistributedCrdtStorage> documentRoutes = new(StringComparer.Ordinal);
     private readonly object syncRoot = new();
 
@@ -29,7 +30,7 @@ public sealed class CompositeCrdtStorage : IDistributedCrdtStorage
         primaryStorage = serviceProvider.GetKeyedService<IDistributedCrdtStorage>("primary") 
             ?? throw new InvalidOperationException("No primary keyed CRDT storage is registered. A fallback primary architecture must structurally exist.");
             
-        storagesByKey["primary"] = primaryStorage;
+        var uniqueStorages = new HashSet<IDistributedCrdtStorage> { primaryStorage };
         
         if (registrations != null)
         {
@@ -38,12 +39,20 @@ public sealed class CompositeCrdtStorage : IDistributedCrdtStorage
                 var storage = serviceProvider.GetKeyedService<IDistributedCrdtStorage>(reg.Key);
                 if (storage != null)
                 {
-                    storagesByKey[reg.Key] = storage;
+                    if (reg.RoutingType == CrdtStorageRoutingType.DocumentType)
+                    {
+                        storagesByDocumentType[reg.TargetValue] = storage;
+                    }
+                    else if (reg.RoutingType == CrdtStorageRoutingType.DocumentId)
+                    {
+                        storagesByDocumentId[reg.TargetValue] = storage;
+                    }
+                    uniqueStorages.Add(storage);
                 }
             }
         }
         
-        allStorages = storagesByKey.Values.Distinct().ToList();
+        allStorages = uniqueStorages.ToList();
     }
 
     private IDistributedCrdtStorage GetStorage(string documentId)
@@ -58,13 +67,20 @@ public sealed class CompositeCrdtStorage : IDistributedCrdtStorage
 
         var selectedStorage = primaryStorage;
         
-        var orchestrator = serviceProvider.GetService<ICrdtDocumentOrchestrator>();
-        if (orchestrator?.Registry?.Document.Data?.Documents != null && 
-            orchestrator.Registry.Document.Data.Documents.TryGetValue(documentId, out var entry))
+        if (storagesByDocumentId.TryGetValue(documentId, out var documentStorage))
         {
-            if (storagesByKey.TryGetValue(entry.TypeAlias, out var keyedStorage))
+            selectedStorage = documentStorage;
+        }
+        else
+        {
+            var orchestrator = serviceProvider.GetService<ICrdtDocumentOrchestrator>();
+            if (orchestrator?.Registry?.Document.Data?.Documents != null && 
+                orchestrator.Registry.Document.Data.Documents.TryGetValue(documentId, out var entry))
             {
-                selectedStorage = keyedStorage;
+                if (storagesByDocumentType.TryGetValue(entry.TypeAlias, out var typeStorage))
+                {
+                    selectedStorage = typeStorage;
+                }
             }
         }
 

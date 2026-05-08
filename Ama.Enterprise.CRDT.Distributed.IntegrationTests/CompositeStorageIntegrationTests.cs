@@ -35,7 +35,7 @@ public sealed class CompositeStorageIntegrationTests
         public string Id { get; set; } = "default";
     }
 
-    private readonly record struct TestNodeContext(IServiceProvider Provider, Mock<IDistributedCrdtStorage> PrimaryMock, Mock<IDistributedCrdtStorage> SpecificMock);
+    private readonly record struct TestNodeContext(IServiceProvider Provider, Mock<IDistributedCrdtStorage> PrimaryMock, Mock<IDistributedCrdtStorage> SpecificTypeMock, Mock<IDistributedCrdtStorage> SpecificDocMock);
 
     private static async IAsyncEnumerable<JournaledOperation> GetEmptyJournaledOperationsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
@@ -45,22 +45,29 @@ public sealed class CompositeStorageIntegrationTests
     private TestNodeContext BuildTestNode()
     {
         var primaryMock = new Mock<IDistributedCrdtStorage>();
-        var specificMock = new Mock<IDistributedCrdtStorage>();
+        var specificTypeMock = new Mock<IDistributedCrdtStorage>();
+        var specificDocMock = new Mock<IDistributedCrdtStorage>();
 
         // Setup default mocks for IAsyncEnumerable returning methods to prevent NullReferenceExceptions during await foreach
         primaryMock.Setup(x => x.GetAllJournaledOperationsAsync(It.IsAny<CancellationToken>()))
                    .Returns(GetEmptyJournaledOperationsAsync());
-        specificMock.Setup(x => x.GetAllJournaledOperationsAsync(It.IsAny<CancellationToken>()))
+        specificTypeMock.Setup(x => x.GetAllJournaledOperationsAsync(It.IsAny<CancellationToken>()))
+                    .Returns(GetEmptyJournaledOperationsAsync());
+        specificDocMock.Setup(x => x.GetAllJournaledOperationsAsync(It.IsAny<CancellationToken>()))
                     .Returns(GetEmptyJournaledOperationsAsync());
 
         primaryMock.Setup(x => x.GetOperationsByRangeAsync(It.IsAny<string>(), It.IsAny<long>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
                    .Returns(GetEmptyJournaledOperationsAsync());
-        specificMock.Setup(x => x.GetOperationsByRangeAsync(It.IsAny<string>(), It.IsAny<long>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
+        specificTypeMock.Setup(x => x.GetOperationsByRangeAsync(It.IsAny<string>(), It.IsAny<long>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
+                    .Returns(GetEmptyJournaledOperationsAsync());
+        specificDocMock.Setup(x => x.GetOperationsByRangeAsync(It.IsAny<string>(), It.IsAny<long>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
                     .Returns(GetEmptyJournaledOperationsAsync());
 
         primaryMock.Setup(x => x.GetOperationsByDotsAsync(It.IsAny<string>(), It.IsAny<IEnumerable<long>>(), It.IsAny<CancellationToken>()))
                    .Returns(GetEmptyJournaledOperationsAsync());
-        specificMock.Setup(x => x.GetOperationsByDotsAsync(It.IsAny<string>(), It.IsAny<IEnumerable<long>>(), It.IsAny<CancellationToken>()))
+        specificTypeMock.Setup(x => x.GetOperationsByDotsAsync(It.IsAny<string>(), It.IsAny<IEnumerable<long>>(), It.IsAny<CancellationToken>()))
+                    .Returns(GetEmptyJournaledOperationsAsync());
+        specificDocMock.Setup(x => x.GetOperationsByDotsAsync(It.IsAny<string>(), It.IsAny<IEnumerable<long>>(), It.IsAny<CancellationToken>()))
                     .Returns(GetEmptyJournaledOperationsAsync());
 
         var services = new ServiceCollection();
@@ -68,8 +75,12 @@ public sealed class CompositeStorageIntegrationTests
 
         // Register explicit mocks prior to AddDistributedCrdtCore so TryAddKeyedSingleton does not bypass them
         services.AddKeyedSingleton("primary", primaryMock.Object);
-        services.AddKeyedSingleton("special-type", specificMock.Object);
-        services.AddSingleton(new CrdtStorageRegistration("special-type"));
+        
+        services.AddKeyedSingleton("type:special-type", specificTypeMock.Object);
+        services.AddSingleton(new CrdtStorageRegistration("type:special-type", "special-type", CrdtStorageRoutingType.DocumentType));
+
+        services.AddKeyedSingleton("doc:specific-doc-id", specificDocMock.Object);
+        services.AddSingleton(new CrdtStorageRegistration("doc:specific-doc-id", "specific-doc-id", CrdtStorageRoutingType.DocumentId));
 
         services.AddDistributedCrdtCore(opt =>
         {
@@ -83,14 +94,14 @@ public sealed class CompositeStorageIntegrationTests
         services.AddDistributedDocumentType<TestState>("special-type");
         services.AddDistributedDocumentType<TestState>("unknown-type");
 
-        return new TestNodeContext(services.BuildServiceProvider(), primaryMock, specificMock);
+        return new TestNodeContext(services.BuildServiceProvider(), primaryMock, specificTypeMock, specificDocMock);
     }
 
     [IntegrationFact]
-    public async Task CompositeStorage_ShouldRouteToSpecificStorage_WhenAliasMatchesCorrectly()
+    public async Task CompositeStorage_ShouldRouteToSpecificTypeStorage_WhenAliasMatchesCorrectly()
     {
         // Arrange
-        var (provider, primaryMock, specificMock) = BuildTestNode();
+        var (provider, primaryMock, specificTypeMock, specificDocMock) = BuildTestNode();
         
         var scopeProvider = provider.GetRequiredService<DistributedCrdtScopeProvider>();
         var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
@@ -99,26 +110,54 @@ public sealed class CompositeStorageIntegrationTests
         await orchestrator.InitializeAsync(CancellationToken.None);
 
         // Act
-        await orchestrator.CreateDocumentAsync("doc-specific", "special-type", CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("doc-normal", "special-type", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
-        var dummyDoc = new CrdtDocument<TestState>(new TestState { Id = "doc-specific" }, new CrdtMetadata());
-        await compositeStorage.SaveDocumentAsync("doc-specific", dummyDoc, CancellationToken.None);
-        await compositeStorage.DeleteDocumentAsync("doc-specific", CancellationToken.None);
+        var dummyDoc = new CrdtDocument<TestState>(new TestState { Id = "doc-normal" }, new CrdtMetadata());
+        await compositeStorage.SaveDocumentAsync("doc-normal", dummyDoc, CancellationToken.None);
+        await compositeStorage.DeleteDocumentAsync("doc-normal", CancellationToken.None);
 
         // Assert
-        specificMock.Verify(x => x.SaveDocumentAsync("doc-specific", It.IsAny<CrdtDocument<TestState>>(), It.IsAny<CancellationToken>()), Times.Once);
-        specificMock.Verify(x => x.DeleteDocumentAsync("doc-specific", It.IsAny<CancellationToken>()), Times.Once);
+        specificTypeMock.Verify(x => x.SaveDocumentAsync("doc-normal", It.IsAny<CrdtDocument<TestState>>(), It.IsAny<CancellationToken>()), Times.Once);
+        specificTypeMock.Verify(x => x.DeleteDocumentAsync("doc-normal", It.IsAny<CancellationToken>()), Times.Once);
 
         primaryMock.Verify(x => x.SaveDocumentAsync(It.IsAny<string>(), It.IsAny<CrdtDocument<TestState>>(), It.IsAny<CancellationToken>()), Times.Never);
-        primaryMock.Verify(x => x.DeleteDocumentAsync("doc-specific", It.IsAny<CancellationToken>()), Times.Never);
+        specificDocMock.Verify(x => x.SaveDocumentAsync(It.IsAny<string>(), It.IsAny<CrdtDocument<TestState>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [IntegrationFact]
-    public async Task CompositeStorage_ShouldRouteToPrimaryStorage_WhenAliasIsNotMapped()
+    public async Task CompositeStorage_ShouldRouteToSpecificDocumentStorage_WhenIdMatchesCorrectly()
     {
         // Arrange
-        var (provider, primaryMock, specificMock) = BuildTestNode();
+        var (provider, primaryMock, specificTypeMock, specificDocMock) = BuildTestNode();
+        
+        var scopeProvider = provider.GetRequiredService<DistributedCrdtScopeProvider>();
+        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var compositeStorage = provider.GetRequiredService<IDistributedCrdtStorage>();
+
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        // Act
+        await orchestrator.CreateDocumentAsync("specific-doc-id", "unknown-type", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
+        var dummyDoc = new CrdtDocument<TestState>(new TestState { Id = "specific-doc-id" }, new CrdtMetadata());
+        await compositeStorage.SaveDocumentAsync("specific-doc-id", dummyDoc, CancellationToken.None);
+        await compositeStorage.DeleteDocumentAsync("specific-doc-id", CancellationToken.None);
+
+        // Assert
+        specificDocMock.Verify(x => x.SaveDocumentAsync("specific-doc-id", It.IsAny<CrdtDocument<TestState>>(), It.IsAny<CancellationToken>()), Times.Once);
+        specificDocMock.Verify(x => x.DeleteDocumentAsync("specific-doc-id", It.IsAny<CancellationToken>()), Times.Once);
+
+        primaryMock.Verify(x => x.SaveDocumentAsync(It.IsAny<string>(), It.IsAny<CrdtDocument<TestState>>(), It.IsAny<CancellationToken>()), Times.Never);
+        specificTypeMock.Verify(x => x.SaveDocumentAsync(It.IsAny<string>(), It.IsAny<CrdtDocument<TestState>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [IntegrationFact]
+    public async Task CompositeStorage_ShouldRouteToPrimaryStorage_WhenNoMappingIsFound()
+    {
+        // Arrange
+        var (provider, primaryMock, specificTypeMock, specificDocMock) = BuildTestNode();
         
         var scopeProvider = provider.GetRequiredService<DistributedCrdtScopeProvider>();
         var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
@@ -135,14 +174,15 @@ public sealed class CompositeStorageIntegrationTests
 
         // Assert
         primaryMock.Verify(x => x.SaveDocumentAsync("doc-unknown", It.IsAny<CrdtDocument<TestState>>(), It.IsAny<CancellationToken>()), Times.Once);
-        specificMock.Verify(x => x.SaveDocumentAsync(It.IsAny<string>(), It.IsAny<CrdtDocument<TestState>>(), It.IsAny<CancellationToken>()), Times.Never);
+        specificTypeMock.Verify(x => x.SaveDocumentAsync(It.IsAny<string>(), It.IsAny<CrdtDocument<TestState>>(), It.IsAny<CancellationToken>()), Times.Never);
+        specificDocMock.Verify(x => x.SaveDocumentAsync(It.IsAny<string>(), It.IsAny<CrdtDocument<TestState>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [IntegrationFact]
     public async Task CompositeStorage_ShouldBroadcastGlobalOperations_ToAllRegisteredStorages()
     {
         // Arrange
-        var (provider, primaryMock, specificMock) = BuildTestNode();
+        var (provider, primaryMock, specificTypeMock, specificDocMock) = BuildTestNode();
         var compositeStorage = provider.GetRequiredService<IDistributedCrdtStorage>();
 
         var gmvv = new Dictionary<string, long>
@@ -158,9 +198,11 @@ public sealed class CompositeStorageIntegrationTests
 
         // Assert
         primaryMock.Verify(x => x.TrimAsync(gmvv, It.IsAny<CancellationToken>()), Times.Once);
-        specificMock.Verify(x => x.TrimAsync(gmvv, It.IsAny<CancellationToken>()), Times.Once);
+        specificTypeMock.Verify(x => x.TrimAsync(gmvv, It.IsAny<CancellationToken>()), Times.Once);
+        specificDocMock.Verify(x => x.TrimAsync(gmvv, It.IsAny<CancellationToken>()), Times.Once);
         
         primaryMock.Verify(x => x.GetAllJournaledOperationsAsync(It.IsAny<CancellationToken>()), Times.Once);
-        specificMock.Verify(x => x.GetAllJournaledOperationsAsync(It.IsAny<CancellationToken>()), Times.Once);
+        specificTypeMock.Verify(x => x.GetAllJournaledOperationsAsync(It.IsAny<CancellationToken>()), Times.Once);
+        specificDocMock.Verify(x => x.GetAllJournaledOperationsAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 }
