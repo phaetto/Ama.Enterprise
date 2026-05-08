@@ -49,7 +49,7 @@ public static class Program
             builder.AddProvider(new LockedConsoleLoggerProvider());
         });
 
-        // 1. Add Plug-and-Play Feature Flags Product domain abstractions
+        // 1. Add Feature Flags Product domain abstractions
         services.AddFeatureFlags(options =>
         {
             options.Crdt.ReplicaId = replicaId;

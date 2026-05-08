@@ -87,7 +87,7 @@ public static class Program
             })
             .AddUdpPeerDiscovery(options =>
             {
-                options.MulticastAddress = "239.255.0.2"; // Separate multicast channel to avoid feature flags showcase collisions
+                options.MulticastAddress = "239.255.0.2";
                 options.MulticastPort = 8036;
                 options.DiscoveryInterval = TimeSpan.FromSeconds(1);
                 options.DiscoveryTimeout = TimeSpan.FromSeconds(1);

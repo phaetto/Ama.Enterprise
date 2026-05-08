@@ -7,7 +7,7 @@
   <Folder Name="/Apps/">
     <File Path="apps-todo.txt" />
   </Folder>
-  <Folder Name="/EndProducts/">
+  <Folder Name="/Products/">
     <Project Path="Ama.Enterprise.CRDT.Testing/Ama.Enterprise.CRDT.Testing.csproj" Id="e30d8fc4-45a1-447c-bfb3-64761c771cb4" />
     <Project Path="Ama.Enterprise.FeatureFlags.IntegrationTests/Ama.Enterprise.FeatureFlags.IntegrationTests.csproj" Id="da1f1950-e20a-435a-9bbb-63d942458072" />
     <Project Path="Ama.Enterprise.FeatureFlags.UnitTests/Ama.Enterprise.FeatureFlags.UnitTests.csproj" Id="d74539b1-a59f-40bc-81d1-e33de4e85be7" />
@@ -15,11 +15,9 @@
     <Project Path="Ama.Enterprise.P2p.Telemetry.IntegrationTests/Ama.Enterprise.P2p.Telemetry.IntegrationTests.csproj" Id="c24eaa7a-4b42-434d-aa9e-30abf4a4e40f" />
     <Project Path="Ama.Enterprise.P2p.Telemetry/Ama.Enterprise.P2p.Telemetry.csproj" Id="480acf15-c35b-4d39-bed4-420bcdea75b4" />
   </Folder>
-  <Folder Name="/EndProducts/ShowCases/">
-    <Project Path="Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj" />
-  </Folder>
   <Folder Name="/ShowCases/">
     <Project Path="Ama.Enterprise.CRDT.Distributed.ShowCase/Ama.Enterprise.CRDT.Distributed.ShowCase.csproj" Id="9994275b-bff7-448d-8763-3a41999774cb" />
+    <Project Path="Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path=".editorconfig" />

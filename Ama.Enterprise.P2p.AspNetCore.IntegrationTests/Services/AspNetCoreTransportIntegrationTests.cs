@@ -2,6 +2,7 @@ namespace Ama.Enterprise.P2p.AspNetCore.IntegrationTests.Services;
 
 using System;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,7 +15,10 @@ using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Shouldly;
 using Xunit;
@@ -22,6 +26,17 @@ using Xunit;
 public sealed class AspNetCoreTransportIntegrationTests(ITestOutputHelper testOutputHelper)
 {
     private sealed record DummyPeerEndpoint : PeerEndpoint;
+
+    private sealed class TestApplicationPayloadHandler : IApplicationPayloadHandler
+    {
+        public TaskCompletionSource<byte[]> MessageReceived { get; } = new();
+
+        public Task HandlePayloadAsync(string meshId, PeerId senderId, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+        {
+            MessageReceived.TrySetResult(payload.ToArray());
+            return Task.CompletedTask;
+        }
+    }
 
     private static int portCounter = 50000;
     
@@ -79,6 +94,52 @@ public sealed class AspNetCoreTransportIntegrationTests(ITestOutputHelper testOu
 
         await nodeB.Listener.StopListeningAsync(cts.Token);
         testOutputHelper.WriteLine("Test finished.");
+    }
+
+    [IntegrationFact]
+    public async Task AspNetCoreTransport_IntegratedMode_EndToEndMessageExchange_Succeeds()
+    {
+        // Arrange
+        var meshId = "aspnetcore-integ-e2e";
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        
+        var peerAId = new PeerId(Guid.NewGuid());
+        var peerBId = new PeerId(Guid.NewGuid());
+
+        var portA = GetNextPort();
+        var portB = GetNextPort();
+
+        var payloadBytes = System.Text.Encoding.UTF8.GetBytes("Hello Integrated AspNetCore World");
+        var messageToSend = new GossipMessage(meshId, Guid.NewGuid(), peerAId, 10, payloadBytes);
+
+        var handlerB = new TestApplicationPayloadHandler();
+
+        testOutputHelper.WriteLine($"Initializing WebApplications on ports {portA} and {portB}...");
+        await using var appA = CreateIntegratedTransportNode(meshId, peerAId, portA);
+        await using var appB = CreateIntegratedTransportNode(meshId, peerBId, portB, handlerB);
+
+        await appA.StartAsync(cts.Token);
+        await appB.StartAsync(cts.Token);
+
+        // Give web server a moment to bind and listen
+        await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
+
+        var transportA = appA.Services.GetRequiredKeyedService<ITransport>(meshId);
+        var endpointB = new AspNetCorePeerEndpoint("127.0.0.1", portB); 
+        
+        // Act - Send
+        testOutputHelper.WriteLine("Sending message from Transport A...");
+        await transportA.SendAsync(endpointB, messageToSend, cts.Token);
+
+        // Assert
+        testOutputHelper.WriteLine("Awaiting message handle block...");
+        var receivedPayload = await handlerB.MessageReceived.Task.WaitAsync(TimeSpan.FromSeconds(15), cts.Token);
+        
+        var receivedText = System.Text.Encoding.UTF8.GetString(receivedPayload);
+        receivedText.ShouldBe("Hello Integrated AspNetCore World");
+
+        await appA.StopAsync(cts.Token);
+        await appB.StopAsync(cts.Token);
     }
 
     [IntegrationFact]
@@ -236,6 +297,47 @@ public sealed class AspNetCoreTransportIntegrationTests(ITestOutputHelper testOu
             provider.GetRequiredKeyedService<ITransportListener>(meshId),
             provider.GetRequiredService<IPeerRegistry>()
         );
+    }
+
+    private WebApplication CreateIntegratedTransportNode(string meshId, PeerId peerId, int listenPort, IApplicationPayloadHandler? payloadHandler = null)
+    {
+        var builder = WebApplication.CreateBuilder();
+
+        builder.Logging.AddXunit(testOutputHelper);
+        builder.Logging.SetMinimumLevel(LogLevel.Trace);
+
+        builder.Services.AddCrdt();
+        builder.Services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
+
+        builder.Services.Configure<P2pNodeOptions>(meshId, options =>
+        {
+            options.LocalPeerId = peerId.Value;
+        });
+
+        builder.Services.AddP2pMesh(meshId)
+            .AddGossipNetwork()
+            .AddAspNetCoreTransport(options =>
+            {
+                options.HostingMode = AspNetCoreHostingMode.Integrated;
+                options.AdvertisedHost = "127.0.0.1";
+                options.AdvertisedPort = listenPort;
+                options.PathPrefix = "/test/p2p/messages/";
+            });
+
+        if (payloadHandler is not null)
+        {
+            builder.Services.AddKeyedSingleton<IApplicationPayloadHandler>(meshId, payloadHandler);
+        }
+
+        builder.WebHost.ConfigureKestrel(options =>
+        {
+            options.Listen(IPAddress.Parse("127.0.0.1"), listenPort);
+        });
+
+        var app = builder.Build();
+        app.MapP2pMeshEndpoints("/test/p2p/messages");
+
+        return app;
     }
 
     private sealed record AspNetCoreTestNode(

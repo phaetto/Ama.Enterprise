@@ -14,6 +14,8 @@ using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -73,6 +75,54 @@ public sealed class AspNetCorePeerHandshakeIntegrationTests
         aspEndpoint.Port.ShouldBe(portB);
 
         testOutputHelper.WriteLine("Direct handshake completed successfully.");
+    }
+
+    [IntegrationFact]
+    public async Task AspNetCorePeerHandshaker_IntegratedMode_DirectHandshake_Succeeds()
+    {
+        // Arrange
+        var meshId = $"aspnetcore-integ-{Guid.NewGuid():N}";
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        var peerAId = new PeerId(Guid.NewGuid());
+        var peerBId = new PeerId(Guid.NewGuid());
+
+        var portA = GetNextPort();
+        var portB = GetNextPort();
+
+        testOutputHelper.WriteLine("Initializing WebApplications for Integrated ASP.NET Core Handshake...");
+        await using var appA = CreateIntegratedTestNode(meshId, peerAId, portA);
+        await using var appB = CreateIntegratedTestNode(meshId, peerBId, portB);
+
+        // Act
+        testOutputHelper.WriteLine("Starting ASP.NET Core apps...");
+        await appA.StartAsync(cts.Token);
+        await appB.StartAsync(cts.Token);
+
+        // Give web servers a moment to bind and start listening
+        await Task.Delay(TimeSpan.FromMilliseconds(500), cts.Token);
+
+        testOutputHelper.WriteLine($"Node A firing manual HandshakeAsync to Node B...");
+        
+        var handshakerA = appA.Services.GetRequiredKeyedService<IPeerHandshaker>(meshId);
+        
+        var localNodeA = new PeerNode(peerAId, new AspNetCorePeerEndpoint("127.0.0.1", portA));
+        
+        var endpointB = new IPEndPoint(IPAddress.Parse("127.0.0.1"), portB);
+        var discoveredNode = await handshakerA.HandshakeAsync(localNodeA, endpointB, cts.Token);
+
+        // Assert
+        discoveredNode.ShouldNotBeNull("Handshake failed to return a valid PeerNode.");
+        discoveredNode.Value.Id.ShouldBe(peerBId);
+        discoveredNode.Value.Endpoint.ShouldBeOfType<AspNetCorePeerEndpoint>();
+
+        var aspEndpoint = (AspNetCorePeerEndpoint)discoveredNode.Value.Endpoint;
+        aspEndpoint.Port.ShouldBe(portB);
+
+        testOutputHelper.WriteLine("Integrated mode handshake completed successfully.");
+        
+        await appA.StopAsync(cts.Token);
+        await appB.StopAsync(cts.Token);
     }
 
     [IntegrationFact]
@@ -348,6 +398,47 @@ public sealed class AspNetCorePeerHandshakeIntegrationTests
             provider.GetRequiredKeyedService<IPeerHandshaker>(meshId),
             provider.GetRequiredService<IPeerRegistry>()
         );
+    }
+
+    private WebApplication CreateIntegratedTestNode(string meshId, PeerId peerId, int listenPort)
+    {
+        var builder = WebApplication.CreateBuilder();
+
+        builder.Logging.AddXunit(testOutputHelper);
+        builder.Logging.SetMinimumLevel(LogLevel.Trace);
+
+        builder.Services.AddCrdt();
+        builder.Services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
+
+        builder.Services.AddKeyedSingleton<PeerEndpoint>(meshId, new AspNetCorePeerEndpoint("127.0.0.1", listenPort));
+
+        builder.Services.Configure<FailureDetectorOptions>(meshId, options => 
+        {
+            options.HeartbeatInterval = TimeSpan.FromSeconds(120);
+        });
+
+        builder.Services.AddP2pMesh(meshId, options =>
+        {
+            options.LocalPeerId = peerId.Value;
+        })
+        .AddGossipNetwork()
+        .AddAspNetCorePeerHandshake(options =>
+        {
+            options.HostingMode = AspNetCoreHostingMode.Integrated;
+            options.AdvertisedHandshakePort = listenPort;
+            options.HandshakeTimeout = TimeSpan.FromSeconds(10);
+            options.PathPrefix = "/test-handshake/";
+        });
+
+        builder.WebHost.ConfigureKestrel(options =>
+        {
+            options.Listen(IPAddress.Parse("127.0.0.1"), listenPort);
+        });
+
+        var app = builder.Build();
+        app.MapP2pMeshHandshakes("/test-handshake");
+
+        return app;
     }
 
     private MultiMeshAspNetCoreTestNode CreateMultiMeshNode(
