@@ -1,9 +1,7 @@
 namespace Ama.Enterprise.P2p.UnitTests.Gossip.Services;
 
 using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;

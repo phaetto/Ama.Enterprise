@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.Http.Core.Services;
+namespace Ama.Enterprise.P2p.AspNetCore.Services;
 
 using System;
 using System.Collections.Concurrent;
@@ -7,7 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p;
-using Ama.Enterprise.P2p.Http.Core.Models;
+using Ama.Enterprise.P2p.AspNetCore.Models;
 using Ama.Enterprise.P2p.Models.Core;
 using Microsoft.Extensions.Logging;
 

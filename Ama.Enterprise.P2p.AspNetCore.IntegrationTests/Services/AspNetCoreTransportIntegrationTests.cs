@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.Kestrel.IntegrationTests.Services;
+namespace Ama.Enterprise.P2p.AspNetCore.IntegrationTests.Services;
 
 using System;
 using System.Linq;
@@ -6,9 +6,9 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Extensions;
+using Ama.Enterprise.P2p.AspNetCore.Extensions;
+using Ama.Enterprise.P2p.AspNetCore.Models;
 using Ama.Enterprise.P2p.Extensions;
-using Ama.Enterprise.P2p.Kestrel.Extensions;
-using Ama.Enterprise.P2p.Kestrel.Models;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
@@ -19,7 +19,7 @@ using Microsoft.Extensions.Logging;
 using Shouldly;
 using Xunit;
 
-public sealed class KestrelTransportIntegrationTests(ITestOutputHelper testOutputHelper)
+public sealed class AspNetCoreTransportIntegrationTests(ITestOutputHelper testOutputHelper)
 {
     private sealed record DummyPeerEndpoint : PeerEndpoint;
 
@@ -30,10 +30,10 @@ public sealed class KestrelTransportIntegrationTests(ITestOutputHelper testOutpu
     private static int GetNextPort() => Interlocked.Increment(ref portCounter);
 
     [IntegrationFact]
-    public async Task KestrelTransport_EndToEndMessageExchange_Succeeds()
+    public async Task AspNetCoreTransport_EndToEndMessageExchange_Succeeds()
     {
         // Arrange
-        var meshId = "kestrel-mesh-e2e";
+        var meshId = "aspnetcore-mesh-e2e";
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
         var peerAId = new PeerId(Guid.NewGuid());
@@ -42,7 +42,7 @@ public sealed class KestrelTransportIntegrationTests(ITestOutputHelper testOutpu
         var portA = GetNextPort();
         var portB = GetNextPort();
 
-        var payloadBytes = System.Text.Encoding.UTF8.GetBytes("Hello Kestrel World");
+        var payloadBytes = System.Text.Encoding.UTF8.GetBytes("Hello AspNetCore World");
         var messageToSend = new GossipMessage(meshId, Guid.NewGuid(), peerAId, 10, payloadBytes);
 
         testOutputHelper.WriteLine($"Initializing DI Nodes on ports {portA} and {portB}...");
@@ -61,10 +61,10 @@ public sealed class KestrelTransportIntegrationTests(ITestOutputHelper testOutpu
             return Task.CompletedTask;
         }, cts.Token);
 
-        // Give Kestrel a moment to bind and listen
+        // Give Standalone web server a moment to bind and listen
         await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
 
-        var endpointB = new KestrelPeerEndpoint("localhost", portB); 
+        var endpointB = new AspNetCorePeerEndpoint("127.0.0.1", portB); 
         
         // Act - Send
         testOutputHelper.WriteLine("Sending message from Transport A...");
@@ -75,17 +75,17 @@ public sealed class KestrelTransportIntegrationTests(ITestOutputHelper testOutpu
         var receivedMessage = await messageCompletionSource.Task.WaitAsync(TimeSpan.FromSeconds(15), cts.Token);
         
         var receivedText = System.Text.Encoding.UTF8.GetString(receivedMessage.Payload.ToArray());
-        receivedText.ShouldBe("Hello Kestrel World");
+        receivedText.ShouldBe("Hello AspNetCore World");
 
         await nodeB.Listener.StopListeningAsync(cts.Token);
         testOutputHelper.WriteLine("Test finished.");
     }
 
     [IntegrationFact]
-    public async Task KestrelTransport_BidirectionalMessageExchange_Succeeds()
+    public async Task AspNetCoreTransport_BidirectionalMessageExchange_Succeeds()
     {
         // Arrange
-        var meshId = "kestrel-mesh-bidirectional";
+        var meshId = "aspnetcore-mesh-bidirectional";
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         
         var peerAId = new PeerId(Guid.NewGuid());
@@ -94,8 +94,8 @@ public sealed class KestrelTransportIntegrationTests(ITestOutputHelper testOutpu
         var portA = GetNextPort();
         var portB = GetNextPort();
 
-        var messageAtoB = new GossipMessage(meshId, Guid.NewGuid(), peerAId, 10, System.Text.Encoding.UTF8.GetBytes("AtoB via Kestrel"));
-        var messageBtoA = new GossipMessage(meshId, Guid.NewGuid(), peerBId, 10, System.Text.Encoding.UTF8.GetBytes("BtoA via Kestrel"));
+        var messageAtoB = new GossipMessage(meshId, Guid.NewGuid(), peerAId, 10, System.Text.Encoding.UTF8.GetBytes("AtoB via AspNetCore"));
+        var messageBtoA = new GossipMessage(meshId, Guid.NewGuid(), peerBId, 10, System.Text.Encoding.UTF8.GetBytes("BtoA via AspNetCore"));
 
         await using var nodeA = CreateTestNode(meshId, peerAId, portA);
         await using var nodeB = CreateTestNode(meshId, peerBId, portB);
@@ -123,8 +123,8 @@ public sealed class KestrelTransportIntegrationTests(ITestOutputHelper testOutpu
 
         await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
 
-        var endpointB = new KestrelPeerEndpoint("localhost", portB);
-        var endpointA = new KestrelPeerEndpoint("localhost", portA);
+        var endpointB = new AspNetCorePeerEndpoint("127.0.0.1", portB);
+        var endpointA = new AspNetCorePeerEndpoint("127.0.0.1", portA);
 
         // Act - Send in both directions
         await nodeA.Transport.SendAsync(endpointB, messageAtoB, cts.Token);
@@ -134,18 +134,18 @@ public sealed class KestrelTransportIntegrationTests(ITestOutputHelper testOutpu
         var receivedByA = await messageCompletionSourceA.Task.WaitAsync(TimeSpan.FromSeconds(15), cts.Token);
         var receivedByB = await messageCompletionSourceB.Task.WaitAsync(TimeSpan.FromSeconds(15), cts.Token);
         
-        System.Text.Encoding.UTF8.GetString(receivedByA.Payload.ToArray()).ShouldBe("BtoA via Kestrel");
-        System.Text.Encoding.UTF8.GetString(receivedByB.Payload.ToArray()).ShouldBe("AtoB via Kestrel");
+        System.Text.Encoding.UTF8.GetString(receivedByA.Payload.ToArray()).ShouldBe("BtoA via AspNetCore");
+        System.Text.Encoding.UTF8.GetString(receivedByB.Payload.ToArray()).ShouldBe("AtoB via AspNetCore");
 
         await nodeA.Listener.StopListeningAsync(cts.Token);
         await nodeB.Listener.StopListeningAsync(cts.Token);
     }
 
     [IntegrationFact]
-    public async Task KestrelTransport_SendToDeadEndpoint_RemovesPeerAndThrowsHttpRequestException()
+    public async Task AspNetCoreTransport_SendToDeadEndpoint_RemovesPeerAndThrowsHttpRequestException()
     {
         // Arrange
-        var meshId = "kestrel-mesh-dead";
+        var meshId = "aspnetcore-mesh-dead";
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         
         var peerAId = new PeerId(Guid.NewGuid());
@@ -156,7 +156,7 @@ public sealed class KestrelTransportIntegrationTests(ITestOutputHelper testOutpu
 
         await using var nodeA = CreateTestNode(meshId, peerAId, portA);
 
-        var deadEndpoint = new KestrelPeerEndpoint("localhost", deadPort);
+        var deadEndpoint = new AspNetCorePeerEndpoint("127.0.0.1", deadPort);
         
         // Manually inject a peer into the registry to test auto-removal explicitly
         var dummyNode = new PeerNode(deadPeerId, deadEndpoint);
@@ -173,10 +173,10 @@ public sealed class KestrelTransportIntegrationTests(ITestOutputHelper testOutpu
     }
 
     [IntegrationFact]
-    public async Task KestrelTransport_CanHandle_ReturnsFalseForOtherEndpoints()
+    public async Task AspNetCoreTransport_CanHandle_ReturnsFalseForOtherEndpoints()
     {
         // Arrange
-        var meshId = "kestrel-mesh-canhandle";
+        var meshId = "aspnetcore-mesh-canhandle";
         var peerAId = new PeerId(Guid.NewGuid());
         var portA = GetNextPort();
         
@@ -195,7 +195,7 @@ public sealed class KestrelTransportIntegrationTests(ITestOutputHelper testOutpu
         await Should.NotThrowAsync(() => nodeA.Transport.SendAsync(dummyEndpoint, message, CancellationToken.None));
     }
 
-    private KestrelTestNode CreateTestNode(string meshId, PeerId peerId, int listenPort)
+    private AspNetCoreTestNode CreateTestNode(string meshId, PeerId peerId, int listenPort)
     {
         var services = new ServiceCollection();
 
@@ -217,16 +217,19 @@ public sealed class KestrelTransportIntegrationTests(ITestOutputHelper testOutpu
 
         services.AddP2pMesh(meshId)
             .AddGossipNetwork() // Installs AOT contexts explicitly bridging GossipMessage serialization
-            .AddKestrelTransport(options =>
+            .AddAspNetCoreTransport(options =>
             {
-                options.ListenHost = "localhost";
-                options.ListenPort = listenPort;
+                options.HostingMode = AspNetCoreHostingMode.Standalone;
+                options.StandaloneListenHost = "127.0.0.1";
+                options.StandaloneListenPort = listenPort;
+                options.AdvertisedHost = "127.0.0.1";
+                options.AdvertisedPort = listenPort;
                 options.PathPrefix = "/test/p2p/messages/";
             });
 
         var provider = services.BuildServiceProvider();
 
-        return new KestrelTestNode(
+        return new AspNetCoreTestNode(
             provider,
             peerId,
             provider.GetRequiredKeyedService<ITransport>(meshId),
@@ -235,7 +238,7 @@ public sealed class KestrelTransportIntegrationTests(ITestOutputHelper testOutpu
         );
     }
 
-    private sealed record KestrelTestNode(
+    private sealed record AspNetCoreTestNode(
         ServiceProvider Provider,
         PeerId Id,
         ITransport Transport,

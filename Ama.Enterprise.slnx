@@ -39,11 +39,9 @@
   <Project Path="Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj" Id="2fe2382f-1652-48b6-b2e4-6f07cb4214dc" />
   <Project Path="Ama.Enterprise.CRDT.MemoryPack/Ama.Enterprise.CRDT.MemoryPack.csproj" Id="f0f76679-d0a0-41fc-a832-5b09055fcfd0" />
   <Project Path="Ama.Enterprise.CRDT.TableStorage/Ama.Enterprise.CRDT.TableStorage.csproj" Id="807a871d-7aad-43f6-83c2-48e62e019c07" />
+  <Project Path="Ama.Enterprise.P2p.AspNetCore.IntegrationTests/Ama.Enterprise.P2p.AspNetCore.IntegrationTests.csproj" />
   <Project Path="Ama.Enterprise.P2p.AspNetCore/Ama.Enterprise.P2p.AspNetCore.csproj" />
-  <Project Path="Ama.Enterprise.P2p.Http.Core/Ama.Enterprise.P2p.Http.Core.csproj" />
   <Project Path="Ama.Enterprise.P2p.IntegrationTests/Ama.Enterprise.P2p.IntegrationTests.csproj" Id="15a7eaaf-b3d8-4ec7-a32b-25a409f265c7" />
-  <Project Path="Ama.Enterprise.P2p.Kestrel.IntegrationTests/Ama.Enterprise.P2p.Kestrel.IntegrationTests.csproj" Id="03fa3a9e-d41d-41d5-a113-b8d2cfce7298" />
-  <Project Path="Ama.Enterprise.P2p.Kestrel/Ama.Enterprise.P2p.Kestrel.csproj" Id="ca40e19b-52d7-41b4-acc9-d5dd7648fb28" />
   <Project Path="Ama.Enterprise.P2p.Mqtt.IntegrationTests/Ama.Enterprise.P2p.Mqtt.IntegrationTests.csproj" Id="4020da86-8f99-44c6-ad79-dd419eb89135" />
   <Project Path="Ama.Enterprise.P2p.Mqtt/Ama.Enterprise.P2p.Mqtt.csproj" Id="b27ff42d-3536-414e-8c9f-2bf3e7a509ac" />
   <Project Path="Ama.Enterprise.P2p.UnitTests/Ama.Enterprise.P2p.UnitTests.csproj" Id="59f1fd65-b40a-4eec-9c39-f99f1665b7f0" />

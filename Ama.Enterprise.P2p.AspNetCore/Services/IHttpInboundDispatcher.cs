@@ -1,10 +1,10 @@
-namespace Ama.Enterprise.P2p.Http.Core.Services;
+namespace Ama.Enterprise.P2p.AspNetCore.Services;
 
 using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Ama.Enterprise.P2p.Http.Core.Models;
+using Ama.Enterprise.P2p.AspNetCore.Models;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>

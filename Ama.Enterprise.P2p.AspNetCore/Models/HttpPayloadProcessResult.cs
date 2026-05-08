@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.Http.Core.Models;
+namespace Ama.Enterprise.P2p.AspNetCore.Models;
 
 /// <summary>
 /// Represents the outcome of an inbound HTTP P2P payload processing attempt.

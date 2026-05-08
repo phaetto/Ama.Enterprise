@@ -2,6 +2,7 @@ namespace Ama.Enterprise.P2p.AspNetCore.Extensions;
 
 using System;
 using System.Linq;
+using System.Net.Http;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Ama.CRDT.Extensions;
@@ -9,11 +10,10 @@ using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.AspNetCore.Models;
 using Ama.Enterprise.P2p.AspNetCore.Services;
 using Ama.Enterprise.P2p.Extensions;
-using Ama.Enterprise.P2p.Http.Core.Extensions;
-using Ama.Enterprise.P2p.Http.Core.Services;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -55,8 +55,14 @@ public static class ServiceCollectionExtensions
         });
     }
 
+    internal static IServiceCollection AddP2pHttpCore(this IServiceCollection services)
+    {
+        services.TryAddSingleton<IHttpInboundDispatcher, HttpInboundDispatcher>();
+        return services;
+    }
+
     /// <summary>
-    /// Registers tracking explicit decoupled inbound handlers abstracting internal dependencies mapping standard underlying mesh generic environments gracefully.
+    /// Registers tracking explicit decoupled inbound handlers abstracting internal dependencies mapping standard underlying mesh generic environments securely.
     /// </summary>
     public static IP2pMeshBuilder AddAspNetCoreTransport(
         this IP2pMeshBuilder builder,
@@ -74,7 +80,7 @@ public static class ServiceCollectionExtensions
         };
 
         var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
-        if (!tracker.TryRegister(builder.MeshId, configAction))
+        if (!tracker.TryRegister(builder.MeshId + "_AspNetCoreTransport", configAction))
         {
             return builder;
         }
@@ -83,7 +89,7 @@ public static class ServiceCollectionExtensions
 
         TryAddAspNetCoreSerialization(builder.Services);
 
-        // Map unified Core HTTP dispatcher mechanisms globally across explicit isolated meshes safely.
+        // Map unified Core HTTP dispatcher mechanisms globally across explicit isolated meshes safely natively.
         builder.Services.AddP2pHttpCore();
 
         builder.Services.AddHttpClient("P2pAspNetCoreTransport");
@@ -106,6 +112,7 @@ public static class ServiceCollectionExtensions
         builder.Services.AddKeyedSingleton<ITransportListener>(builder.MeshId, (sp, key) =>
             new AspNetCoreTransportListener(
                 (string)key!,
+                sp.GetRequiredService<IOptionsMonitor<AspNetCoreTransportOptions>>(),
                 sp.GetRequiredService<IHttpInboundDispatcher>(),
                 sp.GetRequiredService<ILogger<AspNetCoreTransportListener>>()));
 

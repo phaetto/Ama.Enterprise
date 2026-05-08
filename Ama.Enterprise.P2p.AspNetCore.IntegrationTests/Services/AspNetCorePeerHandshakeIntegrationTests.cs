@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.Kestrel.IntegrationTests.Services;
+namespace Ama.Enterprise.P2p.AspNetCore.IntegrationTests.Services;
 
 using System;
 using System.Collections.Generic;
@@ -7,9 +7,9 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Extensions;
+using Ama.Enterprise.P2p.AspNetCore.Extensions;
+using Ama.Enterprise.P2p.AspNetCore.Models;
 using Ama.Enterprise.P2p.Extensions;
-using Ama.Enterprise.P2p.Kestrel.Extensions;
-using Ama.Enterprise.P2p.Kestrel.Models;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.UnitTests.Attributes;
@@ -20,12 +20,12 @@ using Microsoft.Extensions.Logging;
 using Shouldly;
 using Xunit;
 
-public sealed class KestrelPeerHandshakeIntegrationTests
+public sealed class AspNetCorePeerHandshakeIntegrationTests
 {
     private readonly ITestOutputHelper testOutputHelper;
     private static int portCounter = 15000;
 
-    public KestrelPeerHandshakeIntegrationTests(ITestOutputHelper testOutputHelper)
+    public AspNetCorePeerHandshakeIntegrationTests(ITestOutputHelper testOutputHelper)
     {
         this.testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
     }
@@ -33,10 +33,10 @@ public sealed class KestrelPeerHandshakeIntegrationTests
     private static int GetNextPort() => Interlocked.Increment(ref portCounter);
 
     [IntegrationFact]
-    public async Task KestrelPeerHandshaker_DirectHandshake_Succeeds()
+    public async Task AspNetCorePeerHandshaker_DirectHandshake_Succeeds()
     {
         // Arrange
-        var meshId = $"kestrel-direct-{Guid.NewGuid():N}";
+        var meshId = $"aspnetcore-direct-{Guid.NewGuid():N}";
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         var peerAId = new PeerId(Guid.NewGuid());
@@ -45,21 +45,21 @@ public sealed class KestrelPeerHandshakeIntegrationTests
         var portA = GetNextPort();
         var portB = GetNextPort();
 
-        testOutputHelper.WriteLine("Initializing Nodes for Direct Kestrel Handshake...");
+        testOutputHelper.WriteLine("Initializing Nodes for Direct ASP.NET Core Standalone Handshake...");
         await using var nodeA = CreateTestNode(meshId, peerAId, portA, null, 0);
         await using var nodeB = CreateTestNode(meshId, peerBId, portB, null, 0);
 
         // Act
-        testOutputHelper.WriteLine("Starting Kestrel Handshaker background services...");
+        testOutputHelper.WriteLine("Starting ASP.NET Core Handshaker background services...");
         await nodeA.StartAsync(cts.Token);
         await nodeB.StartAsync(cts.Token);
 
-        // Give Kestrel servers a moment to bind and start listening
+        // Give web servers a moment to bind and start listening
         await Task.Delay(TimeSpan.FromMilliseconds(500), cts.Token);
 
         testOutputHelper.WriteLine($"Node A firing manual HandshakeAsync to Node B explicitly unmapped as 127.0.0.1...");
         
-        var localNodeA = new PeerNode(peerAId, new KestrelPeerEndpoint("127.0.0.1", portA));
+        var localNodeA = new PeerNode(peerAId, new AspNetCorePeerEndpoint("127.0.0.1", portA));
         
         var endpointB = new IPEndPoint(IPAddress.Parse("127.0.0.1"), portB);
         var discoveredNode = await nodeA.Handshaker.HandshakeAsync(localNodeA, endpointB, cts.Token);
@@ -67,19 +67,19 @@ public sealed class KestrelPeerHandshakeIntegrationTests
         // Assert
         discoveredNode.ShouldNotBeNull("Handshake failed to return a valid PeerNode.");
         discoveredNode.Value.Id.ShouldBe(peerBId);
-        discoveredNode.Value.Endpoint.ShouldBeOfType<KestrelPeerEndpoint>();
+        discoveredNode.Value.Endpoint.ShouldBeOfType<AspNetCorePeerEndpoint>();
 
-        var kestrelEndpoint = (KestrelPeerEndpoint)discoveredNode.Value.Endpoint;
-        kestrelEndpoint.Port.ShouldBe(portB);
+        var aspEndpoint = (AspNetCorePeerEndpoint)discoveredNode.Value.Endpoint;
+        aspEndpoint.Port.ShouldBe(portB);
 
         testOutputHelper.WriteLine("Direct handshake completed successfully.");
     }
 
     [IntegrationFact]
-    public async Task KestrelPeerHandshaker_WithUdpDiscovery_DiscoversEndpoints_Succeeds()
+    public async Task AspNetCorePeerHandshaker_WithUdpDiscovery_DiscoversEndpoints_Succeeds()
     {
         // Arrange
-        var meshId = $"kestrel-udp-{Guid.NewGuid():N}";
+        var meshId = $"aspnetcore-udp-{Guid.NewGuid():N}";
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var peerAId = new PeerId(Guid.NewGuid());
@@ -91,7 +91,7 @@ public sealed class KestrelPeerHandshakeIntegrationTests
         var multicastGroup = "239.2.2.2";
         var multicastPort = GetNextPort();
 
-        testOutputHelper.WriteLine("Initializing Nodes for UDP Discovery + Kestrel Handshake...");
+        testOutputHelper.WriteLine("Initializing Nodes for UDP Discovery + ASP.NET Core Handshake...");
         await using var nodeA = CreateTestNode(meshId, peerAId, portA, multicastGroup, multicastPort);
         await using var nodeB = CreateTestNode(meshId, peerBId, portB, multicastGroup, multicastPort);
 
@@ -100,8 +100,8 @@ public sealed class KestrelPeerHandshakeIntegrationTests
         await nodeA.StartAsync(cts.Token);
         await nodeB.StartAsync(cts.Token);
 
-        // Assert - Polling loop for UDP multicasts and isolated Kestrel handshakes
-        testOutputHelper.WriteLine("Waiting for Phase 1 (UDP) and Phase 2 (Kestrel) to synchronize endpoints natively decoupled...");
+        // Assert - Polling loop for UDP multicasts and isolated ASP.NET Core handshakes
+        testOutputHelper.WriteLine("Waiting for Phase 1 (UDP) and Phase 2 (ASP.NET Core) to synchronize endpoints natively decoupled...");
         
         bool discovered = false;
         var timeoutTime = DateTime.UtcNow.AddSeconds(45);
@@ -116,11 +116,11 @@ public sealed class KestrelPeerHandshakeIntegrationTests
 
             if (aDiscoveredB.Endpoint is not null && bDiscoveredA.Endpoint is not null)
             {
-                aDiscoveredB.Endpoint.ShouldBeOfType<KestrelPeerEndpoint>();
-                bDiscoveredA.Endpoint.ShouldBeOfType<KestrelPeerEndpoint>();
+                aDiscoveredB.Endpoint.ShouldBeOfType<AspNetCorePeerEndpoint>();
+                bDiscoveredA.Endpoint.ShouldBeOfType<AspNetCorePeerEndpoint>();
 
-                var bKestrelEndpoint = (KestrelPeerEndpoint)aDiscoveredB.Endpoint;
-                bKestrelEndpoint.Port.ShouldBe(portB);
+                var bEndpoint = (AspNetCorePeerEndpoint)aDiscoveredB.Endpoint;
+                bEndpoint.Port.ShouldBe(portB);
 
                 discovered = true;
                 break;
@@ -129,14 +129,14 @@ public sealed class KestrelPeerHandshakeIntegrationTests
             await Task.Delay(TimeSpan.FromMilliseconds(500), cts.Token);
         }
 
-        discovered.ShouldBeTrue("Nodes failed to discover each other via UDP multicast and Kestrel HTTP handshakes implicitly mapping explicit target ports explicitly securely effectively safely within limits.");
+        discovered.ShouldBeTrue("Nodes failed to discover each other via UDP multicast and ASP.NET Core HTTP handshakes implicitly mapping explicit target ports explicitly securely effectively safely within limits.");
     }
 
     [IntegrationFact]
-    public async Task KestrelPeerHandshaker_FiveNodes_ShouldFormClusterAndSynchronize()
+    public async Task AspNetCorePeerHandshaker_FiveNodes_ShouldFormClusterAndSynchronize()
     {
         // Arrange
-        var meshId = $"kestrel-five-{Guid.NewGuid():N}";
+        var meshId = $"aspnetcore-five-{Guid.NewGuid():N}";
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
 
         var peers = Enumerable.Range(0, 5).Select(_ => new PeerId(Guid.NewGuid())).ToList();
@@ -145,8 +145,8 @@ public sealed class KestrelPeerHandshakeIntegrationTests
         var multicastGroup = "239.5.5.5";
         var multicastPort = GetNextPort();
 
-        var nodes = new List<KestrelTestNode>();
-        testOutputHelper.WriteLine("Initializing 5 Nodes for Kestrel/UDP Topology...");
+        var nodes = new List<AspNetCoreTestNode>();
+        testOutputHelper.WriteLine("Initializing 5 Nodes for ASP.NET Core/UDP Topology...");
         
         for (int i = 0; i < 5; i++)
         {
@@ -203,11 +203,11 @@ public sealed class KestrelPeerHandshakeIntegrationTests
     }
 
     [IntegrationFact]
-    public async Task KestrelPeerHandshaker_ShouldMapEndpointsCorrectly_WhenUsingMultipleMeshes()
+    public async Task AspNetCorePeerHandshaker_ShouldMapEndpointsCorrectly_WhenUsingMultipleMeshes()
     {
         // Arrange
-        var mesh1Id = $"kestrel-multi-1-{Guid.NewGuid():N}";
-        var mesh2Id = $"kestrel-multi-2-{Guid.NewGuid():N}";
+        var mesh1Id = $"aspnetcore-multi-1-{Guid.NewGuid():N}";
+        var mesh2Id = $"aspnetcore-multi-2-{Guid.NewGuid():N}";
         
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         
@@ -225,7 +225,7 @@ public sealed class KestrelPeerHandshakeIntegrationTests
         var multicastGroup2 = "239.4.4.4";
         var multicastPort2 = GetNextPort();
 
-        testOutputHelper.WriteLine("Initializing Multi-Mesh Nodes using decoupled Kestrel + UDP natively mapped target ports explicitly securely...");
+        testOutputHelper.WriteLine("Initializing Multi-Mesh Nodes using decoupled ASP.NET Core + UDP natively mapped target ports explicitly securely...");
         await using var nodeA = CreateMultiMeshNode(peerAId, mesh1Id, mesh2Id, mesh1PortA, mesh2PortA, multicastGroup1, multicastPort1, multicastGroup2, multicastPort2);
         await using var nodeB = CreateMultiMeshNode(peerBId, mesh1Id, mesh2Id, mesh1PortB, mesh2PortB, multicastGroup1, multicastPort1, multicastGroup2, multicastPort2);
 
@@ -253,14 +253,14 @@ public sealed class KestrelPeerHandshakeIntegrationTests
 
                 if (aDiscoveredB1.Endpoint is not null && bDiscoveredA1.Endpoint is not null)
                 {
-                    var aKestrelEndpoint = (KestrelPeerEndpoint)aDiscoveredB1.Endpoint;
-                    var bKestrelEndpoint = (KestrelPeerEndpoint)bDiscoveredA1.Endpoint;
+                    var aEndpoint = (AspNetCorePeerEndpoint)aDiscoveredB1.Endpoint;
+                    var bEndpoint = (AspNetCorePeerEndpoint)bDiscoveredA1.Endpoint;
                     
-                    aKestrelEndpoint.Port.ShouldBe(mesh1PortB);
-                    bKestrelEndpoint.Port.ShouldBe(mesh1PortA);
+                    aEndpoint.Port.ShouldBe(mesh1PortB);
+                    bEndpoint.Port.ShouldBe(mesh1PortA);
                     
                     mesh1Discovered = true;
-                    testOutputHelper.WriteLine("Mesh 1 (Kestrel/UDP) synchronized appropriately.");
+                    testOutputHelper.WriteLine("Mesh 1 (ASP.NET Core/UDP) synchronized appropriately.");
                 }
             }
 
@@ -274,12 +274,12 @@ public sealed class KestrelPeerHandshakeIntegrationTests
 
                 if (aDiscoveredB2.Endpoint is not null && bDiscoveredA2.Endpoint is not null)
                 {
-                    var aKestrelEndpoint2 = (KestrelPeerEndpoint)aDiscoveredB2.Endpoint;
+                    var aEndpoint2 = (AspNetCorePeerEndpoint)aDiscoveredB2.Endpoint;
                     
-                    aKestrelEndpoint2.Port.ShouldBe(mesh2PortB);
+                    aEndpoint2.Port.ShouldBe(mesh2PortB);
                     
                     mesh2Discovered = true;
-                    testOutputHelper.WriteLine("Mesh 2 (Kestrel/UDP) synchronized smoothly isolating bounds.");
+                    testOutputHelper.WriteLine("Mesh 2 (ASP.NET Core/UDP) synchronized smoothly isolating bounds.");
                 }
             }
 
@@ -295,7 +295,7 @@ public sealed class KestrelPeerHandshakeIntegrationTests
         mesh2Discovered.ShouldBeTrue("Nodes failed to discover each other on implicitly separated Mesh 2 securely.");
     }
 
-    private KestrelTestNode CreateTestNode(string meshId, PeerId peerId, int kestrelListenPort, string? multicastGroup, int multicastPort)
+    private AspNetCoreTestNode CreateTestNode(string meshId, PeerId peerId, int listenPort, string? multicastGroup, int multicastPort)
     {
         var services = new ServiceCollection();
 
@@ -309,7 +309,7 @@ public sealed class KestrelPeerHandshakeIntegrationTests
         
         services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
 
-        services.AddKeyedSingleton<PeerEndpoint>(meshId, new KestrelPeerEndpoint("127.0.0.1", kestrelListenPort));
+        services.AddKeyedSingleton<PeerEndpoint>(meshId, new AspNetCorePeerEndpoint("127.0.0.1", listenPort));
 
         services.Configure<FailureDetectorOptions>(meshId, options => 
         {
@@ -321,10 +321,12 @@ public sealed class KestrelPeerHandshakeIntegrationTests
             options.LocalPeerId = peerId.Value;
         })
         .AddGossipNetwork()
-        .AddKestrelPeerHandshake(options =>
+        .AddAspNetCorePeerHandshake(options =>
         {
-            options.ListenHost = "+";
-            options.ListenPort = kestrelListenPort;
+            options.HostingMode = AspNetCoreHostingMode.Standalone;
+            options.StandaloneListenHost = "+";
+            options.StandaloneListenPort = listenPort;
+            options.AdvertisedHandshakePort = listenPort;
             options.HandshakeTimeout = TimeSpan.FromSeconds(10);
         });
 
@@ -340,7 +342,7 @@ public sealed class KestrelPeerHandshakeIntegrationTests
 
         var provider = services.BuildServiceProvider();
 
-        return new KestrelTestNode(
+        return new AspNetCoreTestNode(
             provider,
             peerId,
             provider.GetRequiredKeyedService<IPeerHandshaker>(meshId),
@@ -348,12 +350,12 @@ public sealed class KestrelPeerHandshakeIntegrationTests
         );
     }
 
-    private MultiMeshKestrelTestNode CreateMultiMeshNode(
+    private MultiMeshAspNetCoreTestNode CreateMultiMeshNode(
         PeerId peerId,
         string mesh1Id,
         string mesh2Id,
-        int kestrelListenPort1,
-        int kestrelListenPort2,
+        int listenPort1,
+        int listenPort2,
         string multicastGroup1,
         int multicastPort1,
         string multicastGroup2,
@@ -371,18 +373,20 @@ public sealed class KestrelPeerHandshakeIntegrationTests
         
         services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
 
-        services.AddKeyedSingleton<PeerEndpoint>(mesh1Id, new KestrelPeerEndpoint("127.0.0.1", kestrelListenPort1));
-        services.AddKeyedSingleton<PeerEndpoint>(mesh2Id, new KestrelPeerEndpoint("127.0.0.1", kestrelListenPort2));
+        services.AddKeyedSingleton<PeerEndpoint>(mesh1Id, new AspNetCorePeerEndpoint("127.0.0.1", listenPort1));
+        services.AddKeyedSingleton<PeerEndpoint>(mesh2Id, new AspNetCorePeerEndpoint("127.0.0.1", listenPort2));
 
         services.Configure<FailureDetectorOptions>(mesh1Id, options => options.HeartbeatInterval = TimeSpan.FromSeconds(120));
         services.Configure<FailureDetectorOptions>(mesh2Id, options => options.HeartbeatInterval = TimeSpan.FromSeconds(120));
 
         services.AddP2pMesh(mesh1Id, options => options.LocalPeerId = peerId.Value)
             .AddGossipNetwork()
-            .AddKestrelPeerHandshake(options =>
+            .AddAspNetCorePeerHandshake(options =>
             {
-                options.ListenHost = "+";
-                options.ListenPort = kestrelListenPort1;
+                options.HostingMode = AspNetCoreHostingMode.Standalone;
+                options.StandaloneListenHost = "+";
+                options.StandaloneListenPort = listenPort1;
+                options.AdvertisedHandshakePort = listenPort1;
                 options.HandshakeTimeout = TimeSpan.FromSeconds(10);
             })
             .AddUdpPeerDiscovery(options =>
@@ -393,10 +397,12 @@ public sealed class KestrelPeerHandshakeIntegrationTests
             });
 
         services.AddP2pMesh(mesh2Id, options => options.LocalPeerId = peerId.Value)
-            .AddKestrelPeerHandshake(options =>
+            .AddAspNetCorePeerHandshake(options =>
             {
-                options.ListenHost = "+";
-                options.ListenPort = kestrelListenPort2;
+                options.HostingMode = AspNetCoreHostingMode.Standalone;
+                options.StandaloneListenHost = "+";
+                options.StandaloneListenPort = listenPort2;
+                options.AdvertisedHandshakePort = listenPort2;
                 options.HandshakeTimeout = TimeSpan.FromSeconds(10);
             })
             .AddUdpPeerDiscovery(options =>
@@ -408,14 +414,14 @@ public sealed class KestrelPeerHandshakeIntegrationTests
 
         var provider = services.BuildServiceProvider();
 
-        return new MultiMeshKestrelTestNode(
+        return new MultiMeshAspNetCoreTestNode(
             provider,
             peerId,
             provider.GetRequiredService<IPeerRegistry>()
         );
     }
 
-    private sealed record KestrelTestNode(
+    private sealed record AspNetCoreTestNode(
         ServiceProvider Provider,
         PeerId Id,
         IPeerHandshaker Handshaker,
@@ -446,7 +452,7 @@ public sealed class KestrelPeerHandshakeIntegrationTests
         }
     }
 
-    private sealed record MultiMeshKestrelTestNode(
+    private sealed record MultiMeshAspNetCoreTestNode(
         ServiceProvider Provider,
         PeerId Id,
         IPeerRegistry Registry) : IAsyncDisposable
