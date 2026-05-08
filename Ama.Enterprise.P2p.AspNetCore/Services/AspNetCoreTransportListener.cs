@@ -16,26 +16,39 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Bridge implementation connecting decentralized internal generic processing logic exposing mesh subscriptions directly evaluating hosting modes reliably natively.
 /// </summary>
-public sealed class AspNetCoreTransportListener(
-    string meshId,
-    IOptionsMonitor<AspNetCoreTransportOptions> optionsMonitor,
-    IHttpInboundDispatcher dispatcher,
-    ILogger<AspNetCoreTransportListener> logger) : ITransportListener, IDisposable
+public sealed class AspNetCoreTransportListener : ITransportListener, IDisposable
 {
-    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-    private readonly IOptionsMonitor<AspNetCoreTransportOptions> optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
-    private readonly IHttpInboundDispatcher dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
-    private readonly ILogger<AspNetCoreTransportListener> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly string meshId;
+    private readonly IOptionsMonitor<AspNetCoreTransportOptions> optionsMonitor;
+    private readonly IHttpInboundDispatcher dispatcher;
+    private readonly ILogger<AspNetCoreTransportListener> logger;
 
     private WebApplication? app;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AspNetCoreTransportListener"/> class.
+    /// </summary>
+    public AspNetCoreTransportListener(
+        string meshId,
+        IOptionsMonitor<AspNetCoreTransportOptions> optionsMonitor,
+        IHttpInboundDispatcher dispatcher,
+        ILogger<AspNetCoreTransportListener> logger)
+    {
+        ArgumentNullException.ThrowIfNull(meshId);
+        ArgumentNullException.ThrowIfNull(optionsMonitor);
+        ArgumentNullException.ThrowIfNull(dispatcher);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        this.meshId = meshId;
+        this.optionsMonitor = optionsMonitor;
+        this.dispatcher = dispatcher;
+        this.logger = logger;
+    }
 
     /// <inheritdoc />
     public async Task StartListeningAsync(Func<IMeshMessage, Task> onMessageReceived, CancellationToken cancellationToken)
     {
-        if (onMessageReceived is null)
-        {
-            throw new ArgumentNullException(nameof(onMessageReceived));
-        }
+        ArgumentNullException.ThrowIfNull(onMessageReceived);
 
         var options = optionsMonitor.Get(meshId);
         dispatcher.RegisterListener(meshId, onMessageReceived);
@@ -53,18 +66,15 @@ public sealed class AspNetCoreTransportListener(
 
             app = builder.Build();
 
-            var path = options.PathPrefix ?? string.Empty;
-            if (!path.StartsWith("/", StringComparison.Ordinal))
-            {
-                path = "/" + path;
-            }
+            var basePath = string.IsNullOrWhiteSpace(options.PathPrefix) ? "/ama-enterprise/p2p-mesh" : options.PathPrefix.TrimEnd('/');
+            if (!basePath.StartsWith("/", StringComparison.Ordinal)) basePath = "/" + basePath;
 
-            app.MapP2pMeshEndpoints(path);
+            app.MapP2pMeshEndpoints(basePath);
 
             try
             {
                 await app.StartAsync(cancellationToken).ConfigureAwait(false);
-                logger.LogInformation("[{MeshId}] ASP.NET Core Standalone listener globally bounding P2P traffic on {Url}{Path}", meshId, listenUrl, path);
+                logger.LogInformation("[{MeshId}] ASP.NET Core Standalone listener globally bounding P2P traffic on explicitly mapped route {Url}{Path}", meshId, listenUrl, basePath);
             }
             catch (Exception ex)
             {
@@ -74,7 +84,7 @@ public sealed class AspNetCoreTransportListener(
         }
         else
         {
-            logger.LogInformation("[{MeshId}] ASP.NET Core Integrated listener bridge registered successfully tracking explicit bounds.", meshId);
+            logger.LogInformation("[{MeshId}] ASP.NET Core Integrated listener bridge registered successfully tracking explicitly configured endpoints natively.", meshId);
         }
     }
 
@@ -100,7 +110,7 @@ public sealed class AspNetCoreTransportListener(
             }
         }
         
-        logger.LogInformation("[{MeshId}] ASP.NET Core listener bridge explicitly detached bounds.", meshId);
+        logger.LogInformation("[{MeshId}] ASP.NET Core listener bridge explicitly detached standard bounds.", meshId);
     }
 
     /// <inheritdoc />

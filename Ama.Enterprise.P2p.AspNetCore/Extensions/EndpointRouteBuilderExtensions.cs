@@ -18,9 +18,9 @@ public static class EndpointRouteBuilderExtensions
     /// Maps generic inbound POST endpoints bounding decoupled payload streams handling multiple distinct mesh topology roots securely isolated mapping standard routes purely.
     /// </summary>
     /// <param name="endpoints">The route builder instance tracking internal HTTP structural boundaries cleanly.</param>
-    /// <param name="routePrefix">The base path prefix standardizing generic explicit routes natively. Defaults to "/p2p-mesh".</param>
+    /// <param name="routePrefix">The base path prefix standardizing generic explicit routes natively. Defaults to "/ama-enterprise/p2p-mesh".</param>
     /// <returns>A convention builder safely permitting explicit mapped dynamic endpoint customization purely.</returns>
-    public static IEndpointConventionBuilder MapP2pMeshEndpoints(this IEndpointRouteBuilder endpoints, string routePrefix = "/p2p-mesh")
+    public static IEndpointConventionBuilder MapP2pMeshEndpoints(this IEndpointRouteBuilder endpoints, string routePrefix = "/ama-enterprise/p2p-mesh")
     {
         if (endpoints is null)
         {
@@ -53,9 +53,9 @@ public static class EndpointRouteBuilderExtensions
     /// Maps phase 2 inbound discovery handshake endpoints tracking actively decoupled discovery topologies routing explicitly isolated explicit integrated bounds gracefully natively.
     /// </summary>
     /// <param name="endpoints">The explicitly constrained route builder mapping boundaries.</param>
-    /// <param name="routePrefix">The base structurally standard path resolving Phase 2 decoupled probes organically. Defaults to "/p2p-handshake".</param>
+    /// <param name="routePrefix">The base structurally standard path resolving Phase 2 decoupled probes organically. Defaults to "/ama-enterprise/p2p-handshake".</param>
     /// <returns>A unified standard ASP.NET convention builder ensuring identical robust custom configurations natively cleanly.</returns>
-    public static IEndpointConventionBuilder MapP2pMeshHandshakes(this IEndpointRouteBuilder endpoints, string routePrefix = "/p2p-handshake")
+    public static IEndpointConventionBuilder MapP2pMeshHandshakes(this IEndpointRouteBuilder endpoints, string routePrefix = "/ama-enterprise/p2p-handshake")
     {
         if (endpoints is null)
         {

@@ -17,9 +17,9 @@ public sealed record AspNetCoreTransportOptions
 
     /// <summary>
     /// Gets or sets the HTTP URL route path prefix where the host application maps the P2P receiver endpoints.
-    /// Defaults to "/p2p-mesh".
+    /// Defaults to "/ama-enterprise/p2p-mesh".
     /// </summary>
-    public string PathPrefix { get; set; } = "/p2p-mesh";
+    public string PathPrefix { get; set; } = "/ama-enterprise/p2p-mesh";
 
     /// <summary>
     /// Gets or sets the publicly routable Host name or IP address this node advertises strictly to remote peers.

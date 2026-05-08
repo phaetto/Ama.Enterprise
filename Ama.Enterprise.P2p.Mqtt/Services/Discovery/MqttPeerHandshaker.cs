@@ -79,9 +79,9 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
 
             var options = optionsMonitor.Get(meshId);
             var endpointStr = options.HandshakePort > 0 ? $"{GetLocalIpAddress()}:{options.HandshakePort}" : GetLocalIpAddress();
-            var topic = $"{options.TopicPrefix.TrimEnd('/')}/{options.HandshakeTopicSuffix.TrimStart('/')}/{endpointStr}";
+            var topic = BuildHandshakeTopic(options.TopicPrefix, meshId, options.HandshakeTopicSuffix, endpointStr);
             
-            logger.LogInformation("[{MeshId}] MQTT Peer Handshaker started listening on localized topic: {Topic}", meshId, topic);
+            logger.LogInformation("[{MeshId}] MQTT Peer Handshaker started listening on localized explicitly branded topic: {Topic}", meshId, topic);
         }
         catch (Exception ex)
         {
@@ -120,7 +120,7 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
 
         var builder = new MqttClientOptionsBuilder()
             .WithTcpServer(options.Host, options.Port)
-            .WithClientId($"{nodeOptions.LocalPeerId:N}-hs-{Guid.NewGuid():N}");
+            .WithClientId($"ama-ent-{nodeOptions.LocalPeerId:N}-{meshId}-hs-{Guid.NewGuid():N}");
 
         if (!string.IsNullOrWhiteSpace(options.Username)) builder.WithCredentials(options.Username, options.Password);
         if (options.UseTls) builder.WithTlsOptions(o => o.UseTls());
@@ -129,7 +129,7 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
         {
             await tempClient.ConnectAsync(builder.Build(), cancellationToken).ConfigureAwait(false);
 
-            var replyTopic = $"{options.TopicPrefix.TrimEnd('/')}/{options.HandshakeTopicSuffix.TrimStart('/')}/replies/{Guid.NewGuid():N}";
+            var replyTopic = BuildHandshakeReplyTopic(options.TopicPrefix, meshId, options.HandshakeTopicSuffix, Guid.NewGuid().ToString("N"));
             var subscribeOptions = factory.CreateSubscribeOptionsBuilder().WithTopicFilter(f => f.WithTopic(replyTopic)).Build();
             
             await tempClient.SubscribeAsync(subscribeOptions, cancellationToken).ConfigureAwait(false);
@@ -144,7 +144,7 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
             var requestBytes = serializer.SerializeToBytes(handshakeMessage);
 
             var endpointStr = endpoint.Port > 0 ? endpoint.ToString() : endpoint.Address.ToString();
-            var targetTopic = $"{options.TopicPrefix.TrimEnd('/')}/{options.HandshakeTopicSuffix.TrimStart('/')}/{endpointStr}";
+            var targetTopic = BuildHandshakeTopic(options.TopicPrefix, meshId, options.HandshakeTopicSuffix, endpointStr);
 
             var message = new MqttApplicationMessageBuilder()
                 .WithTopic(targetTopic)
@@ -215,7 +215,7 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
         var options = optionsMonitor.Get(meshId);
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
 
-        var clientId = $"{nodeOptions.LocalPeerId:N}-{meshId}-handshaker";
+        var clientId = $"ama-ent-{nodeOptions.LocalPeerId:N}-{meshId}-handshaker";
 
         var builder = new MqttClientOptionsBuilder()
             .WithTcpServer(options.Host, options.Port)
@@ -227,7 +227,8 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
         await listener!.ConnectAsync(builder.Build(), token).ConfigureAwait(false);
 
         var endpointStr = options.HandshakePort > 0 ? $"{GetLocalIpAddress()}:{options.HandshakePort}" : GetLocalIpAddress();
-        var topic = $"{options.TopicPrefix.TrimEnd('/')}/{options.HandshakeTopicSuffix.TrimStart('/')}/{endpointStr}";
+        var topic = BuildHandshakeTopic(options.TopicPrefix, meshId, options.HandshakeTopicSuffix, endpointStr);
+        
         var subscribeOptions = new MqttClientFactory().CreateSubscribeOptionsBuilder()
             .WithTopicFilter(f => f.WithTopic(topic))
             .Build();
@@ -294,6 +295,20 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
         {
             logger.LogError(ex, "[{MeshId}] Failed to reconnect MQTT handshaker.", meshId);
         }
+    }
+
+    private static string BuildHandshakeTopic(string prefix, string meshId, string suffix, string endpointStr)
+    {
+        var p = string.IsNullOrWhiteSpace(prefix) ? "p2p" : prefix.Trim('/');
+        var s = string.IsNullOrWhiteSpace(suffix) ? "handshake" : suffix.Trim('/');
+        return $"ama-enterprise/{p}/{meshId}/{s}/{endpointStr}";
+    }
+
+    private static string BuildHandshakeReplyTopic(string prefix, string meshId, string suffix, string replyId)
+    {
+        var p = string.IsNullOrWhiteSpace(prefix) ? "p2p" : prefix.Trim('/');
+        var s = string.IsNullOrWhiteSpace(suffix) ? "handshake" : suffix.Trim('/');
+        return $"ama-enterprise/{p}/{meshId}/{s}/replies/{replyId}";
     }
 
     private static string GetLocalIpAddress()

@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 using MQTTnet;
 
 /// <summary>
-/// Implementation managing the underlying MQTTnet client, handling continuous connections and specific mesh routing.
+/// Implementation managing the underlying MQTTnet client, handling continuous connections explicitly isolating topic subscriptions across generic meshes natively.
 /// </summary>
 public sealed class MqttClientManager : IMqttClientManager, IDisposable
 {
@@ -33,10 +33,15 @@ public sealed class MqttClientManager : IMqttClientManager, IDisposable
         IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
         ILogger<MqttClientManager> logger)
     {
-        this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-        this.optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
-        this.nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        ArgumentNullException.ThrowIfNull(meshId);
+        ArgumentNullException.ThrowIfNull(optionsMonitor);
+        ArgumentNullException.ThrowIfNull(nodeOptionsMonitor);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        this.meshId = meshId;
+        this.optionsMonitor = optionsMonitor;
+        this.nodeOptionsMonitor = nodeOptionsMonitor;
+        this.logger = logger;
 
         var factory = new MqttClientFactory();
         this.mqttClient = factory.CreateMqttClient();
@@ -51,9 +56,10 @@ public sealed class MqttClientManager : IMqttClientManager, IDisposable
         var options = optionsMonitor.Get(meshId);
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
 
+        // Incorporate application prefix and meshId natively mapping distinct client instances safely avoiding broker kicks.
         var builder = new MqttClientOptionsBuilder()
             .WithTcpServer(options.Host, options.Port)
-            .WithClientId(nodeOptions.LocalPeerId.ToString("N"));
+            .WithClientId($"ama-ent-{nodeOptions.LocalPeerId:N}-{meshId}");
 
         if (!string.IsNullOrWhiteSpace(options.Username))
         {
@@ -70,17 +76,19 @@ public sealed class MqttClientManager : IMqttClientManager, IDisposable
             await mqttClient.ConnectAsync(builder.Build(), cancellationToken).ConfigureAwait(false);
             logger.LogInformation("[{MeshId}] Connected to MQTT broker at {Host}:{Port}.", meshId, options.Host, options.Port);
 
-            var topic = GetTopicForClient(options.TopicPrefix, nodeOptions.LocalPeerId.ToString("N"));
+            // Dynamically decouple internal generic routing injecting application prefix and meshId explicit bounds strictly
+            var topic = GetTopicForClient(options.TopicPrefix, meshId, nodeOptions.LocalPeerId.ToString("N"));
+            
             var subscribeOptions = new MqttClientFactory().CreateSubscribeOptionsBuilder()
                 .WithTopicFilter(f => f.WithTopic(topic))
                 .Build();
 
             await mqttClient.SubscribeAsync(subscribeOptions, cancellationToken).ConfigureAwait(false);
-            logger.LogInformation("[{MeshId}] Subscribed to inbound MQTT topic: {Topic}", meshId, topic);
+            logger.LogInformation("[{MeshId}] Subscribed to explicitly isolated inbound MQTT topic: {Topic}", meshId, topic);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "[{MeshId}] Failed to connect to MQTT broker or subscribe to topics.", meshId);
+            logger.LogError(ex, "[{MeshId}] Failed to connect to MQTT broker mapping decoupled topics.", meshId);
             throw;
         }
     }
@@ -94,26 +102,23 @@ public sealed class MqttClientManager : IMqttClientManager, IDisposable
                 .WithReason(MqttClientDisconnectOptionsReason.NormalDisconnection)
                 .Build(), cancellationToken).ConfigureAwait(false);
                 
-            logger.LogInformation("[{MeshId}] Disconnected from MQTT broker.", meshId);
+            logger.LogInformation("[{MeshId}] Disconnected from explicit generic MQTT broker mapped connections.", meshId);
         }
     }
 
     /// <inheritdoc />
     public async Task PublishAsync(string targetClientId, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(targetClientId))
-        {
-            throw new ArgumentException("Target client ID cannot be empty.", nameof(targetClientId));
-        }
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetClientId);
 
         if (!mqttClient.IsConnected)
         {
-            logger.LogWarning("[{MeshId}] Cannot publish message, MQTT client is not connected.", meshId);
+            logger.LogWarning("[{MeshId}] Cannot publish generically decoupled payload natively, MQTT client is disconnected.", meshId);
             return;
         }
 
         var options = optionsMonitor.Get(meshId);
-        var topic = GetTopicForClient(options.TopicPrefix, targetClientId);
+        var topic = GetTopicForClient(options.TopicPrefix, meshId, targetClientId);
 
         var message = new MqttApplicationMessageBuilder()
             .WithTopic(topic)
@@ -143,9 +148,8 @@ public sealed class MqttClientManager : IMqttClientManager, IDisposable
 
     private async Task HandleDisconnectedAsync(MqttClientDisconnectedEventArgs args)
     {
-        logger.LogWarning("[{MeshId}] MQTT connection lost. Reason: {Reason}", meshId, args.Reason);
+        logger.LogWarning("[{MeshId}] Standard mapped MQTT connection lost. Reason: {Reason}", meshId, args.Reason);
         
-        // Basic automatic reconnection back-off.
         await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
         
         try
@@ -154,13 +158,14 @@ public sealed class MqttClientManager : IMqttClientManager, IDisposable
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "[{MeshId}] Failed to automatically reconnect to MQTT broker.", meshId);
+            logger.LogError(ex, "[{MeshId}] Failed to explicitly reconnect bound MQTT broker cleanly.", meshId);
         }
     }
 
-    private static string GetTopicForClient(string prefix, string clientId)
+    private static string GetTopicForClient(string prefix, string meshId, string clientId)
     {
-        return $"{prefix.TrimEnd('/')}/{clientId}";
+        var p = string.IsNullOrWhiteSpace(prefix) ? "p2p" : prefix.Trim('/');
+        return $"ama-enterprise/{p}/{meshId}/clients/{clientId}";
     }
 
     /// <inheritdoc />

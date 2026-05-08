@@ -26,7 +26,7 @@ public sealed class HttpTransportOptions : IEquatable<HttpTransportOptions>
     /// <summary>
     /// Gets or sets the HTTP path prefix for receiving messages.
     /// </summary>
-    public string PathPrefix { get; set; } = "/p2p/messages/";
+    public string PathPrefix { get; set; } = "/ama-enterprise/p2p/messages/";
 
     /// <inheritdoc />
     public bool Equals(HttpTransportOptions? other)

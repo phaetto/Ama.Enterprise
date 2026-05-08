@@ -28,9 +28,9 @@ public sealed record AspNetCoreHandshakeOptions
     public int StandaloneListenPort { get; set; } = 8081;
 
     /// <summary>
-    /// The HTTP base route path prefix mapping distinct decoupled handshakes cleanly natively. Defaults to "/p2p-handshake".
+    /// The HTTP base route path prefix mapping distinct decoupled handshakes cleanly natively. Defaults to "/ama-enterprise/p2p-handshake".
     /// </summary>
-    public string PathPrefix { get; set; } = "/p2p-handshake";
+    public string PathPrefix { get; set; } = "/ama-enterprise/p2p-handshake";
 
     /// <summary>
     /// The timeout duration safely isolating unstable decoupled outbound handshakes explicitly.

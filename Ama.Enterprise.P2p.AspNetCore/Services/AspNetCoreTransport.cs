@@ -17,47 +17,53 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Implements outbound transport using HTTP POST requests mapped specifically to a target ASP.NET Core mesh listener.
 /// </summary>
-/// <remarks>
-/// Initializes a new instance of the <see cref="AspNetCoreTransport"/> class.
-/// </remarks>
-public sealed class AspNetCoreTransport(
-    string meshId,
-    IOptionsMonitor<AspNetCoreTransportOptions> optionsMonitor,
-    IHttpClientFactory httpClientFactory,
-    ICrdtSerializer serializer,
-    IPeerRegistry peerRegistry,
-    ILogger<AspNetCoreTransport> logger) : ITransport
+public sealed class AspNetCoreTransport : ITransport
 {
-    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-    private readonly IOptionsMonitor<AspNetCoreTransportOptions> optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
-    private readonly IHttpClientFactory httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-    private readonly IPeerRegistry peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
-    private readonly ILogger<AspNetCoreTransport> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly string meshId;
+    private readonly IOptionsMonitor<AspNetCoreTransportOptions> optionsMonitor;
+    private readonly IHttpClientFactory httpClientFactory;
+    private readonly ICrdtSerializer serializer;
+    private readonly IPeerRegistry peerRegistry;
+    private readonly ILogger<AspNetCoreTransport> logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AspNetCoreTransport"/> class.
+    /// </summary>
+    public AspNetCoreTransport(
+        string meshId,
+        IOptionsMonitor<AspNetCoreTransportOptions> optionsMonitor,
+        IHttpClientFactory httpClientFactory,
+        ICrdtSerializer serializer,
+        IPeerRegistry peerRegistry,
+        ILogger<AspNetCoreTransport> logger)
+    {
+        ArgumentNullException.ThrowIfNull(meshId);
+        ArgumentNullException.ThrowIfNull(optionsMonitor);
+        ArgumentNullException.ThrowIfNull(httpClientFactory);
+        ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentNullException.ThrowIfNull(peerRegistry);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        this.meshId = meshId;
+        this.optionsMonitor = optionsMonitor;
+        this.httpClientFactory = httpClientFactory;
+        this.serializer = serializer;
+        this.peerRegistry = peerRegistry;
+        this.logger = logger;
+    }
 
     /// <inheritdoc />
     public bool CanHandle(PeerEndpoint endpoint)
     {
-        if (endpoint == null)
-        {
-            throw new ArgumentNullException(nameof(endpoint));
-        }
-
+        ArgumentNullException.ThrowIfNull(endpoint);
         return endpoint is AspNetCorePeerEndpoint;
     }
 
     /// <inheritdoc />
     public async Task SendAsync(PeerEndpoint endpoint, IMeshMessage message, CancellationToken cancellationToken)
     {
-        if (endpoint == null)
-        {
-            throw new ArgumentNullException(nameof(endpoint));
-        }
-
-        if (message == null)
-        {
-            throw new ArgumentNullException(nameof(message));
-        }
+        ArgumentNullException.ThrowIfNull(endpoint);
+        ArgumentNullException.ThrowIfNull(message);
 
         if (!string.Equals(message.MeshId, meshId, StringComparison.Ordinal))
         {
@@ -86,11 +92,11 @@ public sealed class AspNetCoreTransport(
             return;
         }
 
-        var path = string.IsNullOrWhiteSpace(options.PathPrefix) ? "/p2p-mesh" : options.PathPrefix.TrimEnd('/');
-        var scheme = options.UseHttps ? "https" : "http";
+        var basePath = string.IsNullOrWhiteSpace(options.PathPrefix) ? "/ama-enterprise/p2p-mesh" : options.PathPrefix.TrimEnd('/');
+        if (!basePath.StartsWith("/", StringComparison.Ordinal)) basePath = "/" + basePath;
         
-        // Construct the full path expecting the EndpointRouteBuilder mapping: {routePrefix}/{meshId}
-        var url = $"{scheme}://{targetEndpoint.Host}:{targetEndpoint.Port}{path}/{meshId}";
+        var scheme = options.UseHttps ? "https" : "http";
+        var url = $"{scheme}://{targetEndpoint.Host}:{targetEndpoint.Port}{basePath}/{meshId}";
 
         using var client = httpClientFactory.CreateClient("P2pAspNetCoreTransport");
         client.Timeout = TimeSpan.FromSeconds(5);
@@ -105,7 +111,7 @@ public sealed class AspNetCoreTransport(
         };
         request.Headers.TryAddWithoutValidation("X-P2P-Protocol-Version", Constants.ProtocolVersion);
 
-        logger.LogTrace("[{MeshId}] Sending message via ASP.NET Core transport to {Url}", meshId, url);
+        logger.LogTrace("[{MeshId}] Sending message via ASP.NET Core transport to explicitly isolated path {Url}", meshId, url);
 
         try
         {

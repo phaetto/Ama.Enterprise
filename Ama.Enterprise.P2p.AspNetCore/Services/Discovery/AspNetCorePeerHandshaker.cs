@@ -22,17 +22,47 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Implementation of IPeerHandshaker managing isolated ASP.NET Core HTTP probes explicitly supporting Integrated and Standalone modes natively decoupled structurally.
 /// </summary>
-public sealed class AspNetCorePeerHandshaker(
-    string meshId,
-    IOptionsMonitor<AspNetCoreHandshakeOptions> optionsMonitor,
-    IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
-    PeerEndpoint localEndpoint,
-    IHttpClientFactory httpClientFactory,
-    ICrdtSerializer serializer,
-    ILogger<AspNetCorePeerHandshaker> logger) : IPeerHandshaker, IHostedService, IDisposable
+public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IHostedService, IDisposable
 {
+    private readonly string meshId;
+    private readonly IOptionsMonitor<AspNetCoreHandshakeOptions> optionsMonitor;
+    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
+    private readonly PeerEndpoint localEndpoint;
+    private readonly IHttpClientFactory httpClientFactory;
+    private readonly ICrdtSerializer serializer;
+    private readonly ILogger<AspNetCorePeerHandshaker> logger;
+
     private IHost? webHost;
     private bool isDisposed;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AspNetCorePeerHandshaker"/> class.
+    /// </summary>
+    public AspNetCorePeerHandshaker(
+        string meshId,
+        IOptionsMonitor<AspNetCoreHandshakeOptions> optionsMonitor,
+        IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
+        PeerEndpoint localEndpoint,
+        IHttpClientFactory httpClientFactory,
+        ICrdtSerializer serializer,
+        ILogger<AspNetCorePeerHandshaker> logger)
+    {
+        ArgumentNullException.ThrowIfNull(meshId);
+        ArgumentNullException.ThrowIfNull(optionsMonitor);
+        ArgumentNullException.ThrowIfNull(nodeOptionsMonitor);
+        ArgumentNullException.ThrowIfNull(localEndpoint);
+        ArgumentNullException.ThrowIfNull(httpClientFactory);
+        ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        this.meshId = meshId;
+        this.optionsMonitor = optionsMonitor;
+        this.nodeOptionsMonitor = nodeOptionsMonitor;
+        this.localEndpoint = localEndpoint;
+        this.httpClientFactory = httpClientFactory;
+        this.serializer = serializer;
+        this.logger = logger;
+    }
 
     /// <inheritdoc />
     public int LocalHandshakePort => optionsMonitor.Get(meshId).AdvertisedHandshakePort;
@@ -71,7 +101,10 @@ public sealed class AspNetCorePeerHandshaker(
                     
                     webBuilder.Configure(app =>
                     {
-                        var path = options.PathPrefix.TrimEnd('/') + $"/{meshId}";
+                        var basePath = string.IsNullOrWhiteSpace(options.PathPrefix) ? "/ama-enterprise/p2p-handshake" : options.PathPrefix.TrimEnd('/');
+                        if (!basePath.StartsWith("/", StringComparison.Ordinal)) basePath = "/" + basePath;
+                        var path = $"{basePath}/{meshId}";
+
                         app.Run(async context =>
                         {
                             if (context.Request.Path == path && context.Request.Method == HttpMethods.Post)
@@ -119,7 +152,10 @@ public sealed class AspNetCorePeerHandshaker(
 
         try
         {
-            var path = options.PathPrefix.TrimEnd('/') + $"/{meshId}";
+            var basePath = string.IsNullOrWhiteSpace(options.PathPrefix) ? "/ama-enterprise/p2p-handshake" : options.PathPrefix.TrimEnd('/');
+            if (!basePath.StartsWith("/", StringComparison.Ordinal)) basePath = "/" + basePath;
+            var path = $"{basePath}/{meshId}";
+
             var uri = new Uri($"http://{endpoint.Address}:{endpoint.Port}{path}");
             
             var requestBytes = serializer.SerializeToBytes(localNode);

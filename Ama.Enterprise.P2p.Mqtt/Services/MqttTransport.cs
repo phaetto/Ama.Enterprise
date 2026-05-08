@@ -12,26 +12,46 @@ using Microsoft.Extensions.Logging;
 /// <summary>
 /// Outbound transport mechanism routing P2P messages over isolated MQTT channels.
 /// </summary>
-/// <remarks>
-/// Initializes a new instance of the <see cref="MqttTransport"/> class.
-/// </remarks>
-public sealed class MqttTransport(
-    string meshId,
-    IMqttClientManager clientManager,
-    ICrdtSerializer serializer,
-    ILogger<MqttTransport> logger) : ITransport
+public sealed class MqttTransport : ITransport
 {
-    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-    private readonly IMqttClientManager clientManager = clientManager ?? throw new ArgumentNullException(nameof(clientManager));
-    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-    private readonly ILogger<MqttTransport> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly string meshId;
+    private readonly IMqttClientManager clientManager;
+    private readonly ICrdtSerializer serializer;
+    private readonly ILogger<MqttTransport> logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="MqttTransport"/> class.
+    /// </summary>
+    public MqttTransport(
+        string meshId,
+        IMqttClientManager clientManager,
+        ICrdtSerializer serializer,
+        ILogger<MqttTransport> logger)
+    {
+        ArgumentNullException.ThrowIfNull(meshId);
+        ArgumentNullException.ThrowIfNull(clientManager);
+        ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        this.meshId = meshId;
+        this.clientManager = clientManager;
+        this.serializer = serializer;
+        this.logger = logger;
+    }
 
     /// <inheritdoc />
-    public bool CanHandle(PeerEndpoint endpoint) => endpoint is MqttPeerEndpoint;
+    public bool CanHandle(PeerEndpoint endpoint)
+    {
+        ArgumentNullException.ThrowIfNull(endpoint);
+        return endpoint is MqttPeerEndpoint;
+    }
 
     /// <inheritdoc />
     public Task SendAsync(PeerEndpoint endpoint, IMeshMessage message, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(endpoint);
+        ArgumentNullException.ThrowIfNull(message);
+
         if (endpoint is not MqttPeerEndpoint mqttEndpoint)
         {
             logger.LogWarning("[{MeshId}] Cannot send MQTT message. Target endpoint is not an MqttPeerEndpoint.", meshId);

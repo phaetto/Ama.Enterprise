@@ -85,7 +85,7 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
             
             var nodeOptions = nodeOptionsMonitor.Get(meshId);
             
-            logger.LogInformation("[{MeshId}] Connected to MQTT broker for Phase 1 discovery as {ClientId}.", meshId, $"{nodeOptions.LocalPeerId:N}-discovery");
+            logger.LogInformation("[{MeshId}] Connected to MQTT broker for Phase 1 discovery as {ClientId}.", meshId, $"ama-ent-{nodeOptions.LocalPeerId:N}-{meshId}-discovery");
 
             discoveryTask = DiscoveryLoopAsync(backgroundTaskCancellationSource.Token);
         }
@@ -140,7 +140,7 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
 
         var builder = new MqttClientOptionsBuilder()
             .WithTcpServer(options.Host, options.Port)
-            .WithClientId($"{nodeOptions.LocalPeerId:N}-disc-{Guid.NewGuid():N}");
+            .WithClientId($"ama-ent-{nodeOptions.LocalPeerId:N}-{meshId}-disc-{Guid.NewGuid():N}");
 
         if (!string.IsNullOrWhiteSpace(options.Username)) builder.WithCredentials(options.Username, options.Password);
         if (options.UseTls) builder.WithTlsOptions(o => o.UseTls());
@@ -149,7 +149,7 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
         {
             await tempClient.ConnectAsync(builder.Build(), cancellationToken).ConfigureAwait(false);
 
-            var replyTopic = $"{options.TopicPrefix.TrimEnd('/')}/{options.DiscoveryTopicSuffix.TrimStart('/')}/replies/{Guid.NewGuid():N}";
+            var replyTopic = BuildDiscoveryReplyTopic(options.TopicPrefix, meshId, options.DiscoveryTopicSuffix, Guid.NewGuid().ToString("N"));
             var subscribeOptions = factory.CreateSubscribeOptionsBuilder().WithTopicFilter(f => f.WithTopic(replyTopic)).Build();
             
             await tempClient.SubscribeAsync(subscribeOptions, cancellationToken).ConfigureAwait(false);
@@ -164,7 +164,7 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
             };
 
             var requestBytes = serializer.SerializeToBytes(discoveryPayload);
-            var broadcastTopic = $"{options.TopicPrefix.TrimEnd('/')}/{options.DiscoveryTopicSuffix.TrimStart('/')}";
+            var broadcastTopic = BuildDiscoveryTopic(options.TopicPrefix, meshId, options.DiscoveryTopicSuffix);
 
             var message = new MqttApplicationMessageBuilder()
                 .WithTopic(broadcastTopic)
@@ -263,7 +263,7 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
         var options = discoveryOptionsMonitor.Get(meshId);
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
 
-        var clientId = $"{nodeOptions.LocalPeerId:N}-{meshId}-discovery";
+        var clientId = $"ama-ent-{nodeOptions.LocalPeerId:N}-{meshId}-discovery";
 
         var builder = new MqttClientOptionsBuilder()
             .WithTcpServer(options.Host, options.Port)
@@ -281,7 +281,7 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
 
         await mqttClient.ConnectAsync(builder.Build(), token).ConfigureAwait(false);
 
-        var broadcastTopic = $"{options.TopicPrefix.TrimEnd('/')}/{options.DiscoveryTopicSuffix.TrimStart('/')}";
+        var broadcastTopic = BuildDiscoveryTopic(options.TopicPrefix, meshId, options.DiscoveryTopicSuffix);
 
         var subscribeOptions = new MqttClientFactory().CreateSubscribeOptionsBuilder()
             .WithTopicFilter(f => f.WithTopic(broadcastTopic))
@@ -421,6 +421,18 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
             }
             catch (OperationCanceledException) { }
         }
+    }
+
+    private static string BuildDiscoveryTopic(string prefix, string meshId, string suffix)
+    {
+        var p = string.IsNullOrWhiteSpace(prefix) ? "p2p" : prefix.Trim('/');
+        var s = string.IsNullOrWhiteSpace(suffix) ? "discovery" : suffix.Trim('/');
+        return $"ama-enterprise/{p}/{meshId}/{s}";
+    }
+
+    private static string BuildDiscoveryReplyTopic(string prefix, string meshId, string suffix, string replyId)
+    {
+        return $"{BuildDiscoveryTopic(prefix, meshId, suffix)}/replies/{replyId}";
     }
 
     private static string GetLocalIpAddress()
