@@ -46,8 +46,9 @@ public sealed class TelemetryForwarderService : BackgroundService
 
         meterListener.InstrumentPublished = (instrument, listener) =>
         {
-            if (instrument.Meter.Name == Constants.CoreGossipMeterName ||
-                instrument.Meter.Name == Constants.PushPullGossipMeterName)
+            var options = this.optionsMonitor.CurrentValue;
+            if (options.IncludedMeterNames is not null && 
+                options.IncludedMeterNames.Contains(instrument.Meter.Name))
             {
                 listener.EnableMeasurementEvents(instrument);
             }

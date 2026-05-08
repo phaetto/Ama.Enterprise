@@ -146,18 +146,18 @@
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransport.cs` | Outbound mapping evaluating strict decoupled MQTT client managers natively. Refactored input validatons explicitly. |
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransportListener.cs` | Inbound listener registering standard network hooks dynamically bound to mapped multi-mesh brokers securely. |
 | `$/Ama.Enterprise.P2p.Telemetry.IntegrationTests/Ama.Enterprise.P2p.Telemetry.IntegrationTests.csproj` | No description provided. |
-| `$/Ama.Enterprise.P2p.Telemetry.IntegrationTests/Services/TelemetryNetworkIntegrationTests.cs` | Integration tests verifying pure asynchronous End-to-End explicitly evaluated decentralized generic telemetry broadcasting mapping decoupled constraints actively securely. |
+| `$/Ama.Enterprise.P2p.Telemetry.IntegrationTests/Services/TelemetryNetworkIntegrationTests.cs` | Updated to test custom meter boundaries by asserting on custom metric scopes native configurations natively. |
 | `$/Ama.Enterprise.P2p.Telemetry/Ama.Enterprise.P2p.Telemetry.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.Telemetry/Constants.cs` | Defines the core explicit meter names dynamically evaluated by the telemetry network listeners isolating generic algorithms. |
 | `$/Ama.Enterprise.P2p.Telemetry/Extensions/ServiceCollectionExtensions.cs` | Updated DI to map singletons for the explicit `TelemetryPushProtocol` ensuring bounded generic instance isolation matching background network hooks. |
 | `$/Ama.Enterprise.P2p.Telemetry/Models/MetricSnapshotDto.cs` | AOT friendly pure DTO strictly holding explicitly scoped aggregated metrics structures decoupling logic safely. |
 | `$/Ama.Enterprise.P2p.Telemetry/Models/MetricTagDto.cs` | AOT friendly structure representing a metric precise dimension extracted tracking generic mappings actively. |
 | `$/Ama.Enterprise.P2p.Telemetry/Models/TelemetryJsonContext.cs` | Isolated AOT generic bindings resolving metric serialization safely evaluating pure DTO constraints natively. |
-| `$/Ama.Enterprise.P2p.Telemetry/Models/TelemetryOptions.cs` | Configuration specifically targeting defining how and when mapped telemetry metrics broadcast generically isolated. |
+| `$/Ama.Enterprise.P2p.Telemetry/Models/TelemetryOptions.cs` | Updated to expose explicit tracking configuration enabling native generic meter dimension scopes via a robust `IEquatable` bounds implementation. |
 | `$/Ama.Enterprise.P2p.Telemetry/Models/TelemetryPayloadDto.cs` | DTO defining the top-level explicitly network transmission payloads natively wrapping internally batched generic metrics safely mapping AOT configurations. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/ITelemetryAggregator.cs` | Interface for centrally aggregating and retrieving in-memory telemetry network states. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryAggregator.cs` | Thread-safe in-memory aggregator holding the latest telemetry network metrics. |
-| `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryForwarderService.cs` | Substituted general P2P broadcast generic array loops with the isolated `TelemetryPushProtocol` explicit instance natively mapping payloads purely bounding topology routing. |
+| `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryForwarderService.cs` | Replaced hardcoded telemetry matching metrics with configurable scopes mapping native user boundaries explicitly. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryPayloadHandler.cs` | Application payload handler dedicated to processing incoming telemetry network payloads and routing them into the centralized aggregator. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryPushProtocol.cs` | Dedicated protocol handling un-forwarded one-hop payloads explicitly utilizing `IDirectMessageSender` securely bypassing duplicative network enveloping and strictly bounding explicit network topology routing internally natively. |
 | `$/Ama.Enterprise.P2p.UnitTests/Ama.Enterprise.P2p.UnitTests.csproj` | No description provided. |
