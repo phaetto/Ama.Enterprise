@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.Services.Transports;
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Net;
 using System.Threading;
@@ -15,10 +16,14 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Implements isolated inbound network listener, strictly binding configurations specific to a single mesh.
+/// WARNING: For production environments, it is strongly recommended to use the ASP.NET Core Kestrel implementation instead.
 /// </summary>
 /// <remarks>
 /// Initializes a new instance of the <see cref="HttpTransportListener"/> class.
 /// </remarks>
+#if !DEBUG
+[Experimental("AMA_P2P_HTTP_001", Message = "For production environments, it is strongly recommended to use the ASP.NET Core Kestrel implementation instead")]
+#endif
 public sealed class HttpTransportListener(
     string meshId,
     IOptionsMonitor<HttpTransportOptions> optionsMonitor,

@@ -6,6 +6,7 @@
   </Folder>
   <Folder Name="/Apps/">
     <File Path="apps-todo.txt" />
+    <Project Path="Ama.Enterprise.P2p.Telemetry.Cli/Ama.Enterprise.P2p.Telemetry.Cli.csproj" Id="df33b23a-daf7-4648-b6f0-24b4001792b6" />
   </Folder>
   <Folder Name="/Products/">
     <Project Path="Ama.Enterprise.CRDT.Testing/Ama.Enterprise.CRDT.Testing.csproj" Id="e30d8fc4-45a1-447c-bfb3-64761c771cb4" />

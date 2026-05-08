@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.Services.Transports;
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -15,10 +16,14 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Implements isolated outbound transport using HTTP POST requests mapped specifically to a target mesh.
+/// WARNING: For production environments, it is strongly recommended to use the ASP.NET Core Kestrel implementation instead.
 /// </summary>
 /// <remarks>
 /// Initializes a new instance of the <see cref="HttpTransport"/> class.
 /// </remarks>
+#if !DEBUG
+[Experimental("AMA_P2P_HTTP_001", Message = "For production environments, it is strongly recommended to use the ASP.NET Core Kestrel implementation instead")]
+#endif
 public sealed class HttpTransport(
     string meshId,
     IOptionsMonitor<HttpTransportOptions> optionsMonitor,
