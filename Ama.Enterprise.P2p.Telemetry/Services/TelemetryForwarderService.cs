@@ -68,33 +68,42 @@ public sealed class TelemetryForwarderService : BackgroundService
             return;
         }
 
+        await telemetryProtocol.StartAsync(stoppingToken).ConfigureAwait(false);
+
         logger.LogInformation("Starting isolated metric forwarder pipeline mapping exact aggregated network states.");
         meterListener.Start();
 
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            try
+            while (!stoppingToken.IsCancellationRequested)
             {
-                await Task.Delay(options.FlushInterval, stoppingToken).ConfigureAwait(false);
-
-                var activeOptions = optionsMonitor.CurrentValue;
-                if (!activeOptions.IsEnabled)
+                try
                 {
-                    continue;
+                    await Task.Delay(options.FlushInterval, stoppingToken).ConfigureAwait(false);
+
+                    var activeOptions = optionsMonitor.CurrentValue;
+                    if (!activeOptions.IsEnabled)
+                    {
+                        continue;
+                    }
+
+                    meterListener.RecordObservableInstruments();
+
+                    await BroadcastTelemetryAsync(activeOptions, stoppingToken).ConfigureAwait(false);
                 }
-
-                meterListener.RecordObservableInstruments();
-
-                await BroadcastTelemetryAsync(activeOptions, stoppingToken).ConfigureAwait(false);
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "An error occurred broadcasting metrics evaluating generic telemetry mappings.");
+                }
             }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "An error occurred broadcasting metrics evaluating generic telemetry mappings.");
-            }
+        }
+        finally
+        {
+            await telemetryProtocol.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
     }
 

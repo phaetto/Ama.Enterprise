@@ -111,6 +111,7 @@ public static class Program
             .AddP2pTelemetryForwarder(options =>
             {
                 options.TargetMeshId = "admin";
+                options.FlushInterval = TimeSpan.FromSeconds(1);
             })
             .AddP2pMesh("admin")
             .AddHttpTransport(options =>
