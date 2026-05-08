@@ -28,7 +28,7 @@ public static class ServiceCollectionExtensions
         configure?.Invoke(ffOpts);
 
         // Apply configuration mappings natively maintaining backwards compatibility
-        services.Configure<FeatureFlagOptions>(configure ?? (_ => { }));
+        services.Configure(configure ?? (_ => { }));
 
         Action<DistributedCrdtOptions> distConfig = dist =>
         {

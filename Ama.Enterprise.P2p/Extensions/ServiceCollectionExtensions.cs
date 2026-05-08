@@ -119,7 +119,7 @@ public static class ServiceCollectionExtensions
             return builder;
         }
 
-        builder.Services.Configure<HttpTransportOptions>(builder.MeshId, configAction);
+        builder.Services.Configure(builder.MeshId, configAction);
 
         builder.Services.AddHttpClient("P2pTransport");
 

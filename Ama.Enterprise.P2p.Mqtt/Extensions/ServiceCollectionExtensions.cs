@@ -88,7 +88,7 @@ public static class ServiceCollectionExtensions
             return new MqttPeerEndpoint(nodeOptions.LocalPeerId.ToString());
         });
 
-        builder.Services.AddKeyedSingleton<MqttClientManager>(builder.MeshId, (sp, key) =>
+        builder.Services.AddKeyedSingleton(builder.MeshId, (sp, key) =>
             new MqttClientManager(
                 (string)key!,
                 sp.GetRequiredService<IOptionsMonitor<MqttTransportOptions>>(),

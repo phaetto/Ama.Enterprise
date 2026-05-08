@@ -18,7 +18,6 @@ using Ama.Enterprise.UnitTests.Extensions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Shouldly;
 using Xunit;
@@ -326,7 +325,7 @@ public sealed class AspNetCoreTransportIntegrationTests(ITestOutputHelper testOu
 
         if (payloadHandler is not null)
         {
-            builder.Services.AddKeyedSingleton<IApplicationPayloadHandler>(meshId, payloadHandler);
+            builder.Services.AddKeyedSingleton(meshId, payloadHandler);
         }
 
         builder.WebHost.ConfigureKestrel(options =>

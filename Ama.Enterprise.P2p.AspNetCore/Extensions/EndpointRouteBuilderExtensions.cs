@@ -24,7 +24,7 @@ public static class EndpointRouteBuilderExtensions
     {
         if (endpoints is null)
         {
-            throw new System.ArgumentNullException(nameof(endpoints));
+            throw new ArgumentNullException(nameof(endpoints));
         }
 
         var pattern = $"{routePrefix.TrimEnd('/')}/{{meshId}}";
@@ -59,7 +59,7 @@ public static class EndpointRouteBuilderExtensions
     {
         if (endpoints is null)
         {
-            throw new System.ArgumentNullException(nameof(endpoints));
+            throw new ArgumentNullException(nameof(endpoints));
         }
 
         var pattern = $"{routePrefix.TrimEnd('/')}/{{meshId}}";

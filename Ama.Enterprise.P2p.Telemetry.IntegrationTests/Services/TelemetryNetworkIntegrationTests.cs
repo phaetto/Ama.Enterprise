@@ -11,7 +11,6 @@ using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.Services.Core;
-using Ama.Enterprise.P2p.Telemetry;
 using Ama.Enterprise.P2p.Telemetry.Extensions;
 using Ama.Enterprise.P2p.Telemetry.Models;
 using Ama.Enterprise.P2p.Telemetry.Services;

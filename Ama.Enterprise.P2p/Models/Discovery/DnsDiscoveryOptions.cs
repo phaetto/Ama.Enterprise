@@ -30,7 +30,7 @@ public sealed record DnsDiscoveryOptions
 
     /// <summary>
     /// Gets or sets a value indicating whether to query SRV records to discover both hostnames and ports dynamically.
-    /// Requires an <see cref="Ama.Enterprise.P2p.Services.Discovery.IDnsSrvResolver"/> to be registered in the dependency injection container.
+    /// Requires an <see cref="Services.Discovery.IDnsSrvResolver"/> to be registered in the dependency injection container.
     /// </summary>
     public bool UseSrvRecords { get; set; }
 

@@ -78,7 +78,7 @@ public static class ServiceCollectionExtensions
             return new WebRtcPeerEndpoint(nodeOptions.LocalPeerId);
         });
 
-        builder.Services.AddKeyedSingleton<WebRtcConnectionManager>(builder.MeshId, (sp, key) =>
+        builder.Services.AddKeyedSingleton(builder.MeshId, (sp, key) =>
             new WebRtcConnectionManager(
                 (string)key!,
                 sp.GetRequiredService<IOptionsMonitor<WebRtcOptions>>(),
