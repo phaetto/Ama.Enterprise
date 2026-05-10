@@ -10,7 +10,6 @@ using System.Threading.Tasks;
 using Ama.CRDT.Models;
 using Ama.CRDT.Services;
 using Ama.CRDT.Services.Serialization;
-using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Microsoft.Extensions.Logging;
 

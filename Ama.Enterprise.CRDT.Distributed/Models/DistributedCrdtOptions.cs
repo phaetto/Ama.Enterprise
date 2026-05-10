@@ -1,7 +1,4 @@
 namespace Ama.Enterprise.CRDT.Distributed.Models;
-
-using System;
-
 /// <summary>
 /// Configuration options for the Distributed CRDT module.
 /// </summary>
