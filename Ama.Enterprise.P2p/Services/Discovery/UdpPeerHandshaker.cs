@@ -1,6 +1,8 @@
 namespace Ama.Enterprise.P2p.Services.Discovery;
 
 using System;
+using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -30,6 +32,10 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IHostedService, IDispos
     private Task? listenTask;
     private bool isDisposed;
 
+    private readonly Meter meter;
+    private readonly Counter<long> requestsSentCounter;
+    private readonly Counter<long> requestsReceivedCounter;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="UdpPeerHandshaker"/> class.
     /// </summary>
@@ -39,7 +45,8 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IHostedService, IDispos
         IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
         PeerEndpoint localEndpoint,
         ICrdtSerializer serializer,
-        ILogger<UdpPeerHandshaker> logger)
+        ILogger<UdpPeerHandshaker> logger,
+        IMeterFactory? meterFactory = null)
     {
         ArgumentNullException.ThrowIfNull(meshId);
         ArgumentNullException.ThrowIfNull(optionsMonitor);
@@ -54,6 +61,10 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IHostedService, IDispos
         this.localEndpoint = localEndpoint;
         this.serializer = serializer;
         this.logger = logger;
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.P2p.UdpPeerHandshaker") ?? new Meter("Ama.Enterprise.P2p.UdpPeerHandshaker");
+        this.requestsSentCounter = this.meter.CreateCounter<long>("p2p.handshaker.udp.requests_sent", "requests", "Total UDP handshake requests sent");
+        this.requestsReceivedCounter = this.meter.CreateCounter<long>("p2p.handshaker.udp.requests_received", "requests", "Total UDP handshake requests received");
     }
 
     /// <inheritdoc />
@@ -115,6 +126,8 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IHostedService, IDispos
         try
         {
             await client.SendAsync(requestBytes, requestBytes.Length, endpoint).ConfigureAwait(false);
+            requestsSentCounter.Add(1, new KeyValuePair<string, object?>("mesh_id", meshId));
+
             var result = await client.ReceiveAsync(timeoutCts.Token).ConfigureAwait(false);
 
             return serializer.DeserializeFromBytes<PeerNode>(result.Buffer);
@@ -142,6 +155,7 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IHostedService, IDispos
         backgroundTaskCancellationSource?.Cancel();
         backgroundTaskCancellationSource?.Dispose();
         listener?.Dispose();
+        meter.Dispose();
         isDisposed = true;
     }
 
@@ -149,6 +163,7 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IHostedService, IDispos
     {
         if (listener is null) return;
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
 
         try
         {
@@ -158,6 +173,7 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IHostedService, IDispos
 
                 try
                 {
+                    requestsReceivedCounter.Add(1, tags);
                     var remoteNode = serializer.DeserializeFromBytes<PeerNode>(result.Buffer);
 
                     if (remoteNode.Id.Value != nodeOptions.LocalPeerId && remoteNode.Id.Value != Guid.Empty)

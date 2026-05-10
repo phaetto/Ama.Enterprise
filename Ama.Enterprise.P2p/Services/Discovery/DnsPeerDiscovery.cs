@@ -2,6 +2,7 @@ namespace Ama.Enterprise.P2p.Services.Discovery;
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,32 +17,55 @@ using Microsoft.Extensions.Options;
 /// Implementation of IPeerDiscovery using DNS resolution (Phase 1) paired with abstract active handshaking (Phase 2).
 /// Supports optional SRV record routing through injected dependencies.
 /// </summary>
-public sealed class DnsPeerDiscovery(
-    string meshId,
-    IOptionsMonitor<DnsDiscoveryOptions> discoveryOptionsMonitor,
-    IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
-    PeerEndpoint localEndpoint,
-    IPeerHandshaker handshaker,
-    ILogger<DnsPeerDiscovery> logger,
-    IPeerRegistry peerRegistry,
-    IPeerAuthenticator authenticator,
-    IFailureDetector failureDetector,
-    IDnsSrvResolver? srvResolver = null) : IPeerDiscovery, IHostedService, IDisposable
+public sealed class DnsPeerDiscovery : IPeerDiscovery, IHostedService, IDisposable
 {
-    private readonly string meshId = meshId;
-    private readonly IOptionsMonitor<DnsDiscoveryOptions> discoveryOptionsMonitor = discoveryOptionsMonitor;
-    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor = nodeOptionsMonitor;
-    private readonly PeerEndpoint localEndpoint = localEndpoint;
-    private readonly IPeerHandshaker handshaker = handshaker;
-    private readonly ILogger<DnsPeerDiscovery> logger = logger;
-    private readonly IPeerRegistry peerRegistry = peerRegistry;
-    private readonly IPeerAuthenticator authenticator = authenticator;
-    private readonly IFailureDetector failureDetector = failureDetector;
-    private readonly IDnsSrvResolver? srvResolver = srvResolver;
+    private readonly string meshId;
+    private readonly IOptionsMonitor<DnsDiscoveryOptions> discoveryOptionsMonitor;
+    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
+    private readonly PeerEndpoint localEndpoint;
+    private readonly IPeerHandshaker handshaker;
+    private readonly ILogger<DnsPeerDiscovery> logger;
+    private readonly IPeerRegistry peerRegistry;
+    private readonly IPeerAuthenticator authenticator;
+    private readonly IFailureDetector failureDetector;
+    private readonly IDnsSrvResolver? srvResolver;
 
     private CancellationTokenSource? backgroundTaskCancellationSource;
     private Task? discoveryTask;
     private bool isDisposed;
+
+    private readonly Meter meter;
+    private readonly Counter<long> discoveriesAttemptedCounter;
+    private readonly Counter<long> peersFoundCounter;
+
+    public DnsPeerDiscovery(
+        string meshId,
+        IOptionsMonitor<DnsDiscoveryOptions> discoveryOptionsMonitor,
+        IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
+        PeerEndpoint localEndpoint,
+        IPeerHandshaker handshaker,
+        ILogger<DnsPeerDiscovery> logger,
+        IPeerRegistry peerRegistry,
+        IPeerAuthenticator authenticator,
+        IFailureDetector failureDetector,
+        IDnsSrvResolver? srvResolver = null,
+        IMeterFactory? meterFactory = null)
+    {
+        this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
+        this.discoveryOptionsMonitor = discoveryOptionsMonitor ?? throw new ArgumentNullException(nameof(discoveryOptionsMonitor));
+        this.nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
+        this.localEndpoint = localEndpoint ?? throw new ArgumentNullException(nameof(localEndpoint));
+        this.handshaker = handshaker ?? throw new ArgumentNullException(nameof(handshaker));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        this.peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
+        this.authenticator = authenticator ?? throw new ArgumentNullException(nameof(authenticator));
+        this.failureDetector = failureDetector ?? throw new ArgumentNullException(nameof(failureDetector));
+        this.srvResolver = srvResolver;
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.P2p.DnsPeerDiscovery") ?? new Meter("Ama.Enterprise.P2p.DnsPeerDiscovery");
+        this.discoveriesAttemptedCounter = this.meter.CreateCounter<long>("p2p.discovery.dns.attempts", "attempts", "Total DNS discovery attempts");
+        this.peersFoundCounter = this.meter.CreateCounter<long>("p2p.discovery.dns.peers_found", "peers", "Total peers successfully found via DNS");
+    }
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
@@ -85,6 +109,9 @@ public sealed class DnsPeerDiscovery(
     public async Task<IEnumerable<PeerNode>> DiscoverPeersAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
+
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
+        discoveriesAttemptedCounter.Add(1, tags);
 
         var options = discoveryOptionsMonitor.Get(meshId);
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
@@ -160,6 +187,7 @@ public sealed class DnsPeerDiscovery(
 
         await Task.WhenAll(handshakeTasks).ConfigureAwait(false);
 
+        peersFoundCounter.Add(discoveredPeers.Count, tags);
         return discoveredPeers;
     }
 
@@ -173,6 +201,7 @@ public sealed class DnsPeerDiscovery(
 
         backgroundTaskCancellationSource?.Cancel();
         backgroundTaskCancellationSource?.Dispose();
+        meter.Dispose();
         isDisposed = true;
     }
 

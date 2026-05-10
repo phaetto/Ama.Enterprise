@@ -2,6 +2,7 @@ namespace Ama.Enterprise.P2p.Services.Core;
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,16 +15,33 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Implementation of <see cref="IDirectMessageSender"/> providing targeted point-to-point delivery.
 /// </summary>
-public sealed class DirectMessageSender(
-    IServiceProvider serviceProvider,
-    IEnumerable<P2pMeshMetadata> meshes,
-    IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
-    ILogger<DirectMessageSender> logger) : IDirectMessageSender
+public sealed class DirectMessageSender : IDirectMessageSender, IDisposable
 {
-    private readonly IServiceProvider serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-    private readonly IEnumerable<P2pMeshMetadata> meshes = meshes ?? throw new ArgumentNullException(nameof(meshes));
-    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
-    private readonly ILogger<DirectMessageSender> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IServiceProvider serviceProvider;
+    private readonly IEnumerable<P2pMeshMetadata> meshes;
+    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
+    private readonly ILogger<DirectMessageSender> logger;
+
+    private readonly Meter meter;
+    private readonly Counter<long> messagesSentCounter;
+    private readonly Histogram<long> payloadBytesHistogram;
+
+    public DirectMessageSender(
+        IServiceProvider serviceProvider,
+        IEnumerable<P2pMeshMetadata> meshes,
+        IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
+        ILogger<DirectMessageSender> logger)
+    {
+        this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        this.meshes = meshes ?? throw new ArgumentNullException(nameof(meshes));
+        this.nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        var meterFactory = serviceProvider.GetService<IMeterFactory>();
+        this.meter = meterFactory?.Create("Ama.Enterprise.P2p.DirectMessageSender") ?? new Meter("Ama.Enterprise.P2p.DirectMessageSender");
+        this.messagesSentCounter = this.meter.CreateCounter<long>("p2p.direct_sender.messages_sent", "messages", "Total targeted direct messages sent");
+        this.payloadBytesHistogram = this.meter.CreateHistogram<long>("p2p.direct_sender.payload_bytes", "bytes", "Size of outbound direct payload in bytes");
+    }
 
     /// <inheritdoc />
     public async Task SendDirectAsync(PeerId targetPeerId, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
@@ -84,8 +102,18 @@ public sealed class DirectMessageSender(
             null,
             payload);
 
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
+        messagesSentCounter.Add(1, tags);
+        payloadBytesHistogram.Record(payload.Length, tags);
+
         logger.LogTrace("[{MeshId}] Sending direct point-to-point message {MessageId} to {TargetPeerId}", meshId, message.MessageId, peer.Id.Value);
         
         await router.SendAsync(peer.Endpoint, message, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        meter.Dispose();
     }
 }

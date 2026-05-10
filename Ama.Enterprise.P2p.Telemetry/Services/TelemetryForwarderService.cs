@@ -48,7 +48,7 @@ public sealed class TelemetryForwarderService : BackgroundService
         {
             var options = this.optionsMonitor.CurrentValue;
             if (options.IncludedMeterNames is not null && 
-                options.IncludedMeterNames.Contains(instrument.Meter.Name))
+                options.IncludedMeterNames.Any(x => instrument.Meter.Name.StartsWith(x)))
             {
                 listener.EnableMeasurementEvents(instrument);
             }

@@ -8,10 +8,5 @@ public static class Constants
     /// <summary>
     /// Baseline meter name allocated for the standard active gossip algorithms bounds.
     /// </summary>
-    public const string CoreGossipMeterName = "Ama.Enterprise.P2p.Gossip";
-
-    /// <summary>
-    /// Baseline meter name targeting explicitly the active Push-Pull gossip parameters.
-    /// </summary>
-    public const string PushPullGossipMeterName = "Ama.Enterprise.P2p.PushPullGossip";
+    public const string P2pMeterName = "Ama.Enterprise.P2p";
 }

@@ -1,7 +1,9 @@
 namespace Ama.Enterprise.P2p.Services.Transports;
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -24,20 +26,45 @@ using Microsoft.Extensions.Options;
 #if !DEBUG
 [Experimental("AMA_P2P_HTTP_001", Message = "For production environments, it is strongly recommended to use the ASP.NET Core Kestrel implementation instead")]
 #endif
-public sealed class HttpTransport(
-    string meshId,
-    IOptionsMonitor<HttpTransportOptions> optionsMonitor,
-    IHttpClientFactory httpClientFactory,
-    ICrdtSerializer serializer,
-    IPeerRegistry peerRegistry,
-    ILogger<HttpTransport> logger) : ITransport
+public sealed class HttpTransport : ITransport, IDisposable
 {
-    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-    private readonly IOptionsMonitor<HttpTransportOptions> optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
-    private readonly IHttpClientFactory httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-    private readonly IPeerRegistry peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
-    private readonly ILogger<HttpTransport> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly string meshId;
+    private readonly IOptionsMonitor<HttpTransportOptions> optionsMonitor;
+    private readonly IHttpClientFactory httpClientFactory;
+    private readonly ICrdtSerializer serializer;
+    private readonly IPeerRegistry peerRegistry;
+    private readonly ILogger<HttpTransport> logger;
+
+    private readonly Meter meter;
+    private readonly Counter<long> messagesSentCounter;
+    private readonly Histogram<long> payloadBytesHistogram;
+
+    public HttpTransport(
+        string meshId,
+        IOptionsMonitor<HttpTransportOptions> optionsMonitor,
+        IHttpClientFactory httpClientFactory,
+        ICrdtSerializer serializer,
+        IPeerRegistry peerRegistry,
+        ILogger<HttpTransport> logger,
+        IMeterFactory? meterFactory = null)
+    {
+        this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
+        this.optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+        this.httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+        this.peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.P2p.HttpTransport") ?? new Meter("Ama.Enterprise.P2p.HttpTransport");
+        this.messagesSentCounter = this.meter.CreateCounter<long>(
+            "p2p.transport.http.messages_sent", 
+            "messages", 
+            "Total messages sent via HTTP transport");
+        this.payloadBytesHistogram = this.meter.CreateHistogram<long>(
+            "p2p.transport.http.payload_bytes", 
+            "bytes", 
+            "Size of outbound HTTP payload in bytes");
+    }
 
     /// <inheritdoc />
     public bool CanHandle(PeerEndpoint endpoint)
@@ -92,6 +119,11 @@ public sealed class HttpTransport(
         client.Timeout = TimeSpan.FromSeconds(5);
 
         var payload = serializer.SerializeToBytes(message);
+        
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
+        messagesSentCounter.Add(1, tags);
+        payloadBytesHistogram.Record(payload.Length, tags);
+
         using var content = new ByteArrayContent(payload);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
 
@@ -122,5 +154,11 @@ public sealed class HttpTransport(
 
             throw;
         }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        meter.Dispose();
     }
 }

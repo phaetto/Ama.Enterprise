@@ -138,7 +138,7 @@
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransport.cs` | Outbound mapping evaluating strict decoupled MQTT client managers natively. Refactored input validatons explicitly. |
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransportListener.cs` | Inbound listener registering standard network hooks dynamically bound to mapped multi-mesh brokers securely. |
 | `$/Ama.Enterprise.P2p.Telemetry.Cli/Ama.Enterprise.P2p.Telemetry.Cli.csproj` | No description provided. |
-| `$/Ama.Enterprise.P2p.Telemetry.Cli/Program.cs` | Console application serving as a live in-place telemetry dashboard, connecting to a P2P mesh and displaying dynamically aggregated metrics. |
+| `$/Ama.Enterprise.P2p.Telemetry.Cli/Program.cs` | Console application serving as a live in-place telemetry dashboard, connecting to a P2P mesh and displaying dynamically aggregated metrics. Replaced custom console dashboard logic with Terminal.Gui providing a native scrollable table, client list, and total active peer aggregations. Updated to intersect incoming telemetry endpoints with `IPeerRegistry` state, explicitly dropping inactive/dead nodes from UI aggregations seamlessly natively. |
 | `$/Ama.Enterprise.P2p.Telemetry.IntegrationTests/Ama.Enterprise.P2p.Telemetry.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.Telemetry.IntegrationTests/Services/TelemetryNetworkIntegrationTests.cs` | Updated to test custom meter boundaries by asserting on custom metric scopes native configurations natively. |
 | `$/Ama.Enterprise.P2p.Telemetry/Ama.Enterprise.P2p.Telemetry.csproj` | No description provided. |

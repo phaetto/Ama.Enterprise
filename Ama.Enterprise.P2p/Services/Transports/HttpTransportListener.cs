@@ -1,7 +1,9 @@
 namespace Ama.Enterprise.P2p.Services.Transports;
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Metrics;
 using System.IO;
 using System.Net;
 using System.Threading;
@@ -24,19 +26,43 @@ using Microsoft.Extensions.Options;
 #if !DEBUG
 [Experimental("AMA_P2P_HTTP_001", Message = "For production environments, it is strongly recommended to use the ASP.NET Core Kestrel implementation instead")]
 #endif
-public sealed class HttpTransportListener(
-    string meshId,
-    IOptionsMonitor<HttpTransportOptions> optionsMonitor,
-    ICrdtSerializer serializer,
-    ILogger<HttpTransportListener> logger) : ITransportListener, IDisposable
+public sealed class HttpTransportListener : ITransportListener, IDisposable
 {
-    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-    private readonly IOptionsMonitor<HttpTransportOptions> optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
-    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-    private readonly ILogger<HttpTransportListener> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly string meshId;
+    private readonly IOptionsMonitor<HttpTransportOptions> optionsMonitor;
+    private readonly ICrdtSerializer serializer;
+    private readonly ILogger<HttpTransportListener> logger;
+
     private HttpListener? httpListener;
     private CancellationTokenSource? listenerCts;
     private Task? listeningTask;
+
+    private readonly Meter meter;
+    private readonly Counter<long> messagesReceivedCounter;
+    private readonly Histogram<long> payloadBytesHistogram;
+
+    public HttpTransportListener(
+        string meshId,
+        IOptionsMonitor<HttpTransportOptions> optionsMonitor,
+        ICrdtSerializer serializer,
+        ILogger<HttpTransportListener> logger,
+        IMeterFactory? meterFactory = null)
+    {
+        this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
+        this.optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.P2p.HttpTransportListener") ?? new Meter("Ama.Enterprise.P2p.HttpTransportListener");
+        this.messagesReceivedCounter = this.meter.CreateCounter<long>(
+            "p2p.transport.http.messages_received", 
+            "messages", 
+            "Total messages received via HTTP transport");
+        this.payloadBytesHistogram = this.meter.CreateHistogram<long>(
+            "p2p.transport.http.inbound_payload_bytes", 
+            "bytes", 
+            "Size of inbound HTTP payload in bytes");
+    }
 
     /// <inheritdoc />
     public Task StartListeningAsync(Func<IMeshMessage, Task> onMessageReceived, CancellationToken cancellationToken)
@@ -164,6 +190,11 @@ public sealed class HttpTransportListener(
             await context.Request.InputStream.CopyToAsync(memoryStream, cancellationToken).ConfigureAwait(false);
             
             var payload = memoryStream.ToArray();
+            
+            var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
+            messagesReceivedCounter.Add(1, tags);
+            payloadBytesHistogram.Record(payload.Length, tags);
+
             var message = serializer.DeserializeFromBytes<IMeshMessage>(payload);
 
             if (message is not null) 
@@ -256,5 +287,7 @@ public sealed class HttpTransportListener(
             
             httpListener.Close();
         }
+
+        meter.Dispose();
     }
 }

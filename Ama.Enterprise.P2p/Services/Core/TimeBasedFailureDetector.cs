@@ -2,6 +2,8 @@ namespace Ama.Enterprise.P2p.Services.Core;
 
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
@@ -14,16 +16,48 @@ using Microsoft.Extensions.Options;
 /// <remarks>
 /// Initializes a new instance of the <see cref="TimeBasedFailureDetector"/> class.
 /// </remarks>
-public sealed class TimeBasedFailureDetector(
-    string meshId,
-    IOptionsMonitor<FailureDetectorOptions> optionsMonitor,
-    ILogger<TimeBasedFailureDetector> logger) : IFailureDetector
+public sealed class TimeBasedFailureDetector : IFailureDetector, IDisposable
 {
-    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-    private readonly IOptionsMonitor<FailureDetectorOptions> optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
-    private readonly ILogger<TimeBasedFailureDetector> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly string meshId;
+    private readonly IOptionsMonitor<FailureDetectorOptions> optionsMonitor;
+    private readonly ILogger<TimeBasedFailureDetector> logger;
 
     private readonly ConcurrentDictionary<PeerId, DateTimeOffset> lastHeartbeats = new ConcurrentDictionary<PeerId, DateTimeOffset>();
+
+    private readonly Meter meter;
+    private readonly Counter<long> heartbeatsRecordedCounter;
+    private readonly Counter<long> evaluationsCounter;
+
+    public TimeBasedFailureDetector(
+        string meshId,
+        IOptionsMonitor<FailureDetectorOptions> optionsMonitor,
+        ILogger<TimeBasedFailureDetector> logger,
+        IMeterFactory? meterFactory = null)
+    {
+        this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
+        this.optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.P2p.TimeBasedFailureDetector") ?? new Meter("Ama.Enterprise.P2p.TimeBasedFailureDetector");
+        
+        this.heartbeatsRecordedCounter = this.meter.CreateCounter<long>(
+            "p2p.failure_detector.heartbeats_recorded", 
+            "heartbeats", 
+            "Total peer heartbeats successfully recorded");
+            
+        this.evaluationsCounter = this.meter.CreateCounter<long>(
+            "p2p.failure_detector.evaluations", 
+            "evaluations", 
+            "Total peer health evaluations processed");
+
+        this.meter.CreateObservableGauge(
+            "p2p.failure_detector.tracked_peers",
+            () => new Measurement<int>(
+                lastHeartbeats.Count,
+                new KeyValuePair<string, object?>("mesh_id", meshId)),
+            "peers",
+            "Current number of peers tracked by the failure detector");
+    }
 
     /// <inheritdoc />
     public Task RecordHeartbeatAsync(PeerId peerId, CancellationToken cancellationToken)
@@ -38,6 +72,8 @@ public sealed class TimeBasedFailureDetector(
             _ => DateTimeOffset.UtcNow,
             (_, _) => DateTimeOffset.UtcNow);
 
+        heartbeatsRecordedCounter.Add(1, new KeyValuePair<string, object?>("mesh_id", meshId));
+
         logger.LogTrace("[{MeshId}] Recorded heartbeat for peer {PeerId}.", meshId, peerId.Value);
 
         return Task.CompletedTask;
@@ -50,6 +86,8 @@ public sealed class TimeBasedFailureDetector(
         {
             throw new ArgumentException("Peer ID cannot be empty.", nameof(peerId));
         }
+
+        evaluationsCounter.Add(1, new KeyValuePair<string, object?>("mesh_id", meshId));
 
         if (!lastHeartbeats.TryGetValue(peerId, out var lastSeen))
         {
@@ -75,5 +113,11 @@ public sealed class TimeBasedFailureDetector(
         }
 
         return Task.FromResult(PeerStatus.Active);
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        meter.Dispose();
     }
 }

@@ -3,6 +3,7 @@ namespace Ama.Enterprise.P2p.Services.Discovery;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -18,34 +19,59 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Implementation of IPeerDiscovery acting as Phase 1, using UDP multicast to resolve IPs and delegating negotiation to the handshaker.
 /// </summary>
-public sealed class UdpPeerDiscovery(
-    string meshId,
-    IOptionsMonitor<UdpDiscoveryOptions> discoveryOptionsMonitor,
-    IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
-    PeerEndpoint localEndpoint,
-    IPeerHandshaker handshaker,
-    ILogger<UdpPeerDiscovery> logger,
-    IPeerRegistry peerRegistry,
-    ICrdtSerializer serializer,
-    IPeerAuthenticator authenticator,
-    IFailureDetector failureDetector) : IPeerDiscovery, IHostedService, IDisposable
+public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposable
 {
-    private readonly string meshId = meshId;
-    private readonly IOptionsMonitor<UdpDiscoveryOptions> discoveryOptionsMonitor = discoveryOptionsMonitor;
-    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor = nodeOptionsMonitor;
-    private readonly PeerEndpoint localEndpoint = localEndpoint;
-    private readonly IPeerHandshaker handshaker = handshaker;
-    private readonly ILogger<UdpPeerDiscovery> logger = logger;
-    private readonly IPeerRegistry peerRegistry = peerRegistry;
-    private readonly ICrdtSerializer serializer = serializer;
-    private readonly IPeerAuthenticator authenticator = authenticator;
-    private readonly IFailureDetector failureDetector = failureDetector;
+    private readonly string meshId;
+    private readonly IOptionsMonitor<UdpDiscoveryOptions> discoveryOptionsMonitor;
+    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
+    private readonly PeerEndpoint localEndpoint;
+    private readonly IPeerHandshaker handshaker;
+    private readonly ILogger<UdpPeerDiscovery> logger;
+    private readonly IPeerRegistry peerRegistry;
+    private readonly ICrdtSerializer serializer;
+    private readonly IPeerAuthenticator authenticator;
+    private readonly IFailureDetector failureDetector;
 
     private UdpClient? listener;
     private CancellationTokenSource? backgroundTaskCancellationSource;
     private Task? listenTask;
     private Task? discoveryTask;
     private bool isDisposed;
+
+    private readonly Meter meter;
+    private readonly Counter<long> multicastsSentCounter;
+    private readonly Counter<long> multicastsReceivedCounter;
+    private readonly Counter<long> peersFoundCounter;
+
+    public UdpPeerDiscovery(
+        string meshId,
+        IOptionsMonitor<UdpDiscoveryOptions> discoveryOptionsMonitor,
+        IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
+        PeerEndpoint localEndpoint,
+        IPeerHandshaker handshaker,
+        ILogger<UdpPeerDiscovery> logger,
+        IPeerRegistry peerRegistry,
+        ICrdtSerializer serializer,
+        IPeerAuthenticator authenticator,
+        IFailureDetector failureDetector,
+        IMeterFactory? meterFactory = null)
+    {
+        this.meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
+        this.discoveryOptionsMonitor = discoveryOptionsMonitor ?? throw new ArgumentNullException(nameof(discoveryOptionsMonitor));
+        this.nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
+        this.localEndpoint = localEndpoint ?? throw new ArgumentNullException(nameof(localEndpoint));
+        this.handshaker = handshaker ?? throw new ArgumentNullException(nameof(handshaker));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        this.peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
+        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+        this.authenticator = authenticator ?? throw new ArgumentNullException(nameof(authenticator));
+        this.failureDetector = failureDetector ?? throw new ArgumentNullException(nameof(failureDetector));
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.P2p.UdpPeerDiscovery") ?? new Meter("Ama.Enterprise.P2p.UdpPeerDiscovery");
+        this.multicastsSentCounter = this.meter.CreateCounter<long>("p2p.discovery.udp.multicasts_sent", "multicasts", "Total UDP multicasts sent");
+        this.multicastsReceivedCounter = this.meter.CreateCounter<long>("p2p.discovery.udp.multicasts_received", "multicasts", "Total UDP multicasts received");
+        this.peersFoundCounter = this.meter.CreateCounter<long>("p2p.discovery.udp.peers_found", "peers", "Total peers successfully found via UDP");
+    }
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
@@ -107,6 +133,7 @@ public sealed class UdpPeerDiscovery(
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
         var options = discoveryOptionsMonitor.Get(meshId);
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
         var discoveredPeers = new ConcurrentBag<PeerNode>();
@@ -125,6 +152,7 @@ public sealed class UdpPeerDiscovery(
         var targetEndpoint = new IPEndPoint(IPAddress.Parse(options.MulticastAddress), options.MulticastPort);
 
         await client.SendAsync(requestBytes, requestBytes.Length, targetEndpoint).ConfigureAwait(false);
+        multicastsSentCounter.Add(1, tags);
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(options.DiscoveryTimeout);
@@ -184,6 +212,7 @@ public sealed class UdpPeerDiscovery(
             catch (OperationCanceledException) { }
         }
 
+        peersFoundCounter.Add(discoveredPeers.Count, tags);
         return discoveredPeers;
     }
 
@@ -198,6 +227,7 @@ public sealed class UdpPeerDiscovery(
         backgroundTaskCancellationSource?.Cancel();
         backgroundTaskCancellationSource?.Dispose();
         listener?.Dispose();
+        meter.Dispose();
         isDisposed = true;
     }
 
@@ -205,6 +235,7 @@ public sealed class UdpPeerDiscovery(
     {
         if (listener is null) return;
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
 
         try
         {
@@ -218,6 +249,8 @@ public sealed class UdpPeerDiscovery(
 
                     if (ping.MeshId == meshId)
                     {
+                        multicastsReceivedCounter.Add(1, tags);
+
                         var pong = new UdpDiscoveryMessage
                         {
                             MeshId = meshId,
