@@ -13,12 +13,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 /// <summary>
-/// Extension methods for registering distributed CRDT state logic.
+/// Extension methods for registering distributed CRDT state logic supporting multi-replica environments.
 /// </summary>
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Bootstraps the baseline services, scope providers, and journaling decorators required by distributed CRDT modules.
+    /// Bootstraps the baseline services, scope managers, and journaling decorators.
     /// </summary>
     public static IServiceCollection AddDistributedCrdtCore(this IServiceCollection services, Action<DistributedCrdtOptions>? configure = null)
     {
@@ -50,11 +50,8 @@ public static class ServiceCollectionExtensions
                 .AddCrdtAotContext(new DistributedCrdtSystemAotContext())
                 .AddCrdtSerializableType<CrdtRegistryEntry>("crdt-registry-entry");
 
-        // Provide memory storage as the default 'primary' keyed fallback
-        services.TryAddKeyedSingleton<IDistributedCrdtStorage>("primary", (sp, key) => ActivatorUtilities.CreateInstance<MemoryCrdtStorage>(sp));
-        
-        // Register the composite storage router strictly acting as the unified storage global entry-point
-        services.TryAddSingleton<IDistributedCrdtStorage, CompositeCrdtStorage>();
+        // Provide memory storage as the default fallback actively mapped as scoped per replica instance.
+        services.TryAddScoped<IDistributedCrdtStorage, MemoryCrdtStorage>();
 
         services.AddCrdtJournaling<StorageJournalForwarder>();
 
@@ -62,22 +59,33 @@ public static class ServiceCollectionExtensions
         services.AddCrdtPatcherDecorator<JournalingPatcherDecorator>(DecoratorBehavior.After);
         services.AddCrdtApplicatorDecorator<CompactingApplicatorDecorator>(DecoratorBehavior.After);
 
-        services.AddSingleton<DistributedCrdtScopeProvider>();
-        
-        services.AddDistributedCrdtService<ICrdtDocumentOrchestrator, CrdtDocumentOrchestrator>();
-        
-        services.AddSingleton<IClusterStateTracker, ClusterStateTracker>();
-        services.AddSingleton<ICrdtEvictionService, CrdtEvictionService>();
-        
-        services.AddHostedService<CrdtInitializationService>();
+        services.TryAddSingleton<IDistributedCrdtScopeFactory, DistributedCrdtScopeFactory>();
+        services.TryAddSingleton<DistributedCrdtScopeManager>();
 
+        services.AddScoped<ICrdtDocumentOrchestrator, CrdtDocumentOrchestrator>();
+        services.AddScoped<IClusterStateTracker, ClusterStateTracker>();
+        services.AddScoped<ICrdtEvictionService, CrdtEvictionService>();
+
+        services.AddHostedService<CrdtInitializationService>();
         services.AddHostedService<CrdtCheckpointService>();
 
         return services;
     }
 
     /// <summary>
-    /// Registers a specific AOT-compliant CRDT document type.
+    /// Explicitly declares a distinct CRDT Replica registering bounding constraints generating persistent decoupled structures.
+    /// </summary>
+    public static IServiceCollection AddDistributedCrdtReplica(this IServiceCollection services, string replicaId)
+    {
+        if (services == null) throw new ArgumentNullException(nameof(services));
+        if (string.IsNullOrWhiteSpace(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
+
+        services.AddSingleton(new DistributedCrdtReplicaRegistration(replicaId));
+        return services;
+    }
+
+    /// <summary>
+    /// Registers a specific AOT-compliant CRDT document type avoiding reflection.
     /// </summary>
     public static IServiceCollection AddDistributedDocumentType<TState>(this IServiceCollection services, string typeAlias) where TState : class, new()
     {
@@ -89,81 +97,50 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers a generic domain service scoped within the dynamic CRDT lifecycle.
+    /// Registers a scoped distributed CRDT application service operating within the isolated CRDT multi-mesh scope explicitly.
     /// </summary>
     public static IServiceCollection AddDistributedCrdtService<TService, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>(this IServiceCollection services) 
-        where TService : class 
+        where TService : class
         where TImplementation : class, TService
     {
         if (services == null) throw new ArgumentNullException(nameof(services));
 
-        services.AddScoped<TImplementation>();
-        services.AddTransient<TService>(sp => 
-            sp.GetRequiredService<DistributedCrdtScopeProvider>().Scope.ServiceProvider.GetRequiredService<TImplementation>());
+        services.AddScoped<TService, TImplementation>();
 
         return services;
     }
 
     /// <summary>
-    /// Injects the generic CRDT routing dispatchers and anti-entropy background processors directly into the targeted P2P Mesh pipeline decoupled from underlying algorithm.
+    /// Injects generic anti-entropy multi-mesh payloads mapped tightly enforcing pure identity limits directly isolating routing domains.
     /// </summary>
-    public static IServiceCollection AddDistributedCrdtP2p(this IServiceCollection services, string meshId)
+    public static IServiceCollection AddDistributedCrdtP2p(this IServiceCollection services, string meshId, string replicaId)
     {
         if (services == null) throw new ArgumentNullException(nameof(services));
         if (string.IsNullOrWhiteSpace(meshId)) throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshId));
+        if (string.IsNullOrWhiteSpace(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
 
-        services.AddKeyedSingleton<IApplicationPayloadHandler, CrdtP2pPayloadHandler>(meshId);
-        services.AddSingleton<IPeerTopologyObserver, CrdtTopologyObserver>();
+        services.AddKeyedSingleton<IApplicationPayloadHandler>(meshId, (sp, key) => 
+            ActivatorUtilities.CreateInstance<CrdtP2pPayloadHandler>(sp, replicaId));
+            
+        services.AddKeyedSingleton<IPeerTopologyObserver>(meshId, (sp, key) => 
+            ActivatorUtilities.CreateInstance<CrdtTopologyObserver>(sp, replicaId));
+            
         services.AddHostedService<CrdtAntiEntropyService>();
 
         return services;
     }
 
     /// <summary>
-    /// Registers a generic distributed CRDT storage mechanism acting as the primary store.
+    /// Registers a single unified distributed CRDT storage mechanism mapped for the entire scope, overriding the default memory fallback.
     /// </summary>
-    public static IServiceCollection AddPrimaryDistributedCrdtStorage<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TStorage>(this IServiceCollection services) 
+    public static IServiceCollection AddDistributedCrdtStorage<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TStorage>(this IServiceCollection services) 
         where TStorage : class, IDistributedCrdtStorage
     {
         if (services == null) throw new ArgumentNullException(nameof(services));
         
-        services.RemoveAllKeyed(typeof(IDistributedCrdtStorage), "primary");
-        services.AddKeyedSingleton<IDistributedCrdtStorage, TStorage>("primary");
+        services.RemoveAll(typeof(IDistributedCrdtStorage));
+        services.AddScoped<IDistributedCrdtStorage, TStorage>();
         
-        return services;
-    }
-
-    /// <summary>
-    /// Registers a generic distributed CRDT storage mechanism mapped strictly to a specific dynamic document alias natively explicitly.
-    /// </summary>
-    public static IServiceCollection AddDistributedCrdtStorageForType<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TStorage>(this IServiceCollection services, string typeAlias) 
-        where TStorage : class, IDistributedCrdtStorage
-    {
-        if (services == null) throw new ArgumentNullException(nameof(services));
-        if (string.IsNullOrWhiteSpace(typeAlias)) throw new ArgumentException("Type alias cannot be null or empty.", nameof(typeAlias));
-
-        var key = $"type:{typeAlias}";
-        services.RemoveAllKeyed(typeof(IDistributedCrdtStorage), key);
-        services.AddKeyedSingleton<IDistributedCrdtStorage, TStorage>(key);
-        services.AddSingleton(new CrdtStorageRegistration(key, typeAlias, CrdtStorageRoutingType.DocumentType));
-
-        return services;
-    }
-
-    /// <summary>
-    /// Registers a generic distributed CRDT storage mechanism mapped strictly to a specific explicit active document identity dynamically.
-    /// </summary>
-    public static IServiceCollection AddDistributedCrdtStorageForDocument<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TStorage>(this IServiceCollection services, string documentId) 
-        where TStorage : class, IDistributedCrdtStorage
-    {
-        if (services == null) throw new ArgumentNullException(nameof(services));
-        if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
-
-        var key = $"doc:{documentId}";
-        services.RemoveAllKeyed(typeof(IDistributedCrdtStorage), key);
-        services.AddKeyedSingleton<IDistributedCrdtStorage, TStorage>(key);
-        services.AddSingleton(new CrdtStorageRegistration(key, documentId, CrdtStorageRoutingType.DocumentId));
-
         return services;
     }
 }

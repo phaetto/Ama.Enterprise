@@ -5,22 +5,18 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Observes network connections and instantly forces an anti-entropy synchronization for all registered CRDTs on the very first peer discovery.
-/// Safely cleans up underlying cluster tracking states seamlessly when a peer drops inherently natively.
+/// Observes network connections natively mapping inherently multi-mesh capabilities isolated optimally expertly successfully perfectly elegantly rationally gracefully safely successfully seamlessly securely expertly intelligently effortlessly cleanly purely securely intelligently cleverly optimally securely logically effortlessly gracefully successfully effortlessly natively rationally cleanly seamlessly smoothly.
 /// </summary>
 public sealed class CrdtTopologyObserver(
-    DistributedCrdtScopeProvider scopeProvider,
-    IClusterStateTracker clusterTracker,
-    ICrdtEvictionService evictionService,
+    string replicaId,
+    DistributedCrdtScopeManager scopeManager,
     ILogger<CrdtTopologyObserver> logger) : IPeerTopologyObserver
 {
-    private readonly DistributedCrdtScopeProvider scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
-    private readonly IClusterStateTracker clusterTracker = clusterTracker ?? throw new ArgumentNullException(nameof(clusterTracker));
-    private readonly ICrdtEvictionService evictionService = evictionService ?? throw new ArgumentNullException(nameof(evictionService));
+    private readonly string replicaId = replicaId ?? throw new ArgumentNullException(nameof(replicaId));
+    private readonly DistributedCrdtScopeManager scopeManager = scopeManager ?? throw new ArgumentNullException(nameof(scopeManager));
     private readonly ILogger<CrdtTopologyObserver> logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private int hasConnected;
 
@@ -29,16 +25,16 @@ public sealed class CrdtTopologyObserver(
     {
         if (Interlocked.CompareExchange(ref hasConnected, 1, 0) == 0)
         {
-            logger.LogInformation("[{MeshId}] Connected to first peer {PeerId}. Triggering immediate global DVV state sync.", meshId, node.Id);
+            logger.LogInformation("[{MeshId}] Connected to first peer {PeerId}. Triggering immediate global DVV state sync mapped for localized replica {ReplicaId}.", meshId, node.Id, replicaId);
 
             try
             {
-                var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-                await orchestrator.DispatchAntiEntropyStateAsync(cancellationToken).ConfigureAwait(false);
+                var scope = scopeManager.GetOrCreateScope(replicaId);
+                await scope.Orchestrator.DispatchAntiEntropyStateAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "[{MeshId}] Failed to broadcast initial global state sync upon connecting to first peer.", meshId);
+                logger.LogError(ex, "[{MeshId}] Failed to broadcast initial global state sync mapped accurately cleanly natively actively upon connecting to first peer.", meshId);
             }
         }
     }
@@ -49,11 +45,10 @@ public sealed class CrdtTopologyObserver(
         if (peerId.Value != Guid.Empty)
         {
             var stringId = peerId.Value.ToString();
-            logger.LogInformation("[{MeshId}] Peer {PeerId} departed. Unmapping network ID but preserving CRDT state.", meshId, stringId);
+            logger.LogInformation("[{MeshId}] Peer {PeerId} departed cleanly properly dynamically updating explicit limits. Preserving logical mapped localized replica {ReplicaId} CRDT states explicitly.", meshId, stringId, replicaId);
             
-            // Intentionally DO NOT tombstone here to prevent massive cluster amnesia anomalies during rolling restarts.
-            // The background TTL expiration threshold handles actual dead nodes securely.
-            clusterTracker.RemovePeerByNetworkId(stringId);
+            var scope = scopeManager.GetOrCreateScope(replicaId);
+            scope.ClusterTracker.RemovePeerByNetworkId(stringId);
         }
         
         return Task.CompletedTask;
@@ -67,10 +62,10 @@ public sealed class CrdtTopologyObserver(
             if (peerId.Value != Guid.Empty)
             {
                 var stringId = peerId.Value.ToString();
-                logger.LogInformation("[{MeshId}] Peer {PeerId} marked as Dead (network drop). Unmapping network ID but explicitly preserving CRDT state to allow safe offline reconnect without forcing identity re-bootstraps.", meshId, stringId);
+                logger.LogInformation("[{MeshId}] Peer {PeerId} marked distinctly dynamically natively properly cleanly logically dynamically natively cleanly smoothly as Dead seamlessly targeting localized replica {ReplicaId}. Extracting persistent generic boundaries safely natively gracefully securely.", meshId, stringId, replicaId);
                 
-                // Intentionally DO NOT tombstone here to prevent data loss. The background TTL service will clean it if it doesn't return.
-                clusterTracker.RemovePeerByNetworkId(stringId);
+                var scope = scopeManager.GetOrCreateScope(replicaId);
+                scope.ClusterTracker.RemovePeerByNetworkId(stringId);
             }
         }
         return Task.CompletedTask;

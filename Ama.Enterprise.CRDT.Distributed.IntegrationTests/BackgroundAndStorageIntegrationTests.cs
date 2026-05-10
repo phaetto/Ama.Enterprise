@@ -54,19 +54,20 @@ public sealed class BackgroundAndStorageIntegrationTests
 
         services.AddDistributedCrdtCore(opt =>
         {
-            opt.ReplicaId = replicaId;
             opt.CheckpointIntervalSeconds = 1; // Short interval for background testing
             opt.AntiEntropyIntervalSeconds = 1;
             opt.AntiEntropyInitialDelaySeconds = 0;
             opt.ActiveSyncEnabled = activeSync;
         });
 
+        services.AddDistributedCrdtReplica(replicaId);
+
         services.AddCrdt()
                 .AddCrdtAotContext(new BackgroundAndStorageTestAotContext())
                 .AddCrdtJsonTypeInfoResolver(BackgroundAndStorageTestJsonContext.Default);
 
         services.AddDistributedDocumentType<StorageTestState>("storage-doc");
-        services.AddDistributedCrdtP2p(TestMeshId);
+        services.AddDistributedCrdtP2p(TestMeshId, replicaId);
 
         services.AddSingleton(Mock.Of<IP2pProtocol>());
         services.AddSingleton(Mock.Of<IDirectMessageSender>());
@@ -77,7 +78,7 @@ public sealed class BackgroundAndStorageIntegrationTests
     }
 
     [IntegrationFact]
-    public async Task MemoryCrdtStorage_ShouldAppendRetrieveAndTrim_Correctly()
+    public async Task MemoryCrdtStorage_ShouldAppendRetrieveAndTrim()
     {
         // Arrange
         var storage = new MemoryCrdtStorage();
@@ -87,7 +88,7 @@ public sealed class BackgroundAndStorageIntegrationTests
 
         var ops = new List<CrdtOperation>
         {
-            // Use default to safely initialize the readonly struct and properly set the properties seamlessly matching explicit types correctly.
+            // Use default to initialize the readonly struct
             default(CrdtOperation) with { Id = op1Id, ReplicaId = "ReplicaA", GlobalClock = 1 },
             default(CrdtOperation) with { Id = op2Id, ReplicaId = "ReplicaA", GlobalClock = 2 },
             default(CrdtOperation) with { Id = op3Id, ReplicaId = "ReplicaB", GlobalClock = 1 }
@@ -100,7 +101,7 @@ public sealed class BackgroundAndStorageIntegrationTests
         var allOps = await storage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
         allOps.Count.ShouldBe(3);
 
-        // Act - Trim based on Global Minimum Version Vector (GMVV) safely bounds
+        // Act - Trim based on Global Minimum Version Vector (GMVV) bounds
         var gmvv = new Dictionary<string, long>
         {
             { "ReplicaA", 1 }, // ReplicaA up to 1 is known by all, so op1 can be trimmed
@@ -108,15 +109,15 @@ public sealed class BackgroundAndStorageIntegrationTests
         };
         await storage.TrimAsync(gmvv, CancellationToken.None);
 
-        // Assert - Correct Trimming
+        // Assert - Verify Trimming
         var postTrimOps = await storage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
-        postTrimOps.Count.ShouldBe(2); // op2 (ReplicaA clock 2) and op3 (ReplicaB clock 1) should remain protecting data explicitly
+        postTrimOps.Count.ShouldBe(2); // op2 and op3 should remain
         postTrimOps.Any(o => o.Operation.Id == op1Id).ShouldBeFalse();
         postTrimOps.Any(o => o.Operation.Id == op2Id).ShouldBeTrue();
     }
 
     [IntegrationFact]
-    public async Task CrdtTopologyObserver_ShouldBroadcastOnFirstPeer_Correctly()
+    public async Task CrdtTopologyObserver_ShouldBroadcastOnFirstPeer()
     {
         // Arrange
         var mockSender = new Mock<IDirectMessageSender>();
@@ -125,25 +126,26 @@ public sealed class BackgroundAndStorageIntegrationTests
             services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
         });
 
-        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("storage-doc", "storage-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
-        var observer = sp.GetRequiredService<IPeerTopologyObserver>();
+        var observer = sp.GetRequiredKeyedService<IPeerTopologyObserver>(TestMeshId);
         var peerNode = new PeerNode(new PeerId(Guid.NewGuid()), new HttpPeerEndpoint("http://localhost", 5000));
 
         // Act - Trigger Peer Joined naturally
         await observer.OnPeerJoinedAsync(TestMeshId, peerNode, CancellationToken.None);
         
-        // Assert - The observer should explicitly smoothly dynamically trigger document state sync broadcast seamlessly (1 documents: Registry and our test doc)
+        // Assert - The observer should trigger document state sync broadcast
         mockSender.Verify(p => p.SendToRandomPeerAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
         
-        // Act - Trigger again explicitly testing the thread-safe connection check structurally
+        // Act - Trigger again to test thread-safe connection check
         await observer.OnPeerJoinedAsync(TestMeshId, new PeerNode(new PeerId(Guid.NewGuid()), new HttpPeerEndpoint("http://localhost2", 5001)), CancellationToken.None);
         
-        // Assert - Only triggered on the FIRST connected peer perfectly seamlessly safely natively correctly explicitly properly
+        // Assert - Only triggered on the FIRST connected peer
         mockSender.Verify(p => p.SendToRandomPeerAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
     }
 
@@ -155,34 +157,34 @@ public sealed class BackgroundAndStorageIntegrationTests
         var sp = BuildNode("Replica1", services =>
         {
             services.Replace(ServiceDescriptor.Singleton(mockP2p.Object));
-        }, activeSync: true); // Enable active sync inherently
+        }, activeSync: true);
 
-        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("storage-doc", "storage-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var docManager = orchestrator.GetDocument<StorageTestState>("storage-doc")!;
         
-        // Prepare a valid generic empty patch strictly resolving local bounds mapping natively
+        // Prepare a valid empty patch
         var patch = new CrdtPatch(Array.Empty<CrdtOperation>());
 
         // Act
         await docManager.ApplyPatchAsync(patch, CancellationToken.None);
 
-        // Let's create a valid operation mapped effectively over the internal applicator accurately
         var op1 = default(CrdtOperation) with { Id = Guid.NewGuid(), ReplicaId = "Replica1", JsonPath = "$.Field", Type = OperationType.Upsert, Value = "test" };
         var populatedPatch = new CrdtPatch(new[] { op1 });
 
         await docManager.ApplyPatchAsync(populatedPatch, CancellationToken.None);
 
-        // Now verify it natively broadcasted explicitly smoothly dynamically matching active states accurately optimally appropriately reliably seamlessly flawlessly
+        // Now verify it broadcasted
         mockP2p.Verify(p => p.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
 
     [IntegrationFact]
-    public async Task CrdtGossipHandler_ProcessSnapshot_ShouldMergeProperly_ResolvingGapsNatively()
+    public async Task CrdtGossipHandler_ProcessSnapshot_ShouldMerge_ResolvingGaps()
     {
         // Arrange
         var mockP2p = new Mock<IP2pProtocol>();
@@ -191,8 +193,9 @@ public sealed class BackgroundAndStorageIntegrationTests
             services.Replace(ServiceDescriptor.Singleton(mockP2p.Object));
         });
 
-        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("storage-doc", "storage-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
@@ -200,19 +203,18 @@ public sealed class BackgroundAndStorageIntegrationTests
         var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>("StorageMesh");
         var serializer = sp.GetRequiredService<ICrdtSerializer>();
         
-        // Prepare a complete fully bound fallback snapshot explicitly cleanly logically
-        var context = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+        // Prepare a complete bound fallback snapshot
+        var context = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
         var globalDvv = new DottedVersionVector();
         globalDvv.Versions["RemoteA"] = 10;
         
-        // Ensure local operations are encompassed so concurrency rejection is evaded safely.
         lock (context.GlobalVersionVector)
         {
             globalDvv.Merge(context.GlobalVersionVector);
         }
         
         var docManager = orchestrator.GetDocument<StorageTestState>("storage-doc")!;
-        var metadataManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtMetadataManager>();
+        var metadataManager = scope.ServiceProvider.GetRequiredService<ICrdtMetadataManager>();
         
         var metadata = metadataManager.Initialize(new StorageTestState());
         var snapshotDoc = new CrdtDocument<StorageTestState>(new StorageTestState { Id = "storage-doc", Field = "SnapshotData" }, metadata);
@@ -225,7 +227,7 @@ public sealed class BackgroundAndStorageIntegrationTests
         
         var gossipMsg = new GossipMessage("StorageMesh", Guid.NewGuid(), new PeerId(Guid.NewGuid()), 10, wrapperBytes);
 
-        // Act - Process the completely unwrapped payload natively gracefully effectively bridging payload states
+        // Act - Process the unwrapped payload bridging payload states
         await handler.HandlePayloadAsync(gossipMsg.MeshId, gossipMsg.SenderId, gossipMsg.Payload, CancellationToken.None);
 
         // Assert
@@ -235,7 +237,7 @@ public sealed class BackgroundAndStorageIntegrationTests
     }
 
     [IntegrationFact]
-    public async Task CrdtCheckpointService_ExecutesSafely_SavingBounds()
+    public async Task CrdtCheckpointService_Executes_SavingBounds()
     {
         // Arrange
         var mockStorage = new Mock<IDistributedCrdtStorage>();
@@ -244,15 +246,16 @@ public sealed class BackgroundAndStorageIntegrationTests
             services.Replace(ServiceDescriptor.Singleton(mockStorage.Object));
         });
 
-        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("storage-doc", "storage-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var docManager = orchestrator.GetDocument<StorageTestState>("storage-doc")!;
         
-        // Ensure the document is mutated so it gets flagged securely as Dirty and properly saved natively by the loop
+        // Ensure the document is mutated so it gets flagged as Dirty and properly saved
         var op = default(CrdtOperation) with { Id = Guid.NewGuid(), ReplicaId = "Replica1", JsonPath = "$.Field", Type = OperationType.Upsert, Value = "DirtyData" };
         await docManager.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
 
@@ -276,7 +279,7 @@ public sealed class BackgroundAndStorageIntegrationTests
             await checkpointService.StopAsync(CancellationToken.None);
         }
 
-        // Assert - Effectively explicitly functionally smoothly naturally seamlessly securely thoroughly verifies bounds
+        // Assert - Verifies bounds
         mockStorage.Verify(s => s.SaveGlobalVersionVectorAsync(It.IsAny<string>(), It.IsAny<DottedVersionVector>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
         mockStorage.Verify(s => s.SaveDocumentAsync(It.IsAny<string>(), It.IsAny<CrdtDocument<StorageTestState>>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }

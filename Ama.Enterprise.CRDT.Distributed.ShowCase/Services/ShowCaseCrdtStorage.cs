@@ -8,55 +8,37 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
+using Ama.CRDT.Services;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Showcase implementation of a unified storage mechanism mapping the entire CRDT state tree, global DVV, and journaling natively locally.
 /// </summary>
-public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
+public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
 {
-    private readonly IOptionsMonitor<DistributedCrdtOptions> optionsMonitor;
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<ShowCaseCrdtStorage> logger;
-    private readonly IDisposable? optionsChangeToken;
     
     private readonly List<JournaledOperation> journal = new();
     private readonly object syncRoot = new();
 
-    private string loadedReplicaId;
+    private readonly string loadedReplicaId;
 
     public ShowCaseCrdtStorage(
-        IOptionsMonitor<DistributedCrdtOptions> optionsMonitor,
+        ReplicaContext replicaContext,
         ICrdtSerializer serializer,
         ILogger<ShowCaseCrdtStorage> logger)
     {
-        this.optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+        if (replicaContext == null) throw new ArgumentNullException(nameof(replicaContext));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        this.loadedReplicaId = this.optionsMonitor.CurrentValue.ReplicaId;
+        this.loadedReplicaId = replicaContext.ReplicaId;
         
         LoadJournalSynchronously();
-
-        this.optionsChangeToken = this.optionsMonitor.OnChange(OnOptionsChanged);
-    }
-
-    private void OnOptionsChanged(DistributedCrdtOptions newOptions)
-    {
-        lock (syncRoot)
-        {
-            if (!string.Equals(this.loadedReplicaId, newOptions.ReplicaId, StringComparison.Ordinal))
-            {
-                this.logger.LogInformation("ReplicaId changed from {OldId} to {NewId}. Reloading journal.", this.loadedReplicaId, newOptions.ReplicaId);
-                this.loadedReplicaId = newOptions.ReplicaId;
-                this.journal.Clear();
-                LoadJournalSynchronously();
-            }
-        }
     }
 
     public async Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
@@ -292,11 +274,6 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         return Task.CompletedTask;
     }
 
-    public void Dispose()
-    {
-        optionsChangeToken?.Dispose();
-    }
-
     private void LoadJournalSynchronously()
     {
         var filePath = GetJournalFilePath();
@@ -334,7 +311,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         }
     }
 
-    private string GetDocumentFilePath(string docId) => $"{optionsMonitor.CurrentValue.ReplicaId}_{docId}_state.json";
+    private string GetDocumentFilePath(string docId) => $"{loadedReplicaId}_{docId}_state.json";
     
     private string GetGlobalFilePath(string rid) => $"{rid}_global_dvv.json";
     

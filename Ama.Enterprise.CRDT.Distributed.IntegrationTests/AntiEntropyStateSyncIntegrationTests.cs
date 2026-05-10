@@ -52,9 +52,10 @@ public sealed class AntiEntropyStateSyncIntegrationTests
 
         services.AddDistributedCrdtCore(opt =>
         {
-            opt.ReplicaId = replicaId;
             opt.ActiveSyncEnabled = false;
         });
+
+        services.AddDistributedCrdtReplica(replicaId);
 
         services.AddCrdt()
                 .AddCrdtAotContext(new AntiEntropyStateSyncTestAotContext())
@@ -62,7 +63,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
 
         services.AddDistributedDocumentType<SyncTestState>("sync-doc-1");
         services.AddDistributedDocumentType<SyncTestState>("sync-doc-2");
-        services.AddDistributedCrdtP2p(TestMeshId);
+        services.AddDistributedCrdtP2p(TestMeshId, replicaId);
 
         services.AddSingleton(Mock.Of<IP2pProtocol>());
         services.AddSingleton(Mock.Of<IDirectMessageSender>());
@@ -73,7 +74,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
     }
 
     [IntegrationFact]
-    public async Task ProcessStateSyncAsync_ShouldRetrieveMissingOpsOnce_AndBroadcastPerDocument_Correctly()
+    public async Task ProcessStateSyncAsync_ShouldRetrieveMissingOpsOnce_AndBroadcastPerDocument()
     {
         // Arrange
         var mockSender = new Mock<IDirectMessageSender>();
@@ -86,9 +87,10 @@ public sealed class AntiEntropyStateSyncIntegrationTests
             services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
         });
 
-        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcher = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtPatcher>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var patcher = scope.ServiceProvider.GetRequiredService<ICrdtPatcher>();
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         

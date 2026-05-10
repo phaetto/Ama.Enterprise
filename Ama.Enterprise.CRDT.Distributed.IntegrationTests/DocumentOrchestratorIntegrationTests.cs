@@ -41,10 +41,8 @@ public sealed class DocumentOrchestratorIntegrationTests
         var services = new ServiceCollection();
         services.AddLogging();
 
-        services.AddDistributedCrdtCore(opt =>
-        {
-            opt.ReplicaId = "ReplicaA";
-        });
+        services.AddDistributedCrdtCore();
+        services.AddDistributedCrdtReplica("ReplicaA");
 
         services.AddCrdt()
                 .AddCrdtAotContext(new DynamicTestAotContext())
@@ -58,19 +56,20 @@ public sealed class DocumentOrchestratorIntegrationTests
     }
 
     [IntegrationFact]
-    public async Task Orchestrator_ShouldDynamicallyCreateAndTrackDocuments_Successfully()
+    public async Task Orchestrator_ShouldDynamicallyCreateAndTrackDocuments()
     {
         // Arrange
         var sp = BuildNode();
-        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("ReplicaA");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
 
         await orchestrator.InitializeAsync(CancellationToken.None);
 
         // Act
         await orchestrator.CreateDocumentAsync("dynamic-doc-1", "dynamic-type", CancellationToken.None);
 
-        // Await manual sync execution to effectively bypass background thread execution timing inherently properly gracefully
+        // Await manual sync execution to bypass background thread execution timing
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Assert
@@ -83,7 +82,7 @@ public sealed class DocumentOrchestratorIntegrationTests
     }
 
     [IntegrationFact]
-    public async Task Orchestrator_ShouldTombstoneAndDeleteDocumentsCorrectly_AcrossStorage()
+    public async Task Orchestrator_ShouldTombstoneAndDeleteDocuments_AcrossStorage()
     {
         // Arrange
         var mockStorage = new Mock<IDistributedCrdtStorage>();
@@ -92,8 +91,9 @@ public sealed class DocumentOrchestratorIntegrationTests
             s.Replace(ServiceDescriptor.Singleton(mockStorage.Object));
         });
 
-        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("ReplicaA");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
 
         await orchestrator.InitializeAsync(CancellationToken.None);
 
@@ -105,7 +105,7 @@ public sealed class DocumentOrchestratorIntegrationTests
         // Act
         await orchestrator.DeleteDocumentAsync("doc-to-delete", CancellationToken.None);
         
-        // Ensure synchronization lock handles background pipeline mapping sequentially natively
+        // Ensure synchronization lock handles background pipeline mapping sequentially
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Assert
@@ -124,8 +124,9 @@ public sealed class DocumentOrchestratorIntegrationTests
     {
         // Arrange
         var sp = BuildNode();
-        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("ReplicaA");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
 
         await orchestrator.InitializeAsync(CancellationToken.None);
 
@@ -135,6 +136,6 @@ public sealed class DocumentOrchestratorIntegrationTests
 
         // Assert
         var doc = orchestrator.GetActiveDocuments().FirstOrDefault(d => d.DocumentId == "unknown-doc");
-        doc.ShouldBeNull(); // It should securely effectively appropriately logically flawlessly ignore unmapped aliases natively without destructive application faults gracefully.
+        doc.ShouldBeNull(); // It should ignore unmapped aliases without application faults.
     }
 }

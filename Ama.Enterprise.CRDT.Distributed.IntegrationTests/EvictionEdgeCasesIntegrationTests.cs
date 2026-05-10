@@ -47,10 +47,11 @@ public class EvictionEdgeCasesIntegrationTests
         
         services.AddDistributedCrdtCore(opt =>
         {
-            opt.ReplicaId = replicaId;
             opt.CheckpointIntervalSeconds = 30;
             opt.AntiEntropyIntervalSeconds = 15;
         });
+
+        services.AddDistributedCrdtReplica(replicaId);
 
         // Register the AOT contexts for our custom test models to satisfy the AOT pipeline requirements
         services.AddCrdt()
@@ -80,7 +81,9 @@ public class EvictionEdgeCasesIntegrationTests
     {
         // Arrange - Initial Node Run
         var sp1 = BuildNode("NodeA");
-        var tracker1 = sp1.GetRequiredService<IClusterStateTracker>();
+        var scopeManager1 = sp1.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope1 = scopeManager1.GetOrCreateScope("NodeA");
+        var tracker1 = scope1.ServiceProvider.GetRequiredService<IClusterStateTracker>();
         
         tracker1.UpdatePeerState("NodeB", "NetworkB", new DottedVersionVector());
         
@@ -93,7 +96,9 @@ public class EvictionEdgeCasesIntegrationTests
         // Act - Simulate Node Restart (New DI container, representing process restart)
         // Storage is usually injected/persisted, but tombstones are strictly in-memory (HashSet).
         var sp2 = BuildNode("NodeA");
-        var tracker2 = sp2.GetRequiredService<IClusterStateTracker>();
+        var scopeManager2 = sp2.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope2 = scopeManager2.GetOrCreateScope("NodeA");
+        var tracker2 = scope2.ServiceProvider.GetRequiredService<IClusterStateTracker>();
         
         // Assert - Tombstones are correctly cleared on restart unless persisted natively.
         tracker2.IsReplicaTombstoned("NodeB").ShouldBeFalse();
@@ -104,8 +109,10 @@ public class EvictionEdgeCasesIntegrationTests
     {
         // Arrange
         var sp = BuildNode("NodeA");
-        var tracker = sp.GetRequiredService<IClusterStateTracker>();
-        var syncService = sp.GetRequiredService<IVersionVectorSyncService>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("NodeA");
+        var tracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
+        var syncService = scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
         
         var nodeA_Dvv = new DottedVersionVector();
         nodeA_Dvv.Versions["NodeA"] = 5;
@@ -128,19 +135,20 @@ public class EvictionEdgeCasesIntegrationTests
     }
 
     [IntegrationFact]
-    public async Task EdgeCase3_RebootLocalIdentity_PreservesOfflineLocalData_Safely()
+    public async Task EdgeCase3_RebootLocalIdentity_PreservesOfflineLocalData()
     {
         // Arrange
         var sp = BuildNode("NodeA");
         await StartNodeAsync(sp);
 
-        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("NodeA");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         await orchestrator.CreateDocumentAsync("test-doc", "test-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
         
         var docManager = orchestrator.GetDocument<TestState>("test-doc")!;
-        var evictionService = sp.GetRequiredService<ICrdtEvictionService>();
+        var evictionService = scope.ServiceProvider.GetRequiredService<ICrdtEvictionService>();
         
         // Simulate local offline edit by mutating the Document state directly
         var originalDoc = docManager.Document;
@@ -154,7 +162,7 @@ public class EvictionEdgeCasesIntegrationTests
     }
 
     [IntegrationFact]
-    public async Task EdgeCase4_SnapshotMerge_PreservesPendingLocalEdits_Safely()
+    public async Task EdgeCase4_SnapshotMerge_PreservesPendingLocalEdits()
     {
         // Arrange
         var mockSerializer = new Mock<ICrdtSerializer>();
@@ -165,13 +173,14 @@ public class EvictionEdgeCasesIntegrationTests
         
         await StartNodeAsync(sp);
 
-        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("NodeA");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         await orchestrator.CreateDocumentAsync("test-doc", "test-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var docManager = orchestrator.GetDocument<TestState>("test-doc")!;
-        var metadataManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtMetadataManager>();
+        var metadataManager = scope.ServiceProvider.GetRequiredService<ICrdtMetadataManager>();
         
         // Local node has pending unsynced edits
         docManager.Document.Data.Data = "Local Pending Edit";

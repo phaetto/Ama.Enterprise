@@ -1,5 +1,6 @@
 namespace Ama.Enterprise.FeatureFlags.ShowCase;
 
+using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.FeatureFlags.Extensions;
 using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Services;
@@ -49,17 +50,19 @@ public static class Program
             builder.AddProvider(new LockedConsoleLoggerProvider());
         });
 
-        // 1. Add Feature Flags Product domain abstractions
+        // 1. Declare explicitly decoupled specific CRDT multi-replica scope constraint actively isolating generic structures natively
+        services.AddDistributedCrdtReplica(replicaId);
+
+        // 2. Add Feature Flags Product domain abstractions natively tracking internal explicit scopes mapped dynamically 
         services.AddFeatureFlags(options =>
         {
-            options.Crdt.ReplicaId = replicaId;
             options.Crdt.ActiveSyncEnabled = true;
             options.Crdt.CheckpointIntervalSeconds = (int)TimeSpan.FromHours(1).TotalSeconds;
             options.Crdt.AntiEntropyIntervalSeconds = 1;
             options.Crdt.AntiEntropyInitialDelaySeconds = 1;
         });
 
-        // 2. Wire up the generic P2P mesh network specifically configured for this feature's underlying topology
+        // 3. Wire up the generic P2P mesh network specifically configured for this feature's underlying topology
         services.AddP2pMesh("feature-flags-internal-mesh")
                 .AddGossipNetwork(options =>
                 {

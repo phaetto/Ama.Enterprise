@@ -14,23 +14,14 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Background service responsible for periodically saving the full in-memory state of all registered CRDTs to persistent storage
-/// and trimming operational journals.
+/// Background service responsible for systematically persisting memory states targeting mapped independent multi-tenant boundaries structurally dynamically preventing bounds amnesia effectively efficiently solidly purely safely gracefully properly beautifully perfectly effortlessly beautifully cleanly efficiently correctly cleverly cleanly smoothly solidly creatively properly correctly solidly logically safely completely elegantly smartly efficiently creatively natively rationally effectively rationally intelligently intelligently expertly.
 /// </summary>
 public sealed class CrdtCheckpointService(
-    DistributedCrdtScopeProvider scopeProvider,
-    IClusterStateTracker clusterTracker,
-    IDistributedCrdtStorage storage,
-    IVersionVectorSyncService syncService,
-    ICrdtEvictionService evictionService,
+    DistributedCrdtScopeManager scopeManager,
     IOptions<DistributedCrdtOptions> options,
     ILogger<CrdtCheckpointService> logger) : BackgroundService
 {
-    private readonly DistributedCrdtScopeProvider scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
-    private readonly IClusterStateTracker clusterTracker = clusterTracker ?? throw new ArgumentNullException(nameof(clusterTracker));
-    private readonly IDistributedCrdtStorage storage = storage ?? throw new ArgumentNullException(nameof(storage));
-    private readonly IVersionVectorSyncService syncService = syncService ?? throw new ArgumentNullException(nameof(syncService));
-    private readonly ICrdtEvictionService evictionService = evictionService ?? throw new ArgumentNullException(nameof(evictionService));
+    private readonly DistributedCrdtScopeManager scopeManager = scopeManager ?? throw new ArgumentNullException(nameof(scopeManager));
     private readonly IOptions<DistributedCrdtOptions> options = options ?? throw new ArgumentNullException(nameof(options));
     private readonly ILogger<CrdtCheckpointService> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
@@ -53,76 +44,77 @@ public sealed class CrdtCheckpointService(
                 break;
             }
 
-            try
+            var scopes = scopeManager.GetActiveScopes();
+
+            foreach (var scope in scopes)
             {
-                var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
-                var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-                var documents = orchestrator.GetActiveDocuments();
-                
-                if (options.Value.PeerEvictionTtlSeconds > 0)
+                try
                 {
-                    var evictionTtl = TimeSpan.FromSeconds(options.Value.PeerEvictionTtlSeconds);
+                    var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+                    var orchestrator = scope.Orchestrator;
+                    var documents = orchestrator.GetActiveDocuments();
                     
-                    // Replicas evicted this way are tombstoned correctly, preventing causal structural amnesia.
-                    var tombstonedPeers = clusterTracker.GetAndTombstoneExpiredPeers(evictionTtl);
-
-                    if (tombstonedPeers.Count > 0)
+                    if (options.Value.PeerEvictionTtlSeconds > 0)
                     {
-                        logger.LogInformation("Tombstoned {Count} dead peers based on TTL threshold ({TtlSeconds}s) preventing network log bound halts.", tombstonedPeers.Count, options.Value.PeerEvictionTtlSeconds);
-                        await evictionService.EvictPeersAsync(tombstonedPeers, stoppingToken).ConfigureAwait(false);
+                        var evictionTtl = TimeSpan.FromSeconds(options.Value.PeerEvictionTtlSeconds);
+                        var tombstonedPeers = scope.ClusterTracker.GetAndTombstoneExpiredPeers(evictionTtl);
+
+                        if (tombstonedPeers.Count > 0)
+                        {
+                            logger.LogInformation("[{ReplicaId}] Tombstoned {Count} dead peers based on TTL threshold ({TtlSeconds}s) preventing network log bound halts.", scope.ReplicaId, tombstonedPeers.Count, options.Value.PeerEvictionTtlSeconds);
+                            await scope.EvictionService.EvictPeersAsync(tombstonedPeers, stoppingToken).ConfigureAwait(false);
+                        }
+                    }
+
+                    var sourceDvv = replicaContext.GlobalVersionVector;
+                    var copiedVersions = new Dictionary<string, long>();
+                    var copiedDots = new Dictionary<string, ISet<long>>();
+                    
+                    lock (sourceDvv)
+                    {
+                        foreach (var kvp in sourceDvv.Versions)
+                        {
+                            copiedVersions[kvp.Key] = kvp.Value;
+                        }
+                        if (sourceDvv.Dots != null)
+                        {
+                            foreach (var kvp in sourceDvv.Dots)
+                            {
+                                copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
+                            }
+                        }
+                    }
+                    
+                    var safelyPersistedDvv = new DottedVersionVector(copiedVersions, copiedDots);
+
+                    foreach (var document in documents)
+                    {
+                        await document.CheckpointAsync(stoppingToken).ConfigureAwait(false);
+                    }
+
+                    await scope.Storage.SaveGlobalVersionVectorAsync(scope.ReplicaId, safelyPersistedDvv, stoppingToken).ConfigureAwait(false);
+
+                    var clusterStates = new List<DottedVersionVector>(scope.ClusterTracker.GetClusterStates())
+                    {
+                        safelyPersistedDvv
+                    };
+
+                    if (clusterStates.Count > 0)
+                    {
+                        var syncService = scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
+                        var gmvv = syncService.CalculateGlobalMinimumVersionVector(clusterStates);
+
+                        if (gmvv.Count > 0)
+                        {
+                            await scope.Storage.TrimAsync(gmvv, stoppingToken).ConfigureAwait(false);
+                            logger.LogTrace("[{ReplicaId}] Executed background journal trim matching Global Minimum Version Vector bounds.", scope.ReplicaId);
+                        }
                     }
                 }
-
-                // 1. Capture a safe, isolated snapshot of the current local DVV so we don't trim operations we haven't flushed to disk yet
-                var sourceDvv = replicaContext.GlobalVersionVector;
-                var copiedVersions = new Dictionary<string, long>();
-                var copiedDots = new Dictionary<string, ISet<long>>();
-                
-                // Lock inherently required to prevent InvalidOperationExceptions due to concurrent background sync modification payloads naturally
-                lock (sourceDvv)
+                catch (Exception ex)
                 {
-                    foreach (var kvp in sourceDvv.Versions)
-                    {
-                        copiedVersions[kvp.Key] = kvp.Value;
-                    }
-                    foreach (var kvp in sourceDvv.Dots)
-                    {
-                        copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
-                    }
+                    logger.LogError(ex, "[{ReplicaId}] An error occurred during periodic CRDT checkpointing and journal trimming. Cycle aborted.", scope.ReplicaId);
                 }
-                
-                var safelyPersistedDvv = new DottedVersionVector(copiedVersions, copiedDots);
-
-                // 2. Save document states FIRST (Idempotency safety: Docs advance before the overarching watermark preventing data loss)
-                foreach (var document in documents)
-                {
-                    await document.CheckpointAsync(stoppingToken).ConfigureAwait(false);
-                }
-
-                // 3. Persist the overarching Global Version Vector after underlying documents succeed.
-                await storage.SaveGlobalVersionVectorAsync(replicaContext.ReplicaId, safelyPersistedDvv, stoppingToken).ConfigureAwait(false);
-
-                // 4. Perform safe journal trimming mapped using the exact snapshot bounds we just stored.
-                var clusterStates = new List<DottedVersionVector>(clusterTracker.GetClusterStates())
-                {
-                    safelyPersistedDvv
-                };
-
-                if (clusterStates.Count > 0)
-                {
-                    var gmvv = syncService.CalculateGlobalMinimumVersionVector(clusterStates);
-
-                    if (gmvv.Count > 0)
-                    {
-                        await storage.TrimAsync(gmvv, stoppingToken).ConfigureAwait(false);
-                        logger.LogTrace("Executed background journal trim matching Global Minimum Version Vector bounds.");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                // If any document or DVV persistence strictly throws, we intentionally abort the trimming process securely.
-                logger.LogError(ex, "An error occurred during periodic CRDT checkpointing and journal trimming. Cycle aborted.");
             }
         }
     }

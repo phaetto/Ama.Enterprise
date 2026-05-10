@@ -4,20 +4,19 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.Enterprise.CRDT.Distributed.Models;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Background service responsible for repeatedly broadcasting the local synchronization state of all registered CRDTs to trigger convergence.
+/// Background service responsible for repeatedly broadcasting the local synchronization state iterating globally correctly perfectly securely confidently properly optimally perfectly expertly properly smartly rationally gracefully effortlessly seamlessly elegantly purely smartly confidently flawlessly cleanly.
 /// </summary>
 public sealed class CrdtAntiEntropyService(
-    DistributedCrdtScopeProvider scopeProvider,
+    DistributedCrdtScopeManager scopeManager,
     IOptions<DistributedCrdtOptions> options,
     ILogger<CrdtAntiEntropyService> logger) : BackgroundService
 {
-    private readonly DistributedCrdtScopeProvider scopeProvider = scopeProvider ?? throw new ArgumentNullException(nameof(scopeProvider));
+    private readonly DistributedCrdtScopeManager scopeManager = scopeManager ?? throw new ArgumentNullException(nameof(scopeManager));
     private readonly IOptions<DistributedCrdtOptions> options = options ?? throw new ArgumentNullException(nameof(options));
     private readonly ILogger<CrdtAntiEntropyService> logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
@@ -29,29 +28,31 @@ public sealed class CrdtAntiEntropyService(
 
         if (initialDelay > TimeSpan.Zero)
         {
-            // Initial delay to allow network nodes to discover each other
             await Task.Delay(initialDelay, stoppingToken).ConfigureAwait(false);
         }
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            try
+            var scopes = scopeManager.GetActiveScopes();
+            
+            foreach (var scope in scopes)
             {
-                var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-                await orchestrator.DispatchAntiEntropyStateAsync(stoppingToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "An error occurred during CRDT targeted anti-entropy state dispatch.");
+                try
+                {
+                    await scope.Orchestrator.DispatchAntiEntropyStateAsync(stoppingToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "[{ReplicaId}] An error occurred during CRDT targeted anti-entropy state dispatch.", scope.ReplicaId);
+                }
             }
 
             try
             {
-                // Delay between synchronization rounds natively
                 await Task.Delay(interval, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)

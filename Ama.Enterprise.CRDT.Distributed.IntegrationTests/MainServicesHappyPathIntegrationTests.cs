@@ -49,17 +49,18 @@ public sealed class MainServicesHappyPathIntegrationTests
 
         services.AddDistributedCrdtCore(opt =>
         {
-            opt.ReplicaId = replicaId;
             opt.CheckpointIntervalSeconds = 30;
             opt.AntiEntropyIntervalSeconds = 15;
         });
+
+        services.AddDistributedCrdtReplica(replicaId);
 
         services.AddCrdt()
                 .AddCrdtAotContext(new HappyPathTestAotContext())
                 .AddCrdtJsonTypeInfoResolver(HappyPathTestJsonContext.Default);
 
         services.AddDistributedDocumentType<HappyPathTestState>("happy-doc");
-        services.AddDistributedCrdtP2p("TestMesh");
+        services.AddDistributedCrdtP2p("TestMesh", replicaId);
         
         // Mock P2P Outbound
         services.AddSingleton(Mock.Of<IP2pProtocol>());
@@ -75,23 +76,25 @@ public sealed class MainServicesHappyPathIntegrationTests
     {
         // Arrange
         var sp = BuildNode("Replica1");
-        var tracker = sp.GetRequiredService<IClusterStateTracker>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var tracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
         var remoteDvv = new DottedVersionVector();
         remoteDvv.Versions["RemoteReplica1"] = 10;
 
         // Act - Track a new peer
         tracker.UpdatePeerState("RemoteReplica1", "NetworkId1", remoteDvv);
 
-        // Assert - Peer is successfully tracked
+        // Assert - Peer is tracked
         var states = tracker.GetClusterStates();
         states.Count.ShouldBe(1);
         states[0].Versions["RemoteReplica1"].ShouldBe(10);
         tracker.IsReplicaTombstoned("RemoteReplica1").ShouldBeFalse();
 
-        // Act - Unmap network (simulate offline gracefully)
+        // Act - Unmap network (simulate offline)
         tracker.RemovePeerByNetworkId("NetworkId1");
 
-        // Assert - CRDT state is safely preserved for offline recovery
+        // Assert - CRDT state is preserved for offline recovery
         tracker.GetClusterStates().Count.ShouldBe(1);
 
         // Act - Force tombstone
@@ -107,13 +110,14 @@ public sealed class MainServicesHappyPathIntegrationTests
     {
         // Arrange
         var sp = BuildNode("Replica1");
-        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
         
-        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         await orchestrator.InitializeAsync(CancellationToken.None);
         
-        var context = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
-        var evictionService = sp.GetRequiredService<ICrdtEvictionService>();
+        var context = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+        var evictionService = scope.ServiceProvider.GetRequiredService<ICrdtEvictionService>();
 
         // Set up the local global version vector tracking a remote peer
         context.GlobalVersionVector.Versions["RemoteReplica1"] = 50;
@@ -121,7 +125,7 @@ public sealed class MainServicesHappyPathIntegrationTests
         // Act
         await evictionService.EvictPeersAsync(new[] { "RemoteReplica1" }, CancellationToken.None);
 
-        // Assert - The remote peer's tracked state should be explicitly removed natively avoiding mathematical anomalies
+        // Assert - The remote peer's tracked state should be explicitly removed
         context.GlobalVersionVector.Versions.ContainsKey("RemoteReplica1").ShouldBeFalse();
     }
 
@@ -135,15 +139,16 @@ public sealed class MainServicesHappyPathIntegrationTests
             services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
         });
 
-        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("happy-doc", "happy-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var docManager = orchestrator.GetDocument<HappyPathTestState>("happy-doc")!;
 
-        // Act - Initialize inherently natively safely resolves initial state correctly
+        // Act - Initialize resolves initial state
         await docManager.InitializeAsync(CancellationToken.None);
 
         docManager.DocumentId.ShouldBe("happy-doc");
@@ -152,7 +157,7 @@ public sealed class MainServicesHappyPathIntegrationTests
         // Act - Ask for snapshot
         await docManager.ProvideSnapshotAsync("RemoteReplica2", new PeerId(Guid.NewGuid()), CancellationToken.None);
 
-        // Assert - Ensure the component actively sent the payload over direct sender
+        // Assert - Ensure the component sent the payload over direct sender
         mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
     }
 
@@ -181,8 +186,9 @@ public sealed class MainServicesHappyPathIntegrationTests
         await initService.StartAsync(CancellationToken.None);
 
         // Assert - Context replaced safely in-place
-        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var context = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var context = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
 
         context.GlobalVersionVector.Versions["Replica1"].ShouldBe(100);
     }
@@ -197,8 +203,9 @@ public sealed class MainServicesHappyPathIntegrationTests
             services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
         });
 
-        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("happy-doc", "happy-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
@@ -222,7 +229,7 @@ public sealed class MainServicesHappyPathIntegrationTests
         await handler.HandlePayloadAsync("TestMesh", senderId, wrapperPayload, CancellationToken.None);
 
         // Assert
-        var tracker = sp.GetRequiredService<IClusterStateTracker>();
+        var tracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
         var states = tracker.GetClusterStates();
         
         states.Count.ShouldBe(1);

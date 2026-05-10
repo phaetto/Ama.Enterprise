@@ -47,16 +47,18 @@ public static class Program
             builder.ClearProviders();
             builder.AddProvider(new LockedConsoleLoggerProvider());
         });
+        
         // Add core CRDT distributed services and resolve the orchestrator
         services.AddDistributedCrdtCore(options =>
         {
-            options.ReplicaId = replicaId;
             options.ActiveSyncEnabled = true;
             options.PeerEvictionTtlSeconds = 60;
             options.CheckpointIntervalSeconds = 60;
             options.AntiEntropyInitialDelaySeconds = 1;
             options.AntiEntropyIntervalSeconds = 5;
         });
+
+        services.AddDistributedCrdtReplica(replicaId);
 
         // Register the showcase JSON AOT and CRDT AOT contexts directly into the generic CRDT pipeline
         services.AddCrdt()
@@ -72,14 +74,11 @@ public static class Program
         services.AddDistributedDocumentType<FleetState>("fleet-list");
         services.AddDistributedCrdtService<IFleetManager, FleetManager>();
 
-        // Register Showcase file-based CRDT storage overriding memory fallbacks as the primary target decoupled explicitly mapped bounds
-        services.AddDistributedCrdtStorageForType<ShowCaseCrdtStorage>("task-list");
-        services.AddDistributedCrdtStorageForType<ShowCaseCrdtStorage>("fleet-list");
-        // TODO: find more elegant way to do this, this is internal
-        services.AddDistributedCrdtStorageForDocument<ShowCaseCrdtStorage>("system-document-registry");
+        // Register Showcase file-based CRDT storage overriding memory fallbacks for all documents
+        services.AddDistributedCrdtStorage<ShowCaseCrdtStorage>();
 
         // Register the background multi-document orchestration and route inbound intents from the network
-        services.AddDistributedCrdtP2p("internal");
+        services.AddDistributedCrdtP2p("internal", replicaId);
 
         // Network Layer bindings
         services
@@ -159,9 +158,12 @@ public static class Program
                 await service.StartAsync(cts.Token).ConfigureAwait(false);
             }
 
-            var orchestrator = provider.GetRequiredService<ICrdtDocumentOrchestrator>();
-            var taskManager = provider.GetRequiredService<ITaskManager>();
-            var fleetManager = provider.GetRequiredService<IFleetManager>();
+            var scopeManager = provider.GetRequiredService<DistributedCrdtScopeManager>();
+            var scope = scopeManager.GetOrCreateScope(replicaId);
+
+            var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+            var taskManager = scope.ServiceProvider.GetRequiredService<ITaskManager>();
+            var fleetManager = scope.ServiceProvider.GetRequiredService<IFleetManager>();
 
             // UI refresh bindings
             taskManager.StateChanged += (sender, eventArgs) => DrawState(orchestrator, taskManager, fleetManager);

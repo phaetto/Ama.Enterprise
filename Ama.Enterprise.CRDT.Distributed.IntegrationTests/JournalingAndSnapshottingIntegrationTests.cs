@@ -53,10 +53,11 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         services.AddDistributedCrdtCore(opt =>
         {
-            opt.ReplicaId = replicaId;
             opt.CheckpointIntervalSeconds = 30;
             opt.AntiEntropyIntervalSeconds = 15;
         });
+
+        services.AddDistributedCrdtReplica(replicaId);
 
         services.AddCrdt()
                 .AddCrdtAotContext(new JournalTestAotContext())
@@ -71,20 +72,21 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     }
 
     [IntegrationFact]
-    public async Task Orchestrator_CreateDocument_ShouldJournalRegistryOperations_Safely()
+    public async Task Orchestrator_CreateDocument_ShouldJournalRegistryOperations()
     {
         // Arrange
         var sp = BuildNode("ReplicaA");
-        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var storage = sp.GetRequiredService<IDistributedCrdtStorage>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("ReplicaA");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var storage = scope.ServiceProvider.GetRequiredService<IDistributedCrdtStorage>();
 
         await orchestrator.InitializeAsync(CancellationToken.None);
 
         // Act - Create a brand new document across the active matrix dynamically
         await orchestrator.CreateDocumentAsync("brand-new-doc", "journal-doc", CancellationToken.None);
         
-        // Assert - The creation relies on the `system-document-registry` bounds natively, so it should securely exist in that specific stream
+        // Assert - The creation relies on the system-document-registry bounds natively
         var allOps = await storage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
         
         var registryOps = allOps.Where(o => o.DocumentId == orchestrator.Registry.DocumentId).ToList();
@@ -100,12 +102,13 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     {
         // Arrange
         var sp = BuildNode("ReplicaA");
-        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcher = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtPatcher>();
-        var syncService = scopeProvider.Scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
-        var journalManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IJournalManager>();
-        var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("ReplicaA");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var patcher = scope.ServiceProvider.GetRequiredService<ICrdtPatcher>();
+        var syncService = scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
+        var journalManager = scope.ServiceProvider.GetRequiredService<IJournalManager>();
+        var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
         
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
@@ -113,7 +116,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         var docA = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
 
-        // Apply a mapped patch natively securely using the exact Patcher effectively saving to the active journal correctly
+        // Apply a mapped patch using the Patcher saving to the active journal.
         // This ensures the operation is structurally valid, preventing the applicator from rejecting it as "Unapplied"
         var intent = new MapSetIntent("testKey", "Updated");
         var op = patcher.GenerateOperation(docA.Document, x => x.DataMap, intent);
@@ -139,13 +142,14 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     {
         // Arrange
         var sp = BuildNode("ReplicaA");
-        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcher = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtPatcher>();
-        var storage = sp.GetRequiredService<IDistributedCrdtStorage>();
-        var syncService = scopeProvider.Scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
-        var journalManager = scopeProvider.Scope.ServiceProvider.GetRequiredService<IJournalManager>();
-        var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("ReplicaA");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var patcher = scope.ServiceProvider.GetRequiredService<ICrdtPatcher>();
+        var storage = scope.ServiceProvider.GetRequiredService<IDistributedCrdtStorage>();
+        var syncService = scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
+        var journalManager = scope.ServiceProvider.GetRequiredService<IJournalManager>();
+        var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
@@ -153,7 +157,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         var docA = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
 
-        // Apply a mapped patch natively using the Patcher explicitly properly gracefully
+        // Apply a mapped patch using the Patcher explicitly
         var intent = new MapSetIntent("testKey", "Updated");
         var op = patcher.GenerateOperation(docA.Document, x => x.DataMap, intent);
         
@@ -163,26 +167,27 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var gmvv = new Dictionary<string, long> { { "ReplicaA", 10 } }; 
         await storage.TrimAsync(gmvv, CancellationToken.None);
 
-        // Act - Remote node with empty bounds asks for missing operations securely triggering gap logic organically
+        // Act - Remote node with empty bounds asks for missing operations triggering gap logic
         var remoteDvv = new DottedVersionVector();
         
         var requirement = syncService.CalculateRequirement("ReplicaB", remoteDvv, replicaContext.ReplicaId, replicaContext.GlobalVersionVector);
         var missingOpsStream = journalManager.GetMissingOperationsAsync(requirement, CancellationToken.None);
         var result = await syncService.EvaluateJournalCompletionAsync(missingOpsStream, requirement, CancellationToken.None);
 
-        // Assert - The mechanism detects causal truncation and smoothly requests a complete fallback snapshot flawlessly
+        // Assert - The mechanism detects causal truncation and requests a complete fallback snapshot.
         result.SnapshotRequired.ShouldBeTrue();
         result.Operations.ShouldBeEmpty();
     }
 
     [IntegrationFact]
-    public async Task MergeSnapshot_ShouldOverrideLocalState_AndMergeGlobalVersionVectorCorrectly()
+    public async Task MergeSnapshot_ShouldOverrideLocalState_AndMergeGlobalVersionVector()
     {
         // Arrange
         var sp = BuildNode("ReplicaA");
         var serializer = sp.GetRequiredService<ICrdtSerializer>();
-        var scopeProvider = sp.GetRequiredService<DistributedCrdtScopeProvider>();
-        var orchestrator = scopeProvider.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("ReplicaA");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
@@ -198,13 +203,13 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         var snapshotBytes = serializer.SerializeToBytes(docA.Document);
 
-        // Act - Safely gracefully explicitly overwrite underlying local dependencies securely natively properly
+        // Act - Overwrite underlying local dependencies
         await docA.MergeSnapshotAsync(snapshotBytes, globalDvv, CancellationToken.None);
 
         // Assert
         docA.Document.Data.DataMap["testKey"].ShouldBe("Materialized Snapshot State");
 
-        var replicaContext = scopeProvider.Scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+        var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
         replicaContext.GlobalVersionVector.Versions["ReplicaB"].ShouldBe(5);
     }
 
@@ -219,14 +224,15 @@ public sealed class JournalingAndSnapshottingIntegrationTests
             services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(sharedStorage));
         });
 
-        var scopeProvider1 = sp1.GetRequiredService<DistributedCrdtScopeProvider>();
-        var orchestrator1 = scopeProvider1.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcher1 = scopeProvider1.Scope.ServiceProvider.GetRequiredService<ICrdtPatcher>();
+        var scopeManager1 = sp1.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope1 = scopeManager1.GetOrCreateScope("Replica1");
+        var orchestrator1 = scope1.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var patcher1 = scope1.ServiceProvider.GetRequiredService<ICrdtPatcher>();
 
-        // Orchestrator initialization creates the empty registry natively smoothly.
+        // Orchestrator initialization creates the empty registry.
         await orchestrator1.InitializeAsync(CancellationToken.None);
         
-        // Creating a document mutates the registry natively and appends a valid patch to the shared storage WAL inherently via decorators.
+        // Creating a document mutates the registry and appends a valid patch to the shared storage WAL inherently via decorators.
         await orchestrator1.CreateDocumentAsync("test-replayed-doc", "journal-doc", CancellationToken.None);
         await orchestrator1.SyncDocumentsAsync(CancellationToken.None);
 
@@ -239,7 +245,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var intent2 = new MapSetIntent("key2", "ReplayedData2");
         var op2 = patcher1.GenerateOperation(doc1.Document, x => x.DataMap, intent2);
 
-        // Apply patches correctly invoking the decorators seamlessly explicitly cleanly writing structurally valid WAL entries.
+        // Apply patches correctly invoking the decorators natively explicit writing structurally valid WAL entries.
         await doc1.ApplyPatchAsync(new CrdtPatch(new[] { op1, op2 }), CancellationToken.None);
 
         // Verify the uncheckpointed operations hit the underlying storage correctly inherently
@@ -256,9 +262,10 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var initService = sp2.GetServices<IHostedService>().OfType<CrdtInitializationService>().First();
         await initService.StartAsync(CancellationToken.None);
 
-        // Assert - The orchestrator should have completely accurately reliably explicitly rebuilt the registry and replayed operations natively.
-        var scopeProvider2 = sp2.GetRequiredService<DistributedCrdtScopeProvider>();
-        var orchestrator2 = scopeProvider2.Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        // Assert - The orchestrator should have rebuilt the registry and replayed operations.
+        var scopeManager2 = sp2.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope2 = scopeManager2.GetOrCreateScope("Replica1");
+        var orchestrator2 = scope2.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         
         var doc2 = orchestrator2.GetDocument<JournalTestState>("test-replayed-doc");
 
