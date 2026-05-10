@@ -1,11 +1,10 @@
 namespace Ama.Enterprise.CRDT.Distributed.TableStorage.Extensions;
 
-using System;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Ama.Enterprise.CRDT.Distributed.Services;
+using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.TableStorage.Models;
 using Ama.Enterprise.CRDT.Distributed.TableStorage.Services;
+using Microsoft.Extensions.DependencyInjection;
+using System;
 
 /// <summary>
 /// Extension methods exposing Dependency Injection routines capturing Table Storage integration models dynamically decoupled.
@@ -24,8 +23,7 @@ public static class ServiceCollectionExtensions
         if (configureOptions == null) throw new ArgumentNullException(nameof(configureOptions));
 
         services.Configure(configureOptions);
-        services.RemoveAll(typeof(IDistributedCrdtStorage));
-        services.AddSingleton<IDistributedCrdtStorage, TableStorageDistributedCrdtStorage>();
+        services.AddDistributedCrdtStorage<TableStorageDistributedCrdtStorage>();
 
         return services;
     }
