@@ -79,10 +79,10 @@
 | `$/Ama.Enterprise.CRDT.Testing/todo.txt` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Ama.Enterprise.FeatureFlags.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj` | Showcase console application project displaying P2P feature flags integration, AOT readiness, and UDP cluster discovery. |
-| `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Updated standalone setup natively implementing explicitly configured distinct replica bounds correctly avoiding implicit global topologies. |
+| `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Updated application entry point resolving `IFeatureFlagClusterManager` cleanly via isolated structural scopes avoiding root provider errors targeting mapped singletons securely. |
 | `$/Ama.Enterprise.FeatureFlags.UnitTests/Ama.Enterprise.FeatureFlags.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj` | No description provided. |
-| `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | Removed hardcoded transport mechanisms from the service configuration, cleanly decoupling the domain CRDT models from P2P infrastructural setup implementations. |
+| `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | Refactored `AddFeatureFlags` signature enforcing explicit `replicaId` tracking dynamically configuring underlying singleton bounds identically across mesh architectures. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlag.cs` | Data structure representing a single feature flag. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagOptions.cs` | Configuration structure for feature flags. Removed hardcoded network abstractions, delegating topology management dynamically to the host. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagState.cs` | Inherits `IDistributedCrdtState` and maps generic constraints bridging properties. |

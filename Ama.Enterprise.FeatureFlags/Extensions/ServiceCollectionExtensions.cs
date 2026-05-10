@@ -17,12 +17,10 @@ public static class ServiceCollectionExtensions
     /// Adds the complete, plug-and-play feature flags system to the service collection.
     /// P2P network transports and configurations must be registered by the application independently.
     /// </summary>
-    public static IServiceCollection AddFeatureFlags(this IServiceCollection services, Action<FeatureFlagOptions>? configure = null)
+    public static IServiceCollection AddFeatureFlags(this IServiceCollection services, string replicaId, Action<FeatureFlagOptions>? configure = null)
     {
-        if (services == null)
-        {
-            throw new ArgumentNullException(nameof(services));
-        }
+        if (services == null) throw new ArgumentNullException(nameof(services));
+        if (string.IsNullOrWhiteSpace(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
 
         var ffOpts = new FeatureFlagOptions();
         configure?.Invoke(ffOpts);
@@ -32,13 +30,15 @@ public static class ServiceCollectionExtensions
 
         Action<DistributedCrdtOptions> distConfig = dist =>
         {
-            dist.ReplicaId = ffOpts.Crdt.ReplicaId;
             dist.ActiveSyncEnabled = ffOpts.Crdt.ActiveSyncEnabled;
             dist.CheckpointIntervalSeconds = ffOpts.Crdt.CheckpointIntervalSeconds;
             dist.AntiEntropyInitialDelaySeconds = ffOpts.Crdt.AntiEntropyInitialDelaySeconds;
             dist.AntiEntropyIntervalSeconds = ffOpts.Crdt.AntiEntropyIntervalSeconds;
             dist.PeerEvictionTtlSeconds = ffOpts.Crdt.PeerEvictionTtlSeconds;
         };
+
+        // Explicitly register the replica scope bounds
+        services.AddDistributedCrdtReplica(replicaId);
 
         // Bootstrap generic core dependencies
         services.AddDistributedCrdtCore(distConfig);
@@ -59,8 +59,8 @@ public static class ServiceCollectionExtensions
         // Register the background initialization service to securely build the global scope natively
         services.AddHostedService<FeatureFlagBootstrapper>();
 
-        // Delegate routing orchestrations and background services completely to the distributed core
-        services.AddDistributedCrdtP2p(ffOpts.InternalMeshId);
+        // Delegate routing orchestrations and background services completely to the distributed core explicitly bounded
+        services.AddDistributedCrdtP2p(ffOpts.InternalMeshId, replicaId);
 
         return services;
     }

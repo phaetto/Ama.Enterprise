@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.FeatureFlags.ShowCase;
 
 using Ama.Enterprise.CRDT.Distributed.Extensions;
+using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.FeatureFlags.Extensions;
 using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Services;
@@ -50,11 +51,8 @@ public static class Program
             builder.AddProvider(new LockedConsoleLoggerProvider());
         });
 
-        // 1. Declare explicitly decoupled specific CRDT multi-replica scope constraint actively isolating generic structures natively
-        services.AddDistributedCrdtReplica(replicaId);
-
-        // 2. Add Feature Flags Product domain abstractions natively tracking internal explicit scopes mapped dynamically 
-        services.AddFeatureFlags(options =>
+        // 1. Add Feature Flags Product domain abstractions natively tracking internal explicit scopes mapped dynamically 
+        services.AddFeatureFlags(replicaId, options =>
         {
             options.Crdt.ActiveSyncEnabled = true;
             options.Crdt.CheckpointIntervalSeconds = (int)TimeSpan.FromHours(1).TotalSeconds;
@@ -62,7 +60,7 @@ public static class Program
             options.Crdt.AntiEntropyInitialDelaySeconds = 1;
         });
 
-        // 3. Wire up the generic P2P mesh network specifically configured for this feature's underlying topology
+        // 2. Wire up the generic P2P mesh network specifically configured for this feature's underlying topology
         services.AddP2pMesh("feature-flags-internal-mesh")
                 .AddGossipNetwork(options =>
                 {
@@ -90,11 +88,15 @@ public static class Program
         await using var provider = services.BuildServiceProvider();
         var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("ShowCase");
         
-        // Resolve the cluster manager natively via the transparent forwarder implicitly mapped to the internal state scope
-        var clusterManager = provider.GetRequiredService<IFeatureFlagClusterManager>();
-        
         // Background services typically remain resolved from the root provider as singletons
         var hostedServices = provider.GetServices<IHostedService>().ToList();
+
+        // Resolve the scoped structural boundaries targeting explicit ReplicaId to extract isolated generic scopes safely
+        var scopeManager = provider.GetRequiredService<DistributedCrdtScopeManager>();
+        var crdtScope = scopeManager.GetOrCreateScope(replicaId);
+        
+        // Resolve the cluster manager natively via the transparent forwarder implicitly mapped to the internal state scope
+        var clusterManager = crdtScope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
         
         using var cts = new CancellationTokenSource();
 
@@ -115,7 +117,7 @@ public static class Program
         {
             logger.LogInformation("Starting showcase node on port {Port}...", currentPort);
 
-            // Start all background hosted services (Gossip loop, Anti-Entropy, UDP Listener)
+            // Start all background hosted services (Gossip loop, Anti-Entropy, UDP Listener, Bootstrapper)
             foreach (var service in hostedServices)
             {
                 await service.StartAsync(cts.Token).ConfigureAwait(false);
