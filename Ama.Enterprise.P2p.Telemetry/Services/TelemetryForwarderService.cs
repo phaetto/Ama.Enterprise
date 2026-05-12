@@ -126,13 +126,6 @@ public sealed class TelemetryForwarderService : BackgroundService
         foreach (var tag in tags)
         {
             var valueStr = tag.Value?.ToString() ?? string.Empty;
-            
-            if (string.Equals(tag.Key, "mesh_id", StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(valueStr, options.TargetMeshId, StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
             mappedTags.Add(new MetricTagDto(tag.Key, valueStr));
         }
 
