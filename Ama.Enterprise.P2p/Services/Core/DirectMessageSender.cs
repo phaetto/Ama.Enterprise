@@ -65,6 +65,27 @@ public sealed class DirectMessageSender : IDirectMessageSender, IDisposable
     }
 
     /// <inheritdoc />
+    public async Task SendDirectAsync(string meshId, PeerId targetPeerId, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(meshId))
+        {
+            throw new ArgumentException("Mesh ID cannot be null or whitespace.", nameof(meshId));
+        }
+
+        var registry = serviceProvider.GetRequiredService<IPeerRegistry>();
+        var peers = await registry.GetAllPeersAsync(meshId, cancellationToken).ConfigureAwait(false);
+        var targetPeer = peers.FirstOrDefault(p => p.Id.Equals(targetPeerId));
+
+        if (targetPeer.Id.Value != Guid.Empty)
+        {
+            await SendToPeerInternalAsync(meshId, targetPeer, payload, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        
+        logger.LogWarning("Cannot send targeted direct message. Peer {PeerId} not found in the explicit mesh topology {MeshId}.", targetPeerId.Value, meshId);
+    }
+
+    /// <inheritdoc />
     public async Task SendToRandomPeerAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
         foreach (var mesh in meshes)
@@ -84,6 +105,29 @@ public sealed class DirectMessageSender : IDirectMessageSender, IDisposable
         }
         
         logger.LogDebug("No peers available across any active mesh for random direct message delivery.");
+    }
+
+    /// <inheritdoc />
+    public async Task SendToRandomPeerAsync(string meshId, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(meshId))
+        {
+            throw new ArgumentException("Mesh ID cannot be null or whitespace.", nameof(meshId));
+        }
+
+        var selector = serviceProvider.GetKeyedService<IPeerSelector>(meshId);
+        
+        if (selector != null)
+        {
+            var peers = (await selector.GetPeersAsync(1, cancellationToken).ConfigureAwait(false)).ToList();
+            if (peers.Count > 0)
+            {
+                await SendToPeerInternalAsync(meshId, peers[0], payload, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+        }
+        
+        logger.LogDebug("No peers available in mesh {MeshId} for random direct message delivery.", meshId);
     }
 
     private async Task SendToPeerInternalAsync(string meshId, PeerNode peer, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)

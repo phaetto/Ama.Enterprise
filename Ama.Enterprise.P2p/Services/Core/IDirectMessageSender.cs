@@ -19,9 +19,26 @@ public interface IDirectMessageSender
     Task SendDirectAsync(PeerId targetPeerId, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Sends a payload directly to a specific peer bypassing the epidemic broadcast protocol targeting a specific mesh explicitly natively.
+    /// </summary>
+    /// <param name="meshId">The explicit network mesh ID.</param>
+    /// <param name="targetPeerId">The targeted peer identifier.</param>
+    /// <param name="payload">The binary payload.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task SendDirectAsync(string meshId, PeerId targetPeerId, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Sends a payload directly to a randomly selected active peer in the network natively.
     /// </summary>
     /// <param name="payload">The binary payload.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     Task SendToRandomPeerAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Sends a payload directly to a randomly selected active peer in a specific network mesh natively.
+    /// </summary>
+    /// <param name="meshId">The explicit network mesh ID.</param>
+    /// <param name="payload">The binary payload.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task SendToRandomPeerAsync(string meshId, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken);
 }

@@ -129,7 +129,7 @@ public sealed class TelemetryPushProtocol : IDisposable
         var sendTasks = new List<Task>(peerList.Count);
         foreach (var peer in peerList)
         {
-            sendTasks.Add(SendToPeerAsync(peer.Id, payload, cancellationToken));
+            sendTasks.Add(SendToPeerAsync(meshId, peer.Id, payload, cancellationToken));
         }
 
         await Task.WhenAll(sendTasks).ConfigureAwait(false);
@@ -171,15 +171,15 @@ public sealed class TelemetryPushProtocol : IDisposable
         }
     }
 
-    private async Task SendToPeerAsync(PeerId targetPeerId, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    private async Task SendToPeerAsync(string meshId, PeerId targetPeerId, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
         try
         {
-            await directMessageSender.SendDirectAsync(targetPeerId, payload, cancellationToken).ConfigureAwait(false);
+            await directMessageSender.SendDirectAsync(meshId, targetPeerId, payload, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to push telemetry payload to peer {PeerId}.", targetPeerId.Value);
+            logger.LogWarning(ex, "Failed to push telemetry payload to peer {PeerId} on explicit mesh {MeshId}.", targetPeerId.Value, meshId);
         }
     }
 
