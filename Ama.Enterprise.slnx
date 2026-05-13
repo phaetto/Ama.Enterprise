@@ -6,7 +6,6 @@
   </Folder>
   <Folder Name="/Apps/">
     <File Path="apps-todo.txt" />
-    <Project Path="Ama.Enterprise.P2p.Telemetry.Cli.UnitTests/Ama.Enterprise.P2p.Telemetry.Cli.UnitTests.csproj" Id="7a8d8634-2f77-4f31-8274-184917b0c9ee" />
     <Project Path="Ama.Enterprise.P2p.Telemetry.Cli/Ama.Enterprise.P2p.Telemetry.Cli.csproj" Id="df33b23a-daf7-4648-b6f0-24b4001792b6" />
   </Folder>
   <Folder Name="/Products/">
@@ -15,6 +14,7 @@
     <Project Path="Ama.Enterprise.FeatureFlags.UnitTests/Ama.Enterprise.FeatureFlags.UnitTests.csproj" Id="d74539b1-a59f-40bc-81d1-e33de4e85be7" />
     <Project Path="Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj" Id="f29896b4-f84b-45fb-8742-3496884d770e" />
     <Project Path="Ama.Enterprise.P2p.Telemetry.IntegrationTests/Ama.Enterprise.P2p.Telemetry.IntegrationTests.csproj" Id="c24eaa7a-4b42-434d-aa9e-30abf4a4e40f" />
+    <Project Path="Ama.Enterprise.P2p.Telemetry.UnitTests/Ama.Enterprise.P2p.Telemetry.UnitTests.csproj" />
     <Project Path="Ama.Enterprise.P2p.Telemetry/Ama.Enterprise.P2p.Telemetry.csproj" Id="480acf15-c35b-4d39-bed4-420bcdea75b4" />
   </Folder>
   <Folder Name="/ShowCases/">

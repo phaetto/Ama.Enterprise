@@ -139,29 +139,36 @@
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttClientManager.cs` | Updated to strictly isolate topic subscriptions and client connection IDs by injecting the explicit `meshId`, preventing cross-mesh broker collisions. |
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransport.cs` | Outbound mapping evaluating strict decoupled MQTT client managers natively. Refactored input validatons explicitly. |
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransportListener.cs` | Inbound listener registering standard network hooks dynamically bound to mapped multi-mesh brokers securely. |
+| `$/Ama.Enterprise.P2p.Telemetry.Cli.UnitTests/Ama.Enterprise.P2p.Telemetry.Cli.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.Telemetry.Cli/Ama.Enterprise.P2p.Telemetry.Cli.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.Telemetry.Cli/Program.cs` | Console application serving as a live in-place telemetry dashboard, connecting to a P2P mesh and displaying dynamically aggregated metrics. Replaced custom console dashboard logic with Terminal.Gui providing a native scrollable table, client list, and total active peer aggregations. Updated to intersect incoming telemetry endpoints with `IPeerRegistry` state, explicitly dropping inactive/dead nodes from UI aggregations seamlessly natively. |
 | `$/Ama.Enterprise.P2p.Telemetry.IntegrationTests/Ama.Enterprise.P2p.Telemetry.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.Telemetry.IntegrationTests/Services/TelemetryNetworkIntegrationTests.cs` | Updated to test custom meter boundaries by asserting on custom metric scopes native configurations natively. |
+| `$/Ama.Enterprise.P2p.Telemetry.UnitTests/Ama.Enterprise.P2p.Telemetry.UnitTests.csproj` | Unit tests project for validating P2P telemetry aggregations and metric extrapolation behaviors natively tracking .NET 10 time boundaries. |
+| `$/Ama.Enterprise.P2p.Telemetry.UnitTests/Services/ClusterMetricsAggregatorTests.cs` | Unit tests validating the `ClusterMetricsAggregator` tracking time series histories natively calculating deltas dynamically correctly avoiding logic errors. Appended explicit verification bounds securing standard behavior mappings across Histograms, UpDownCounters, and strict monotonic metric bounds organically. |
 | `$/Ama.Enterprise.P2p.Telemetry/Ama.Enterprise.P2p.Telemetry.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.Telemetry/Constants.cs` | Defines the core explicit meter names dynamically evaluated by the telemetry network listeners isolating generic algorithms. |
 | `$/Ama.Enterprise.P2p.Telemetry/Extensions/ServiceCollectionExtensions.cs` | Updated DI to map singletons for the explicit `TelemetryPushProtocol` ensuring bounded generic instance isolation matching background network hooks. |
+| `$/Ama.Enterprise.P2p.Telemetry/Models/ClusterMetricAggregation.cs` | Data structure representing the computed aggregated statistics for a specific metric across a cluster of nodes. |
 | `$/Ama.Enterprise.P2p.Telemetry/Models/MetricSnapshotDto.cs` | AOT friendly pure DTO strictly holding explicitly scoped aggregated metrics structures decoupling logic safely. |
 | `$/Ama.Enterprise.P2p.Telemetry/Models/MetricTagDto.cs` | AOT friendly structure representing a metric precise dimension extracted tracking generic mappings actively. |
 | `$/Ama.Enterprise.P2p.Telemetry/Models/TelemetryJsonContext.cs` | Isolated AOT generic bindings resolving metric serialization safely evaluating pure DTO constraints natively. |
 | `$/Ama.Enterprise.P2p.Telemetry/Models/TelemetryOptions.cs` | Updated to expose explicit tracking configuration enabling native generic meter dimension scopes via a robust `IEquatable` bounds implementation. |
 | `$/Ama.Enterprise.P2p.Telemetry/Models/TelemetryPayloadDto.cs` | DTO defining the top-level explicitly network transmission payloads natively wrapping internally batched generic metrics safely mapping AOT configurations. |
+| `$/Ama.Enterprise.P2p.Telemetry/Services/ClusterMetricsAggregator.cs` | Thread-safe service responsible for computing rates, deltas, and multi-node aggregations over mapped telemetry boundaries natively. Fixed histogram and counter aggregation logic enforcing strict structural delta classifications, fundamentally eliminating jumping sums and errant negative throughput derivatives. |
+| `$/Ama.Enterprise.P2p.Telemetry/Services/IClusterMetricsAggregator.cs` | Contract for aggregating cluster-wide telemetry metrics across active nodes natively tracking mathematical trends. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/ITelemetryAggregator.cs` | Interface for centrally aggregating and retrieving in-memory telemetry network states. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryAggregator.cs` | Thread-safe in-memory aggregator holding the latest telemetry network metrics. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryForwarderService.cs` | Replaced hardcoded telemetry matching metrics with configurable scopes mapping native user boundaries explicitly. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryPayloadHandler.cs` | Application payload handler dedicated to processing incoming telemetry network payloads and routing them into the centralized aggregator. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryPushAlgorithm.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.UnitTests/Ama.Enterprise.P2p.UnitTests.csproj` | No description provided. |
-| `$/Ama.Enterprise.P2p.UnitTests/Services/GossipProtocolTests.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p.UnitTests/Services/InMemoryPeerRegistryTests.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p.UnitTests/Services/MessageDispatcherTests.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p.UnitTests/Services/RandomPeerSelectorTests.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p.UnitTests/Services/TimeBasedFailureDetectorTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Services/Core/InMemoryPeerRegistryTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Services/Core/MessageDispatcherTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Services/Core/RandomPeerSelectorTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Services/Core/TimeBasedFailureDetectorTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.WebRTC.AspNetCore.IntegrationTests/Ama.Enterprise.P2p.WebRTC.AspNetCore.IntegrationTests.csproj` | No description provided. |
+| `$/Ama.Enterprise.P2p.WebRTC.AspNetCore/Ama.Enterprise.P2p.WebRTC.AspNetCore.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Ama.Enterprise.P2p.WebRTC.IntegrationTests.csproj` | Added project references mapping MQTT signaling capabilities alongside copying explicit local settings explicitly. |
 | `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Services/WebRtcTransportIntegrationTests.cs` | Updated `TestMessage` implementing the newly enforced `ProtocolVersion` satisfying `IMeshMessage`. |
 | `$/Ama.Enterprise.P2p.WebRTC/Ama.Enterprise.P2p.WebRTC.csproj` | No description provided. |

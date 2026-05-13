@@ -20,7 +20,6 @@ using Terminal.Gui;
 
 internal sealed class Program
 {
-    private static readonly Dictionary<Guid, NodeTelemetryState> NetworkState = new();
     private static readonly List<string> CachedPeerList = new() { "All" };
     private static string SelectedPeerId = "All";
 
@@ -43,6 +42,9 @@ internal sealed class Program
 
         // Need base services and serialization
         services.AddCrdt();
+
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<IClusterMetricsAggregator, ClusterMetricsAggregator>();
 
         // Map identically configured "admin" network boundaries to join the telemetry cluster natively
         services
@@ -87,6 +89,7 @@ internal sealed class Program
             }
 
             var aggregator = provider.GetRequiredService<ITelemetryAggregator>();
+            var metricsAggregator = provider.GetRequiredService<IClusterMetricsAggregator>();
             var peerRegistry = provider.GetRequiredService<IPeerRegistry>();
 
             Application.Init();
@@ -135,6 +138,13 @@ internal sealed class Program
                 Height = Dim.Fill()
             };
 
+            var hideTelemetryMeshCheckbox = new CheckBox("Hide Telemetry Mesh ('admin') Metrics")
+            {
+                X = 0,
+                Y = 0,
+                Checked = true
+            };
+
             var dataTable = new DataTable();
             dataTable.Columns.Add("Metric", typeof(string));
             dataTable.Columns.Add("Type", typeof(string));
@@ -147,13 +157,14 @@ internal sealed class Program
             var tableView = new TableView()
             {
                 X = 0,
-                Y = 0,
+                Y = Pos.Bottom(hideTelemetryMeshCheckbox),
                 Width = Dim.Fill(),
                 Height = Dim.Fill(),
                 Table = dataTable,
                 FullRowSelect = true
             };
-            metricsFrame.Add(tableView);
+            
+            metricsFrame.Add(hideTelemetryMeshCheckbox, tableView);
 
             window.Add(peersFrame, metricsFrame);
             top.Add(window);
@@ -178,7 +189,7 @@ internal sealed class Program
                     try
                     {
                         await Task.Delay(1000, cts.Token).ConfigureAwait(false);
-                        await UpdateDataAsync(aggregator, peerRegistry, dataTable, peersListView, window, peersFrame, tableView, cts.Token).ConfigureAwait(false);
+                        await UpdateDataAsync(aggregator, metricsAggregator, peerRegistry, dataTable, peersListView, window, peersFrame, tableView, hideTelemetryMeshCheckbox, cts.Token).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException)
                     {
@@ -203,12 +214,14 @@ internal sealed class Program
 
     private static async Task UpdateDataAsync(
         ITelemetryAggregator aggregator,
+        IClusterMetricsAggregator metricsAggregator,
         IPeerRegistry peerRegistry,
         DataTable dataTable,
         ListView peersListView,
         Window window,
         FrameView peersFrame,
         TableView tableView,
+        CheckBox hideTelemetryMeshCheckbox,
         CancellationToken cancellationToken)
     {
         // 1. Fetch valid, connected active peers explicitly mapping bounds preventing phantom nodes evaluation natively
@@ -216,99 +229,27 @@ internal sealed class Program
         var activePeerIds = activePeers.Select(p => p.Id.Value).ToHashSet();
         
         var rawMetrics = aggregator.GetAllNodeMetrics().ToList();
-        var currentTelemetryNodes = rawMetrics.Select(m => m.NodeId).ToHashSet();
-
-        // 2. Remove nodes only if they are no longer reported by the aggregator, bypassing transient active state drops ensuring deltas are preserved
-        var departedNodes = NetworkState.Keys
-            .Where(k => !currentTelemetryNodes.Contains(k))
-            .ToList();
-            
-        foreach (var departed in departedNodes)
-        {
-            NetworkState.Remove(departed);
-        }
-
-        // 3. Update local timeseries histories aligning DateTimeOffset bounds for all incoming payloads unconditionally
-        foreach (var node in rawMetrics)
-        {
-            if (!NetworkState.TryGetValue(node.NodeId, out var state))
-            {
-                state = new NodeTelemetryState { NodeId = node.NodeId };
-                NetworkState[node.NodeId] = state;
-            }
-
-            state.LastSeen = node.Timestamp.ToLocalTime();
-
-            foreach (var metric in node.Metrics)
-            {
-                var tagDict = new Dictionary<string, string>();
-                foreach (var tag in metric.Tags)
-                {
-                    tagDict[tag.Key?.ToString() ?? ""] = tag.Value?.ToString() ?? "";
-                }
-
-                var tagSuffix = string.Join("|", tagDict.OrderBy(t => t.Key).Select(t => $"{t.Key}:{t.Value}"));
-                var metricKey = $"{metric.Name}[{tagSuffix}]";
-
-                if (!state.Metrics.TryGetValue(metricKey, out var stats))
-                {
-                    stats = new MetricStats
-                    {
-                        Name = metric.Name,
-                        Type = metric.Type,
-                        Tags = tagDict
-                    };
-                    state.Metrics[metricKey] = stats;
-                }
-
-                stats.Update(Convert.ToDouble(metric.Value), node.Timestamp);
-            }
-        }
+        
+        // 2. Delegate internal historic mathematical projections explicitly to centralized domain limits
+        metricsAggregator.ProcessPayloads(rawMetrics);
 
         // Capture current selected peer ID explicitly preventing thread overlaps
         var activeSelection = SelectedPeerId;
 
         // Map subset evaluating global vs distinct target peers strictly enforcing active topology mappings isolated purely for UI evaluation
-        var targetNodes = activeSelection == "All"
-            ? NetworkState.Values.Where(n => activePeerIds.Contains(n.NodeId))
-            : NetworkState.Values.Where(n => activePeerIds.Contains(n.NodeId) && n.NodeId.ToString("N").StartsWith(activeSelection));
+        var targetNodeIds = activeSelection == "All"
+            ? activePeerIds
+            : activePeerIds.Where(id => id.ToString("N").StartsWith(activeSelection)).ToHashSet();
 
         // Project and compute local/global cluster aggregations (Sum, Max, Min, Per Second, Per Minute)
-        var clusterMetrics = new Dictionary<string, ClusterMetricAggregation>();
-
-        foreach (var nodeState in targetNodes)
-        {
-            foreach (var kvp in nodeState.Metrics)
-            {
-                var metricKey = kvp.Key;
-                var stats = kvp.Value;
-
-                if (!clusterMetrics.TryGetValue(metricKey, out var agg))
-                {
-                    agg = new ClusterMetricAggregation
-                    {
-                        Name = stats.Name,
-                        Type = stats.Type,
-                        Tags = stats.Tags
-                    };
-                    clusterMetrics[metricKey] = agg;
-                }
-
-                agg.NodeCount++;
-                agg.Sum += stats.CurrentValue;
-                if (stats.CurrentValue < agg.Min) agg.Min = stats.CurrentValue;
-                if (stats.CurrentValue > agg.Max) agg.Max = stats.CurrentValue;
-
-                agg.RatePerSecond += stats.GetPerSecond();
-                agg.RatePerMinute += stats.GetPerMinute();
-            }
-        }
+        var clusterAggregations = metricsAggregator.AggregateClusterMetrics(targetNodeIds);
+        var trackedNodeIds = metricsAggregator.GetTrackedNodeIds();
 
         Application.MainLoop.Invoke(() =>
         {
             // Evaluate generic bounds tracking "All" element alongside strictly active dynamic peer evaluations seamlessly
             var updatedPeerList = new List<string> { "All" };
-            updatedPeerList.AddRange(NetworkState.Keys.Where(k => activePeerIds.Contains(k)).Select(k => k.ToString("N")[..8]).OrderBy(k => k));
+            updatedPeerList.AddRange(trackedNodeIds.Where(k => activePeerIds.Contains(k)).Select(k => k.ToString("N")[..8]).OrderBy(k => k));
 
             bool listChanged = CachedPeerList.Count != updatedPeerList.Count || !CachedPeerList.SequenceEqual(updatedPeerList);
 
@@ -332,25 +273,32 @@ internal sealed class Program
                 }
             }
 
-            var activeStateCount = NetworkState.Keys.Count(k => activePeerIds.Contains(k));
+            var activeStateCount = trackedNodeIds.Count(k => activePeerIds.Contains(k));
             peersFrame.Title = $"Active Peers ({activeStateCount})";
             window.Title = $"P2P Cluster Telemetry Dashboard ('admin' mesh) - Connections: {activeStateCount} | View: {activeSelection}";
 
             dataTable.Rows.Clear();
 
-            foreach (var agg in clusterMetrics.Values.OrderBy(m => m.Name))
-            {
-                var min = agg.Min == double.MaxValue ? 0 : agg.Min;
-                var max = agg.Max == double.MinValue ? 0 : agg.Max;
+            bool hideAdmin = hideTelemetryMeshCheckbox.Checked;
+            var visibleAggregations = clusterAggregations.AsEnumerable();
 
+            if (hideAdmin)
+            {
+                visibleAggregations = visibleAggregations.Where(agg =>
+                    !agg.Tags.Any(t => t.Key.Equals("mesh_id", StringComparison.OrdinalIgnoreCase) && 
+                                       t.Value.Equals("admin", StringComparison.OrdinalIgnoreCase)));
+            }
+
+            foreach (var agg in visibleAggregations.OrderBy(m => m.Name))
+            {
                 dataTable.Rows.Add(
                     agg.Name,
                     agg.Type,
-                    agg.Sum.ToString("0.##"),
-                    min.ToString("0.##"),
-                    max.ToString("0.##"),
-                    agg.RatePerSecond.ToString("0.##"),
-                    agg.RatePerMinute.ToString("0.##")
+                    FormatNumber(agg.Sum),
+                    FormatNumber(agg.Min),
+                    FormatNumber(agg.Max),
+                    FormatNumber(agg.RatePerSecond),
+                    FormatNumber(agg.RatePerMinute)
                 );
 
                 // Add a distinct indented row for each tag individually using a tree layout mapping explicitly
@@ -375,6 +323,7 @@ internal sealed class Program
                 }
             }
 
+            tableView.Update();
             tableView.SetNeedsDisplay();
         });
     }
@@ -397,114 +346,35 @@ internal sealed class Program
         return port;
     }
 
-    private readonly record struct MetricHistoryEntry(DateTimeOffset LocalTime, DateTimeOffset ServerTime, double Value);
-
-    private sealed class NodeTelemetryState
+    private static string FormatNumber(double value)
     {
-        public Guid NodeId { get; set; }
-        public DateTimeOffset LastSeen { get; set; }
-        public Dictionary<string, MetricStats> Metrics { get; } = new();
-    }
-
-    private sealed class MetricStats
-    {
-        public string Name { get; set; } = string.Empty;
-        public string Type { get; set; } = string.Empty;
-        public Dictionary<string, string> Tags { get; set; } = new();
-
-        public double CurrentValue { get; private set; }
-
-        private readonly Queue<MetricHistoryEntry> history = new();
-
-        public void Update(double value, DateTimeOffset serverTime)
+        if (double.IsNaN(value) || double.IsInfinity(value))
         {
-            var now = DateTimeOffset.UtcNow;
-
-            // Stop compounding identical payload entries if the origin server timestamp remains identical avoiding P2P network duplications natively
-            if (history.Count > 0 && history.Last().ServerTime >= serverTime)
-            {
-                Prune(now);
-                return;
-            }
-
-            bool isObservable = Type.Contains("Observable", StringComparison.OrdinalIgnoreCase);
-            bool isCounter = Type.Contains("Counter", StringComparison.OrdinalIgnoreCase);
-            bool isDelta = isCounter && !isObservable;
-
-            // Natively resolve raw delta measurements accumulating bounds for absolute structural UI tracking
-            if (isDelta)
-            {
-                CurrentValue += value;
-            }
-            else
-            {
-                CurrentValue = value;
-            }
-
-            history.Enqueue(new MetricHistoryEntry(now, serverTime, CurrentValue));
-            Prune(now);
+            return "0";
         }
 
-        private void Prune(DateTimeOffset now)
+        var absValue = Math.Abs(value);
+
+        if (absValue >= 1_000_000_000_000)
         {
-            // Retain up to 10 minutes rolling window for rate extrapolations locally
-            while (history.Count > 0 && (now - history.Peek().LocalTime).TotalMinutes > 10)
-            {
-                history.Dequeue();
-            }
+            return (value / 1_000_000_000_000D).ToString("0.##") + "T";
+        }
+        
+        if (absValue >= 1_000_000_000)
+        {
+            return (value / 1_000_000_000D).ToString("0.##") + "B";
+        }
+        
+        if (absValue >= 1_000_000)
+        {
+            return (value / 1_000_000D).ToString("0.##") + "M";
+        }
+        
+        if (absValue >= 1_000)
+        {
+            return (value / 1_000D).ToString("0.##") + "K";
         }
 
-        public double GetPerSecond()
-        {
-            var now = DateTimeOffset.UtcNow;
-            Prune(now);
-
-            if (history.Count < 2) return 0;
-            var first = history.Peek();
-            var last = history.Last();
-
-            var seconds = Math.Max(1.0, (now - first.LocalTime).TotalSeconds);
-            var diff = last.Value - first.Value;
-
-            bool isUpDown = Type.Contains("UpDown", StringComparison.OrdinalIgnoreCase);
-
-            // Re-alignment for standard counter resets discarding temporary negative slopes
-            if (Type.Contains("Counter", StringComparison.OrdinalIgnoreCase) && !isUpDown && diff < 0) diff = 0;
-
-            return diff / seconds;
-        }
-
-        public double GetPerMinute()
-        {
-            var now = DateTimeOffset.UtcNow;
-            Prune(now);
-
-            if (history.Count < 2) return 0;
-            var first = history.Peek();
-            var last = history.Last();
-
-            var minutes = Math.Max(1.0 / 60.0, (now - first.LocalTime).TotalMinutes);
-            var diff = last.Value - first.Value;
-
-            bool isUpDown = Type.Contains("UpDown", StringComparison.OrdinalIgnoreCase);
-
-            if (Type.Contains("Counter", StringComparison.OrdinalIgnoreCase) && !isUpDown && diff < 0) diff = 0;
-
-            return diff / minutes;
-        }
-    }
-
-    private sealed class ClusterMetricAggregation
-    {
-        public string Name { get; set; } = string.Empty;
-        public string Type { get; set; } = string.Empty;
-        public Dictionary<string, string> Tags { get; set; } = new();
-
-        public int NodeCount { get; set; }
-        public double Sum { get; set; }
-        public double Min { get; set; } = double.MaxValue;
-        public double Max { get; set; } = double.MinValue;
-        public double RatePerSecond { get; set; }
-        public double RatePerMinute { get; set; }
+        return value.ToString("0.##");
     }
 }
