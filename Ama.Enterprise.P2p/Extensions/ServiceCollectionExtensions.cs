@@ -107,6 +107,8 @@ public static class ServiceCollectionExtensions
         this IP2pMeshBuilder builder,
         Action<HttpTransportOptions>? configureOptions = null)
     {
+        ArgumentNullException.ThrowIfNull(builder);
+
         Action<HttpTransportOptions> configAction = options => 
         {
             options.IsEnabled = true;
@@ -114,7 +116,7 @@ public static class ServiceCollectionExtensions
         };
 
         var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
-        if (!tracker.TryRegister(builder.MeshId, configAction))
+        if (!tracker.TryRegister($"{builder.MeshId}_HttpTransport", configAction))
         {
             return builder;
         }
@@ -148,6 +150,106 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<IOptionsMonitor<HttpTransportOptions>>(),
                 sp.GetRequiredService<ICrdtSerializer>(),
                 sp.GetRequiredService<ILogger<HttpTransportListener>>()));
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers the pure TCP transport actively mapping standalone decoupled capabilities locally natively.
+    /// </summary>
+    public static IP2pMeshBuilder AddTcpTransport(
+        this IP2pMeshBuilder builder,
+        Action<TcpTransportOptions>? configureOptions = null)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        Action<TcpTransportOptions> configAction = options => 
+        {
+            options.IsEnabled = true;
+            configureOptions?.Invoke(options);
+        };
+
+        var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
+        if (!tracker.TryRegister($"{builder.MeshId}_TcpTransport", configAction))
+        {
+            return builder;
+        }
+
+        builder.Services.Configure(builder.MeshId, configAction);
+
+        builder.Services.AddKeyedSingleton<PeerEndpoint>(builder.MeshId, (sp, key) =>
+        {
+            var options = sp.GetRequiredService<IOptionsMonitor<TcpTransportOptions>>().Get((string)key!);
+            var host = string.Equals(options.ListenHost, "+", StringComparison.OrdinalIgnoreCase) 
+                ? "localhost" 
+                : options.ListenHost;
+                
+            return new TcpPeerEndpoint(host, options.ListenPort);
+        });
+
+        builder.Services.AddKeyedSingleton<ITransport>(builder.MeshId, (sp, key) =>
+            new TcpTransport(
+                (string)key!,
+                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredService<IPeerRegistry>(),
+                sp.GetRequiredService<ILogger<TcpTransport>>()));
+
+        builder.Services.AddKeyedSingleton<ITransportListener>(builder.MeshId, (sp, key) =>
+            new TcpTransportListener(
+                (string)key!,
+                sp.GetRequiredService<IOptionsMonitor<TcpTransportOptions>>(),
+                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredService<ILogger<TcpTransportListener>>()));
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers the robust datagram UDP transport structuring standalone explicitly natively decoupled multi-mesh pipelines.
+    /// </summary>
+    public static IP2pMeshBuilder AddUdpTransport(
+        this IP2pMeshBuilder builder,
+        Action<UdpTransportOptions>? configureOptions = null)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        Action<UdpTransportOptions> configAction = options => 
+        {
+            options.IsEnabled = true;
+            configureOptions?.Invoke(options);
+        };
+
+        var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
+        if (!tracker.TryRegister($"{builder.MeshId}_UdpTransport", configAction))
+        {
+            return builder;
+        }
+
+        builder.Services.Configure(builder.MeshId, configAction);
+
+        builder.Services.AddKeyedSingleton<PeerEndpoint>(builder.MeshId, (sp, key) =>
+        {
+            var options = sp.GetRequiredService<IOptionsMonitor<UdpTransportOptions>>().Get((string)key!);
+            var host = string.Equals(options.ListenHost, "+", StringComparison.OrdinalIgnoreCase) 
+                ? "localhost" 
+                : options.ListenHost;
+                
+            return new UdpPeerEndpoint(host, options.ListenPort);
+        });
+
+        builder.Services.AddKeyedSingleton<ITransport>(builder.MeshId, (sp, key) =>
+            new UdpTransport(
+                (string)key!,
+                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredService<IPeerRegistry>(),
+                sp.GetRequiredService<ILogger<UdpTransport>>()));
+
+        builder.Services.AddKeyedSingleton<ITransportListener>(builder.MeshId, (sp, key) =>
+            new UdpTransportListener(
+                (string)key!,
+                sp.GetRequiredService<IOptionsMonitor<UdpTransportOptions>>(),
+                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredService<ILogger<UdpTransportListener>>()));
 
         return builder;
     }

@@ -118,6 +118,8 @@
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pNetworkIntegrationTests.cs` | Refactored integration assertions targeting unboxed test payloads. Redesigned deduplication tests wrapping identical envelopes ensuring robust evaluation. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pVersioningIntegrationTests.cs` | Refactored integration assertions mapping unboxed generic wrappers. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/PushPullGossipIntegrationTests.cs` | Integration tests verifying Push-Pull anti-entropy bounds isolating digest transmissions and ensuring active localized fallback synchronizations. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/TcpNetworkIntegrationTests.cs` | Refactored tests to assign dynamic OS-level TCP ports, resolving hardcoded port collision socket exceptions during parallel integration test executions. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/UdpNetworkIntegrationTests.cs` | Integration tests explicitly asserting robust decoupled UDP datagram tracking boundaries securely navigating native isolated topologies. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/UdpPeerDiscoveryIntegrationTests.cs` | Updated integration profiles extracting hardcoded target mappings demonstrating and validating decentralized runtime IP mappings robustly without collisions. |
 | `$/Ama.Enterprise.P2p.Mqtt.IntegrationTests/Ama.Enterprise.P2p.Mqtt.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.Mqtt.IntegrationTests/Services/MqttPeerDiscoveryIntegrationTests.cs` | Integration tests verifying the active MQTT peer discovery background service mapping decoupled mesh architectures. |
@@ -206,6 +208,10 @@
 | `$/Ama.Enterprise.P2p/Models/P2pJsonSerializerContext.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Transports/HttpPeerEndpoint.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Transports/HttpTransportOptions.cs` | Added `IsEnabled` flag to track if the HTTP transport has been added for a designated P2P mesh. |
+| `$/Ama.Enterprise.P2p/Models/Transports/TcpPeerEndpoint.cs` | Represents a TCP network address endpoint. |
+| `$/Ama.Enterprise.P2p/Models/Transports/TcpTransportOptions.cs` | Configuration options explicitly bound for configuring active TCP transport connectivity. Implemented IEquatable to comply with the standard bounding. |
+| `$/Ama.Enterprise.P2p/Models/Transports/UdpPeerEndpoint.cs` | Represents a UDP network address endpoint. |
+| `$/Ama.Enterprise.P2p/Models/Transports/UdpTransportOptions.cs` | Configuration options explicitly bound for configuring active UDP datagram connectivity. Implemented IEquatable to comply with the standard bounding. |
 | `$/Ama.Enterprise.P2p/Services/Core/ApplicationPayloadDispatcher.cs` | Composite orchestrator dispatching to abstract domain observers. |
 | `$/Ama.Enterprise.P2p/Services/Core/DirectMessageSender.cs` | Implements localized targeted point-to-point generic delivery dynamically fetching active peering bindings avoiding overarching network broadcast storms. |
 | `$/Ama.Enterprise.P2p/Services/Core/IApplicationPayloadDispatcher.cs` | Dispatches targeted application payloads. |
@@ -239,6 +245,10 @@
 | `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | Refactored encompassing overarching multi-mesh core states evaluating dynamic incoming deduplications and isolated health evaluations efficiently avoiding duplication. |
 | `$/Ama.Enterprise.P2p/Services/Transports/HttpTransport.cs` | Refactored standard HTTP implementation isolated via Keyed dependencies handling precise outgoing payloads evaluating identical network bounds. |
 | `$/Ama.Enterprise.P2p/Services/Transports/HttpTransportListener.cs` | Redesigned inbound network listener transitioning away from multiplexing, adapting keyed dependencies handling localized prefixes isolating meshes. |
+| `$/Ama.Enterprise.P2p/Services/Transports/TcpTransport.cs` | Implements isolated outbound transport using robust TCP streams explicitly mapped against bounded architectures. |
+| `$/Ama.Enterprise.P2p/Services/Transports/TcpTransportListener.cs` | Implements inbound network listener extracting localized pure TCP streams mapping native robust pipelines. |
+| `$/Ama.Enterprise.P2p/Services/Transports/UdpTransport.cs` | Implements completely decoupled, natively mapped lightweight UDP datagram delivery mechanisms efficiently safely. |
+| `$/Ama.Enterprise.P2p/Services/Transports/UdpTransportListener.cs` | Implements decoupled native UDP inbound multiplexing tracking locally registered decentralized architectures smoothly. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/DirectSerializationUsageAnalyzerTests.cs` | Unit tests for `DirectSerializationUsageAnalyzer` to ensure diagnostics are reported for `System.Text.Json` usages and ignored for correct generic interfaces. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/PropertyInfoUsageAnalyzerTests.cs` | No description provided. |
