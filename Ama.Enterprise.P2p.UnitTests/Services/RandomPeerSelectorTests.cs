@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.UnitTests.Gossip.Services;
+namespace Ama.Enterprise.P2p.UnitTests.Services;
 
 using System;
 using System.Linq;
