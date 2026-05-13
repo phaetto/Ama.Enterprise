@@ -9,6 +9,7 @@ using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
+using Ama.Enterprise.UnitTests.Networking;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services;
 using Ama.Enterprise.P2p.Services.Core;
@@ -24,9 +25,10 @@ using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Handlers;
 /// <summary>
 /// Contains advanced integration tests focusing on edge cases, high concurrency, and specific network topologies.
 /// </summary>
-public sealed class P2pAdvancedIntegrationTests(ITestOutputHelper testOutputHelper)
+public sealed class P2pAdvancedIntegrationTests(ITestOutputHelper testOutputHelper, NetworkResourceManager resourceManager) : IClassFixture<NetworkResourceManager>
 {
     private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
+    private readonly NetworkResourceManager resourceManager = resourceManager ?? throw new ArgumentNullException(nameof(resourceManager));
     private const string TestMeshId = "AdvancedIntegrationMesh";
 
     [IntegrationFact]
@@ -36,10 +38,10 @@ public sealed class P2pAdvancedIntegrationTests(ITestOutputHelper testOutputHelp
 
         // Create a linear chain: A <-> B <-> C <-> D
         // Node A only knows B, Node B knows A and C, Node C knows B and D, Node D only knows C.
-        await using var nodeA = CreateTestNode(8201);
-        await using var nodeB = CreateTestNode(8202);
-        await using var nodeC = CreateTestNode(8203);
-        await using var nodeD = CreateTestNode(8204);
+        await using var nodeA = CreateTestNode(resourceManager.GetNextPort());
+        await using var nodeB = CreateTestNode(resourceManager.GetNextPort());
+        await using var nodeC = CreateTestNode(resourceManager.GetNextPort());
+        await using var nodeD = CreateTestNode(resourceManager.GetNextPort());
 
         await RegisterPeerAsync(nodeA, nodeB, cts.Token);
         await RegisterPeerAsync(nodeB, nodeA, cts.Token);
@@ -74,9 +76,9 @@ public sealed class P2pAdvancedIntegrationTests(ITestOutputHelper testOutputHelp
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         // Nodes configured with a strict TTL of 1
-        await using var nodeA = CreateTestNode(8205, defaultTtl: 1);
-        await using var nodeB = CreateTestNode(8206, defaultTtl: 1);
-        await using var nodeC = CreateTestNode(8207, defaultTtl: 1);
+        await using var nodeA = CreateTestNode(resourceManager.GetNextPort(), defaultTtl: 1);
+        await using var nodeB = CreateTestNode(resourceManager.GetNextPort(), defaultTtl: 1);
+        await using var nodeC = CreateTestNode(resourceManager.GetNextPort(), defaultTtl: 1);
 
         // Chain topology: A <-> B <-> C
         await RegisterPeerAsync(nodeA, nodeB, cts.Token);
@@ -107,8 +109,8 @@ public sealed class P2pAdvancedIntegrationTests(ITestOutputHelper testOutputHelp
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
 
-        await using var nodeA = CreateTestNode(8208);
-        await using var nodeB = CreateTestNode(8209);
+        await using var nodeA = CreateTestNode(resourceManager.GetNextPort());
+        await using var nodeB = CreateTestNode(resourceManager.GetNextPort());
 
         await RegisterPeerAsync(nodeA, nodeB, cts.Token);
         await RegisterPeerAsync(nodeB, nodeA, cts.Token);

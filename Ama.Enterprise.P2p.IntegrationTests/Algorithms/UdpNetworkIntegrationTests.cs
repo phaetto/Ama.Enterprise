@@ -5,6 +5,7 @@ using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
+using Ama.Enterprise.UnitTests.Networking;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services;
@@ -27,9 +28,10 @@ using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Handlers;
 /// <summary>
 /// Contains complex integration tests validating actual UDP binding, datagram cycles, and payload distributions.
 /// </summary>
-public sealed class UdpNetworkIntegrationTests(ITestOutputHelper testOutputHelper)
+public sealed class UdpNetworkIntegrationTests(ITestOutputHelper testOutputHelper, NetworkResourceManager resourceManager) : IClassFixture<NetworkResourceManager>
 {
     private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
+    private readonly NetworkResourceManager resourceManager = resourceManager ?? throw new ArgumentNullException(nameof(resourceManager));
     private const string TestMeshId = "UdpIntegrationMesh";
 
     [IntegrationFact]
@@ -38,9 +40,9 @@ public sealed class UdpNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         // Create 3 independent nodes running locally on different UDP ports
-        await using var nodeA = CreateTestNode(8401);
-        await using var nodeB = CreateTestNode(8402);
-        await using var nodeC = CreateTestNode(8403);
+        await using var nodeA = CreateTestNode(resourceManager.GetNextPort());
+        await using var nodeB = CreateTestNode(resourceManager.GetNextPort());
+        await using var nodeC = CreateTestNode(resourceManager.GetNextPort());
 
         await RegisterPeerAsync(nodeA, nodeB, cts.Token);
         await RegisterPeerAsync(nodeA, nodeC, cts.Token);
@@ -71,8 +73,11 @@ public sealed class UdpNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
-        await using var nodeA = CreateTestNode(8404);
-        await using var nodeB = CreateTestNode(8405);
+        var portA = resourceManager.GetNextPort();
+        var portB = resourceManager.GetNextPort();
+
+        await using var nodeA = CreateTestNode(portA);
+        await using var nodeB = CreateTestNode(portB);
 
         await nodeA.HostedService.StartAsync(cts.Token);
         await nodeB.HostedService.StartAsync(cts.Token);
@@ -88,11 +93,11 @@ public sealed class UdpNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
         using var client = new UdpClient();
 
         // First manual UDP transmission
-        await client.SendAsync(payloadBytes, "127.0.0.1", 8405, cts.Token);
+        await client.SendAsync(payloadBytes, "127.0.0.1", portB, cts.Token);
         await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
 
         // Second manual UDP transmission (echo duplication directly pushing identical envelope)
-        await client.SendAsync(payloadBytes, "127.0.0.1", 8405, cts.Token);
+        await client.SendAsync(payloadBytes, "127.0.0.1", portB, cts.Token);
         await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
 
         // Assert Node B handled deduplication within IP2pProtocol natively dropping datagram repetition
@@ -104,9 +109,9 @@ public sealed class UdpNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
 
-        await using var nodeA = CreateTestNode(8411);
-        await using var nodeB = CreateTestNode(8412);
-        await using var nodeC = CreateTestNode(8413);
+        await using var nodeA = CreateTestNode(resourceManager.GetNextPort());
+        await using var nodeB = CreateTestNode(resourceManager.GetNextPort());
+        await using var nodeC = CreateTestNode(resourceManager.GetNextPort());
 
         // Phase 1: Setup initial A-B-C mesh
         await RegisterPeerAsync(nodeA, nodeB, cts.Token);
@@ -136,7 +141,7 @@ public sealed class UdpNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
         await nodeB.Registry.RemovePeerAsync(TestMeshId, nodeC.Id, cts.Token);
 
         // Phase 3: Node D joins the network mid-flight
-        await using var nodeD = CreateTestNode(8414);
+        await using var nodeD = CreateTestNode(resourceManager.GetNextPort());
         
         await RegisterPeerAsync(nodeA, nodeD, cts.Token);
         await RegisterPeerAsync(nodeB, nodeD, cts.Token);

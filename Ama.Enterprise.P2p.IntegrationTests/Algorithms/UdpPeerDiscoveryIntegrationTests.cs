@@ -4,6 +4,7 @@ using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
+using Ama.Enterprise.UnitTests.Networking;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.Services.Core;
@@ -22,13 +23,11 @@ using Xunit;
 /// <summary>
 /// Contains integration tests focusing on the Two-Phase UDP multicast discovery mechanism.
 /// </summary>
-public sealed class UdpPeerDiscoveryIntegrationTests(ITestOutputHelper testOutputHelper) : IDisposable
+public sealed class UdpPeerDiscoveryIntegrationTests(ITestOutputHelper testOutputHelper, NetworkResourceManager resourceManager) : IClassFixture<NetworkResourceManager>, IDisposable
 {
     private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
+    private readonly NetworkResourceManager resourceManager = resourceManager ?? throw new ArgumentNullException(nameof(resourceManager));
     private readonly IList<ServiceProvider> serviceProviders = new List<ServiceProvider>();
-
-    private static int udpPortCounter = 13000;
-    private static int GetNextUdpPort() => Interlocked.Increment(ref udpPortCounter);
 
     [IntegrationFact]
     public async Task DiscoverPeersAsync_ShouldFindOtherNodes_WhenTheyAreListening()
@@ -38,13 +37,13 @@ public sealed class UdpPeerDiscoveryIntegrationTests(ITestOutputHelper testOutpu
         var nodeId1 = Guid.NewGuid();
         var nodeId2 = Guid.NewGuid();
 
-        var port1 = 8301;
-        var port2 = 8302;
+        var port1 = resourceManager.GetNextPort();
+        var port2 = resourceManager.GetNextPort();
 
-        var multicastPort = 8035;
+        var multicastPort = resourceManager.GetNextPort();
         
-        var handshakeListen1 = 8601;
-        var handshakeListen2 = 8602;
+        var handshakeListen1 = resourceManager.GetNextPort();
+        var handshakeListen2 = resourceManager.GetNextPort();
 
         var node1 = CreateDiscoveryNode(nodeId1, port1, multicastPort, handshakeListen1);
         var node2 = CreateDiscoveryNode(nodeId2, port2, multicastPort, handshakeListen2);
@@ -74,20 +73,20 @@ public sealed class UdpPeerDiscoveryIntegrationTests(ITestOutputHelper testOutpu
         var nodeId1 = Guid.NewGuid();
         var nodeId2 = Guid.NewGuid();
 
-        var node1Mesh1Port = 8401;
-        var node1Mesh2Port = 8501;
+        var node1Mesh1Port = resourceManager.GetNextPort();
+        var node1Mesh2Port = resourceManager.GetNextPort();
         
-        var node2Mesh1Port = 8402;
-        var node2Mesh2Port = 8502;
+        var node2Mesh1Port = resourceManager.GetNextPort();
+        var node2Mesh2Port = resourceManager.GetNextPort();
 
-        var multicastPort1 = 8036; 
-        var multicastPort2 = 8037; 
+        var multicastPort1 = resourceManager.GetNextPort(); 
+        var multicastPort2 = resourceManager.GetNextPort(); 
 
-        var node1Mesh1Handshake = 8701;
-        var node1Mesh2Handshake = 8801;
+        var node1Mesh1Handshake = resourceManager.GetNextPort();
+        var node1Mesh2Handshake = resourceManager.GetNextPort();
         
-        var node2Mesh1Handshake = 8702;
-        var node2Mesh2Handshake = 8802;
+        var node2Mesh1Handshake = resourceManager.GetNextPort();
+        var node2Mesh2Handshake = resourceManager.GetNextPort();
 
         var node1 = CreateMultiMeshNode(nodeId1, node1Mesh1Port, node1Mesh2Port, multicastPort1, multicastPort2, node1Mesh1Handshake, node1Mesh2Handshake);
         var node2 = CreateMultiMeshNode(nodeId2, node2Mesh1Port, node2Mesh2Port, multicastPort1, multicastPort2, node2Mesh1Handshake, node2Mesh2Handshake);
@@ -127,10 +126,10 @@ public sealed class UdpPeerDiscoveryIntegrationTests(ITestOutputHelper testOutpu
         using var cancellationSource = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var nodeIds = Enumerable.Range(0, 5).Select(_ => Guid.NewGuid()).ToList();
-        var ports = Enumerable.Range(0, 5).Select(_ => GetNextUdpPort()).ToList();
-        var handshakeListenPorts = Enumerable.Range(0, 5).Select(_ => GetNextUdpPort()).ToList();
+        var ports = Enumerable.Range(0, 5).Select(_ => resourceManager.GetNextPort()).ToList();
+        var handshakeListenPorts = Enumerable.Range(0, 5).Select(_ => resourceManager.GetNextPort()).ToList();
 
-        var multicastPort = GetNextUdpPort();
+        var multicastPort = resourceManager.GetNextPort();
         
         var nodes = new List<SingleMeshTestNode>();
 

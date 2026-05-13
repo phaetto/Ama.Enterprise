@@ -7,6 +7,7 @@ using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
+using Ama.Enterprise.UnitTests.Networking;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services;
@@ -25,16 +26,17 @@ using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Handlers;
 /// <summary>
 /// Integration tests verifying backwards compatibility and protocol versioning constraints natively using explicit TCP topologies.
 /// </summary>
-public sealed class P2pVersioningIntegrationTests(ITestOutputHelper testOutputHelper)
+public sealed class P2pVersioningIntegrationTests(ITestOutputHelper testOutputHelper, NetworkResourceManager resourceManager) : IClassFixture<NetworkResourceManager>
 {
     private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
+    private readonly NetworkResourceManager resourceManager = resourceManager ?? throw new ArgumentNullException(nameof(resourceManager));
     private const string TestMeshId = "VersioningIntegrationMesh";
 
     [IntegrationFact]
     public async Task Network_ShouldRejectMessages_WithIncompatibleMajorProtocolVersion()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var node = CreateTestNode(8210);
+        await using var node = CreateTestNode(resourceManager.GetNextPort());
         await node.HostedService.StartAsync(cts.Token);
 
         var localVersion = Version.Parse(Constants.ProtocolVersion);
@@ -57,7 +59,7 @@ public sealed class P2pVersioningIntegrationTests(ITestOutputHelper testOutputHe
     public async Task Network_ShouldAcceptMessages_WithCompatibleProtocolVersion_ForBackwardsCompatibility()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var node = CreateTestNode(8211);
+        await using var node = CreateTestNode(resourceManager.GetNextPort());
         await node.HostedService.StartAsync(cts.Token);
 
         var localVersion = Version.Parse(Constants.ProtocolVersion);
@@ -81,7 +83,7 @@ public sealed class P2pVersioningIntegrationTests(ITestOutputHelper testOutputHe
     public async Task Network_ShouldAcceptMessages_WithCurrentYamlProtocolVersion_0_1()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var node = CreateTestNode(8212);
+        await using var node = CreateTestNode(resourceManager.GetNextPort());
         await node.HostedService.StartAsync(cts.Token);
 
         // This explicit test directly maps to the deployed YAML version natively covering explicit bound regressions gracefully.

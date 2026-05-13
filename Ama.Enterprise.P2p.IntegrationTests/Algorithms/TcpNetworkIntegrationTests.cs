@@ -5,6 +5,7 @@ using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
+using Ama.Enterprise.UnitTests.Networking;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services;
@@ -29,9 +30,10 @@ using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Handlers;
 /// <summary>
 /// Contains complex integration tests validating actual TCP binding, protocol cycles, and payload distributions.
 /// </summary>
-public sealed class TcpNetworkIntegrationTests(ITestOutputHelper testOutputHelper)
+public sealed class TcpNetworkIntegrationTests(ITestOutputHelper testOutputHelper, NetworkResourceManager resourceManager) : IClassFixture<NetworkResourceManager>
 {
     private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
+    private readonly NetworkResourceManager resourceManager = resourceManager ?? throw new ArgumentNullException(nameof(resourceManager));
     private const string TestMeshId = "TcpIntegrationMesh";
 
     [IntegrationFact]
@@ -39,9 +41,9 @@ public sealed class TcpNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
-        var portA = GetAvailablePort();
-        var portB = GetAvailablePort();
-        var portC = GetAvailablePort();
+        var portA = resourceManager.GetNextPort();
+        var portB = resourceManager.GetNextPort();
+        var portC = resourceManager.GetNextPort();
 
         // Create 3 independent nodes running locally on different dynamically assigned TCP ports
         await using var nodeA = CreateTestNode(portA);
@@ -77,8 +79,8 @@ public sealed class TcpNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
-        var portA = GetAvailablePort();
-        var portB = GetAvailablePort();
+        var portA = resourceManager.GetNextPort();
+        var portB = resourceManager.GetNextPort();
 
         await using var nodeA = CreateTestNode(portA);
         await using var nodeB = CreateTestNode(portB);
@@ -120,10 +122,10 @@ public sealed class TcpNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
 
-        var portA = GetAvailablePort();
-        var portB = GetAvailablePort();
-        var portC = GetAvailablePort();
-        var portD = GetAvailablePort();
+        var portA = resourceManager.GetNextPort();
+        var portB = resourceManager.GetNextPort();
+        var portC = resourceManager.GetNextPort();
+        var portD = resourceManager.GetNextPort();
 
         await using var nodeA = CreateTestNode(portA);
         await using var nodeB = CreateTestNode(portB);
@@ -260,14 +262,5 @@ public sealed class TcpNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
 
         var nodeDetails = new PeerNode(targetNode.Id, targetNode.Endpoint);
         await sourceNode.Registry.AddOrUpdatePeerAsync(TestMeshId, nodeDetails, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
-    }
-
-    private static int GetAvailablePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
 }

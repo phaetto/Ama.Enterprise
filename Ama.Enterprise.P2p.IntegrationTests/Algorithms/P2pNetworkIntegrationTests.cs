@@ -9,6 +9,7 @@ using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
+using Ama.Enterprise.UnitTests.Networking;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services;
@@ -25,9 +26,10 @@ using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Handlers;
 /// <summary>
 /// Contains complex integration tests validating actual generic TCP bindings natively, protocol cycles, and payload distributions.
 /// </summary>
-public sealed class P2pNetworkIntegrationTests(ITestOutputHelper testOutputHelper)
+public sealed class P2pNetworkIntegrationTests(ITestOutputHelper testOutputHelper, NetworkResourceManager resourceManager) : IClassFixture<NetworkResourceManager>
 {
     private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
+    private readonly NetworkResourceManager resourceManager = resourceManager ?? throw new ArgumentNullException(nameof(resourceManager));
     private const string TestMeshId = "BasicIntegrationMesh";
 
     [IntegrationFact]
@@ -37,9 +39,9 @@ public sealed class P2pNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         // Create 3 independent nodes running locally on different ports
-        await using var nodeA = CreateTestNode(8101);
-        await using var nodeB = CreateTestNode(8102);
-        await using var nodeC = CreateTestNode(8103);
+        await using var nodeA = CreateTestNode(resourceManager.GetNextPort());
+        await using var nodeB = CreateTestNode(resourceManager.GetNextPort());
+        await using var nodeC = CreateTestNode(resourceManager.GetNextPort());
 
         // Establish a mesh topology for quick propagation
         await RegisterPeerAsync(nodeA, nodeB, cts.Token);
@@ -75,8 +77,8 @@ public sealed class P2pNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
-        await using var nodeA = CreateTestNode(8104);
-        await using var nodeB = CreateTestNode(8105);
+        await using var nodeA = CreateTestNode(resourceManager.GetNextPort());
+        await using var nodeB = CreateTestNode(resourceManager.GetNextPort());
 
         await nodeA.HostedService.StartAsync(cts.Token);
         await nodeB.HostedService.StartAsync(cts.Token);
@@ -104,7 +106,7 @@ public sealed class P2pNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
     public async Task BroadcastAsync_ShouldThrow_WhenPayloadExceedsLimit()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await using var nodeA = CreateTestNode(8106);
+        await using var nodeA = CreateTestNode(resourceManager.GetNextPort());
 
         var largePayload = new byte[Constants.MaximumPayloadSizeBytes + 1];
 
@@ -121,9 +123,9 @@ public sealed class P2pNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
 
         // Use distinct ports to avoid parallel test execution conflicts
-        await using var nodeA = CreateTestNode(8111);
-        await using var nodeB = CreateTestNode(8112);
-        await using var nodeC = CreateTestNode(8113);
+        await using var nodeA = CreateTestNode(resourceManager.GetNextPort());
+        await using var nodeB = CreateTestNode(resourceManager.GetNextPort());
+        await using var nodeC = CreateTestNode(resourceManager.GetNextPort());
 
         // Phase 1: Setup initial A-B-C mesh
         await RegisterPeerAsync(nodeA, nodeB, cts.Token);
@@ -154,7 +156,7 @@ public sealed class P2pNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
         await nodeB.Registry.RemovePeerAsync(TestMeshId, nodeC.Id, cts.Token);
 
         // Phase 3: Node D joins the network mid-flight
-        await using var nodeD = CreateTestNode(8114);
+        await using var nodeD = CreateTestNode(resourceManager.GetNextPort());
         
         await RegisterPeerAsync(nodeA, nodeD, cts.Token);
         await RegisterPeerAsync(nodeB, nodeD, cts.Token);

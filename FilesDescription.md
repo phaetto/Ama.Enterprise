@@ -255,6 +255,7 @@
 | `$/Ama.Enterprise.UnitTests/Extensions/XunitLoggingBuilderExtensions.cs` | Extension methods to register xUnit logger in ILoggingBuilder. Shared testing utility. |
 | `$/Ama.Enterprise.UnitTests/Logging/XunitLogger.cs` | Custom ILogger implementation for routing logs to xUnit's ITestOutputHelper. Shared testing utility. |
 | `$/Ama.Enterprise.UnitTests/Logging/XunitLoggerProvider.cs` | Provider for creating XunitLogger instances. Shared testing utility. |
+| `$/Ama.Enterprise.UnitTests/Networking/NetworkResourceManager.cs` | A shared resource manager providing unique wait-free network TCP and UDP ports reliably across explicitly isolated executing integration tests natively avoiding parallel port exhaustion collisions. |
 | `$/Ama.Enterprise.slnx` | Purged unreferenced obsolete entries bridging merged internal bounds (`Ama.Enterprise.P2p.Http.Core` and `Ama.Enterprise.P2p.Kestrel`). |
 | `$/CodingStandards.md` | No description provided. |
 | `$/FilesDescription.md` | No description provided. |

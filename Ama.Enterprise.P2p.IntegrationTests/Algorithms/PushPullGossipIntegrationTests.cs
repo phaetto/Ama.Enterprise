@@ -9,6 +9,7 @@ using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
+using Ama.Enterprise.UnitTests.Networking;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Models.Transports;
@@ -29,9 +30,10 @@ using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Handlers;
 /// <remarks>
 /// Initializes a new instance of the <see cref="PushPullGossipIntegrationTests"/> class.
 /// </remarks>
-public sealed class PushPullGossipIntegrationTests(ITestOutputHelper testOutputHelper)
+public sealed class PushPullGossipIntegrationTests(ITestOutputHelper testOutputHelper, NetworkResourceManager resourceManager) : IClassFixture<NetworkResourceManager>
 {
     private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
+    private readonly NetworkResourceManager resourceManager = resourceManager ?? throw new ArgumentNullException(nameof(resourceManager));
     private const string TestMeshId = "PushPullIntegrationMesh";
 
     [IntegrationFact]
@@ -49,8 +51,8 @@ public sealed class PushPullGossipIntegrationTests(ITestOutputHelper testOutputH
             options.MaxDigestSize = 50;
         };
 
-        await using var nodeA = CreateTestNode(8401, configureOptions);
-        await using var nodeB = CreateTestNode(8402, configureOptions);
+        await using var nodeA = CreateTestNode(resourceManager.GetNextPort(), configureOptions);
+        await using var nodeB = CreateTestNode(resourceManager.GetNextPort(), configureOptions);
 
         await RegisterPeerAsync(nodeA, nodeB, cts.Token);
         await RegisterPeerAsync(nodeB, nodeA, cts.Token);
@@ -83,8 +85,8 @@ public sealed class PushPullGossipIntegrationTests(ITestOutputHelper testOutputH
             options.Fanout = 1;
         };
 
-        await using var nodeA = CreateTestNode(8303, configureOptions);
-        await using var nodeB = CreateTestNode(8304, configureOptions);
+        await using var nodeA = CreateTestNode(resourceManager.GetNextPort(), configureOptions);
+        await using var nodeB = CreateTestNode(resourceManager.GetNextPort(), configureOptions);
 
         await RegisterPeerAsync(nodeA, nodeB, cts.Token);
         await RegisterPeerAsync(nodeB, nodeA, cts.Token);
@@ -116,8 +118,8 @@ public sealed class PushPullGossipIntegrationTests(ITestOutputHelper testOutputH
             options.Fanout = 1;
         };
 
-        await using var nodeA = CreateTestNode(8305, configureOptions);
-        await using var nodeB = CreateTestNode(8306, configureOptions);
+        await using var nodeA = CreateTestNode(resourceManager.GetNextPort(), configureOptions);
+        await using var nodeB = CreateTestNode(resourceManager.GetNextPort(), configureOptions);
 
         await RegisterPeerAsync(nodeA, nodeB, cts.Token);
         await RegisterPeerAsync(nodeB, nodeA, cts.Token);
