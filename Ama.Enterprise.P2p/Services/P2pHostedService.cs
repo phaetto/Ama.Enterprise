@@ -23,13 +23,13 @@ public sealed class P2pHostedService(
     IEnumerable<P2pMeshMetadata> meshes,
     IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
     ILogger<P2pHostedService> logger,
-    IP2pProtocol? p2pProtocol = null) : IHostedService
+    IP2pAlgorithm? p2pProtocol = null) : IHostedService
 {
     private readonly IServiceProvider serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
     private readonly IEnumerable<P2pMeshMetadata> meshes = meshes ?? throw new ArgumentNullException(nameof(meshes));
     private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
     private readonly ILogger<P2pHostedService> logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    private readonly IP2pProtocol? p2pProtocol = p2pProtocol;
+    private readonly IP2pAlgorithm? p2pProtocol = p2pProtocol;
 
     private readonly ConcurrentDictionary<string, Task> inboundProcessors = new();
     private readonly ConcurrentDictionary<string, MeshState> activeMeshes = new();

@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.IntegrationTests.Gossip;
+namespace Ama.Enterprise.P2p.IntegrationTests.Algorithms;
 
 using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;

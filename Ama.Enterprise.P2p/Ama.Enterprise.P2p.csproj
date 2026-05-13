@@ -43,8 +43,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <Folder Include="Models\Protocols\" />
-	  <Folder Include="Services\Protocols\" />
+	  <Folder Include="Models\Algorithms\" />
 	</ItemGroup>
 
 </Project>

@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.Services.Gossip;
+namespace Ama.Enterprise.P2p.Services.Algorithms;
 
 using System;
 using System.Collections.Concurrent;
@@ -7,6 +7,7 @@ using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.Enterprise.P2p;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
@@ -19,15 +20,15 @@ using Microsoft.Extensions.Options;
 /// Supports deterministic anti-entropy through explicitly targeted push digest and pull request mechanics.
 /// </summary>
 /// <remarks>
-/// Initializes a new instance of the <see cref="PushPullGossipProtocol"/> class.
+/// Initializes a new instance of the <see cref="PushPullGossipAlgorithm"/> class.
 /// </remarks>
-public sealed class PushPullGossipProtocol : IP2pProtocol, IDisposable
+public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
 {
     private readonly IServiceProvider serviceProvider;
     private readonly IEnumerable<P2pMeshMetadata> meshes;
     private readonly IOptionsMonitor<PushPullGossipOptions> pushPullOptionsMonitor;
     private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
-    private readonly ILogger<PushPullGossipProtocol> logger;
+    private readonly ILogger<PushPullGossipAlgorithm> logger;
 
     private readonly ConcurrentDictionary<string, ProtocolState> activeMeshes = new();
 
@@ -39,12 +40,12 @@ public sealed class PushPullGossipProtocol : IP2pProtocol, IDisposable
     private readonly Counter<long> directFulfillmentsCounter;
     private readonly Histogram<long> payloadBytesHistogram;
 
-    public PushPullGossipProtocol(
+    public PushPullGossipAlgorithm(
         IServiceProvider serviceProvider,
         IEnumerable<P2pMeshMetadata> meshes,
         IOptionsMonitor<PushPullGossipOptions> pushPullOptionsMonitor,
         IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
-        ILogger<PushPullGossipProtocol> logger)
+        ILogger<PushPullGossipAlgorithm> logger)
     {
         this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         this.meshes = meshes ?? throw new ArgumentNullException(nameof(meshes));

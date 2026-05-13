@@ -1,12 +1,10 @@
-namespace Ama.Enterprise.P2p.IntegrationTests.Gossip;
+namespace Ama.Enterprise.P2p.IntegrationTests.Algorithms;
 
 using Ama.CRDT.Extensions;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
-using Ama.Enterprise.P2p.IntegrationTests.Gossip.Handlers;
-using Ama.Enterprise.P2p.IntegrationTests.Gossip.Models;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services;
@@ -23,6 +21,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
 using Ama.Enterprise.P2p.Models.Transports;
+using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Models;
+using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Handlers;
 
 /// <summary>
 /// Integration tests verifying backwards compatibility and protocol versioning constraints.
@@ -166,7 +166,7 @@ public sealed class P2pVersioningIntegrationTests(ITestOutputHelper testOutputHe
             endpoint,
             handler,
             provider.GetServices<IHostedService>().OfType<P2pHostedService>().First(),
-            provider.GetRequiredService<IP2pProtocol>(),
+            provider.GetRequiredService<IP2pAlgorithm>(),
             provider.GetRequiredService<IPeerRegistry>()
         );
     }

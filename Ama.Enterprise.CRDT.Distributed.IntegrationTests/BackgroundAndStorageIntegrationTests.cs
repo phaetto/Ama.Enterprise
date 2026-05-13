@@ -69,7 +69,7 @@ public sealed class BackgroundAndStorageIntegrationTests
         services.AddDistributedDocumentType<StorageTestState>("storage-doc");
         services.AddDistributedCrdtP2p(TestMeshId, replicaId);
 
-        services.AddSingleton(Mock.Of<IP2pProtocol>());
+        services.AddSingleton(Mock.Of<IP2pAlgorithm>());
         services.AddSingleton(Mock.Of<IDirectMessageSender>());
 
         configureExtra?.Invoke(services);
@@ -153,7 +153,7 @@ public sealed class BackgroundAndStorageIntegrationTests
     public async Task DistributedCrdtDocument_ApplyPatch_ShouldTriggerActiveSync_WhenEnabled()
     {
         // Arrange
-        var mockP2p = new Mock<IP2pProtocol>();
+        var mockP2p = new Mock<IP2pAlgorithm>();
         var sp = BuildNode("Replica1", services =>
         {
             services.Replace(ServiceDescriptor.Singleton(mockP2p.Object));
@@ -187,7 +187,7 @@ public sealed class BackgroundAndStorageIntegrationTests
     public async Task CrdtGossipHandler_ProcessSnapshot_ShouldMerge_ResolvingGaps()
     {
         // Arrange
-        var mockP2p = new Mock<IP2pProtocol>();
+        var mockP2p = new Mock<IP2pAlgorithm>();
         var sp = BuildNode("Replica1", services =>
         {
             services.Replace(ServiceDescriptor.Singleton(mockP2p.Object));

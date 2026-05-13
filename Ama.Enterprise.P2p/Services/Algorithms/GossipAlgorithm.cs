@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.Services.Gossip;
+namespace Ama.Enterprise.P2p.Services.Algorithms;
 
 using System;
 using System.Collections.Concurrent;
@@ -7,6 +7,7 @@ using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.Enterprise.P2p;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
@@ -18,15 +19,15 @@ using Microsoft.Extensions.Options;
 /// Orchestrates the Gossip protocol algorithm across multiple meshes.
 /// </summary>
 /// <remarks>
-/// Initializes a new instance of the <see cref="GossipProtocol"/> class.
+/// Initializes a new instance of the <see cref="GossipAlgorithm"/> class.
 /// </remarks>
-public sealed class GossipProtocol : IP2pProtocol, IDisposable
+public sealed class GossipAlgorithm : IP2pAlgorithm, IDisposable
 {
     private readonly IServiceProvider serviceProvider;
     private readonly IEnumerable<P2pMeshMetadata> meshes;
     private readonly IOptionsMonitor<GossipOptions> gossipOptionsMonitor;
     private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
-    private readonly ILogger<GossipProtocol> logger;
+    private readonly ILogger<GossipAlgorithm> logger;
 
     private readonly ConcurrentDictionary<string, ProtocolState> activeMeshes = new();
 
@@ -35,12 +36,12 @@ public sealed class GossipProtocol : IP2pProtocol, IDisposable
     private readonly Counter<long> messagesReceivedCounter;
     private readonly Histogram<long> payloadBytesHistogram;
 
-    public GossipProtocol(
+    public GossipAlgorithm(
         IServiceProvider serviceProvider,
         IEnumerable<P2pMeshMetadata> meshes,
         IOptionsMonitor<GossipOptions> gossipOptionsMonitor,
         IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
-        ILogger<GossipProtocol> logger)
+        ILogger<GossipAlgorithm> logger)
     {
         this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         this.meshes = meshes ?? throw new ArgumentNullException(nameof(meshes));

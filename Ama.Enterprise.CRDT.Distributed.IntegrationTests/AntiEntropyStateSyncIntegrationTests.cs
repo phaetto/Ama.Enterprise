@@ -65,7 +65,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         services.AddDistributedDocumentType<SyncTestState>("sync-doc-2");
         services.AddDistributedCrdtP2p(TestMeshId, replicaId);
 
-        services.AddSingleton(Mock.Of<IP2pProtocol>());
+        services.AddSingleton(Mock.Of<IP2pAlgorithm>());
         services.AddSingleton(Mock.Of<IDirectMessageSender>());
 
         configureExtra?.Invoke(services);

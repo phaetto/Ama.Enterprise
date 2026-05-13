@@ -258,7 +258,7 @@ public sealed class CrdtP2pPayloadHandler(
         var wrapper = new CrdtMessageWrapper(targetDoc.DocumentId, "CrdtEviction", payload);
         var wrapperBytes = serializer.SerializeToBytes(wrapper);
 
-        var p2pProtocol = scope.ServiceProvider.GetService<IP2pProtocol>();
+        var p2pProtocol = scope.ServiceProvider.GetService<IP2pAlgorithm>();
         if (p2pProtocol != null)
         {
             await p2pProtocol.BroadcastAsync(wrapperBytes, cancellationToken).ConfigureAwait(false);

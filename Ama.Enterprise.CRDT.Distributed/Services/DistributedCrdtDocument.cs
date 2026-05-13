@@ -363,7 +363,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     {
         try
         {
-            var p2pProtocol = serviceProvider.GetRequiredService<IP2pProtocol>();
+            var p2pProtocol = serviceProvider.GetRequiredService<IP2pAlgorithm>();
             var opsMsg = new CrdtOperationsMessage(replicaContext.ReplicaId, new[] { operation });
             var payload = serializer.SerializeToBytes(opsMsg);
             

@@ -1,9 +1,9 @@
-namespace Ama.Enterprise.P2p.IntegrationTests.Gossip.Models;
+namespace Ama.Enterprise.P2p.IntegrationTests.Algorithms.Models;
 
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Ama.Enterprise.P2p.IntegrationTests.Gossip.Handlers;
+using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Handlers;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,7 +21,7 @@ public sealed class TestNode(
     PeerEndpoint endpoint,
     TestMessageHandler handler,
     IHostedService hostedService,
-    IP2pProtocol protocol,
+    IP2pAlgorithm protocol,
     IPeerRegistry registry) : IAsyncDisposable
 {
     /// <summary>
@@ -52,7 +52,7 @@ public sealed class TestNode(
     /// <summary>
     /// Gets the generic protocol instance.
     /// </summary>
-    public IP2pProtocol Protocol { get; } = protocol ?? throw new ArgumentNullException(nameof(protocol));
+    public IP2pAlgorithm Protocol { get; } = protocol ?? throw new ArgumentNullException(nameof(protocol));
 
     /// <summary>
     /// Gets the routing registry instance.

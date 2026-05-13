@@ -64,7 +64,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
                 .AddCrdtJsonTypeInfoResolver(JournalTestJsonContext.Default);
 
         services.AddDistributedDocumentType<JournalTestState>("journal-doc");
-        services.AddSingleton(Mock.Of<IP2pProtocol>());
+        services.AddSingleton(Mock.Of<IP2pAlgorithm>());
 
         configureExtra?.Invoke(services);
 

@@ -63,7 +63,7 @@ public sealed class MainServicesHappyPathIntegrationTests
         services.AddDistributedCrdtP2p("TestMesh", replicaId);
         
         // Mock P2P Outbound
-        services.AddSingleton(Mock.Of<IP2pProtocol>());
+        services.AddSingleton(Mock.Of<IP2pAlgorithm>());
         services.AddSingleton(Mock.Of<IDirectMessageSender>());
 
         configureExtra?.Invoke(services);

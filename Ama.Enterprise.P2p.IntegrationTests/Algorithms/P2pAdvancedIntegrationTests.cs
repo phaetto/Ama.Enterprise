@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.IntegrationTests.Gossip;
+namespace Ama.Enterprise.P2p.IntegrationTests.Algorithms;
 
 using System;
 using System.Linq;
@@ -9,8 +9,6 @@ using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
-using Ama.Enterprise.P2p.IntegrationTests.Gossip.Handlers;
-using Ama.Enterprise.P2p.IntegrationTests.Gossip.Models;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services;
 using Ama.Enterprise.P2p.Services.Core;
@@ -20,6 +18,8 @@ using Microsoft.Extensions.Logging;
 using Shouldly;
 using Xunit;
 using Ama.Enterprise.P2p.Models.Transports;
+using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Models;
+using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Handlers;
 
 /// <summary>
 /// Contains advanced integration tests focusing on edge cases, high concurrency, and specific network topologies.
@@ -201,7 +201,7 @@ public sealed class P2pAdvancedIntegrationTests(ITestOutputHelper testOutputHelp
             endpoint,
             handler,
             provider.GetServices<IHostedService>().OfType<P2pHostedService>().First(),
-            provider.GetRequiredService<IP2pProtocol>(),
+            provider.GetRequiredService<IP2pAlgorithm>(),
             provider.GetRequiredService<IPeerRegistry>()
         );
     }

@@ -59,7 +59,7 @@ public class EvictionEdgeCasesIntegrationTests
                 .AddCrdtJsonTypeInfoResolver(EvictionEdgeCasesTestJsonContext.Default);
 
         services.AddDistributedDocumentType<TestState>("test-doc");
-        services.AddSingleton(Mock.Of<IP2pProtocol>());
+        services.AddSingleton(Mock.Of<IP2pAlgorithm>());
 
         configureExtra?.Invoke(services);
 

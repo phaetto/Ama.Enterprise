@@ -7,8 +7,8 @@ using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Models.Transports;
+using Ama.Enterprise.P2p.Services.Algorithms;
 using Ama.Enterprise.P2p.Services.Core;
-using Ama.Enterprise.P2p.Services.Gossip;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -23,7 +23,7 @@ public sealed class GossipProtocolTests
     private readonly Mock<IApplicationPayloadDispatcher> dispatcherMock;
     private readonly Mock<IFailureDetector> failureDetectorMock;
     private readonly Mock<IPeerRegistry> peerRegistryMock;
-    private readonly Mock<ILogger<GossipProtocol>> loggerMock;
+    private readonly Mock<ILogger<GossipAlgorithm>> loggerMock;
     private readonly Mock<IOptionsMonitor<GossipOptions>> gossipOptionsMock;
     private readonly Mock<IOptionsMonitor<P2pNodeOptions>> nodeOptionsMock;
     private readonly IServiceProvider serviceProvider;
@@ -35,7 +35,7 @@ public sealed class GossipProtocolTests
         dispatcherMock = new Mock<IApplicationPayloadDispatcher>();
         failureDetectorMock = new Mock<IFailureDetector>();
         peerRegistryMock = new Mock<IPeerRegistry>();
-        loggerMock = new Mock<ILogger<GossipProtocol>>();
+        loggerMock = new Mock<ILogger<GossipAlgorithm>>();
         
         gossipOptionsMock = new Mock<IOptionsMonitor<GossipOptions>>();
         gossipOptionsMock.Setup(o => o.Get(TestMeshId)).Returns(new GossipOptions { GossipInterval = TimeSpan.FromMilliseconds(50), Fanout = 2 });
@@ -154,7 +154,7 @@ public sealed class GossipProtocolTests
         await protocol.StopAsync(CancellationToken.None);
     }
 
-    private GossipProtocol CreateProtocol() => new(
+    private GossipAlgorithm CreateProtocol() => new(
         serviceProvider,
         new[] { new P2pMeshMetadata(TestMeshId) },
         gossipOptionsMock.Object,

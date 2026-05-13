@@ -59,7 +59,7 @@ public sealed class TelemetryNetworkIntegrationTests(ITestOutputHelper testOutpu
         await StartAllHostedServicesAsync(hostedServicesAggregator, cancellationSource.Token).ConfigureAwait(false);
 
         // Manually start the TelemetryPushProtocol since it relies on explicit protocol hooks.
-        var pushProtocolForwarder = providerForwarder.GetRequiredService<TelemetryPushProtocol>();
+        var pushProtocolForwarder = providerForwarder.GetRequiredService<TelemetryPushAlgorithm>();
         await pushProtocolForwarder.StartAsync(cancellationSource.Token).ConfigureAwait(false);
 
         // Inject the Aggregator Node directly into the Forwarder Node's topology registry to establish a direct route.
@@ -136,7 +136,7 @@ public sealed class TelemetryNetworkIntegrationTests(ITestOutputHelper testOutpu
         await StartAllHostedServicesAsync(hostedServicesForwarder, cancellationSource.Token).ConfigureAwait(false);
         await StartAllHostedServicesAsync(hostedServicesAggregator, cancellationSource.Token).ConfigureAwait(false);
 
-        var pushProtocolForwarder = providerForwarder.GetRequiredService<TelemetryPushProtocol>();
+        var pushProtocolForwarder = providerForwarder.GetRequiredService<TelemetryPushAlgorithm>();
         await pushProtocolForwarder.StartAsync(cancellationSource.Token).ConfigureAwait(false);
 
         var registryForwarder = providerForwarder.GetRequiredService<IPeerRegistry>();

@@ -32,7 +32,7 @@ public static class ServiceCollectionExtensions
         }
 
         services.AddCrdtJsonTypeInfoResolver(TelemetryJsonContext.Default);
-        services.AddSingleton<TelemetryPushProtocol>();
+        services.AddSingleton<TelemetryPushAlgorithm>();
         services.AddHostedService<TelemetryForwarderService>();
 
         return services;

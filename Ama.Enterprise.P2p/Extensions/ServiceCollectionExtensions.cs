@@ -8,8 +8,8 @@ using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.Services;
+using Ama.Enterprise.P2p.Services.Algorithms;
 using Ama.Enterprise.P2p.Services.Core;
-using Ama.Enterprise.P2p.Services.Gossip;
 using Ama.Enterprise.P2p.Services.Transports;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -276,7 +276,7 @@ public static class ServiceCollectionExtensions
             builder.Services.Configure(builder.MeshId, configureOptions);
         }
         
-        builder.Services.TryAddSingleton<IP2pProtocol, GossipProtocol>();
+        builder.Services.TryAddSingleton<IP2pAlgorithm, GossipAlgorithm>();
 
         return builder;
     }
@@ -303,7 +303,7 @@ public static class ServiceCollectionExtensions
             builder.Services.Configure(builder.MeshId, configureOptions);
         }
         
-        builder.Services.TryAddSingleton<IP2pProtocol, PushPullGossipProtocol>();
+        builder.Services.TryAddSingleton<IP2pAlgorithm, PushPullGossipAlgorithm>();
 
         return builder;
     }

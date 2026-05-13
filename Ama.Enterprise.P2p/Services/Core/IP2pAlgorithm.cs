@@ -10,7 +10,7 @@ using Ama.Enterprise.P2p.Models.Core;
 /// This interface abstracts away the underlying distribution algorithm (e.g., Gossip, Push-Pull, Rumor Mongering)
 /// and acts universally across all defined meshes.
 /// </summary>
-public interface IP2pProtocol
+public interface IP2pAlgorithm
 {
     /// <summary>
     /// Starts the P2P protocol across all configured meshes, including periodic syncing and listening to incoming messages.

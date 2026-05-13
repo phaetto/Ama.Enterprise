@@ -24,7 +24,7 @@ public sealed class TelemetryForwarderService : BackgroundService
     
     private readonly IOptionsMonitor<TelemetryOptions> optionsMonitor;
     private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
-    private readonly TelemetryPushProtocol telemetryProtocol;
+    private readonly TelemetryPushAlgorithm telemetryProtocol;
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<TelemetryForwarderService> logger;
 
@@ -34,7 +34,7 @@ public sealed class TelemetryForwarderService : BackgroundService
     public TelemetryForwarderService(
         IOptionsMonitor<TelemetryOptions> optionsMonitor,
         IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
-        TelemetryPushProtocol telemetryProtocol,
+        TelemetryPushAlgorithm telemetryProtocol,
         ICrdtSerializer serializer,
         ILogger<TelemetryForwarderService> logger)
     {

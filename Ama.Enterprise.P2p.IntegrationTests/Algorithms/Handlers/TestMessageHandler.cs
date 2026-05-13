@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.IntegrationTests.Gossip.Handlers;
+namespace Ama.Enterprise.P2p.IntegrationTests.Algorithms.Handlers;
 
 using System;
 using System.Collections.Concurrent;

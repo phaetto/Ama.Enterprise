@@ -16,12 +16,12 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Protocol implementation dedicated to pushing telemetry messages across the configured telemetry mesh natively without extraneous forwarding overhead.
 /// </summary>
-public sealed class TelemetryPushProtocol : IDisposable
+public sealed class TelemetryPushAlgorithm : IDisposable
 {
     private readonly IServiceProvider serviceProvider;
     private readonly IOptionsMonitor<TelemetryOptions> telemetryOptionsMonitor;
     private readonly IDirectMessageSender directMessageSender;
-    private readonly ILogger<TelemetryPushProtocol> logger;
+    private readonly ILogger<TelemetryPushAlgorithm> logger;
 
     private CancellationTokenSource? loopCts;
     private Task? healthCheckLoopTask;
@@ -33,13 +33,13 @@ public sealed class TelemetryPushProtocol : IDisposable
     private bool isStarted;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="TelemetryPushProtocol"/> class.
+    /// Initializes a new instance of the <see cref="TelemetryPushAlgorithm"/> class.
     /// </summary>
-    public TelemetryPushProtocol(
+    public TelemetryPushAlgorithm(
         IServiceProvider serviceProvider,
         IOptionsMonitor<TelemetryOptions> telemetryOptionsMonitor,
         IDirectMessageSender directMessageSender,
-        ILogger<TelemetryPushProtocol> logger)
+        ILogger<TelemetryPushAlgorithm> logger)
     {
         this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         this.telemetryOptionsMonitor = telemetryOptionsMonitor ?? throw new ArgumentNullException(nameof(telemetryOptionsMonitor));
