@@ -17,7 +17,6 @@ using Shouldly;
 using System;
 using System.Buffers.Binary;
 using System.Linq;
-using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;

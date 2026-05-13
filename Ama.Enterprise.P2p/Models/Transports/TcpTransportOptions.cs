@@ -1,5 +1,3 @@
-using System;
-
 namespace Ama.Enterprise.P2p.Models.Transports;
 
 /// <summary>

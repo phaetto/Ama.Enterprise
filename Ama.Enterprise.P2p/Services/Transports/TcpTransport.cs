@@ -2,6 +2,7 @@ namespace Ama.Enterprise.P2p.Services.Transports;
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
 using System.IO;
@@ -28,6 +29,9 @@ public sealed class TcpTransport : ITransport, IDisposable
     private readonly Meter meter;
     private readonly Counter<long> messagesSentCounter;
     private readonly Histogram<long> payloadBytesHistogram;
+
+    private readonly ConcurrentDictionary<TcpPeerEndpoint, SemaphoreSlim> endpointLocks = new();
+    private readonly ConcurrentDictionary<TcpPeerEndpoint, ConnectionState> activeConnections = new();
 
     public TcpTransport(
         string meshId,
@@ -94,19 +98,29 @@ public sealed class TcpTransport : ITransport, IDisposable
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(TimeSpan.FromSeconds(5));
 
-        using var client = new TcpClient();
+        var endpointLock = endpointLocks.GetOrAdd(tcpEndpoint, _ => new SemaphoreSlim(1, 1));
+        await endpointLock.WaitAsync(cts.Token).ConfigureAwait(false);
 
         try
         {
-            await client.ConnectAsync(tcpEndpoint.Host, tcpEndpoint.Port, cts.Token).ConfigureAwait(false);
-            await using var stream = client.GetStream();
+            if (!activeConnections.TryGetValue(tcpEndpoint, out var connection))
+            {
+                var client = new TcpClient();
+                client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+                
+                await client.ConnectAsync(tcpEndpoint.Host, tcpEndpoint.Port, cts.Token).ConfigureAwait(false);
+                
+                connection = new ConnectionState(client);
+                activeConnections[tcpEndpoint] = connection;
+            }
 
             var payload = serializer.SerializeToBytes(message);
             var lengthBytes = new byte[4];
             BinaryPrimitives.WriteInt32LittleEndian(lengthBytes, payload.Length);
 
-            await stream.WriteAsync(lengthBytes, cts.Token).ConfigureAwait(false);
-            await stream.WriteAsync(payload, cts.Token).ConfigureAwait(false);
+            await connection.Stream.WriteAsync(lengthBytes, cts.Token).ConfigureAwait(false);
+            await connection.Stream.WriteAsync(payload, cts.Token).ConfigureAwait(false);
+            await connection.Stream.FlushAsync(cts.Token).ConfigureAwait(false);
 
             var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
             messagesSentCounter.Add(1, tags);
@@ -114,11 +128,20 @@ public sealed class TcpTransport : ITransport, IDisposable
 
             logger.LogTrace("[{MeshId}] Successfully dispatched {Bytes} bytes via TCP to {Host}:{Port}", meshId, payload.Length, tcpEndpoint.Host, tcpEndpoint.Port);
         }
-        catch (Exception ex) when (ex is SocketException or IOException or TimeoutException or OperationCanceledException)
+        catch (Exception ex) when (ex is SocketException or IOException or TimeoutException or OperationCanceledException or ObjectDisposedException)
         {
+            if (activeConnections.TryRemove(tcpEndpoint, out var brokenConnection))
+            {
+                brokenConnection.Dispose();
+            }
+
             logger.LogWarning(ex, "[{MeshId}] TCP transport failure when communicating with {Host}:{Port}. Removing dead peer structurally.", meshId, tcpEndpoint.Host, tcpEndpoint.Port);
             await RemoveDeadPeerAsync(endpoint, cancellationToken).ConfigureAwait(false);
             throw;
+        }
+        finally
+        {
+            endpointLock.Release();
         }
     }
 
@@ -137,6 +160,36 @@ public sealed class TcpTransport : ITransport, IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
+        foreach (var connection in activeConnections.Values)
+        {
+            connection.Dispose();
+        }
+        activeConnections.Clear();
+
+        foreach (var lockObj in endpointLocks.Values)
+        {
+            lockObj.Dispose();
+        }
+        endpointLocks.Clear();
+
         meter.Dispose();
+    }
+
+    private sealed class ConnectionState : IDisposable
+    {
+        public TcpClient Client { get; }
+        public NetworkStream Stream { get; }
+
+        public ConnectionState(TcpClient client)
+        {
+            Client = client;
+            Stream = client.GetStream();
+        }
+
+        public void Dispose()
+        {
+            try { Stream.Dispose(); } catch { }
+            try { Client.Dispose(); } catch { }
+        }
     }
 }

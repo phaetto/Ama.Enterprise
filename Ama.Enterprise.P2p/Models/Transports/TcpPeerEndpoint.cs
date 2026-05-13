@@ -1,6 +1,5 @@
 namespace Ama.Enterprise.P2p.Models.Transports;
 
-using System;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
