@@ -254,7 +254,6 @@ public sealed class WebRtcTransportIntegrationTests(ITestOutputHelper testOutput
         });
 
         services.AddP2pMesh(meshId)
-            .AddGossipNetwork() // Installs AOT contexts explicitly bridging GossipMessage serialization
             .AddWebRtcTransport(options =>
             {
                 // Disable external STUN lookup to accelerate local integration tests efficiently
