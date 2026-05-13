@@ -10,7 +10,6 @@ using Ama.Enterprise.P2p.Models.Transports;
 /// </summary>
 [JsonSerializable(typeof(PeerNode))]
 [JsonSerializable(typeof(PeerEndpoint))]
-[JsonSerializable(typeof(HttpPeerEndpoint))]
 [JsonSerializable(typeof(UdpDiscoveryMessage))]
 internal sealed partial class UdpDiscoveryJsonContext : JsonSerializerContext
 {

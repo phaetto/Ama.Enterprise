@@ -42,16 +42,12 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtRegistryState.cs` | Global P2P synced directory state handling distributed multi-document topologies, ensuring active instantiation maps across nodes. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtSnapshotMessage.cs` | Message payload containing a complete materialized CRDT document snapshot, used as a fallback synchronization mechanism when log truncation gaps are detected. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtStateSyncMessage.cs` | Structure carrying generic synchronization states formatted across anti-entropy operations representing document DVV. |
-| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtStorageRegistration.cs` | Updated configuration mapping to include explicit target values and explicit `CrdtStorageRoutingType` routing bounds. |
-| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtStorageRoutingType.cs` | Enumeration explicitly defining the storage routing criteria allowing resolution by either Document Type or Document ID. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtOptions.cs` | Removed global ReplicaId to natively support multi-replica dependency injection isolation explicitly. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtP2pJsonContext.cs` | JSON serialization context mapping AOT bindings resolving eviction message constraints. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtReplicaRegistration.cs` | Represents a dynamically registered Replica ID enforcing discrete CRDT multi-mesh state architectures inherently. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtSystemAotContext.cs` | AOT contextual reflection mapping for internal orchestrator registry CRDT scopes, bridging models. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtSystemJsonContext.cs` | JSON serialization context guaranteeing AOT compatibility for internal orchestrator registry CRDT scopes. |
-| `$/Ama.Enterprise.CRDT.Distributed/Models/MissingOperationsResult.cs` | DTO representing the result of querying for missing operations and indicating whether a full snapshot is required, bridging interface contracts without relying on tuples. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ClusterStateTracker.cs` | Singleton thread-safe implementation capturing localized maps representing overarching remote state matrix limits. Modified `RemovePeerByNetworkId` preventing amnesia by intentionally preserving CRDT vectors, decoupling network routes and avoiding destructive structural gaps. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/CompositeCrdtStorage.cs` | Updated composite router to strictly map routing configurations decoupled by explicitly typed storage dictionaries preventing dictionary key collisions. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtCheckpointService.cs` | Background service responsible for periodically saving the full in-memory state of all registered CRDTs. Replaced direct eviction with mathematically bounded tombstoning algorithms resolving logic bounds. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Centralized generic orchestrator managing global localized active P2P CRDT document bindings. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtEvictionService.cs` | Implementation of `ICrdtEvictionService` extracting the eviction logic, avoiding duplication. |
@@ -109,20 +105,20 @@
 | `$/Ama.Enterprise.P2p.AspNetCore/Services/Discovery/AspNetCorePeerHandshaker.cs` | Updated Standalone HTTP topology probes falling back into standard `ama-enterprise` routing prefix scopes preventing implicit collisions gracefully effectively. |
 | `$/Ama.Enterprise.P2p.AspNetCore/Services/HttpInboundDispatcher.cs` | Thread-safe generic centralized HTTP orchestrator extracting mapped inbound pipelines isolated exclusively. Consolidated from removed Http.Core package. |
 | `$/Ama.Enterprise.P2p.AspNetCore/Services/IHttpInboundDispatcher.cs` | Contract decoupling generic abstract HTTP routing frameworks natively decoupling boundaries safely. Consolidated from removed Http.Core package. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/Handlers/TestMessageHandler.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/Models/TestNode.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/P2pAdvancedIntegrationTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/P2pNetworkIntegrationTests.cs` | Contains complex integration tests validating actual TCP binding natively, deduplications, and payload distributions. Removed obsolete direct `HttpClient` testing replacing it with `ITransportRouter` explicitly correctly. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/P2pVersioningIntegrationTests.cs` | Integration tests verifying backwards compatibility and protocol versioning constraints. Upgraded to utilize strict TCP transports securely dropping obsolete HTTP explicit bindings. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/PushPullGossipIntegrationTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/TcpNetworkIntegrationTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/UdpNetworkIntegrationTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/UdpPeerDiscoveryIntegrationTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Ama.Enterprise.P2p.IntegrationTests.csproj` | Integration tests project for validating P2P networking components via HTTP loopbacks. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Architecture/VersioningArchitectureTests.cs` | Architectural tests that parse the CI/CD deployment files ensuring specific deployed versions always possess explicit test coverage. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Discovery/DnsPeerDiscoveryIntegrationTests.cs` | Integration tests verifying DNS peer discovery natively resolves target domains and dispatches accurate Phase 2 handshakes against discovered IPs. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/Handlers/TestMessageHandler.cs` | Updated to implement `IApplicationPayloadHandler` and capture unwrapped application payloads via `TestPayloadRecord` reflecting domain consumer architecture. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/Models/TestNode.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pAdvancedIntegrationTests.cs` | Updated DI registrations routing `IApplicationPayloadHandler` and adapted assertion mechanics to decode unwrapped byte arrays. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pNetworkIntegrationTests.cs` | Refactored integration assertions targeting unboxed test payloads. Redesigned deduplication tests wrapping identical envelopes ensuring robust evaluation. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/P2pVersioningIntegrationTests.cs` | Refactored integration assertions mapping unboxed generic wrappers. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/PushPullGossipIntegrationTests.cs` | Integration tests verifying Push-Pull anti-entropy bounds isolating digest transmissions and ensuring active localized fallback synchronizations. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/TcpNetworkIntegrationTests.cs` | Refactored tests to assign dynamic OS-level TCP ports, resolving hardcoded port collision socket exceptions during parallel integration test executions. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/UdpNetworkIntegrationTests.cs` | Integration tests explicitly asserting robust decoupled UDP datagram tracking boundaries securely navigating native isolated topologies. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Gossip/UdpPeerDiscoveryIntegrationTests.cs` | Updated integration profiles extracting hardcoded target mappings demonstrating and validating decentralized runtime IP mappings robustly without collisions. |
 | `$/Ama.Enterprise.P2p.Mqtt.IntegrationTests/Ama.Enterprise.P2p.Mqtt.IntegrationTests.csproj` | No description provided. |
-| `$/Ama.Enterprise.P2p.Mqtt.IntegrationTests/Services/MqttPeerDiscoveryIntegrationTests.cs` | Integration tests verifying the active MQTT peer discovery background service mapping decoupled mesh architectures. |
+| `$/Ama.Enterprise.P2p.Mqtt.IntegrationTests/Services/MqttPeerDiscoveryIntegrationTests.cs` | Integration tests verifying MQTT peer discovery mapping decoupled multi-mesh architectures natively. Migrated to use `TcpTransport` and `TcpPeerEndpoint` dynamically correctly correctly correctly dropping obsolete HTTP transport bindings. |
 | `$/Ama.Enterprise.P2p.Mqtt.IntegrationTests/Services/MqttTransportIntegrationTests.cs` | Integration tests verifying end-to-end MQTT transport functionality evaluating isolated inbound subscriptions. |
 | `$/Ama.Enterprise.P2p.Mqtt/Ama.Enterprise.P2p.Mqtt.csproj` | Project definition for MQTT transport using MQTTnet compatible with AOT serialization constraints. |
 | `$/Ama.Enterprise.P2p.Mqtt/Extensions/MqttDiscoveryServiceCollectionExtensions.cs` | Updated to guarantee Mqtt JSON and Discovery JSON AOT serialization bindings execute for decoupled discovery capabilities. |
@@ -158,13 +154,13 @@
 | `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryAggregator.cs` | Thread-safe in-memory aggregator holding the latest telemetry network metrics. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryForwarderService.cs` | Replaced hardcoded telemetry matching metrics with configurable scopes mapping native user boundaries explicitly. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryPayloadHandler.cs` | Application payload handler dedicated to processing incoming telemetry network payloads and routing them into the centralized aggregator. |
-| `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryPushProtocol.cs` | Dedicated protocol handling un-forwarded one-hop payloads explicitly utilizing `IDirectMessageSender` securely bypassing duplicative network enveloping and strictly bounding explicit network topology routing internally natively. |
+| `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryPushAlgorithm.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.UnitTests/Ama.Enterprise.P2p.UnitTests.csproj` | No description provided. |
-| `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/GossipProtocolTests.cs` | Refactored mock structures to validate `IApplicationPayloadDispatcher` verifying unwrapped domain payload transmissions. |
-| `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/InMemoryPeerRegistryTests.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/MessageDispatcherTests.cs` | Adjusted tests adapting the newly refactored `ApplicationPayloadDispatcher` confirming decoupling of generic envelopes. |
-| `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/RandomPeerSelectorTests.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p.UnitTests/Gossip/Services/TimeBasedFailureDetectorTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Services/GossipProtocolTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Services/InMemoryPeerRegistryTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Services/MessageDispatcherTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Services/RandomPeerSelectorTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Services/TimeBasedFailureDetectorTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Ama.Enterprise.P2p.WebRTC.IntegrationTests.csproj` | Added project references mapping MQTT signaling capabilities alongside copying explicit local settings explicitly. |
 | `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Services/WebRtcTransportIntegrationTests.cs` | Updated `TestMessage` implementing the newly enforced `ProtocolVersion` satisfying `IMeshMessage`. |
 | `$/Ama.Enterprise.P2p.WebRTC/Ama.Enterprise.P2p.WebRTC.csproj` | No description provided. |
@@ -206,12 +202,12 @@
 | `$/Ama.Enterprise.P2p/Models/Gossip/GossipOptions.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Gossip/PushPullGossipOptions.cs` | Dedicated configuration options decoupling the Push-Pull mechanisms without polluting the pure baseline primitives. |
 | `$/Ama.Enterprise.P2p/Models/P2pJsonSerializerContext.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Models/Transports/HttpPeerEndpoint.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Models/Transports/HttpTransportOptions.cs` | Added `IsEnabled` flag to track if the HTTP transport has been added for a designated P2P mesh. |
 | `$/Ama.Enterprise.P2p/Models/Transports/TcpPeerEndpoint.cs` | Represents a TCP network address endpoint. |
 | `$/Ama.Enterprise.P2p/Models/Transports/TcpTransportOptions.cs` | Configuration options explicitly bound for configuring active TCP transport connectivity. Implemented IEquatable to comply with the standard bounding. |
 | `$/Ama.Enterprise.P2p/Models/Transports/UdpPeerEndpoint.cs` | Represents a UDP network address endpoint. |
 | `$/Ama.Enterprise.P2p/Models/Transports/UdpTransportOptions.cs` | Configuration options explicitly bound for configuring active UDP datagram connectivity. Implemented IEquatable to comply with the standard bounding. |
+| `$/Ama.Enterprise.P2p/Services/Algorithms/GossipAlgorithm.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Services/Algorithms/PushPullGossipAlgorithm.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/ApplicationPayloadDispatcher.cs` | Composite orchestrator dispatching to abstract domain observers. |
 | `$/Ama.Enterprise.P2p/Services/Core/DirectMessageSender.cs` | Implements localized targeted point-to-point generic delivery dynamically fetching active peering bindings avoiding overarching network broadcast storms. |
 | `$/Ama.Enterprise.P2p/Services/Core/IApplicationPayloadDispatcher.cs` | Dispatches targeted application payloads. |
@@ -219,7 +215,7 @@
 | `$/Ama.Enterprise.P2p/Services/Core/IDirectMessageSender.cs` | Defines a targeted point-to-point payload delivery contract decoupling anti-entropy processes from gossip epidemic broadcasts explicitly honoring the Single Responsibility Principle. |
 | `$/Ama.Enterprise.P2p/Services/Core/IFailureDetector.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IInboundMessageQueue.cs` | Defines an internal queue for decoupling inbound network listeners from the protocol logic. |
-| `$/Ama.Enterprise.P2p/Services/Core/IP2pProtocol.cs` | Generic interface defining the orchestrator for the P2P protocol, abstracting algorithms like Gossip. |
+| `$/Ama.Enterprise.P2p/Services/Core/IP2pAlgorithm.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerAuthenticator.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerDiscovery.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerHandshaker.cs` | Added explicit `LocalHandshakePort` property natively exposing Phase 2 configurations natively decoupled without enforcing tightly bound internal options dependencies. |
@@ -240,11 +236,7 @@
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpDiscoveryJsonContext.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerDiscovery.cs` | Implementation of UDP peer discovery. Updated to actively handshake and register incoming discovery peers when getting discovered, avoiding one-sided peer topologies. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerHandshaker.cs` | Added `LocalHandshakePort` property natively extracting localized internal constraints standardizing interface. |
-| `$/Ama.Enterprise.P2p/Services/Gossip/GossipProtocol.cs` | Stripped explicit bounds transitioning states cleanly into globally bound generic infrastructures extracting standalone `ProtocolState` natively. |
-| `$/Ama.Enterprise.P2p/Services/Gossip/PushPullGossipProtocol.cs` | Cleaned redundant health and heartbeat mechanics offloading bounds reliably against decoupled host mechanisms dynamically. |
 | `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | Refactored encompassing overarching multi-mesh core states evaluating dynamic incoming deduplications and isolated health evaluations efficiently avoiding duplication. |
-| `$/Ama.Enterprise.P2p/Services/Transports/HttpTransport.cs` | Refactored standard HTTP implementation isolated via Keyed dependencies handling precise outgoing payloads evaluating identical network bounds. |
-| `$/Ama.Enterprise.P2p/Services/Transports/HttpTransportListener.cs` | Redesigned inbound network listener transitioning away from multiplexing, adapting keyed dependencies handling localized prefixes isolating meshes. |
 | `$/Ama.Enterprise.P2p/Services/Transports/TcpTransport.cs` | Implements isolated outbound transport using robust TCP streams explicitly mapped against bounded architectures. |
 | `$/Ama.Enterprise.P2p/Services/Transports/TcpTransportListener.cs` | Implements inbound network listener extracting localized pure TCP streams mapping native robust pipelines. |
 | `$/Ama.Enterprise.P2p/Services/Transports/UdpTransport.cs` | Implements completely decoupled, natively mapped lightweight UDP datagram delivery mechanisms efficiently safely. |

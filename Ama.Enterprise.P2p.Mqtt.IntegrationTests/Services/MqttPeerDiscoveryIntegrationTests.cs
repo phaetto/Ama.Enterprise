@@ -208,11 +208,11 @@ public sealed class MqttPeerDiscoveryIntegrationTests
     }
 
     [IntegrationFact]
-    public async Task MqttPeerDiscovery_WithHttpTransport_DiscoversHttpEndpoints_Succeeds()
+    public async Task MqttPeerDiscovery_WithTcpTransport_DiscoversTcpEndpoints_Succeeds()
     {
         // Arrange
-        var meshId = $"mqtt-http-disc-{Guid.NewGuid():N}";
-        var topicPrefix = $"integration-test/http-disc/{Guid.NewGuid():N}";
+        var meshId = $"mqtt-tcp-disc-{Guid.NewGuid():N}";
+        var topicPrefix = $"integration-test/tcp-disc/{Guid.NewGuid():N}";
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         var peerAId = new PeerId(Guid.NewGuid());
@@ -221,12 +221,12 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         var portA = 8401;
         var portB = 8402;
 
-        testOutputHelper.WriteLine("Initializing HTTP Nodes for MQTT Discovery...");
-        await using var nodeA = CreateDiscoveryTestNode(meshId, peerAId, topicPrefix, useHttpTransport: true, httpPort: portA, handshakePort: 9031);
-        await using var nodeB = CreateDiscoveryTestNode(meshId, peerBId, topicPrefix, useHttpTransport: true, httpPort: portB, handshakePort: 9032);
+        testOutputHelper.WriteLine("Initializing TCP Nodes for MQTT Discovery...");
+        await using var nodeA = CreateDiscoveryTestNode(meshId, peerAId, topicPrefix, useTcpTransport: true, tcpPort: portA, handshakePort: 9031);
+        await using var nodeB = CreateDiscoveryTestNode(meshId, peerBId, topicPrefix, useTcpTransport: true, tcpPort: portB, handshakePort: 9032);
 
         // Act
-        testOutputHelper.WriteLine("Starting MQTT Peer Discovery background services for HTTP endpoints...");
+        testOutputHelper.WriteLine("Starting MQTT Peer Discovery background services for TCP endpoints...");
         await nodeA.StartDiscoveryAsync(cts.Token);
         await nodeB.StartDiscoveryAsync(cts.Token);
 
@@ -250,18 +250,18 @@ public sealed class MqttPeerDiscoveryIntegrationTests
             var aDiscoveredB = peersA.FirstOrDefault(p => p.Id.Equals(peerBId));
             var bDiscoveredA = peersB.FirstOrDefault(p => p.Id.Equals(peerAId));
 
-            aDiscoveredB.Endpoint.ShouldBeOfType<HttpPeerEndpoint>();
-            bDiscoveredA.Endpoint.ShouldBeOfType<HttpPeerEndpoint>();
+            aDiscoveredB.Endpoint.ShouldBeOfType<TcpPeerEndpoint>();
+            bDiscoveredA.Endpoint.ShouldBeOfType<TcpPeerEndpoint>();
 
-            var bHttpEndpoint = (HttpPeerEndpoint)aDiscoveredB.Endpoint;
-            bHttpEndpoint.Host.ShouldBe("localhost");
-            bHttpEndpoint.Port.ShouldBe(portB);
+            var bTcpEndpoint = (TcpPeerEndpoint)aDiscoveredB.Endpoint;
+            bTcpEndpoint.Host.ShouldBe("127.0.0.1");
+            bTcpEndpoint.Port.ShouldBe(portB);
 
             discovered = true;
             break;
         }
 
-        discovered.ShouldBeTrue("Nodes failed to discover each other's HTTP endpoints within the expected timeout limit.");
+        discovered.ShouldBeTrue("Nodes failed to discover each other's TCP endpoints within the expected timeout limit.");
 
         testOutputHelper.WriteLine("Stopping discovery loops...");
         await nodeA.StopDiscoveryAsync(cts.Token);
@@ -314,17 +314,17 @@ public sealed class MqttPeerDiscoveryIntegrationTests
 
                 if (aDiscoveredB1.Endpoint != null && bDiscoveredA1.Endpoint != null)
                 {
-                    aDiscoveredB1.Endpoint.ShouldBeOfType<HttpPeerEndpoint>();
-                    bDiscoveredA1.Endpoint.ShouldBeOfType<HttpPeerEndpoint>();
+                    aDiscoveredB1.Endpoint.ShouldBeOfType<TcpPeerEndpoint>();
+                    bDiscoveredA1.Endpoint.ShouldBeOfType<TcpPeerEndpoint>();
                     
-                    var aHttpEndpoint = (HttpPeerEndpoint)aDiscoveredB1.Endpoint;
-                    var bHttpEndpoint = (HttpPeerEndpoint)bDiscoveredA1.Endpoint;
+                    var aTcpEndpoint = (TcpPeerEndpoint)aDiscoveredB1.Endpoint;
+                    var bTcpEndpoint = (TcpPeerEndpoint)bDiscoveredA1.Endpoint;
                     
-                    aHttpEndpoint.Port.ShouldBe(portB);
-                    bHttpEndpoint.Port.ShouldBe(portA);
+                    aTcpEndpoint.Port.ShouldBe(portB);
+                    bTcpEndpoint.Port.ShouldBe(portA);
                     
                     mesh1Discovered = true;
-                    testOutputHelper.WriteLine("Mesh 1 (HTTP) synchronized.");
+                    testOutputHelper.WriteLine("Mesh 1 (TCP) synchronized.");
                 }
             }
 
@@ -354,7 +354,7 @@ public sealed class MqttPeerDiscoveryIntegrationTests
             await Task.Delay(TimeSpan.FromMilliseconds(500), cts.Token);
         }
 
-        mesh1Discovered.ShouldBeTrue("Nodes failed to discover each other on Mesh 1 (HTTP).");
+        mesh1Discovered.ShouldBeTrue("Nodes failed to discover each other on Mesh 1 (TCP).");
         mesh2Discovered.ShouldBeTrue("Nodes failed to discover each other on Mesh 2 (MQTT).");
 
         testOutputHelper.WriteLine("Stopping discovery loops...");
@@ -362,7 +362,7 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         await nodeB.StopAsync(cts.Token);
     }
 
-    private MqttDiscoveryTestNode CreateDiscoveryTestNode(string meshId, PeerId peerId, string topicPrefix, bool useHttpTransport = false, int httpPort = 0, int handshakePort = 0)
+    private MqttDiscoveryTestNode CreateDiscoveryTestNode(string meshId, PeerId peerId, string topicPrefix, bool useTcpTransport = false, int tcpPort = 0, int handshakePort = 0)
     {
         var services = new ServiceCollection();
 
@@ -387,13 +387,12 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         })
         .AddGossipNetwork();
 
-        if (useHttpTransport)
+        if (useTcpTransport)
         {
-            meshBuilder.AddHttpTransport(options =>
+            meshBuilder.AddTcpTransport(options =>
             {
-                options.ListenHost = "localhost";
-                options.ListenPort = httpPort;
-                options.PathPrefix = "/p2p/gossip/";
+                options.ListenHost = "127.0.0.1";
+                options.ListenPort = tcpPort;
             });
         }
         else
@@ -448,7 +447,7 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         PeerId peerId,
         string mesh1Id,
         string mesh2Id,
-        int mesh1HttpPort,
+        int mesh1TcpPort,
         string topicPrefix1,
         string topicPrefix2,
         int handshakePort1,
@@ -481,11 +480,10 @@ public sealed class MqttPeerDiscoveryIntegrationTests
             options.LocalPeerId = peerId.Value;
         })
         .AddGossipNetwork()
-        .AddHttpTransport(options =>
+        .AddTcpTransport(options =>
         {
-            options.ListenHost = "localhost";
-            options.ListenPort = mesh1HttpPort;
-            options.PathPrefix = "/p2p/mesh1/";
+            options.ListenHost = "127.0.0.1";
+            options.ListenPort = mesh1TcpPort;
         })
         .AddMqttPeerHandshake(options =>
         {

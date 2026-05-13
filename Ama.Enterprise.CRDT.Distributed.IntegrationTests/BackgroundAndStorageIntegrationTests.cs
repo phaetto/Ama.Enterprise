@@ -134,7 +134,7 @@ public sealed class BackgroundAndStorageIntegrationTests
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var observer = sp.GetRequiredKeyedService<IPeerTopologyObserver>(TestMeshId);
-        var peerNode = new PeerNode(new PeerId(Guid.NewGuid()), new HttpPeerEndpoint("http://localhost", 5000));
+        var peerNode = new PeerNode(new PeerId(Guid.NewGuid()), new TcpPeerEndpoint("http://localhost", 5000));
 
         // Act - Trigger Peer Joined naturally
         await observer.OnPeerJoinedAsync(TestMeshId, peerNode, CancellationToken.None);
@@ -143,7 +143,7 @@ public sealed class BackgroundAndStorageIntegrationTests
         mockSender.Verify(p => p.SendToRandomPeerAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
         
         // Act - Trigger again to test thread-safe connection check
-        await observer.OnPeerJoinedAsync(TestMeshId, new PeerNode(new PeerId(Guid.NewGuid()), new HttpPeerEndpoint("http://localhost2", 5001)), CancellationToken.None);
+        await observer.OnPeerJoinedAsync(TestMeshId, new PeerNode(new PeerId(Guid.NewGuid()), new TcpPeerEndpoint("http://localhost2", 5001)), CancellationToken.None);
         
         // Assert - Only triggered on the FIRST connected peer
         mockSender.Verify(p => p.SendToRandomPeerAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());

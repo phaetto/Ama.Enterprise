@@ -64,7 +64,7 @@ public sealed class TelemetryNetworkIntegrationTests(ITestOutputHelper testOutpu
 
         // Inject the Aggregator Node directly into the Forwarder Node's topology registry to establish a direct route.
         var registryForwarder = providerForwarder.GetRequiredService<IPeerRegistry>();
-        var aggregatorEndpoint = new HttpPeerEndpoint("127.0.0.1", portAggregator);
+        var aggregatorEndpoint = new TcpPeerEndpoint("127.0.0.1", portAggregator);
         var peerAggregator = new PeerNode(new PeerId(aggregatorNodeId), aggregatorEndpoint);
         
         await registryForwarder.AddOrUpdatePeerAsync(meshId, peerAggregator, PeerStatus.Active, cancellationSource.Token).ConfigureAwait(false);
@@ -140,7 +140,7 @@ public sealed class TelemetryNetworkIntegrationTests(ITestOutputHelper testOutpu
         await pushProtocolForwarder.StartAsync(cancellationSource.Token).ConfigureAwait(false);
 
         var registryForwarder = providerForwarder.GetRequiredService<IPeerRegistry>();
-        var aggregatorEndpoint = new HttpPeerEndpoint("127.0.0.1", portAggregator);
+        var aggregatorEndpoint = new TcpPeerEndpoint("127.0.0.1", portAggregator);
         var peerAggregator = new PeerNode(new PeerId(aggregatorNodeId), aggregatorEndpoint);
         
         await registryForwarder.AddOrUpdatePeerAsync(meshId, peerAggregator, PeerStatus.Active, cancellationSource.Token).ConfigureAwait(false);
@@ -270,11 +270,10 @@ public sealed class TelemetryNetworkIntegrationTests(ITestOutputHelper testOutpu
             {
                 nodeOptions.LocalPeerId = peerId;
             })
-            .AddHttpTransport(opts => 
+            .AddTcpTransport(opts => 
             { 
                 opts.ListenPort = listenPort; 
                 opts.ListenHost = "127.0.0.1"; 
-                opts.PathPrefix = $"/p2p/{meshId.ToLower()}/";
             });
 
         if (isForwarder)

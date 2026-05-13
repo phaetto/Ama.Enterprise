@@ -8,7 +8,6 @@ using Ama.Enterprise.P2p.Models.Transports;
 /// Represents the abstract base network address where a peer can be reached.
 /// </summary>
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type", IgnoreUnrecognizedTypeDiscriminators = true, UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
-[JsonDerivedType(typeof(HttpPeerEndpoint), "http-peer-endpoint")]
 [JsonDerivedType(typeof(TcpPeerEndpoint), "tcp-peer-endpoint")]
 [JsonDerivedType(typeof(UdpPeerEndpoint), "udp-peer-endpoint")]
 public abstract record PeerEndpoint : IEquatable<PeerEndpoint>;

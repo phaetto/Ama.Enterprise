@@ -48,7 +48,7 @@ public sealed class DnsPeerDiscoveryIntegrationTests
         var mockNodeOptionsMonitor = new Mock<IOptionsMonitor<P2pNodeOptions>>();
         mockNodeOptionsMonitor.Setup(m => m.Get(TestMeshId)).Returns(nodeOptions);
 
-        var localEndpoint = new HttpPeerEndpoint("localhost", 8080);
+        var localEndpoint = new TcpPeerEndpoint("127.0.0.1", 8080);
 
         var mockHandshaker = new Mock<IPeerHandshaker>();
         var mockAuthenticator = new Mock<IPeerAuthenticator>();
@@ -66,7 +66,7 @@ public sealed class DnsPeerDiscoveryIntegrationTests
                 if (endpoint is IPEndPoint ipEndpoint)
                 {
                     var remoteId = new PeerId(Guid.NewGuid());
-                    var remoteEndpoint = new HttpPeerEndpoint(ipEndpoint.Address.ToString(), ipEndpoint.Port);
+                    var remoteEndpoint = new TcpPeerEndpoint(ipEndpoint.Address.ToString(), ipEndpoint.Port);
                     return new PeerNode(remoteId, remoteEndpoint);
                 }
                 return null;
@@ -105,7 +105,7 @@ public sealed class DnsPeerDiscoveryIntegrationTests
                 Times.Once,
                 $"Expected handshake with {expectedIp}:{TestPort}");
 
-            peersList.ShouldContain(p => p.Endpoint is HttpPeerEndpoint && ((HttpPeerEndpoint)p.Endpoint).Host == expectedIp && ((HttpPeerEndpoint)p.Endpoint).Port == TestPort);
+            peersList.ShouldContain(p => p.Endpoint is TcpPeerEndpoint && ((TcpPeerEndpoint)p.Endpoint).Host == expectedIp && ((TcpPeerEndpoint)p.Endpoint).Port == TestPort);
         }
     }
 }

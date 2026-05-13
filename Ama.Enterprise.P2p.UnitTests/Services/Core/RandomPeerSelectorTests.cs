@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.UnitTests.Services;
+namespace Ama.Enterprise.P2p.UnitTests.Services.Core;
 
 using System;
 using System.Linq;
@@ -52,7 +52,7 @@ public sealed class RandomPeerSelectorTests
     {
         // Arrange
         var activePeers = Enumerable.Range(1, 5)
-            .Select(_ => new PeerNode(new PeerId(Guid.NewGuid()), new HttpPeerEndpoint("localhost", 8080)))
+            .Select(_ => new PeerNode(new PeerId(Guid.NewGuid()), new TcpPeerEndpoint("localhost", 8080)))
             .ToList();
 
         registryMock.Setup(r => r.GetPeersByStatusAsync(TestMeshId, PeerStatus.Active, It.IsAny<CancellationToken>()))
@@ -71,7 +71,7 @@ public sealed class RandomPeerSelectorTests
     {
         // Arrange
         var activePeers = Enumerable.Range(1, 2)
-            .Select(_ => new PeerNode(new PeerId(Guid.NewGuid()), new HttpPeerEndpoint("localhost", 8080)))
+            .Select(_ => new PeerNode(new PeerId(Guid.NewGuid()), new TcpPeerEndpoint("localhost", 8080)))
             .ToList();
 
         registryMock.Setup(r => r.GetPeersByStatusAsync(TestMeshId, PeerStatus.Active, It.IsAny<CancellationToken>()))

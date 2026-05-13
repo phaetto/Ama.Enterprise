@@ -1,7 +1,11 @@
 namespace Ama.Enterprise.P2p.IntegrationTests.Algorithms;
 
+using System;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Ama.CRDT.Extensions;
-using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
@@ -13,19 +17,13 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Shouldly;
-using System;
-using System.Linq;
-using System.Net.Http;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using Xunit;
 using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Models;
 using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Handlers;
 
 /// <summary>
-/// Contains complex integration tests validating actual TCP/HTTP binding, protocol cycles, and payload distributions.
+/// Contains complex integration tests validating actual generic TCP bindings natively, protocol cycles, and payload distributions.
 /// </summary>
 public sealed class P2pNetworkIntegrationTests(ITestOutputHelper testOutputHelper)
 {
@@ -60,7 +58,7 @@ public sealed class P2pNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
         var payload = Encoding.UTF8.GetBytes("IntegrationTestPayload123");
         await nodeA.Protocol.BroadcastAsync(payload, cts.Token);
 
-        // Wait to allow gossip loop background tasks and HTTP transports to fulfill
+        // Wait to allow gossip loop background tasks and TCP transports to fulfill
         await Task.Delay(TimeSpan.FromSeconds(3), cts.Token);
 
         // Assert that the message propagated throughout the test mesh
@@ -80,7 +78,6 @@ public sealed class P2pNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
         await using var nodeA = CreateTestNode(8104);
         await using var nodeB = CreateTestNode(8105);
 
-        // We manually push an explicitly crafted duplicate envelope over HTTP strictly verifying algorithm deduplication
         await nodeA.HostedService.StartAsync(cts.Token);
         await nodeB.HostedService.StartAsync(cts.Token);
 
@@ -89,31 +86,17 @@ public sealed class P2pNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
         var messageId = Guid.NewGuid();
         var gossipMessage = new GossipMessage(TestMeshId, messageId, nodeA.Id, 5, payload);
 
-        var serializer = nodeA.Provider.GetRequiredService<ICrdtSerializer>();
-        
-        // Ensure STJ serialize the payload resolving abstract polymorphism explicitly
-        var payloadBytes = serializer.SerializeToBytes<IMeshMessage>(gossipMessage);
+        var router = nodeA.Provider.GetRequiredKeyedService<ITransportRouter>(TestMeshId);
 
-        var clientFactory = nodeA.Provider.GetRequiredService<IHttpClientFactory>();
-        using var client = clientFactory.CreateClient();
-        
-        // First send
-        using var request1 = new HttpRequestMessage(HttpMethod.Post, "http://localhost:8105/p2p/gossip/");
-        request1.Headers.Add("X-P2P-Protocol-Version", Constants.ProtocolVersion);
-        request1.Content = new ByteArrayContent(payloadBytes);
-        
-        await client.SendAsync(request1, cts.Token);
+        // First send directly explicitly mapping target node avoiding arbitrary epidemic evaluations
+        await router.SendAsync(nodeB.Endpoint, gossipMessage, cts.Token);
         await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
 
-        // Second send (echo duplication directly pushing the exact same message UUID envelope)
-        using var request2 = new HttpRequestMessage(HttpMethod.Post, "http://localhost:8105/p2p/gossip/");
-        request2.Headers.Add("X-P2P-Protocol-Version", Constants.ProtocolVersion);
-        request2.Content = new ByteArrayContent(payloadBytes);
-        
-        await client.SendAsync(request2, cts.Token);
+        // Second send (echo duplication directly pushing the exact same message UUID envelope natively securely over TCP limits)
+        await router.SendAsync(nodeB.Endpoint, gossipMessage, cts.Token);
         await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
 
-        // Assert Node B handled deduplication within IP2pProtocol and didn't dispatch to handlers again
+        // Assert Node B handled deduplication within IP2pProtocol natively evaluating duplicate IDs cleanly
         nodeB.Handler.ReceivedMessages.Count.ShouldBe(1);
     }
 
@@ -237,14 +220,12 @@ public sealed class P2pNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
         var services = new ServiceCollection();
 
         services.AddCrdt();
-        services.AddHttpClient();
 
         services.AddLogging(builder => 
         {
             builder.AddXunit(testOutputHelper);
             builder.SetMinimumLevel(LogLevel.Trace);
         });
-
 
         services.AddP2pMesh(TestMeshId, options =>
             {
@@ -256,11 +237,10 @@ public sealed class P2pNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
                 options.Fanout = 2;
                 options.DefaultTimeToLive = 5;
             })
-            .AddHttpTransport(options =>
+            .AddTcpTransport(options =>
             {
-                options.ListenHost = "localhost";
+                options.ListenHost = "127.0.0.1";
                 options.ListenPort = port;
-                options.PathPrefix = "/p2p/gossip/";
             });
 
         var handler = new TestMessageHandler();
@@ -270,7 +250,7 @@ public sealed class P2pNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
 
         var provider = services.BuildServiceProvider();
 
-        var endpoint = new HttpPeerEndpoint("localhost", port);
+        var endpoint = new TcpPeerEndpoint("127.0.0.1", port);
 
         return new TestNode(
             provider,

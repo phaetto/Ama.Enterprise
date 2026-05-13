@@ -47,10 +47,10 @@ internal sealed class Program
         // Map identically configured "admin" network boundaries to join the telemetry cluster natively
         services
             .AddP2pMesh("admin")
-            .AddHttpTransport(options =>
+            .AddTcpTransport(options =>
             {
                 options.ListenPort = httpPort;
-                options.ListenHost = "localhost";
+                options.ListenHost = "127.0.0.1";
             })
             .AddUdpPeerDiscovery(options =>
             {

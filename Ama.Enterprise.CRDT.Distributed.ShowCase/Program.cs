@@ -87,10 +87,10 @@ public static class Program
             {
                 options.GossipInterval = TimeSpan.FromMilliseconds(500);
             })
-            .AddHttpTransport(options =>
+            .AddTcpTransport(options =>
             {
                 options.ListenPort = currentPort;
-                options.ListenHost = "localhost";
+                options.ListenHost = "127.0.0.1";
             })
             .AddUdpPeerDiscovery(options =>
             {
@@ -115,10 +115,10 @@ public static class Program
                 options.FlushInterval = TimeSpan.FromSeconds(1);
             })
             .AddP2pMesh("admin")
-            .AddHttpTransport(options =>
+            .AddTcpTransport(options =>
             {
                 options.ListenPort = currentAdminPort;
-                options.ListenHost = "localhost";
+                options.ListenHost = "127.0.0.1";
             })
             .AddUdpPeerDiscovery(options =>
             {

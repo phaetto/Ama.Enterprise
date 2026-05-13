@@ -101,60 +101,6 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers the core HTTP transport explicitly isolated to the current mesh context.
-    /// </summary>
-    public static IP2pMeshBuilder AddHttpTransport(
-        this IP2pMeshBuilder builder,
-        Action<HttpTransportOptions>? configureOptions = null)
-    {
-        ArgumentNullException.ThrowIfNull(builder);
-
-        Action<HttpTransportOptions> configAction = options => 
-        {
-            options.IsEnabled = true;
-            configureOptions?.Invoke(options);
-        };
-
-        var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
-        if (!tracker.TryRegister($"{builder.MeshId}_HttpTransport", configAction))
-        {
-            return builder;
-        }
-
-        builder.Services.Configure(builder.MeshId, configAction);
-
-        builder.Services.AddHttpClient("P2pTransport");
-
-        builder.Services.AddKeyedSingleton<PeerEndpoint>(builder.MeshId, (sp, key) =>
-        {
-            var options = sp.GetRequiredService<IOptionsMonitor<HttpTransportOptions>>().Get((string)key!);
-            var host = string.Equals(options.ListenHost, "+", StringComparison.OrdinalIgnoreCase) 
-                ? "localhost" 
-                : options.ListenHost;
-                
-            return new HttpPeerEndpoint(host, options.ListenPort);
-        });
-
-        builder.Services.AddKeyedSingleton<ITransport>(builder.MeshId, (sp, key) =>
-            new HttpTransport(
-                (string)key!,
-                sp.GetRequiredService<IOptionsMonitor<HttpTransportOptions>>(),
-                sp.GetRequiredService<IHttpClientFactory>(),
-                sp.GetRequiredService<ICrdtSerializer>(),
-                sp.GetRequiredService<IPeerRegistry>(),
-                sp.GetRequiredService<ILogger<HttpTransport>>()));
-
-        builder.Services.AddKeyedSingleton<ITransportListener>(builder.MeshId, (sp, key) =>
-            new HttpTransportListener(
-                (string)key!,
-                sp.GetRequiredService<IOptionsMonitor<HttpTransportOptions>>(),
-                sp.GetRequiredService<ICrdtSerializer>(),
-                sp.GetRequiredService<ILogger<HttpTransportListener>>()));
-
-        return builder;
-    }
-
-    /// <summary>
     /// Registers the pure TCP transport actively mapping standalone decoupled capabilities locally natively.
     /// </summary>
     public static IP2pMeshBuilder AddTcpTransport(

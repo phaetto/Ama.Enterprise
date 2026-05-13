@@ -178,11 +178,10 @@ public sealed class P2pAdvancedIntegrationTests(ITestOutputHelper testOutputHelp
                 options.Fanout = 2;
                 options.DefaultTimeToLive = defaultTtl;
             })
-            .AddHttpTransport(options =>
+            .AddTcpTransport(options =>
             {
-                options.ListenHost = "localhost";
+                options.ListenHost = "127.0.0.1";
                 options.ListenPort = port;
-                options.PathPrefix = "/p2p/gossip/";
             });
 
         var handler = new TestMessageHandler();
@@ -193,7 +192,7 @@ public sealed class P2pAdvancedIntegrationTests(ITestOutputHelper testOutputHelp
         var provider = services.BuildServiceProvider();
 
         // Use polymorphic concrete endpoint
-        var endpoint = new HttpPeerEndpoint("localhost", port);
+        var endpoint = new TcpPeerEndpoint("127.0.0.1", port);
 
         return new TestNode(
             provider,

@@ -1,7 +1,9 @@
 namespace Ama.Enterprise.P2p.IntegrationTests.Algorithms;
 
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 using Ama.CRDT.Extensions;
-using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
@@ -14,18 +16,14 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Shouldly;
-using System;
-using System.Linq;
-using System.Net.Http;
-using System.Threading;
-using System.Threading.Tasks;
 using Xunit;
+using System.Linq;
 using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Models;
 using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Handlers;
 
 /// <summary>
-/// Integration tests verifying backwards compatibility and protocol versioning constraints.
+/// Integration tests verifying backwards compatibility and protocol versioning constraints natively using explicit TCP topologies.
 /// </summary>
 public sealed class P2pVersioningIntegrationTests(ITestOutputHelper testOutputHelper)
 {
@@ -42,20 +40,17 @@ public sealed class P2pVersioningIntegrationTests(ITestOutputHelper testOutputHe
         var localVersion = Version.Parse(Constants.ProtocolVersion);
         var incompatibleVersion = new Version(localVersion.Major + 1, 0, 0);
 
-        var clientFactory = node.Provider.GetRequiredService<IHttpClientFactory>();
-        var serializer = node.Provider.GetRequiredService<ICrdtSerializer>();
-        using var client = clientFactory.CreateClient();
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, "http://localhost:8210/p2p/gossip/");
+        var router = node.Provider.GetRequiredKeyedService<ITransportRouter>(TestMeshId);
         
         var dummyMessage = new GossipMessage(TestMeshId, incompatibleVersion.ToString(), Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, ReadOnlyMemory<byte>.Empty);
-        var payloadBytes = serializer.SerializeToBytes<IMeshMessage>(dummyMessage);
         
-        request.Content = new ByteArrayContent(payloadBytes);
+        // Push the custom invalid message explicitly via the isolated loopback routing natively testing dropping logic structurally
+        await router.SendAsync(node.Endpoint, dummyMessage, cts.Token);
 
-        using var response = await client.SendAsync(request, cts.Token);
+        await Task.Delay(TimeSpan.FromSeconds(2), cts.Token);
 
-        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.HttpVersionNotSupported);
+        // Assert that the listener aggressively detected the invalid major version and forcefully dropped it before domain handlers triggered
+        node.Handler.ReceivedMessages.ShouldBeEmpty();
     }
 
     [IntegrationFact]
@@ -69,25 +64,16 @@ public sealed class P2pVersioningIntegrationTests(ITestOutputHelper testOutputHe
         // Ensure same major version, but completely different minor and patch version to guarantee backwards compatibility success
         var compatibleVersion = new Version(localVersion.Major, localVersion.Minor + 99, 99);
 
-        var clientFactory = node.Provider.GetRequiredService<IHttpClientFactory>();
-        var serializer = node.Provider.GetRequiredService<ICrdtSerializer>();
+        var router = node.Provider.GetRequiredKeyedService<ITransportRouter>(TestMeshId);
         
-        using var client = clientFactory.CreateClient();
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, "http://localhost:8211/p2p/gossip/");
-        
-        // We submit a valid serialized model payload targeting the specific mesh to bypass HTTP listener isolation verification checks gracefully
         var dummyMessage = new GossipMessage(TestMeshId, compatibleVersion.ToString(), Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, ReadOnlyMemory<byte>.Empty);
         
-        // Use STJ polymorphism mapping explicitly identifying the generic interface container
-        var payloadBytes = serializer.SerializeToBytes<IMeshMessage>(dummyMessage);
-        
-        request.Content = new ByteArrayContent(payloadBytes);
+        await router.SendAsync(node.Endpoint, dummyMessage, cts.Token);
 
-        using var response = await client.SendAsync(request, cts.Token);
+        await Task.Delay(TimeSpan.FromSeconds(2), cts.Token);
 
         // Verify it was NOT rejected for protocol version mismatch
-        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.Accepted);
+        node.Handler.ReceivedMessages.Count.ShouldBe(1);
     }
 
     [IntegrationFact]
@@ -98,25 +84,19 @@ public sealed class P2pVersioningIntegrationTests(ITestOutputHelper testOutputHe
         await using var node = CreateTestNode(8212);
         await node.HostedService.StartAsync(cts.Token);
 
-        // This explicit test directly maps to the deployed YAML version. 
+        // This explicit test directly maps to the deployed YAML version natively covering explicit bound regressions gracefully.
         var deployedVersion = new Version(0, 1, 0);
 
-        var clientFactory = node.Provider.GetRequiredService<IHttpClientFactory>();
-        var serializer = node.Provider.GetRequiredService<ICrdtSerializer>();
-        
-        using var client = clientFactory.CreateClient();
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, "http://localhost:8212/p2p/gossip/");
+        var router = node.Provider.GetRequiredKeyedService<ITransportRouter>(TestMeshId);
         
         var dummyMessage = new GossipMessage(TestMeshId, deployedVersion.ToString(), Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, ReadOnlyMemory<byte>.Empty);
-        var payloadBytes = serializer.SerializeToBytes<IMeshMessage>(dummyMessage);
         
-        request.Content = new ByteArrayContent(payloadBytes);
+        await router.SendAsync(node.Endpoint, dummyMessage, cts.Token);
 
-        using var response = await client.SendAsync(request, cts.Token);
+        await Task.Delay(TimeSpan.FromSeconds(2), cts.Token);
 
-        // Verify it passed the protocol verification and was accepted
-        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.Accepted);
+        // Verify it passed the protocol verification and was accepted seamlessly
+        node.Handler.ReceivedMessages.Count.ShouldBe(1);
     }
 
     private TestNode CreateTestNode(int port)
@@ -124,7 +104,6 @@ public sealed class P2pVersioningIntegrationTests(ITestOutputHelper testOutputHe
         var services = new ServiceCollection();
 
         services.AddCrdt();
-        services.AddHttpClient();
 
         services.AddLogging(builder => 
         {
@@ -139,14 +118,12 @@ public sealed class P2pVersioningIntegrationTests(ITestOutputHelper testOutputHe
                 options.Fanout = 2;
                 options.DefaultTimeToLive = 5;
             })
-            .AddHttpTransport(options =>
+            .AddTcpTransport(options =>
             {
-                options.ListenHost = "localhost";
+                options.ListenHost = "127.0.0.1";
                 options.ListenPort = port;
-                options.PathPrefix = "/p2p/gossip/";
             });
 
-        // Ensure newly mapped keyed interfaces natively resolve bounds explicitly safely
         services.AddKeyedSingleton<IFailureDetector>(TestMeshId, (sp, key) => new TimeBasedFailureDetector((string)key!, sp.GetRequiredService<IOptionsMonitor<FailureDetectorOptions>>(), sp.GetRequiredService<ILogger<TimeBasedFailureDetector>>()));
         services.AddKeyedSingleton<IPeerAuthenticator>(TestMeshId, (sp, key) => new PassThroughPeerAuthenticator((string)key!, sp.GetRequiredService<ILogger<PassThroughPeerAuthenticator>>()));
 
@@ -157,7 +134,7 @@ public sealed class P2pVersioningIntegrationTests(ITestOutputHelper testOutputHe
 
         var provider = services.BuildServiceProvider();
 
-        var endpoint = new HttpPeerEndpoint("localhost", port);
+        var endpoint = new TcpPeerEndpoint("127.0.0.1", port);
         var peerId = new PeerId(Guid.NewGuid());
 
         return new TestNode(

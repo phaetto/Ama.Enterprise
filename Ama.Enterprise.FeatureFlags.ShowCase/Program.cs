@@ -67,10 +67,10 @@ public static class Program
                     options.Fanout = 3;
                     options.DefaultTimeToLive = 3;
                 })
-                .AddHttpTransport(options =>
+                .AddTcpTransport(options =>
                 {
                     options.ListenPort = currentPort;
-                    options.ListenHost = "localhost";
+                    options.ListenHost = "127.0.0.1";
                 })
                 .AddUdpPeerDiscovery(options =>
                 {

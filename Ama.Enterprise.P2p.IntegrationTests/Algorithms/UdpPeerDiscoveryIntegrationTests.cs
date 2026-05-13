@@ -105,7 +105,7 @@ public sealed class UdpPeerDiscoveryIntegrationTests(ITestOutputHelper testOutpu
         
         var peer2Mesh1 = peersList1.FirstOrDefault(p => p.Id.Value == nodeId2);
         peer2Mesh1.ShouldNotBe(default);
-        peer2Mesh1.Endpoint.ShouldBeOfType<HttpPeerEndpoint>().Port.ShouldBe(node2Mesh1Port);
+        peer2Mesh1.Endpoint.ShouldBeOfType<TcpPeerEndpoint>().Port.ShouldBe(node2Mesh1Port);
 
         var discoveryMesh2 = node1.Provider.GetRequiredKeyedService<IPeerDiscovery>("Mesh2");
         var discoveredPeersMesh2 = await discoveryMesh2.DiscoverPeersAsync(cancellationSource.Token);
@@ -115,7 +115,7 @@ public sealed class UdpPeerDiscoveryIntegrationTests(ITestOutputHelper testOutpu
 
         var peer2Mesh2 = peersList2.FirstOrDefault(p => p.Id.Value == nodeId2);
         peer2Mesh2.ShouldNotBe(default);
-        peer2Mesh2.Endpoint.ShouldBeOfType<HttpPeerEndpoint>().Port.ShouldBe(node2Mesh2Port);
+        peer2Mesh2.Endpoint.ShouldBeOfType<TcpPeerEndpoint>().Port.ShouldBe(node2Mesh2Port);
 
         await StopAllHostedServicesAsync(node1.HostedServices, cancellationSource.Token);
         await StopAllHostedServicesAsync(node2.HostedServices, cancellationSource.Token);
@@ -186,11 +186,10 @@ public sealed class UdpPeerDiscoveryIntegrationTests(ITestOutputHelper testOutpu
                 nodeOptions.LocalPeerId = peerId;
             })
             .AddGossipNetwork()
-            .AddHttpTransport(opts => 
+            .AddTcpTransport(opts => 
             { 
                 opts.ListenPort = listenPort; 
-                opts.ListenHost = "localhost"; 
-                opts.PathPrefix = "/p2p/gossip/";
+                opts.ListenHost = "127.0.0.1"; 
             })
             .AddUdpPeerDiscovery(options => 
             {
@@ -236,11 +235,10 @@ public sealed class UdpPeerDiscoveryIntegrationTests(ITestOutputHelper testOutpu
                 nodeOptions.LocalPeerId = peerId;
             })
             .AddGossipNetwork()
-            .AddHttpTransport(opts => 
+            .AddTcpTransport(opts => 
             { 
                 opts.ListenPort = mesh1Port; 
-                opts.ListenHost = "localhost";
-                opts.PathPrefix = "/p2p/mesh1/";
+                opts.ListenHost = "127.0.0.1";
             })
             .AddUdpPeerDiscovery(options => 
             {
@@ -261,11 +259,10 @@ public sealed class UdpPeerDiscoveryIntegrationTests(ITestOutputHelper testOutpu
             {
                 nodeOptions.LocalPeerId = peerId;
             })
-            .AddHttpTransport(opts => 
+            .AddTcpTransport(opts => 
             { 
                 opts.ListenPort = mesh2Port; 
-                opts.ListenHost = "localhost";
-                opts.PathPrefix = "/p2p/mesh2/";
+                opts.ListenHost = "127.0.0.1";
             })
             .AddUdpPeerDiscovery(options => 
             {

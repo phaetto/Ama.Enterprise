@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.UnitTests.Services;
+namespace Ama.Enterprise.P2p.UnitTests.Services.Core;
 
 using System;
 using System.Linq;

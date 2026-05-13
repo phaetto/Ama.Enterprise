@@ -49,8 +49,8 @@ public sealed class PushPullGossipIntegrationTests(ITestOutputHelper testOutputH
             options.MaxDigestSize = 50;
         };
 
-        await using var nodeA = CreateTestNode(8301, configureOptions);
-        await using var nodeB = CreateTestNode(8302, configureOptions);
+        await using var nodeA = CreateTestNode(8401, configureOptions);
+        await using var nodeB = CreateTestNode(8402, configureOptions);
 
         await RegisterPeerAsync(nodeA, nodeB, cts.Token);
         await RegisterPeerAsync(nodeB, nodeA, cts.Token);
@@ -156,7 +156,7 @@ public sealed class PushPullGossipIntegrationTests(ITestOutputHelper testOutputH
     {
         var services = new ServiceCollection();
         var uniqueId = Guid.NewGuid();
-        var endpoint = new HttpPeerEndpoint("localhost", port);
+        var endpoint = new TcpPeerEndpoint("127.0.0.1", port);
         
         services.Configure<P2pNodeOptions>(TestMeshId, options =>
         {
@@ -173,12 +173,10 @@ public sealed class PushPullGossipIntegrationTests(ITestOutputHelper testOutputH
 
         services.AddP2pMesh(TestMeshId)
             .AddPushPullGossipNetwork(configureOptions)
-            .AddHttpTransport(options =>
+            .AddTcpTransport(options =>
             {
-                options.ListenHost = "localhost";
+                options.ListenHost = "127.0.0.1";
                 options.ListenPort = port;
-                // Standardize the path prefix so peers resolve the correct listener target endpoints symmetrically.
-                options.PathPrefix = "/p2p/pushpull/";
             });
 
         // Ensure newly mapped keyed interfaces natively resolve bounds explicitly safely

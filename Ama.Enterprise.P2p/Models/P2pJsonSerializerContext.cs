@@ -13,7 +13,6 @@ using Ama.Enterprise.P2p.Models.Transports;
 [JsonSerializable(typeof(UdpDiscoveryMessage))]
 [JsonSerializable(typeof(PeerNode))]
 [JsonSerializable(typeof(PeerEndpoint))]
-[JsonSerializable(typeof(HttpPeerEndpoint))]
 [JsonSerializable(typeof(TcpPeerEndpoint))]
 [JsonSerializable(typeof(UdpPeerEndpoint))]
 [JsonSerializable(typeof(TcpTransportOptions))]
