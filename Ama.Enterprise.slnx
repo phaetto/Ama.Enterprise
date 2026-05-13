@@ -6,6 +6,7 @@
   </Folder>
   <Folder Name="/Apps/">
     <File Path="apps-todo.txt" />
+    <Project Path="Ama.Enterprise.P2p.Telemetry.Cli.UnitTests/Ama.Enterprise.P2p.Telemetry.Cli.UnitTests.csproj" Id="7a8d8634-2f77-4f31-8274-184917b0c9ee" />
     <Project Path="Ama.Enterprise.P2p.Telemetry.Cli/Ama.Enterprise.P2p.Telemetry.Cli.csproj" Id="df33b23a-daf7-4648-b6f0-24b4001792b6" />
   </Folder>
   <Folder Name="/Products/">
@@ -44,6 +45,8 @@
   <Project Path="Ama.Enterprise.P2p.Mqtt.IntegrationTests/Ama.Enterprise.P2p.Mqtt.IntegrationTests.csproj" Id="4020da86-8f99-44c6-ad79-dd419eb89135" />
   <Project Path="Ama.Enterprise.P2p.Mqtt/Ama.Enterprise.P2p.Mqtt.csproj" Id="b27ff42d-3536-414e-8c9f-2bf3e7a509ac" />
   <Project Path="Ama.Enterprise.P2p.UnitTests/Ama.Enterprise.P2p.UnitTests.csproj" Id="59f1fd65-b40a-4eec-9c39-f99f1665b7f0" />
+  <Project Path="Ama.Enterprise.P2p.WebRTC.AspNetCore.IntegrationTests/Ama.Enterprise.P2p.WebRTC.AspNetCore.IntegrationTests.csproj" Id="88cf7072-f8fe-4850-9ffb-926a6b99ea2a" />
+  <Project Path="Ama.Enterprise.P2p.WebRTC.AspNetCore/Ama.Enterprise.P2p.WebRTC.AspNetCore.csproj" Id="db146bb6-d60e-4ab6-83a7-d7ef217f2429" />
   <Project Path="Ama.Enterprise.P2p.WebRTC.IntegrationTests/Ama.Enterprise.P2p.WebRTC.IntegrationTests.csproj" Id="484d8c43-aa18-41cf-8aef-27615860617d" />
   <Project Path="Ama.Enterprise.P2p.WebRTC/Ama.Enterprise.P2p.WebRTC.csproj" Id="d60ba049-4e90-41f9-9dab-4b4c4ebdf909" />
   <Project Path="Ama.Enterprise.P2p/Ama.Enterprise.P2p.csproj" />
