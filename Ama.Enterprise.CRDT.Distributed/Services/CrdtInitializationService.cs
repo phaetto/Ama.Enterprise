@@ -2,6 +2,7 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,14 +13,29 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Hosted service responsible for isolating uncoupled replicas sequentially natively dynamically binding their discrete initial persistence scopes directly mapping naturally natively seamlessly intelligently expertly properly cleanly successfully seamlessly solidly effectively intelligently seamlessly efficiently brilliantly safely creatively expertly confidently creatively logically successfully smoothly effectively cleanly expertly actively confidently.
+/// Hosted service responsible for isolating uncoupled replicas sequentially natively dynamically binding their discrete initial persistence scopes.
 /// </summary>
-public sealed class CrdtInitializationService(
-    DistributedCrdtScopeManager scopeManager,
-    ILogger<CrdtInitializationService> logger) : IHostedService
+public sealed class CrdtInitializationService : IHostedService, IDisposable
 {
-    private readonly DistributedCrdtScopeManager scopeManager = scopeManager ?? throw new ArgumentNullException(nameof(scopeManager));
-    private readonly ILogger<CrdtInitializationService> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly DistributedCrdtScopeManager scopeManager;
+    private readonly ILogger<CrdtInitializationService> logger;
+
+    private readonly Meter meter;
+    private readonly Counter<long> replayedOperationsCounter;
+    private readonly Counter<long> globalDvvRestoredCounter;
+
+    public CrdtInitializationService(
+        DistributedCrdtScopeManager scopeManager,
+        ILogger<CrdtInitializationService> logger,
+        IMeterFactory? meterFactory = null)
+    {
+        this.scopeManager = scopeManager ?? throw new ArgumentNullException(nameof(scopeManager));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.CrdtInitializationService") ?? new Meter("Ama.Enterprise.CRDT.Distributed.CrdtInitializationService");
+        this.replayedOperationsCounter = this.meter.CreateCounter<long>("crdt.initialization.replayed_operations", "operations", "Total journaled operations actively replayed restoring states");
+        this.globalDvvRestoredCounter = this.meter.CreateCounter<long>("crdt.initialization.global_dvv_restored", "events", "Total overarching cluster global bounds restored natively");
+    }
 
     /// <inheritdoc />
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -56,6 +72,7 @@ public sealed class CrdtInitializationService(
                         }
                     }
                     
+                    globalDvvRestoredCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
                     logger.LogInformation("Successfully re-initialized in-place CRDT global Dotted Version Vector for replica {ReplicaId}.", replicaContext.ReplicaId);
                 }
 
@@ -78,7 +95,9 @@ public sealed class CrdtInitializationService(
 
                 if (operationsByDoc.Count > 0)
                 {
-                    logger.LogInformation("Replaying {Count} journaled operations for replica {ReplicaId}.", operationsByDoc.Values.Sum(l => l.Count), replicaContext.ReplicaId);
+                    var totalReplayed = operationsByDoc.Values.Sum(l => l.Count);
+                    replayedOperationsCounter.Add(totalReplayed, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
+                    logger.LogInformation("Replaying {Count} journaled operations for replica {ReplicaId}.", totalReplayed, replicaContext.ReplicaId);
                     
                     if (operationsByDoc.TryGetValue(orchestrator.Registry.DocumentId, out var registryOps))
                     {
@@ -110,5 +129,10 @@ public sealed class CrdtInitializationService(
     public Task StopAsync(CancellationToken cancellationToken)
     {
         return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        meter.Dispose();
     }
 }

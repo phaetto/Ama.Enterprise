@@ -3,6 +3,7 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
@@ -17,22 +18,41 @@ using Microsoft.Extensions.Logging;
 /// <summary>
 /// Centralized generic orchestrator managing global active P2P CRDT document bindings.
 /// </summary>
-public sealed class CrdtDocumentOrchestrator(
-    IServiceProvider serviceProvider,
-    IDistributedCrdtStorage storage,
-    ICrdtPatcher patcher,
-    ILogger<CrdtDocumentOrchestrator> logger) : ICrdtDocumentOrchestrator, IDisposable
+public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDisposable
 {
-    private readonly IServiceProvider serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-    private readonly IDistributedCrdtStorage storage = storage ?? throw new ArgumentNullException(nameof(storage));
-    private readonly ICrdtPatcher patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
-    private readonly ILogger<CrdtDocumentOrchestrator> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IServiceProvider serviceProvider;
+    private readonly IDistributedCrdtStorage storage;
+    private readonly ICrdtPatcher patcher;
+    private readonly ILogger<CrdtDocumentOrchestrator> logger;
     private readonly ConcurrentDictionary<string, IDistributedCrdtDocument> activeDocuments = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim syncLock = new(1, 1);
+
+    private readonly Meter meter;
+    private readonly Counter<long> documentCreatedCounter;
+    private readonly Counter<long> documentDeletedCounter;
+    private readonly Counter<long> antiEntropySyncCounter;
     
     public IDistributedCrdtDocument<CrdtRegistryState> Registry { get; private set; } = null!;
 
     public event EventHandler? DocumentsChanged;
+
+    public CrdtDocumentOrchestrator(
+        IServiceProvider serviceProvider,
+        IDistributedCrdtStorage storage,
+        ICrdtPatcher patcher,
+        ILogger<CrdtDocumentOrchestrator> logger,
+        IMeterFactory? meterFactory = null)
+    {
+        this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
+        this.patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.CrdtDocumentOrchestrator") ?? new Meter("Ama.Enterprise.CRDT.Distributed.CrdtDocumentOrchestrator");
+        this.documentCreatedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.documents_created", "documents", "Total CRDT documents mapped dynamically");
+        this.documentDeletedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.documents_deleted", "documents", "Total CRDT documents permanently tombstoned");
+        this.antiEntropySyncCounter = this.meter.CreateCounter<long>("crdt.orchestrator.anti_entropy_syncs", "syncs", "Total anti-entropy point-to-point synchronizations dispatched");
+    }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -73,6 +93,7 @@ public sealed class CrdtDocumentOrchestrator(
                         if (activeDocuments.TryAdd(kvp.Key, doc))
                         {
                             changed = true;
+                            documentCreatedCounter.Add(1, new KeyValuePair<string, object?>("document_id", kvp.Key));
                             logger.LogInformation("Orchestrator dynamically mapped new CRDT document: {DocumentId}", kvp.Key);
                         }
                     }
@@ -100,6 +121,7 @@ public sealed class CrdtDocumentOrchestrator(
                     if (doc is IDisposable d) d.Dispose();
                     await storage.DeleteDocumentAsync(docId, cancellationToken).ConfigureAwait(false);
                     changed = true;
+                    documentDeletedCounter.Add(1, new KeyValuePair<string, object?>("document_id", docId));
                     logger.LogInformation("Orchestrator tombstoned CRDT document: {DocumentId}", docId);
                 }
             }
@@ -178,6 +200,7 @@ public sealed class CrdtDocumentOrchestrator(
 
             await directSender.SendToRandomPeerAsync(finalBytes, cancellationToken).ConfigureAwait(false);
             
+            antiEntropySyncCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
             logger.LogTrace("Dispatched targeted global DVV cluster state sync.");
         }
         catch (Exception ex)
@@ -201,5 +224,6 @@ public sealed class CrdtDocumentOrchestrator(
         
         activeDocuments.Clear();
         syncLock.Dispose();
+        meter.Dispose();
     }
 }

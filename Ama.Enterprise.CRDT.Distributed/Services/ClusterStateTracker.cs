@@ -2,18 +2,32 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Linq;
 using Ama.CRDT.Models;
 
 /// <summary>
 /// Singleton thread-safe implementation capturing localized maps representing overarching remote state matrix limits.
 /// </summary>
-public sealed class ClusterStateTracker : IClusterStateTracker
+public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
 {
     private readonly Dictionary<string, PeerStateEntry> peerStates = new();
     private readonly Dictionary<string, string> networkIdToReplicaId = new();
     private readonly HashSet<string> tombstonedReplicas = new();
     private readonly object syncRoot = new();
+
+    private readonly Meter meter;
+    private readonly Counter<long> stateUpdatesCounter;
+    private readonly Counter<long> tombstonedPeersCounter;
+    private readonly Counter<long> peerRemovalsCounter;
+
+    public ClusterStateTracker(IMeterFactory? meterFactory = null)
+    {
+        this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.ClusterStateTracker") ?? new Meter("Ama.Enterprise.CRDT.Distributed.ClusterStateTracker");
+        this.stateUpdatesCounter = this.meter.CreateCounter<long>("crdt.cluster.state_updates", "updates", "Number of cluster state updates");
+        this.tombstonedPeersCounter = this.meter.CreateCounter<long>("crdt.cluster.tombstoned_peers", "peers", "Number of explicitly tombstoned replicas");
+        this.peerRemovalsCounter = this.meter.CreateCounter<long>("crdt.cluster.peer_removals", "peers", "Number of network peers intentionally disconnected preserving states");
+    }
 
     /// <inheritdoc />
     public void UpdatePeerState(string peerReplicaId, string peerId, DottedVersionVector globalState)
@@ -32,6 +46,8 @@ public sealed class ClusterStateTracker : IClusterStateTracker
             peerStates[peerReplicaId] = new PeerStateEntry(globalState, DateTime.UtcNow);
             networkIdToReplicaId[peerId] = peerReplicaId;
         }
+
+        stateUpdatesCounter.Add(1, new KeyValuePair<string, object?>("replica_id", peerReplicaId));
     }
 
     /// <inheritdoc />
@@ -53,7 +69,10 @@ public sealed class ClusterStateTracker : IClusterStateTracker
             // ONLY unmap the network routing. We intentionally DO NOT remove the replica from `peerStates` here!
             // If we remove the CRDT state early, the GMVV will trim the journal and cause amnesia for offline peers.
             // The state remains safely bounded until `GetAndTombstoneExpiredPeers` handles the TTL timeout inherently.
-            networkIdToReplicaId.Remove(peerId);
+            if (networkIdToReplicaId.Remove(peerId))
+            {
+                peerRemovalsCounter.Add(1);
+            }
         }
     }
 
@@ -64,7 +83,10 @@ public sealed class ClusterStateTracker : IClusterStateTracker
         
         lock (syncRoot)
         {
-            tombstonedReplicas.Add(replicaId);
+            if (tombstonedReplicas.Add(replicaId))
+            {
+                tombstonedPeersCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaId));
+            }
             peerStates.Remove(replicaId);
             
             var keysToRemove = networkIdToReplicaId
@@ -130,6 +152,11 @@ public sealed class ClusterStateTracker : IClusterStateTracker
         }
 
         return expiredReplicas;
+    }
+
+    public void Dispose()
+    {
+        meter.Dispose();
     }
 
     private readonly record struct PeerStateEntry : IEquatable<PeerStateEntry>

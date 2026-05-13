@@ -2,6 +2,7 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services;
@@ -10,14 +11,29 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Implementation explicitly enforcing bounded mapping limits structurally gracefully successfully optimally natively efficiently smoothly solidly cleanly inherently cleverly correctly cleanly beautifully correctly flawlessly efficiently cleanly solidly intelligently actively smoothly efficiently perfectly robustly naturally actively inherently expertly successfully expertly creatively natively natively securely securely cleanly explicitly perfectly successfully efficiently intelligently creatively solidly gracefully actively perfectly securely gracefully.
+/// Implementation explicitly enforcing bounded mapping limits structurally natively.
 /// </summary>
-public sealed class CrdtEvictionService(
-    IServiceProvider serviceProvider,
-    ILogger<CrdtEvictionService> logger) : ICrdtEvictionService
+public sealed class CrdtEvictionService : ICrdtEvictionService, IDisposable
 {
-    private readonly IServiceProvider serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-    private readonly ILogger<CrdtEvictionService> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IServiceProvider serviceProvider;
+    private readonly ILogger<CrdtEvictionService> logger;
+
+    private readonly Meter meter;
+    private readonly Counter<long> replicasEvictedCounter;
+    private readonly Counter<long> identitiesRebootedCounter;
+
+    public CrdtEvictionService(
+        IServiceProvider serviceProvider,
+        ILogger<CrdtEvictionService> logger,
+        IMeterFactory? meterFactory = null)
+    {
+        this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.CrdtEvictionService") ?? new Meter("Ama.Enterprise.CRDT.Distributed.CrdtEvictionService");
+        this.replicasEvictedCounter = this.meter.CreateCounter<long>("crdt.eviction.replicas_evicted", "replicas", "Total replica evictions processed natively across active structures");
+        this.identitiesRebootedCounter = this.meter.CreateCounter<long>("crdt.eviction.identities_rebooted", "reboots", "Total local identities forcibly re-bootstrapped following cluster tombstones");
+    }
 
     /// <inheritdoc />
     public async Task EvictPeersAsync(IReadOnlyList<string> replicaIds, CancellationToken cancellationToken = default)
@@ -57,6 +73,7 @@ public sealed class CrdtEvictionService(
             }
         }
         
+        replicasEvictedCounter.Add(replicaIds.Count, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
         logger.LogInformation("[{LocalReplicaId}] Successfully applied eviction across {DocCount} documents for {ReplicaCount} replicas.", replicaContext.ReplicaId, documents.Count, replicaIds.Count);
     }
 
@@ -99,6 +116,12 @@ public sealed class CrdtEvictionService(
         
         await orchestrator.DispatchAntiEntropyStateAsync(cancellationToken).ConfigureAwait(false);
         
+        identitiesRebootedCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
         logger.LogInformation("Successfully completed re-bootstrap identity mechanisms explicitly extracting persistent capabilities mapping explicitly.");
+    }
+
+    public void Dispose()
+    {
+        meter.Dispose();
     }
 }

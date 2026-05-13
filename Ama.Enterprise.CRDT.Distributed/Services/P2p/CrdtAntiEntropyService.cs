@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services.P2p;
 
 using System;
+using System.Diagnostics.Metrics;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.Enterprise.CRDT.Distributed.Models;
@@ -9,16 +10,30 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Background service responsible for repeatedly broadcasting the local synchronization state iterating globally correctly perfectly securely confidently properly optimally perfectly expertly properly smartly rationally gracefully effortlessly seamlessly elegantly purely smartly confidently flawlessly cleanly.
+/// Background service responsible for repeatedly broadcasting the local synchronization state iterating globally natively.
 /// </summary>
-public sealed class CrdtAntiEntropyService(
-    DistributedCrdtScopeManager scopeManager,
-    IOptions<DistributedCrdtOptions> options,
-    ILogger<CrdtAntiEntropyService> logger) : BackgroundService
+public sealed class CrdtAntiEntropyService : BackgroundService
 {
-    private readonly DistributedCrdtScopeManager scopeManager = scopeManager ?? throw new ArgumentNullException(nameof(scopeManager));
-    private readonly IOptions<DistributedCrdtOptions> options = options ?? throw new ArgumentNullException(nameof(options));
-    private readonly ILogger<CrdtAntiEntropyService> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly DistributedCrdtScopeManager scopeManager;
+    private readonly IOptions<DistributedCrdtOptions> options;
+    private readonly ILogger<CrdtAntiEntropyService> logger;
+
+    private readonly Meter meter;
+    private readonly Counter<long> antiEntropyCyclesCounter;
+
+    public CrdtAntiEntropyService(
+        DistributedCrdtScopeManager scopeManager,
+        IOptions<DistributedCrdtOptions> options,
+        ILogger<CrdtAntiEntropyService> logger,
+        IMeterFactory? meterFactory = null)
+    {
+        this.scopeManager = scopeManager ?? throw new ArgumentNullException(nameof(scopeManager));
+        this.options = options ?? throw new ArgumentNullException(nameof(options));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.CrdtAntiEntropyService") ?? new Meter("Ama.Enterprise.CRDT.Distributed.CrdtAntiEntropyService");
+        this.antiEntropyCyclesCounter = this.meter.CreateCounter<long>("crdt.anti_entropy.cycles_executed", "cycles", "Total localized periodic anti-entropy generic interactions dispatched natively");
+    }
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -40,6 +55,7 @@ public sealed class CrdtAntiEntropyService(
                 try
                 {
                     await scope.Orchestrator.DispatchAntiEntropyStateAsync(stoppingToken).ConfigureAwait(false);
+                    antiEntropyCyclesCounter.Add(1, new System.Collections.Generic.KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
                 }
                 catch (OperationCanceledException)
                 {
@@ -60,5 +76,11 @@ public sealed class CrdtAntiEntropyService(
                 break;
             }
         }
+    }
+
+    public override void Dispose()
+    {
+        meter.Dispose();
+        base.Dispose();
     }
 }

@@ -2,6 +2,7 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -12,10 +13,21 @@ using Ama.CRDT.Models;
 /// Thread-safe in-memory unified storage and journal for CRDT operations.
 /// Provides a default ephemeral implementation for systems not requiring persistent storage.
 /// </summary>
-public sealed class MemoryCrdtStorage : IDistributedCrdtStorage
+public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
 {
     private readonly List<JournaledOperation> operations = new();
     private readonly object syncRoot = new();
+
+    private readonly Meter meter;
+    private readonly Counter<long> appendedOperationsCounter;
+    private readonly Counter<long> trimsExecutedCounter;
+
+    public MemoryCrdtStorage(IMeterFactory? meterFactory = null)
+    {
+        this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.MemoryCrdtStorage") ?? new Meter("Ama.Enterprise.CRDT.Distributed.MemoryCrdtStorage");
+        this.appendedOperationsCounter = this.meter.CreateCounter<long>("crdt.storage.memory.operations_appended", "operations", "Total operations saved natively into ephemeral memory structures");
+        this.trimsExecutedCounter = this.meter.CreateCounter<long>("crdt.storage.memory.trims_executed", "trims", "Total journal trim collections evaluated");
+    }
 
     /// <inheritdoc />
     public void Append(string documentId, IReadOnlyList<CrdtOperation> operationsList)
@@ -33,6 +45,8 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage
                 }
             }
         }
+        
+        appendedOperationsCounter.Add(operationsList.Count, new KeyValuePair<string, object?>("document_id", documentId));
     }
 
     /// <inheritdoc />
@@ -95,6 +109,8 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage
                 !gmvv.TryGetValue(op.Operation.ReplicaId, out var minKnown) || 
                 op.Operation.GlobalClock <= minKnown);
         }
+        
+        trimsExecutedCounter.Add(1);
     }
 
     /// <inheritdoc />
@@ -145,5 +161,10 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage
         }
 
         return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        meter.Dispose();
     }
 }

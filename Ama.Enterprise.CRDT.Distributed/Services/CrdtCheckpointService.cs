@@ -2,6 +2,7 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
@@ -14,16 +15,34 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Background service responsible for systematically persisting memory states targeting mapped independent multi-tenant boundaries structurally dynamically preventing bounds amnesia effectively efficiently solidly purely safely gracefully properly beautifully perfectly effortlessly beautifully cleanly efficiently correctly cleverly cleanly smoothly solidly creatively properly correctly solidly logically safely completely elegantly smartly efficiently creatively natively rationally effectively rationally intelligently intelligently expertly.
+/// Background service responsible for systematically persisting memory states targeting mapped independent multi-tenant boundaries structurally dynamically preventing bounds amnesia effectively.
 /// </summary>
-public sealed class CrdtCheckpointService(
-    DistributedCrdtScopeManager scopeManager,
-    IOptions<DistributedCrdtOptions> options,
-    ILogger<CrdtCheckpointService> logger) : BackgroundService
+public sealed class CrdtCheckpointService : BackgroundService
 {
-    private readonly DistributedCrdtScopeManager scopeManager = scopeManager ?? throw new ArgumentNullException(nameof(scopeManager));
-    private readonly IOptions<DistributedCrdtOptions> options = options ?? throw new ArgumentNullException(nameof(options));
-    private readonly ILogger<CrdtCheckpointService> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly DistributedCrdtScopeManager scopeManager;
+    private readonly IOptions<DistributedCrdtOptions> options;
+    private readonly ILogger<CrdtCheckpointService> logger;
+
+    private readonly Meter meter;
+    private readonly Counter<long> checkpointCyclesCounter;
+    private readonly Counter<long> trimmedJournalsCounter;
+    private readonly Counter<long> evictedPeersCounter;
+
+    public CrdtCheckpointService(
+        DistributedCrdtScopeManager scopeManager,
+        IOptions<DistributedCrdtOptions> options,
+        ILogger<CrdtCheckpointService> logger,
+        IMeterFactory? meterFactory = null)
+    {
+        this.scopeManager = scopeManager ?? throw new ArgumentNullException(nameof(scopeManager));
+        this.options = options ?? throw new ArgumentNullException(nameof(options));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.CrdtCheckpointService") ?? new Meter("Ama.Enterprise.CRDT.Distributed.CrdtCheckpointService");
+        this.checkpointCyclesCounter = this.meter.CreateCounter<long>("crdt.checkpoint.cycles", "cycles", "Total background checkpoint cycles executed");
+        this.trimmedJournalsCounter = this.meter.CreateCounter<long>("crdt.checkpoint.trimmed_journals", "trims", "Total journal trims executed based on GMVV bounds");
+        this.evictedPeersCounter = this.meter.CreateCounter<long>("crdt.checkpoint.evicted_peers", "peers", "Total dead peers actively tombstoned due to TTL");
+    }
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -54,6 +73,9 @@ public sealed class CrdtCheckpointService(
                     var orchestrator = scope.Orchestrator;
                     var documents = orchestrator.GetActiveDocuments();
                     
+                    var tag = new KeyValuePair<string, object?>("replica_id", scope.ReplicaId);
+                    checkpointCyclesCounter.Add(1, tag);
+
                     if (options.Value.PeerEvictionTtlSeconds > 0)
                     {
                         var evictionTtl = TimeSpan.FromSeconds(options.Value.PeerEvictionTtlSeconds);
@@ -61,6 +83,7 @@ public sealed class CrdtCheckpointService(
 
                         if (tombstonedPeers.Count > 0)
                         {
+                            evictedPeersCounter.Add(tombstonedPeers.Count, tag);
                             logger.LogInformation("[{ReplicaId}] Tombstoned {Count} dead peers based on TTL threshold ({TtlSeconds}s) preventing network log bound halts.", scope.ReplicaId, tombstonedPeers.Count, options.Value.PeerEvictionTtlSeconds);
                             await scope.EvictionService.EvictPeersAsync(tombstonedPeers, stoppingToken).ConfigureAwait(false);
                         }
@@ -107,6 +130,7 @@ public sealed class CrdtCheckpointService(
                         if (gmvv.Count > 0)
                         {
                             await scope.Storage.TrimAsync(gmvv, stoppingToken).ConfigureAwait(false);
+                            trimmedJournalsCounter.Add(1, tag);
                             logger.LogTrace("[{ReplicaId}] Executed background journal trim matching Global Minimum Version Vector bounds.", scope.ReplicaId);
                         }
                     }
@@ -117,5 +141,11 @@ public sealed class CrdtCheckpointService(
                 }
             }
         }
+    }
+
+    public override void Dispose()
+    {
+        meter.Dispose();
+        base.Dispose();
     }
 }

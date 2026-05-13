@@ -31,7 +31,7 @@ public sealed record TelemetryOptions : IEquatable<TelemetryOptions>
     /// </summary>
     public ISet<string> IncludedMeterNames { get; set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        Constants.P2pMeterName,
+        Constants.AmaEnterpriseBaseMeterPrefixName,
     };
 
     /// <inheritdoc />

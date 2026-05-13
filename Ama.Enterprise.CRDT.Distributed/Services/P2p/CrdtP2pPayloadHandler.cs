@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services.P2p;
 
 using System;
+using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,18 +17,39 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Deserializes incoming network application payloads bounding properly gracefully cleanly smoothly solidly smartly explicitly effectively cleanly expertly perfectly completely successfully purely successfully efficiently gracefully expertly seamlessly brilliantly seamlessly completely flawlessly cleanly natively robustly effectively cleanly rationally.
+/// Deserializes incoming network application payloads bounding properly gracefully explicitly natively.
 /// </summary>
-public sealed class CrdtP2pPayloadHandler(
-    string replicaId,
-    DistributedCrdtScopeManager scopeManager,
-    ICrdtSerializer serializer,
-    ILogger<CrdtP2pPayloadHandler> logger) : IApplicationPayloadHandler
+public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposable
 {
-    private readonly string replicaId = replicaId ?? throw new ArgumentNullException(nameof(replicaId));
-    private readonly DistributedCrdtScopeManager scopeManager = scopeManager ?? throw new ArgumentNullException(nameof(scopeManager));
-    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-    private readonly ILogger<CrdtP2pPayloadHandler> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly string replicaId;
+    private readonly DistributedCrdtScopeManager scopeManager;
+    private readonly ICrdtSerializer serializer;
+    private readonly ILogger<CrdtP2pPayloadHandler> logger;
+
+    private readonly Meter meter;
+    private readonly Counter<long> messagesProcessedCounter;
+    private readonly Counter<long> operationsReceivedCounter;
+    private readonly Counter<long> snapshotsMergedCounter;
+    private readonly Counter<long> rebootsHandledCounter;
+
+    public CrdtP2pPayloadHandler(
+        string replicaId,
+        DistributedCrdtScopeManager scopeManager,
+        ICrdtSerializer serializer,
+        ILogger<CrdtP2pPayloadHandler> logger,
+        IMeterFactory? meterFactory = null)
+    {
+        this.replicaId = replicaId ?? throw new ArgumentNullException(nameof(replicaId));
+        this.scopeManager = scopeManager ?? throw new ArgumentNullException(nameof(scopeManager));
+        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.CrdtP2pPayloadHandler") ?? new Meter("Ama.Enterprise.CRDT.Distributed.CrdtP2pPayloadHandler");
+        this.messagesProcessedCounter = this.meter.CreateCounter<long>("crdt.payloads.processed", "messages", "Total network payload wrappers intercepted smoothly directly explicitly");
+        this.operationsReceivedCounter = this.meter.CreateCounter<long>("crdt.payloads.operations_received", "operations", "Total operations accurately dispatched natively towards application limits");
+        this.snapshotsMergedCounter = this.meter.CreateCounter<long>("crdt.payloads.snapshots_merged", "snapshots", "Total fallback snapshots successfully merged dynamically");
+        this.rebootsHandledCounter = this.meter.CreateCounter<long>("crdt.payloads.reboots_handled", "events", "Total eviction rejection payloads correctly forcing dynamic bounds");
+    }
 
     /// <inheritdoc />
     public async Task HandlePayloadAsync(string meshId, PeerId senderId, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
@@ -51,6 +73,8 @@ public sealed class CrdtP2pPayloadHandler(
         {
             return;
         }
+
+        messagesProcessedCounter.Add(1, new System.Collections.Generic.KeyValuePair<string, object?>("message_type", wrapper.MessageType));
 
         if (wrapper.MessageType == "CrdtEviction")
         {
@@ -178,6 +202,7 @@ public sealed class CrdtP2pPayloadHandler(
             }
             
             await targetDoc.ApplyOperationsAsync(opsMsg.Operations, cancellationToken).ConfigureAwait(false);
+            operationsReceivedCounter.Add(opsMsg.Operations.Length, new System.Collections.Generic.KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
         }
         catch (Exception ex)
         {
@@ -222,6 +247,7 @@ public sealed class CrdtP2pPayloadHandler(
             scope.ClusterTracker.UpdatePeerState(resMsg.ReplicaId, senderId.Value.ToString(), resMsg.GlobalState);
             
             await targetDoc.MergeSnapshotAsync(resMsg.SnapshotData, resMsg.GlobalState, cancellationToken).ConfigureAwait(false);
+            snapshotsMergedCounter.Add(1, new System.Collections.Generic.KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
         }
         catch (Exception ex)
         {
@@ -240,6 +266,7 @@ public sealed class CrdtP2pPayloadHandler(
             if (rejectionMsg.EvictedReplicaId == replicaContext.ReplicaId)
             {
                 await scope.EvictionService.RebootLocalIdentityAsync(cancellationToken).ConfigureAwait(false);
+                rebootsHandledCounter.Add(1, new System.Collections.Generic.KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
             }
         }
         catch (Exception ex)
@@ -263,5 +290,10 @@ public sealed class CrdtP2pPayloadHandler(
         {
             await p2pProtocol.BroadcastAsync(wrapperBytes, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    public void Dispose()
+    {
+        meter.Dispose();
     }
 }
