@@ -117,6 +117,7 @@
 | `$/Ama.Enterprise.P2p.IntegrationTests/Ama.Enterprise.P2p.IntegrationTests.csproj` | Integration tests project for validating P2P networking components via HTTP loopbacks. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Architecture/VersioningArchitectureTests.cs` | Architectural tests that parse the CI/CD deployment files ensuring specific deployed versions always possess explicit test coverage. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Discovery/DnsPeerDiscoveryIntegrationTests.cs` | Integration tests verifying DNS peer discovery natively resolves target domains and dispatches accurate Phase 2 handshakes against discovered IPs. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Services/Core/LicenseManagerIntegrationTests.cs` | Integration tests verifying cryptographic RSA signature validations for the generic honor-based license manager. |
 | `$/Ama.Enterprise.P2p.Mqtt.IntegrationTests/Ama.Enterprise.P2p.Mqtt.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.Mqtt.IntegrationTests/Services/MqttPeerDiscoveryIntegrationTests.cs` | Integration tests verifying MQTT peer discovery mapping decoupled multi-mesh architectures natively. Migrated to use `TcpTransport` and `TcpPeerEndpoint` dynamically correctly correctly correctly dropping obsolete HTTP transport bindings. |
 | `$/Ama.Enterprise.P2p.Mqtt.IntegrationTests/Services/MqttTransportIntegrationTests.cs` | Integration tests verifying end-to-end MQTT transport functionality evaluating isolated inbound subscriptions. |
@@ -182,10 +183,11 @@
 | `$/Ama.Enterprise.P2p/Extensions/IP2pMeshBuilder.cs` | Interface for building and configuring specific Keyed DI mesh profiles. |
 | `$/Ama.Enterprise.P2p/Extensions/P2pMeshBuilder.cs` | Implementation of `IP2pMeshBuilder` handling multi-mesh dependency injection tracking. |
 | `$/Ama.Enterprise.P2p/Extensions/P2pMeshRegistrationTracker.cs` | Centralized tracking mechanism guaranteeing idempotent mesh registrations evaluating structurally identical configurations, bypassing duplicates. |
-| `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Moved common mesh infrastructure registrations into AddP2pMesh to avoid duplication between distinct protocol configurations like AddGossipNetwork and AddPushPullGossipNetwork. |
+| `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Extension methods updated with non-intrusive honor-based global licensing hooks natively tracking meshes explicitly. |
 | `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Removed tightly coupled injected Handshaker Options isolating generic P2P mesh parameters decoupling explicitly. |
 | `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
 | `$/Ama.Enterprise.P2p/Models/Core/IMeshMessage.cs` | Added required standardized `SenderId` bounding origin payloads explicitly decoupled traversing generic algorithms identically. |
+| `$/Ama.Enterprise.P2p/Models/Core/LicenseOptions.cs` | Configuration options for tracking the honor-based license setup explicitly, extended with public key cryptography configurations. |
 | `$/Ama.Enterprise.P2p/Models/Core/P2pMeshMetadata.cs` | Metadata record registering a specific mesh identifier into the global dependency container for orchestration. |
 | `$/Ama.Enterprise.P2p/Models/Core/P2pNodeOptions.cs` | Centralized generic configuration options holding the core node identity (ID and Endpoint) for the P2P Mesh. Updated to enforce a static, process-wide global peer identifier to satisfy repeatable idempotent tracker validations. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerEndpoint.cs` | Abstract base record for peer endpoints, configured with JSON polymorphic attributes mapping same-assembly derivatives to support standard AOT serialization. |
@@ -210,11 +212,13 @@
 | `$/Ama.Enterprise.P2p/Services/Algorithms/PushPullGossipAlgorithm.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/ApplicationPayloadDispatcher.cs` | Composite orchestrator dispatching to abstract domain observers. |
 | `$/Ama.Enterprise.P2p/Services/Core/DirectMessageSender.cs` | Implements localized targeted point-to-point generic delivery dynamically fetching active peering bindings avoiding overarching network broadcast storms. |
+| `$/Ama.Enterprise.P2p/Services/Core/HonorLicenseManager.cs` | Implementation tracking generic honor-based checks evaluating provided bounds explicitly natively via RSA cryptographic signatures. |
 | `$/Ama.Enterprise.P2p/Services/Core/IApplicationPayloadDispatcher.cs` | Dispatches targeted application payloads. |
 | `$/Ama.Enterprise.P2p/Services/Core/IApplicationPayloadHandler.cs` | Defines a domain-level consumer decoupling underlying distribution protocols. |
 | `$/Ama.Enterprise.P2p/Services/Core/IDirectMessageSender.cs` | Defines a targeted point-to-point payload delivery contract decoupling anti-entropy processes from gossip epidemic broadcasts explicitly honoring the Single Responsibility Principle. |
 | `$/Ama.Enterprise.P2p/Services/Core/IFailureDetector.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IInboundMessageQueue.cs` | Defines an internal queue for decoupling inbound network listeners from the protocol logic. |
+| `$/Ama.Enterprise.P2p/Services/Core/ILicenseManager.cs` | Contract isolating the validation logic for the honor-based licensing system. |
 | `$/Ama.Enterprise.P2p/Services/Core/IP2pAlgorithm.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerAuthenticator.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerDiscovery.cs` | No description provided. |
@@ -227,6 +231,7 @@
 | `$/Ama.Enterprise.P2p/Services/Core/ITransportRouter.cs` | Interface for routing outgoing messages to the appropriate transport based on the endpoint type. |
 | `$/Ama.Enterprise.P2p/Services/Core/InMemoryPeerRegistry.cs` | Implements an in-memory thread-safe registry tracking peering topology globally using a flat dictionary mapping. |
 | `$/Ama.Enterprise.P2p/Services/Core/InboundMessageQueue.cs` | Channel-backed implementation of the inbound message queue. |
+| `$/Ama.Enterprise.P2p/Services/Core/LicenseStartupService.cs` | Background startup service tracking the single explicit license validation step cleanly without overlapping boundaries. |
 | `$/Ama.Enterprise.P2p/Services/Core/PassThroughPeerAuthenticator.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/RandomPeerSelector.cs` | Implementation of IPeerSelector utilizing random distribution selection. |
 | `$/Ama.Enterprise.P2p/Services/Core/TimeBasedFailureDetector.cs` | Implementation of IFailureDetector using abstract heartbeats decoupled from specific protocol options. |

@@ -49,6 +49,8 @@ public static class ServiceCollectionExtensions
             services.Configure(meshId, configureNodeOptions);
         }
 
+        services.AddAmaLicense();
+
         if (!services.Any(s => s.ImplementationType == typeof(P2pHostedService)))
         {
             services.AddHostedService<P2pHostedService>();
@@ -272,5 +274,33 @@ public static class ServiceCollectionExtensions
         builder.Services.Configure(builder.MeshId, configureOptions);
 
         return builder;
+    }
+
+    /// <summary>
+    /// Registers the generic honor-based licensing dependencies.
+    /// </summary>
+    public static IServiceCollection AddAmaLicense(
+        this IServiceCollection services,
+        Action<LicenseOptions>? configureOptions = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        if (configureOptions is not null)
+        {
+            services.Configure(configureOptions);
+        }
+        else
+        {
+            services.Configure<LicenseOptions>(_ => { });
+        }
+
+        services.TryAddSingleton<ILicenseManager, HonorLicenseManager>();
+
+        if (!services.Any(s => s.ImplementationType == typeof(LicenseStartupService)))
+        {
+            services.AddHostedService<LicenseStartupService>();
+        }
+
+        return services;
     }
 }
