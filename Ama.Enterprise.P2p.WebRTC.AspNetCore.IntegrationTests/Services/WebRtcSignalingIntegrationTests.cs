@@ -10,7 +10,6 @@ using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.WebRTC.AspNetCore.Extensions;
-using Ama.Enterprise.P2p.WebRTC.AspNetCore.Models;
 using Ama.Enterprise.P2p.WebRTC.AspNetCore.Services;
 using Ama.Enterprise.P2p.WebRTC.Extensions;
 using Ama.Enterprise.P2p.WebRTC.Models;
@@ -57,7 +56,7 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
         // Assert
         answer.ShouldNotBeNull();
         answer.Value.SdpAnswer.ShouldNotBeNullOrWhiteSpace();
-        testOutputHelper.WriteLine("Node B responded with explicit SDP answer successfully.");
+        testOutputHelper.WriteLine("Node B responded with explicit SDP answer.");
 
         testOutputHelper.WriteLine("Node A finalizing local connection mapping natively.");
         await nodeA.InvitationService.FinalizeInvitationAsync(localOffer.ConnectionId, answer.Value.SdpAnswer, CancellationToken.None);
@@ -86,7 +85,7 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
         testOutputHelper.WriteLine("Node A answering remote SDP offer natively...");
         var localAnswer = await nodeA.InvitationService.AcceptInvitationAsync(remoteOffer.Value.SdpOffer, CancellationToken.None);
 
-        // Map the explicit Node B remote connection ID back so Node B successfully locates its pending WebRTC peer instance
+        // Map the explicit Node B remote connection ID back so Node B explicitly locates its pending WebRTC peer instance
         var answerForNodeB = new WebRtcInvitationAnswer(remoteOffer.Value.ConnectionId, localAnswer.SdpAnswer);
 
         testOutputHelper.WriteLine("Node A pushing active SDP answer to finalize Node B's connection state...");
@@ -94,7 +93,7 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
         
         // Assert
         finalizeResult.ShouldBeTrue();
-        testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange finalized cleanly.");
+        testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange finalized explicitly.");
     }
 
     [IntegrationFact]
@@ -123,7 +122,7 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
         // Assert
         answer.ShouldNotBeNull();
         answer.Value.SdpAnswer.ShouldNotBeNullOrWhiteSpace();
-        testOutputHelper.WriteLine("Node B responded with explicit SDP answer successfully through integrated HTTP bounds.");
+        testOutputHelper.WriteLine("Node B responded with explicit SDP answer through integrated HTTP bounds.");
 
         testOutputHelper.WriteLine("Node A finalizing local connection mapping natively.");
         await nodeA.InvitationService.FinalizeInvitationAsync(localOffer.ConnectionId, answer.Value.SdpAnswer, CancellationToken.None);
@@ -159,11 +158,11 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
         
         // Assert
         finalizeResult.ShouldBeTrue();
-        testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange finalized cleanly across integrated endpoints.");
+        testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange finalized across integrated endpoints.");
     }
 
     [IntegrationFact]
-    public async Task WebRtcSignalingClient_OfflinePeer_ReturnsNullGracefully()
+    public async Task WebRtcSignalingClient_OfflinePeer_ReturnsNull()
     {
         // Arrange
         var meshId = "sig-mesh-offline";
@@ -175,12 +174,77 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
         var offlineUri = new Uri($"http://127.0.0.1:{offlinePort}");
 
         // Act
-        testOutputHelper.WriteLine($"Node A requesting explicit offer from completely offline endpoint {offlineUri}...");
+        testOutputHelper.WriteLine($"Node A requesting explicit offer from offline endpoint {offlineUri}...");
         var offer = await nodeA.Client.RequestOfferAsync(offlineUri, meshId, null, CancellationToken.None);
         
         // Assert
         offer.ShouldBeNull();
-        testOutputHelper.WriteLine("Client gracefully suppressed the connection failure structurally.");
+        testOutputHelper.WriteLine("Client suppressed the connection failure structurally.");
+    }
+
+    [IntegrationFact]
+    public async Task WebRtcHttpPeerDiscovery_StandaloneMode_DiscoversAndConnects_Succeeds()
+    {
+        // Arrange
+        var meshId = "sig-mesh-discovery";
+        var portA = resourceManager.GetNextPort();
+        var portB = resourceManager.GetNextPort();
+
+        await using var nodeA = await CreateStandaloneTestNodeAsync(meshId, new PeerId(Guid.NewGuid()), portA);
+        await using var nodeB = await CreateStandaloneTestNodeAsync(meshId, new PeerId(Guid.NewGuid()), portB);
+
+        var uriB = new Uri($"http://127.0.0.1:{portB}");
+
+        // Act
+        testOutputHelper.WriteLine("Node A running explicit HTTP discovery connecting to Standalone Node B natively...");
+        var result = await nodeA.Discovery.DiscoverPeerAsync(uriB, null, CancellationToken.None);
+
+        // Assert
+        result.ShouldBeTrue();
+        testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange automated explicitly using the discovery service.");
+    }
+
+    [IntegrationFact]
+    public async Task WebRtcHttpPeerDiscovery_IntegratedMode_DiscoversAndConnects_Succeeds()
+    {
+        // Arrange
+        var meshId = "sig-mesh-discovery-integ";
+        var portA = resourceManager.GetNextPort();
+        var portB = resourceManager.GetNextPort();
+
+        await using var nodeA = await CreateIntegratedTestNodeAsync(meshId, new PeerId(Guid.NewGuid()), portA);
+        await using var nodeB = await CreateIntegratedTestNodeAsync(meshId, new PeerId(Guid.NewGuid()), portB);
+
+        var uriB = new Uri($"http://127.0.0.1:{portB}");
+
+        // Act
+        testOutputHelper.WriteLine("Node A running explicit HTTP discovery connecting to Integrated Node B natively...");
+        var result = await nodeA.Discovery.DiscoverPeerAsync(uriB, null, CancellationToken.None);
+
+        // Assert
+        result.ShouldBeTrue();
+        testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange automated explicitly using the discovery service across integrated endpoints.");
+    }
+
+    [IntegrationFact]
+    public async Task WebRtcHttpPeerDiscovery_OfflinePeer_ReturnsFalse()
+    {
+        // Arrange
+        var meshId = "sig-mesh-discovery-offline";
+        var portA = resourceManager.GetNextPort();
+        var offlinePort = resourceManager.GetNextPort();
+
+        await using var nodeA = await CreateStandaloneTestNodeAsync(meshId, new PeerId(Guid.NewGuid()), portA);
+
+        var offlineUri = new Uri($"http://127.0.0.1:{offlinePort}");
+
+        // Act
+        testOutputHelper.WriteLine($"Node A running explicit HTTP discovery connecting to offline peer {offlineUri}...");
+        var result = await nodeA.Discovery.DiscoverPeerAsync(offlineUri, null, CancellationToken.None);
+
+        // Assert
+        result.ShouldBeFalse();
+        testOutputHelper.WriteLine("Client suppressed the connection failure natively returning false.");
     }
 
     private async Task<WebRtcSignalingStandaloneTestNode> CreateStandaloneTestNodeAsync(string meshId, PeerId peerId, int port)
@@ -213,13 +277,15 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
                 options.HostingMode = AspNetCoreHostingMode.Standalone;
                 options.StandaloneListenHost = "127.0.0.1";
                 options.StandaloneListenPort = port;
-            });
+            })
+            .AddWebRtcHttpPeerDiscovery();
 
         var provider = services.BuildServiceProvider();
 
         // Resolve dependencies BEFORE starting the hosted services to prevent leaking ports in case of misconfiguration crashes.
         var client = provider.GetRequiredService<IWebRtcSignalingClient>();
         var invitationService = provider.GetRequiredKeyedService<IWebRtcInvitationService>(meshId);
+        var discovery = provider.GetRequiredKeyedService<IWebRtcHttpPeerDiscovery>(meshId);
 
         var hostedServices = provider.GetServices<IHostedService>();
         
@@ -244,7 +310,8 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
             provider,
             peerId,
             client,
-            invitationService
+            invitationService,
+            discovery
         );
     }
 
@@ -272,7 +339,8 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
             .AddAspNetCoreWebRtcSignaling(options =>
             {
                 options.HostingMode = AspNetCoreHostingMode.Integrated;
-            });
+            })
+            .AddWebRtcHttpPeerDiscovery();
 
         builder.WebHost.ConfigureKestrel(options =>
         {
@@ -288,15 +356,17 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
 
         var client = app.Services.GetRequiredService<IWebRtcSignalingClient>();
         var invitationService = app.Services.GetRequiredKeyedService<IWebRtcInvitationService>(meshId);
+        var discovery = app.Services.GetRequiredKeyedService<IWebRtcHttpPeerDiscovery>(meshId);
 
-        return new WebRtcSignalingIntegratedTestNode(app, peerId, client, invitationService);
+        return new WebRtcSignalingIntegratedTestNode(app, peerId, client, invitationService, discovery);
     }
 
     private sealed record WebRtcSignalingStandaloneTestNode(
         ServiceProvider Provider,
         PeerId Id,
         IWebRtcSignalingClient Client,
-        IWebRtcInvitationService InvitationService) : IAsyncDisposable
+        IWebRtcInvitationService InvitationService,
+        IWebRtcHttpPeerDiscovery Discovery) : IAsyncDisposable
     {
         public async ValueTask DisposeAsync()
         {
@@ -314,7 +384,8 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
         WebApplication App,
         PeerId Id,
         IWebRtcSignalingClient Client,
-        IWebRtcInvitationService InvitationService) : IAsyncDisposable
+        IWebRtcInvitationService InvitationService,
+        IWebRtcHttpPeerDiscovery Discovery) : IAsyncDisposable
     {
         public async ValueTask DisposeAsync()
         {

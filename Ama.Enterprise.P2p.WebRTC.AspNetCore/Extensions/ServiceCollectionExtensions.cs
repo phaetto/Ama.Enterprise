@@ -3,10 +3,12 @@ namespace Ama.Enterprise.P2p.WebRTC.AspNetCore.Extensions;
 using System;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Extensions;
+using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.WebRTC.AspNetCore.Models;
 using Ama.Enterprise.P2p.WebRTC.AspNetCore.Services;
 using Ama.Enterprise.P2p.WebRTC.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -37,9 +39,6 @@ public static class ServiceCollectionExtensions
         }
 
         builder.Services.Configure(builder.MeshId, configAction);
-        
-        builder.Services.AddHttpClient();
-        builder.Services.AddSingleton<IWebRtcSignalingClient, WebRtcSignalingClient>();
 
         builder.Services.AddHostedService(sp =>
         {
@@ -54,6 +53,37 @@ public static class ServiceCollectionExtensions
                 invitationService,
                 serializer,
                 logger);
+        });
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers the out-of-band HTTP peer discovery mechanism connecting natively to remote WebRTC signaling endpoints.
+    /// </summary>
+    public static IP2pMeshBuilder AddWebRtcHttpPeerDiscovery(this IP2pMeshBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
+        if (!tracker.TryRegister(builder.MeshId + "_WebRtcHttpPeerDiscovery"))
+        {
+            return builder;
+        }
+
+        builder.Services.AddHttpClient();
+        builder.Services.TryAddSingleton<IWebRtcSignalingClient, WebRtcSignalingClient>();
+
+        builder.Services.AddKeyedSingleton<IWebRtcHttpPeerDiscovery>(builder.MeshId, (sp, key) =>
+        {
+            var signalingClient = sp.GetRequiredService<IWebRtcSignalingClient>();
+            var invitationService = sp.GetRequiredKeyedService<IWebRtcInvitationService>(key);
+            var peerRegistry = sp.GetRequiredService<IPeerRegistry>();
+            var authenticator = sp.GetRequiredKeyedService<IPeerAuthenticator>(key);
+            var failureDetector = sp.GetRequiredKeyedService<IFailureDetector>(key);
+            var logger = sp.GetRequiredService<ILogger<WebRtcHttpPeerDiscovery>>();
+            
+            return new WebRtcHttpPeerDiscovery((string)key!, signalingClient, invitationService, peerRegistry, authenticator, failureDetector, logger);
         });
 
         return builder;

@@ -67,4 +67,22 @@ public sealed class P2pMeshRegistrationTracker
 
         return true;
     }
+
+    /// <summary>
+    /// Validates if a parameterless component is already registered for the specified mesh identifier.
+    /// </summary>
+    /// <param name="meshId">The mesh identifier.</param>
+    /// <returns>True if uniquely registered, false if already securely registered.</returns>
+    /// <exception cref="ArgumentException">Thrown if the mesh identifier is null or empty.</exception>
+    public bool TryRegister(string meshId)
+    {
+        if (string.IsNullOrWhiteSpace(meshId))
+        {
+            throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshId));
+        }
+
+        var key = $"{meshId}_Parameterless";
+
+        return registeredOptions.TryAdd(key, true);
+    }
 }
