@@ -27,10 +27,7 @@ public static class ServiceCollectionExtensions
         this IP2pMeshBuilder builder,
         Action<WebRtcOptions>? configureOptions = null)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
 
         var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
         if (!tracker.TryRegister(builder.MeshId, configureOptions))

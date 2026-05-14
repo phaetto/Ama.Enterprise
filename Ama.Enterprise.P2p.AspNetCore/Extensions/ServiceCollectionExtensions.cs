@@ -68,10 +68,7 @@ public static class ServiceCollectionExtensions
         this IP2pMeshBuilder builder,
         Action<AspNetCoreTransportOptions>? configureOptions = null)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
 
         Action<AspNetCoreTransportOptions> configAction = options => 
         {

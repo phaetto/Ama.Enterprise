@@ -42,8 +42,8 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         ILogger<TableStorageDistributedCrdtStorage> logger,
         IMeterFactory? meterFactory = null)
     {
-        if (options == null) throw new ArgumentNullException(nameof(options));
-        
+        ArgumentNullException.ThrowIfNull(options);
+
         var storageOptions = options.Value ?? throw new ArgumentException("Options value cannot be null.", nameof(options));
 
         if (string.IsNullOrEmpty(storageOptions.ConnectionString))
@@ -122,7 +122,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
     public async Task SaveGlobalVersionVectorAsync(string replicaId, DottedVersionVector globalVersionVector, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
-        if (globalVersionVector == null) throw new ArgumentNullException(nameof(globalVersionVector));
+        ArgumentNullException.ThrowIfNull(globalVersionVector);
 
         try
         {
@@ -238,7 +238,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
     public void Append(string documentId, IReadOnlyList<CrdtOperation> operations)
     {
         if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
-        if (operations == null) throw new ArgumentNullException(nameof(operations));
+        ArgumentNullException.ThrowIfNull(operations);
         if (operations.Count == 0) return;
 
         var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
@@ -288,7 +288,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
     public async Task AppendAsync(string documentId, IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
-        if (operations == null) throw new ArgumentNullException(nameof(operations));
+        ArgumentNullException.ThrowIfNull(operations);
         if (operations.Count == 0) return;
 
         var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
@@ -369,7 +369,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
     public async IAsyncEnumerable<JournaledOperation> GetOperationsByDotsAsync(string originReplicaId, IEnumerable<long> globalClocks, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(originReplicaId)) throw new ArgumentException("Origin replica ID cannot be null or empty.", nameof(originReplicaId));
-        if (globalClocks == null) throw new ArgumentNullException(nameof(globalClocks));
+        ArgumentNullException.ThrowIfNull(globalClocks);
 
         var partitionKey = GetJournalPartitionKey(originReplicaId);
         var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
@@ -433,7 +433,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
     public async Task TrimAsync(IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default)
     {
-        if (globalMinimumVersionVector == null) throw new ArgumentNullException(nameof(globalMinimumVersionVector));
+        ArgumentNullException.ThrowIfNull(globalMinimumVersionVector);
 
         var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
 

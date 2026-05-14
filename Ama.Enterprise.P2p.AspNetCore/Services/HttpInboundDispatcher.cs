@@ -56,11 +56,8 @@ public sealed class HttpInboundDispatcher : IHttpInboundDispatcher, IDisposable
         {
             throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshId));
         }
-        
-        if (onMessageReceived is null)
-        {
-            throw new ArgumentNullException(nameof(onMessageReceived));
-        }
+
+        ArgumentNullException.ThrowIfNull(onMessageReceived);
 
         listeners.AddOrUpdate(meshId, onMessageReceived, (_, _) => onMessageReceived);
         logger.LogInformation("[{MeshId}] HTTP inbound dispatcher registered listener.", meshId);

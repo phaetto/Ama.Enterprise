@@ -34,7 +34,7 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
     {
         if (string.IsNullOrWhiteSpace(peerReplicaId)) throw new ArgumentException("Peer Replica ID cannot be null or empty.", nameof(peerReplicaId));
         if (string.IsNullOrWhiteSpace(peerId)) throw new ArgumentException("Peer ID cannot be null or empty.", nameof(peerId));
-        if (globalState == null) throw new ArgumentNullException(nameof(globalState));
+        ArgumentNullException.ThrowIfNull(globalState);
 
         lock (syncRoot)
         {

@@ -83,7 +83,7 @@ public sealed class CrdtTableEntity : ITableEntity
     /// <exception cref="InvalidOperationException">Thrown if data exceeds the 15 segment limit.</exception>
     public void SetPayload(byte[] data)
     {
-        if (data == null) throw new ArgumentNullException(nameof(data));
+        ArgumentNullException.ThrowIfNull(data);
 
         var offset = 0;
         const int chunkLimit = 64000;

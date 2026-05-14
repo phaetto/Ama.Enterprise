@@ -15,6 +15,7 @@ using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
+using Ama.Enterprise.UnitTests.Networking;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,7 +23,7 @@ using Microsoft.Extensions.Logging;
 using Shouldly;
 using Xunit;
 
-public sealed class AspNetCoreTransportIntegrationTests(ITestOutputHelper testOutputHelper)
+public sealed class AspNetCoreTransportIntegrationTests(ITestOutputHelper testOutputHelper, NetworkResourceManager resourceManager) : IClassFixture<NetworkResourceManager>
 {
     private sealed record DummyPeerEndpoint : PeerEndpoint;
 
@@ -36,12 +37,9 @@ public sealed class AspNetCoreTransportIntegrationTests(ITestOutputHelper testOu
             return Task.CompletedTask;
         }
     }
-
-    private static int portCounter = 50000;
     
     private readonly ITestOutputHelper testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
-
-    private static int GetNextPort() => Interlocked.Increment(ref portCounter);
+    private readonly NetworkResourceManager resourceManager = resourceManager ?? throw new ArgumentNullException(nameof(resourceManager));
 
     [IntegrationFact]
     public async Task AspNetCoreTransport_EndToEndMessageExchange_Succeeds()
@@ -53,8 +51,8 @@ public sealed class AspNetCoreTransportIntegrationTests(ITestOutputHelper testOu
         var peerAId = new PeerId(Guid.NewGuid());
         var peerBId = new PeerId(Guid.NewGuid());
 
-        var portA = GetNextPort();
-        var portB = GetNextPort();
+        var portA = resourceManager.GetNextPort();
+        var portB = resourceManager.GetNextPort();
 
         var payloadBytes = System.Text.Encoding.UTF8.GetBytes("Hello AspNetCore World");
         var messageToSend = new GossipMessage(meshId, Guid.NewGuid(), peerAId, 10, payloadBytes);
@@ -105,8 +103,8 @@ public sealed class AspNetCoreTransportIntegrationTests(ITestOutputHelper testOu
         var peerAId = new PeerId(Guid.NewGuid());
         var peerBId = new PeerId(Guid.NewGuid());
 
-        var portA = GetNextPort();
-        var portB = GetNextPort();
+        var portA = resourceManager.GetNextPort();
+        var portB = resourceManager.GetNextPort();
 
         var payloadBytes = System.Text.Encoding.UTF8.GetBytes("Hello Integrated AspNetCore World");
         var messageToSend = new GossipMessage(meshId, Guid.NewGuid(), peerAId, 10, payloadBytes);
@@ -151,8 +149,8 @@ public sealed class AspNetCoreTransportIntegrationTests(ITestOutputHelper testOu
         var peerAId = new PeerId(Guid.NewGuid());
         var peerBId = new PeerId(Guid.NewGuid());
 
-        var portA = GetNextPort();
-        var portB = GetNextPort();
+        var portA = resourceManager.GetNextPort();
+        var portB = resourceManager.GetNextPort();
 
         var messageAtoB = new GossipMessage(meshId, Guid.NewGuid(), peerAId, 10, System.Text.Encoding.UTF8.GetBytes("AtoB via AspNetCore"));
         var messageBtoA = new GossipMessage(meshId, Guid.NewGuid(), peerBId, 10, System.Text.Encoding.UTF8.GetBytes("BtoA via AspNetCore"));
@@ -211,8 +209,8 @@ public sealed class AspNetCoreTransportIntegrationTests(ITestOutputHelper testOu
         var peerAId = new PeerId(Guid.NewGuid());
         var deadPeerId = new PeerId(Guid.NewGuid());
         
-        var portA = GetNextPort();
-        var deadPort = GetNextPort();
+        var portA = resourceManager.GetNextPort();
+        var deadPort = resourceManager.GetNextPort();
 
         await using var nodeA = CreateTestNode(meshId, peerAId, portA);
 
@@ -238,7 +236,7 @@ public sealed class AspNetCoreTransportIntegrationTests(ITestOutputHelper testOu
         // Arrange
         var meshId = "aspnetcore-mesh-canhandle";
         var peerAId = new PeerId(Guid.NewGuid());
-        var portA = GetNextPort();
+        var portA = resourceManager.GetNextPort();
         
         await using var nodeA = CreateTestNode(meshId, peerAId, portA);
 

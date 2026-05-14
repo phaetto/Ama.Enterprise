@@ -143,10 +143,7 @@ public sealed class P2pAdvancedIntegrationTests(ITestOutputHelper testOutputHelp
 
     private bool HasPayload(TestNode node, string expectedText)
     {
-        if (node is null)
-        {
-            throw new ArgumentNullException(nameof(node));
-        }
+        ArgumentNullException.ThrowIfNull(node);
 
         if (string.IsNullOrEmpty(expectedText))
         {
@@ -209,15 +206,9 @@ public sealed class P2pAdvancedIntegrationTests(ITestOutputHelper testOutputHelp
 
     private async Task RegisterPeerAsync(TestNode sourceNode, TestNode targetNode, CancellationToken cancellationToken)
     {
-        if (sourceNode is null)
-        {
-            throw new ArgumentNullException(nameof(sourceNode));
-        }
-        
-        if (targetNode is null)
-        {
-            throw new ArgumentNullException(nameof(targetNode));
-        }
+        ArgumentNullException.ThrowIfNull(sourceNode);
+
+        ArgumentNullException.ThrowIfNull(targetNode);
 
         var nodeDetails = new PeerNode(targetNode.Id, targetNode.Endpoint);
         await sourceNode.Registry.AddOrUpdatePeerAsync(TestMeshId, nodeDetails, PeerStatus.Active, cancellationToken).ConfigureAwait(false);

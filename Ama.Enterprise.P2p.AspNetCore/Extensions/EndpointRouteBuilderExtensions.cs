@@ -1,5 +1,6 @@
 namespace Ama.Enterprise.P2p.AspNetCore.Extensions;
 
+using System;
 using Ama.Enterprise.P2p.AspNetCore.Models;
 using Ama.Enterprise.P2p.AspNetCore.Services;
 using Ama.Enterprise.P2p.AspNetCore.Services.Discovery;
@@ -10,27 +11,31 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
-/// Provides extension methods for seamlessly routing decentralized ASP.NET Core application HTTP traffic mapped actively bounding P2P meshes dynamically.
+/// Provides extension methods for routing decentralized ASP.NET Core application HTTP traffic mapped to P2P meshes.
 /// </summary>
 public static class EndpointRouteBuilderExtensions
 {
     /// <summary>
-    /// Maps generic inbound POST endpoints bounding decoupled payload streams handling multiple distinct mesh topology roots securely isolated mapping standard routes purely.
+    /// Maps generic inbound POST endpoints handling multiple distinct mesh topology roots via standard routes.
     /// </summary>
-    /// <param name="endpoints">The route builder instance tracking internal HTTP structural boundaries cleanly.</param>
-    /// <param name="routePrefix">The base path prefix standardizing generic explicit routes natively. Defaults to "/ama-enterprise/p2p-mesh".</param>
-    /// <returns>A convention builder safely permitting explicit mapped dynamic endpoint customization purely.</returns>
+    /// <param name="endpoints">The route builder instance tracking internal HTTP structural boundaries.</param>
+    /// <param name="routePrefix">The base path prefix standardizing generic explicit routes. Defaults to "/ama-enterprise/p2p-mesh".</param>
+    /// <returns>A convention builder permitting explicit mapped endpoint customization.</returns>
     public static IEndpointConventionBuilder MapP2pMeshEndpoints(this IEndpointRouteBuilder endpoints, string routePrefix = "/ama-enterprise/p2p-mesh")
     {
-        if (endpoints is null)
-        {
-            throw new ArgumentNullException(nameof(endpoints));
-        }
+        ArgumentNullException.ThrowIfNull(endpoints);
 
         var pattern = $"{routePrefix.TrimEnd('/')}/{{meshId}}";
 
-        return endpoints.MapPost(pattern, async (HttpContext context, string meshId) =>
+        return endpoints.MapPost(pattern, new RequestDelegate(async context =>
         {
+            var meshId = context.GetRouteValue("meshId")?.ToString();
+            if (string.IsNullOrEmpty(meshId))
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                return;
+            }
+
             var dispatcher = context.RequestServices.GetRequiredService<IHttpInboundDispatcher>();
             var incomingVersion = context.Request.Headers["X-P2P-Protocol-Version"].ToString();
             
@@ -46,26 +51,30 @@ public static class EndpointRouteBuilderExtensions
                 HttpPayloadProcessResult.InternalServerError => StatusCodes.Status500InternalServerError,
                 _ => StatusCodes.Status500InternalServerError
             };
-        });
+        }));
     }
 
     /// <summary>
-    /// Maps phase 2 inbound discovery handshake endpoints tracking actively decoupled discovery topologies routing explicitly isolated explicit integrated bounds gracefully natively.
+    /// Maps phase 2 inbound discovery handshake endpoints tracking decoupled discovery topologies.
     /// </summary>
     /// <param name="endpoints">The explicitly constrained route builder mapping boundaries.</param>
-    /// <param name="routePrefix">The base structurally standard path resolving Phase 2 decoupled probes organically. Defaults to "/ama-enterprise/p2p-handshake".</param>
-    /// <returns>A unified standard ASP.NET convention builder ensuring identical robust custom configurations natively cleanly.</returns>
+    /// <param name="routePrefix">The base path resolving Phase 2 decoupled probes. Defaults to "/ama-enterprise/p2p-handshake".</param>
+    /// <returns>A unified standard ASP.NET convention builder ensuring identical custom configurations.</returns>
     public static IEndpointConventionBuilder MapP2pMeshHandshakes(this IEndpointRouteBuilder endpoints, string routePrefix = "/ama-enterprise/p2p-handshake")
     {
-        if (endpoints is null)
-        {
-            throw new ArgumentNullException(nameof(endpoints));
-        }
+        ArgumentNullException.ThrowIfNull(endpoints);
 
         var pattern = $"{routePrefix.TrimEnd('/')}/{{meshId}}";
 
-        return endpoints.MapPost(pattern, async (HttpContext context, string meshId) =>
+        return endpoints.MapPost(pattern, new RequestDelegate(async context =>
         {
+            var meshId = context.GetRouteValue("meshId")?.ToString();
+            if (string.IsNullOrEmpty(meshId))
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                return;
+            }
+
             var handshaker = context.RequestServices.GetKeyedService<IPeerHandshaker>(meshId) as AspNetCorePeerHandshaker;
             if (handshaker is not null)
             {
@@ -75,6 +84,6 @@ public static class EndpointRouteBuilderExtensions
             {
                 context.Response.StatusCode = StatusCodes.Status404NotFound;
             }
-        });
+        }));
     }
 }

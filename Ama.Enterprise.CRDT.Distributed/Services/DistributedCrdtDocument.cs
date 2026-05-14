@@ -71,10 +71,10 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         IDocumentIdProvider documentIdProvider,
         IMeterFactory? meterFactory = null)
     {
-        if (options == null) throw new ArgumentNullException(nameof(options));
-        if (initialState == null) throw new ArgumentNullException(nameof(initialState));
-        if (documentIdProvider == null) throw new ArgumentNullException(nameof(documentIdProvider));
-        
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(initialState);
+        ArgumentNullException.ThrowIfNull(documentIdProvider);
+
         this.replicaContext = replicaContext ?? throw new ArgumentNullException(nameof(replicaContext));
         this.applicator = applicator ?? throw new ArgumentNullException(nameof(applicator));
         this.metadataManager = metadataManager ?? throw new ArgumentNullException(nameof(metadataManager));
@@ -184,7 +184,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// <inheritdoc />
     public async Task ApplyOperationsAsync(IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default)
     {
-        if (operations == null) throw new ArgumentNullException(nameof(operations));
+        ArgumentNullException.ThrowIfNull(operations);
         if (operations.Count == 0) return;
 
         await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);

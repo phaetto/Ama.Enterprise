@@ -19,7 +19,7 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddFeatureFlags(this IServiceCollection services, string replicaId, Action<FeatureFlagOptions>? configure = null)
     {
-        if (services == null) throw new ArgumentNullException(nameof(services));
+        ArgumentNullException.ThrowIfNull(services);
         if (string.IsNullOrWhiteSpace(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
 
         var ffOpts = new FeatureFlagOptions();

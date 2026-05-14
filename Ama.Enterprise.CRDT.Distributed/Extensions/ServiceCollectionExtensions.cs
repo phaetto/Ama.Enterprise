@@ -22,7 +22,7 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddDistributedCrdtCore(this IServiceCollection services, Action<DistributedCrdtOptions>? configure = null)
     {
-        if (services == null) throw new ArgumentNullException(nameof(services));
+        ArgumentNullException.ThrowIfNull(services);
 
         var optionsBuilder = services.AddOptions<DistributedCrdtOptions>();
 
@@ -77,7 +77,7 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddDistributedCrdtReplica(this IServiceCollection services, string replicaId)
     {
-        if (services == null) throw new ArgumentNullException(nameof(services));
+        ArgumentNullException.ThrowIfNull(services);
         if (string.IsNullOrWhiteSpace(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
 
         services.AddSingleton(new DistributedCrdtReplicaRegistration(replicaId));
@@ -89,7 +89,7 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddDistributedDocumentType<TState>(this IServiceCollection services, string typeAlias) where TState : class, new()
     {
-        if (services == null) throw new ArgumentNullException(nameof(services));
+        ArgumentNullException.ThrowIfNull(services);
         if (string.IsNullOrWhiteSpace(typeAlias)) throw new ArgumentException("Type alias cannot be null or empty.", nameof(typeAlias));
 
         services.AddKeyedSingleton<IDocumentFactory>(typeAlias, new DocumentFactory<TState>());
@@ -103,7 +103,7 @@ public static class ServiceCollectionExtensions
         where TService : class
         where TImplementation : class, TService
     {
-        if (services == null) throw new ArgumentNullException(nameof(services));
+        ArgumentNullException.ThrowIfNull(services);
 
         services.AddScoped<TService, TImplementation>();
 
@@ -115,7 +115,7 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddDistributedCrdtP2p(this IServiceCollection services, string meshId, string replicaId)
     {
-        if (services == null) throw new ArgumentNullException(nameof(services));
+        ArgumentNullException.ThrowIfNull(services);
         if (string.IsNullOrWhiteSpace(meshId)) throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshId));
         if (string.IsNullOrWhiteSpace(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
 
@@ -136,8 +136,8 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddDistributedCrdtStorage<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TStorage>(this IServiceCollection services) 
         where TStorage : class, IDistributedCrdtStorage
     {
-        if (services == null) throw new ArgumentNullException(nameof(services));
-        
+        ArgumentNullException.ThrowIfNull(services);
+
         services.RemoveAll(typeof(IDistributedCrdtStorage));
         services.AddScoped<IDistributedCrdtStorage, TStorage>();
         

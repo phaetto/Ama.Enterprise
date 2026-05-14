@@ -20,10 +20,7 @@ public sealed class P2pMeshRegistrationTracker
     /// <exception cref="ArgumentNullException">Thrown if the services collection is null.</exception>
     public static P2pMeshRegistrationTracker GetOrCreate(IServiceCollection services)
     {
-        if (services == null)
-        {
-            throw new ArgumentNullException(nameof(services));
-        }
+        ArgumentNullException.ThrowIfNull(services);
 
         var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(P2pMeshRegistrationTracker));
         if (descriptor?.ImplementationInstance is P2pMeshRegistrationTracker existingTracker)

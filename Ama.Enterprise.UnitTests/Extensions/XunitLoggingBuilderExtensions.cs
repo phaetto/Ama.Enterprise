@@ -17,15 +17,9 @@ public static class XunitLoggingBuilderExtensions
     /// <returns>The updated logging builder.</returns>
     public static ILoggingBuilder AddXunit(this ILoggingBuilder builder, ITestOutputHelper testOutputHelper)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
 
-        if (testOutputHelper is null)
-        {
-            throw new ArgumentNullException(nameof(testOutputHelper));
-        }
+        ArgumentNullException.ThrowIfNull(testOutputHelper);
 
         builder.AddProvider(new XunitLoggerProvider(testOutputHelper));
         return builder;

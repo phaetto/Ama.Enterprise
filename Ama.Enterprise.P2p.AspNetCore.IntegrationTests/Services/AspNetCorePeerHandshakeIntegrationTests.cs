@@ -14,6 +14,7 @@ using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
+using Ama.Enterprise.UnitTests.Networking;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,17 +23,16 @@ using Microsoft.Extensions.Logging;
 using Shouldly;
 using Xunit;
 
-public sealed class AspNetCorePeerHandshakeIntegrationTests
+public sealed class AspNetCorePeerHandshakeIntegrationTests : IClassFixture<NetworkResourceManager>
 {
     private readonly ITestOutputHelper testOutputHelper;
-    private static int portCounter = 15000;
+    private readonly NetworkResourceManager resourceManager;
 
-    public AspNetCorePeerHandshakeIntegrationTests(ITestOutputHelper testOutputHelper)
+    public AspNetCorePeerHandshakeIntegrationTests(ITestOutputHelper testOutputHelper, NetworkResourceManager resourceManager)
     {
         this.testOutputHelper = testOutputHelper ?? throw new ArgumentNullException(nameof(testOutputHelper));
+        this.resourceManager = resourceManager ?? throw new ArgumentNullException(nameof(resourceManager));
     }
-
-    private static int GetNextPort() => Interlocked.Increment(ref portCounter);
 
     [IntegrationFact]
     public async Task AspNetCorePeerHandshaker_DirectHandshake_Succeeds()
@@ -44,8 +44,8 @@ public sealed class AspNetCorePeerHandshakeIntegrationTests
         var peerAId = new PeerId(Guid.NewGuid());
         var peerBId = new PeerId(Guid.NewGuid());
 
-        var portA = GetNextPort();
-        var portB = GetNextPort();
+        var portA = resourceManager.GetNextPort();
+        var portB = resourceManager.GetNextPort();
 
         testOutputHelper.WriteLine("Initializing Nodes for Direct ASP.NET Core Standalone Handshake...");
         await using var nodeA = CreateTestNode(meshId, peerAId, portA, null, 0);
@@ -87,8 +87,8 @@ public sealed class AspNetCorePeerHandshakeIntegrationTests
         var peerAId = new PeerId(Guid.NewGuid());
         var peerBId = new PeerId(Guid.NewGuid());
 
-        var portA = GetNextPort();
-        var portB = GetNextPort();
+        var portA = resourceManager.GetNextPort();
+        var portB = resourceManager.GetNextPort();
 
         testOutputHelper.WriteLine("Initializing WebApplications for Integrated ASP.NET Core Handshake...");
         await using var appA = CreateIntegratedTestNode(meshId, peerAId, portA);
@@ -135,11 +135,11 @@ public sealed class AspNetCorePeerHandshakeIntegrationTests
         var peerAId = new PeerId(Guid.NewGuid());
         var peerBId = new PeerId(Guid.NewGuid());
 
-        var portA = GetNextPort();
-        var portB = GetNextPort();
+        var portA = resourceManager.GetNextPort();
+        var portB = resourceManager.GetNextPort();
         
         var multicastGroup = "239.2.2.2";
-        var multicastPort = GetNextPort();
+        var multicastPort = resourceManager.GetNextPort();
 
         testOutputHelper.WriteLine("Initializing Nodes for UDP Discovery + ASP.NET Core Handshake...");
         await using var nodeA = CreateTestNode(meshId, peerAId, portA, multicastGroup, multicastPort);
@@ -190,10 +190,10 @@ public sealed class AspNetCorePeerHandshakeIntegrationTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
 
         var peers = Enumerable.Range(0, 5).Select(_ => new PeerId(Guid.NewGuid())).ToList();
-        var ports = Enumerable.Range(0, 5).Select(_ => GetNextPort()).ToList();
+        var ports = Enumerable.Range(0, 5).Select(_ => resourceManager.GetNextPort()).ToList();
         
         var multicastGroup = "239.5.5.5";
-        var multicastPort = GetNextPort();
+        var multicastPort = resourceManager.GetNextPort();
 
         var nodes = new List<AspNetCoreTestNode>();
         testOutputHelper.WriteLine("Initializing 5 Nodes for ASP.NET Core/UDP Topology...");
@@ -264,16 +264,16 @@ public sealed class AspNetCorePeerHandshakeIntegrationTests
         var peerAId = new PeerId(Guid.NewGuid());
         var peerBId = new PeerId(Guid.NewGuid());
         
-        var mesh1PortA = GetNextPort();
-        var mesh1PortB = GetNextPort();
-        var mesh2PortA = GetNextPort();
-        var mesh2PortB = GetNextPort();
+        var mesh1PortA = resourceManager.GetNextPort();
+        var mesh1PortB = resourceManager.GetNextPort();
+        var mesh2PortA = resourceManager.GetNextPort();
+        var mesh2PortB = resourceManager.GetNextPort();
 
         var multicastGroup1 = "239.3.3.3";
-        var multicastPort1 = GetNextPort();
+        var multicastPort1 = resourceManager.GetNextPort();
         
         var multicastGroup2 = "239.4.4.4";
-        var multicastPort2 = GetNextPort();
+        var multicastPort2 = resourceManager.GetNextPort();
 
         testOutputHelper.WriteLine("Initializing Multi-Mesh Nodes using decoupled ASP.NET Core + UDP natively mapped target ports explicitly securely...");
         await using var nodeA = CreateMultiMeshNode(peerAId, mesh1Id, mesh2Id, mesh1PortA, mesh2PortA, multicastGroup1, multicastPort1, multicastGroup2, multicastPort2);

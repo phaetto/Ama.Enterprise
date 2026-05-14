@@ -10,7 +10,15 @@ using System.Threading;
 /// </summary>
 public sealed class NetworkResourceManager : IDisposable
 {
-    private static int currentPort = 10000;
+    private static int currentPort;
+
+    static NetworkResourceManager()
+    {
+        // Initialize with a random starting port to prevent collisions across multiple test assemblies
+        // executing in parallel (which run in separate processes and therefore have their own static fields).
+        // This bounds the starting port roughly between 10000 and 40000.
+        currentPort = 10000 + (Math.Abs(Guid.NewGuid().GetHashCode()) % 30000);
+    }
 
     /// <summary>
     /// Gets the next available unique network port.
@@ -25,7 +33,7 @@ public sealed class NetworkResourceManager : IDisposable
             // Loop back if we exceed the dynamic port range
             if (port > 65000)
             {
-                Interlocked.Exchange(ref currentPort, 10000);
+                Interlocked.Exchange(ref currentPort, 10000 + (Math.Abs(Guid.NewGuid().GetHashCode()) % 30000));
                 continue;
             }
 

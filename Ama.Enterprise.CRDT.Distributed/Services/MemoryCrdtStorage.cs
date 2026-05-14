@@ -33,7 +33,7 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     public void Append(string documentId, IReadOnlyList<CrdtOperation> operationsList)
     {
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
-        if (operationsList == null) throw new ArgumentNullException(nameof(operationsList));
+        ArgumentNullException.ThrowIfNull(operationsList);
 
         lock (syncRoot)
         {
@@ -80,7 +80,7 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     public async IAsyncEnumerable<JournaledOperation> GetOperationsByDotsAsync(string originReplicaId, IEnumerable<long> globalClocks, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(originReplicaId)) throw new ArgumentException("Origin Replica ID cannot be null or empty.", nameof(originReplicaId));
-        if (globalClocks == null) throw new ArgumentNullException(nameof(globalClocks));
+        ArgumentNullException.ThrowIfNull(globalClocks);
 
         var clocks = globalClocks.ToHashSet();
         List<JournaledOperation> snapshot;
@@ -101,7 +101,7 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     /// <inheritdoc />
     public void Trim(IReadOnlyDictionary<string, long> gmvv)
     {
-        if (gmvv == null) throw new ArgumentNullException(nameof(gmvv));
+        ArgumentNullException.ThrowIfNull(gmvv);
 
         lock (syncRoot)
         {

@@ -21,10 +21,7 @@ public static class ServiceCollectionExtensions
     /// <returns>Transitive IServiceCollection ensuring cascaded registrations.</returns>
     public static IServiceCollection AddP2pTelemetryForwarder(this IServiceCollection services, Action<TelemetryOptions>? configure = null)
     {
-        if (services is null)
-        {
-            throw new ArgumentNullException(nameof(services));
-        }
+        ArgumentNullException.ThrowIfNull(services);
 
         if (configure is not null)
         {
@@ -46,10 +43,7 @@ public static class ServiceCollectionExtensions
     /// <returns>Transitive IServiceCollection ensuring cascaded registrations.</returns>
     public static IServiceCollection AddP2pTelemetryAggregator(this IServiceCollection services, string meshId)
     {
-        if (services is null)
-        {
-            throw new ArgumentNullException(nameof(services));
-        }
+        ArgumentNullException.ThrowIfNull(services);
 
         if (string.IsNullOrWhiteSpace(meshId))
         {

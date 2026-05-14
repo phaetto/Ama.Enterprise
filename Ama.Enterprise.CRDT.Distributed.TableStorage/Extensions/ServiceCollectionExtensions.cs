@@ -19,8 +19,8 @@ public static class ServiceCollectionExtensions
     /// <returns>The configured service collection.</returns>
     public static IServiceCollection AddDistributedCrdtTableStorage(this IServiceCollection services, Action<TableStorageCrdtOptions> configureOptions)
     {
-        if (services == null) throw new ArgumentNullException(nameof(services));
-        if (configureOptions == null) throw new ArgumentNullException(nameof(configureOptions));
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configureOptions);
 
         services.Configure(configureOptions);
         services.AddDistributedCrdtStorage<TableStorageDistributedCrdtStorage>();

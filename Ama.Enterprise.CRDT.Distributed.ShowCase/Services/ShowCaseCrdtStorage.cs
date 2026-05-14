@@ -31,7 +31,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         ICrdtSerializer serializer,
         ILogger<ShowCaseCrdtStorage> logger)
     {
-        if (replicaContext == null) throw new ArgumentNullException(nameof(replicaContext));
+        ArgumentNullException.ThrowIfNull(replicaContext);
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
@@ -133,7 +133,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
     public async Task SaveGlobalVersionVectorAsync(string replicaId, DottedVersionVector globalVersionVector, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(replicaId)) throw new ArgumentException("Value cannot be null or empty.", nameof(replicaId));
-        if (globalVersionVector == null) throw new ArgumentNullException(nameof(globalVersionVector));
+        ArgumentNullException.ThrowIfNull(globalVersionVector);
 
         var filePath = GetGlobalFilePath(replicaId);
         try
@@ -150,7 +150,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
     public void Append(string documentId, IReadOnlyList<CrdtOperation> operationsList)
     {
         if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
-        if (operationsList == null) throw new ArgumentNullException(nameof(operationsList));
+        ArgumentNullException.ThrowIfNull(operationsList);
 
         lock (syncRoot)
         {
@@ -174,7 +174,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
     public async Task AppendAsync(string documentId, IReadOnlyList<CrdtOperation> operationsList, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
-        if (operationsList == null) throw new ArgumentNullException(nameof(operationsList));
+        ArgumentNullException.ThrowIfNull(operationsList);
 
         bool added = false;
         List<JournaledOperation> snapshot;
@@ -226,7 +226,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
     public async IAsyncEnumerable<JournaledOperation> GetOperationsByDotsAsync(string originReplicaId, IEnumerable<long> globalClocks, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(originReplicaId)) throw new ArgumentException("Value cannot be null or empty.", nameof(originReplicaId));
-        if (globalClocks == null) throw new ArgumentNullException(nameof(globalClocks));
+        ArgumentNullException.ThrowIfNull(globalClocks);
 
         var clocks = globalClocks.ToHashSet();
         List<JournaledOperation> snapshot;
@@ -255,7 +255,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
 
     public void Trim(IReadOnlyDictionary<string, long> gmvv)
     {
-        if (gmvv == null) throw new ArgumentNullException(nameof(gmvv));
+        ArgumentNullException.ThrowIfNull(gmvv);
 
         lock (syncRoot)
         {
