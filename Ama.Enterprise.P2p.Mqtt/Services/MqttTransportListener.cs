@@ -1,6 +1,8 @@
 namespace Ama.Enterprise.P2p.Mqtt.Services;
 
 using System;
+using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
@@ -18,6 +20,10 @@ public sealed class MqttTransportListener : ITransportListener, IDisposable
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<MqttTransportListener> logger;
     
+    private readonly Meter meter;
+    private readonly Counter<long> messagesReceivedCounter;
+    private readonly Histogram<long> payloadBytesHistogram;
+
     private Func<IMeshMessage, Task>? onMessageReceivedCallback;
     private bool isDisposed;
 
@@ -28,7 +34,8 @@ public sealed class MqttTransportListener : ITransportListener, IDisposable
         string meshId,
         IMqttClientManager clientManager,
         ICrdtSerializer serializer,
-        ILogger<MqttTransportListener> logger)
+        ILogger<MqttTransportListener> logger,
+        IMeterFactory? meterFactory = null)
     {
         ArgumentNullException.ThrowIfNull(meshId);
         ArgumentNullException.ThrowIfNull(clientManager);
@@ -39,6 +46,16 @@ public sealed class MqttTransportListener : ITransportListener, IDisposable
         this.clientManager = clientManager;
         this.serializer = serializer;
         this.logger = logger;
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.P2p.MqttTransportListener") ?? new Meter("Ama.Enterprise.P2p.MqttTransportListener");
+        this.messagesReceivedCounter = this.meter.CreateCounter<long>(
+            "p2p.transport.mqtt.messages_received", 
+            "messages", 
+            "Total messages received via MQTT transport");
+        this.payloadBytesHistogram = this.meter.CreateHistogram<long>(
+            "p2p.transport.mqtt.inbound_payload_bytes", 
+            "bytes", 
+            "Size of inbound MQTT payload in bytes");
     }
 
     /// <inheritdoc />
@@ -72,6 +89,10 @@ public sealed class MqttTransportListener : ITransportListener, IDisposable
     {
         if (onMessageReceivedCallback is null) return;
 
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
+        messagesReceivedCounter.Add(1, tags);
+        payloadBytesHistogram.Record(payload.Length, tags);
+
         try
         {
             var message = serializer.DeserializeFromBytes<IMeshMessage>(payload);
@@ -96,6 +117,7 @@ public sealed class MqttTransportListener : ITransportListener, IDisposable
     {
         if (isDisposed) return;
         clientManager.OnMessageReceived -= OnClientManagerMessageReceived;
+        meter.Dispose();
         isDisposed = true;
     }
 }

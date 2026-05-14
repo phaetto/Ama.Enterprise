@@ -3,6 +3,7 @@ namespace Ama.Enterprise.P2p.WebRTC.Services;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,25 +18,59 @@ using SIPSorcery.Net;
 /// <summary>
 /// Implements the management of WebRTC connections and out-of-band signaling using SIPSorcery.
 /// </summary>
-/// <remarks>
-/// Initializes a new instance of the <see cref="WebRtcConnectionManager"/> class.
-/// </remarks>
-public sealed class WebRtcConnectionManager(
-    string meshId,
-    IOptionsMonitor<WebRtcOptions> optionsMonitor,
-    IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
-    IPeerRegistry peerRegistry,
-    ICrdtSerializer serializer,
-    ILogger<WebRtcConnectionManager> logger) : IWebRtcConnectionManager, IWebRtcInvitationService, IDisposable
+public sealed class WebRtcConnectionManager : IWebRtcConnectionManager, IWebRtcInvitationService, IDisposable
 {
-    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-    private readonly IOptionsMonitor<WebRtcOptions> optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
-    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor = nodeOptionsMonitor ?? throw new ArgumentNullException(nameof(nodeOptionsMonitor));
-    private readonly IPeerRegistry peerRegistry = peerRegistry ?? throw new ArgumentNullException(nameof(peerRegistry));
-    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-    private readonly ILogger<WebRtcConnectionManager> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly string meshId;
+    private readonly IOptionsMonitor<WebRtcOptions> optionsMonitor;
+    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
+    private readonly IPeerRegistry peerRegistry;
+    private readonly ICrdtSerializer serializer;
+    private readonly ILogger<WebRtcConnectionManager> logger;
     
     private readonly ConcurrentDictionary<Guid, PeerConnectionState> connections = new();
+
+    private readonly Meter meter;
+    private readonly UpDownCounter<long> activeConnectionsUpDownCounter;
+    private readonly Counter<long> connectionsCreatedCounter;
+    private readonly Counter<long> connectionsClosedCounter;
+
+    public WebRtcConnectionManager(
+        string meshId,
+        IOptionsMonitor<WebRtcOptions> optionsMonitor,
+        IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
+        IPeerRegistry peerRegistry,
+        ICrdtSerializer serializer,
+        ILogger<WebRtcConnectionManager> logger,
+        IMeterFactory? meterFactory = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
+        ArgumentNullException.ThrowIfNull(optionsMonitor);
+        ArgumentNullException.ThrowIfNull(nodeOptionsMonitor);
+        ArgumentNullException.ThrowIfNull(peerRegistry);
+        ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        this.meshId = meshId;
+        this.optionsMonitor = optionsMonitor;
+        this.nodeOptionsMonitor = nodeOptionsMonitor;
+        this.peerRegistry = peerRegistry;
+        this.serializer = serializer;
+        this.logger = logger;
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.P2p.WebRtcConnectionManager") ?? new Meter("Ama.Enterprise.P2p.WebRtcConnectionManager");
+        this.activeConnectionsUpDownCounter = this.meter.CreateUpDownCounter<long>(
+            "p2p.transport.webrtc.active_connections",
+            "connections",
+            "Number of currently active WebRTC connections");
+        this.connectionsCreatedCounter = this.meter.CreateCounter<long>(
+            "p2p.transport.webrtc.connections_created",
+            "connections",
+            "Total number of WebRTC connections created");
+        this.connectionsClosedCounter = this.meter.CreateCounter<long>(
+            "p2p.transport.webrtc.connections_closed",
+            "connections",
+            "Total number of WebRTC connections closed");
+    }
 
     /// <inheritdoc />
     public event Func<Guid, byte[], Task>? OnMessageReceived;
@@ -51,7 +86,10 @@ public sealed class WebRtcConnectionManager(
         var dc = await pc.createDataChannel("p2p-data").ConfigureAwait(false);
         
         var state = new PeerConnectionState(pc, dc);
-        connections.TryAdd(connectionId, state);
+        if (connections.TryAdd(connectionId, state))
+        {
+            TrackConnectionCreated();
+        }
 
         BindDataChannelEvents(connectionId, dc);
 
@@ -76,7 +114,11 @@ public sealed class WebRtcConnectionManager(
         var connectionId = Guid.NewGuid();
         var pc = CreatePeerConnection(connectionId);
         var state = new PeerConnectionState(pc, null);
-        connections.TryAdd(connectionId, state);
+        
+        if (connections.TryAdd(connectionId, state))
+        {
+            TrackConnectionCreated();
+        }
 
         pc.ondatachannel += (dc) =>
         {
@@ -155,12 +197,28 @@ public sealed class WebRtcConnectionManager(
     /// <inheritdoc />
     public void Dispose()
     {
-        foreach (var state in connections.Values)
+        foreach (var kvp in connections)
         {
-            state.DataChannel?.close();
-            state.PeerConnection?.Close("Disposing");
+            TrackConnectionClosed();
+            kvp.Value.DataChannel?.close();
+            kvp.Value.PeerConnection?.Close("Disposing");
         }
         connections.Clear();
+        meter.Dispose();
+    }
+
+    private void TrackConnectionCreated()
+    {
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
+        connectionsCreatedCounter.Add(1, tags);
+        activeConnectionsUpDownCounter.Add(1, tags);
+    }
+
+    private void TrackConnectionClosed()
+    {
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
+        connectionsClosedCounter.Add(1, tags);
+        activeConnectionsUpDownCounter.Add(-1, tags);
     }
 
     private RTCPeerConnection CreatePeerConnection(Guid connectionId)
@@ -191,6 +249,7 @@ public sealed class WebRtcConnectionManager(
             {
                 if (connections.TryRemove(connectionId, out var removedState))
                 {
+                    TrackConnectionClosed();
                     removedState.DataChannel?.close();
                     removedState.PeerConnection?.Close("Disconnected");
                 }

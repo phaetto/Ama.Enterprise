@@ -2,6 +2,8 @@ namespace Ama.Enterprise.P2p.AspNetCore.Services;
 
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,14 +16,38 @@ using Microsoft.Extensions.Logging;
 /// <summary>
 /// Singleton orchestrator managing decoupling of inbound HTTP frameworks mapping raw payloads into decoupled P2P processing delegates.
 /// </summary>
-public sealed class HttpInboundDispatcher(
-    ICrdtSerializer serializer,
-    ILogger<HttpInboundDispatcher> logger) : IHttpInboundDispatcher
+public sealed class HttpInboundDispatcher : IHttpInboundDispatcher, IDisposable
 {
-    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-    private readonly ILogger<HttpInboundDispatcher> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ICrdtSerializer serializer;
+    private readonly ILogger<HttpInboundDispatcher> logger;
     
     private readonly ConcurrentDictionary<string, Func<IMeshMessage, Task>> listeners = new(StringComparer.Ordinal);
+
+    private readonly Meter meter;
+    private readonly Counter<long> messagesReceivedCounter;
+    private readonly Histogram<long> payloadBytesHistogram;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="HttpInboundDispatcher"/> class.
+    /// </summary>
+    public HttpInboundDispatcher(
+        ICrdtSerializer serializer,
+        ILogger<HttpInboundDispatcher> logger,
+        IMeterFactory? meterFactory = null)
+    {
+        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.P2p.HttpInboundDispatcher") ?? new Meter("Ama.Enterprise.P2p.HttpInboundDispatcher");
+        this.messagesReceivedCounter = this.meter.CreateCounter<long>(
+            "p2p.transport.aspnetcore.messages_received",
+            "messages",
+            "Total messages received via ASP.NET Core transport");
+        this.payloadBytesHistogram = this.meter.CreateHistogram<long>(
+            "p2p.transport.aspnetcore.inbound_payload_bytes",
+            "bytes",
+            "Size of inbound ASP.NET Core payload in bytes");
+    }
 
     /// <inheritdoc />
     public void RegisterListener(string meshId, Func<IMeshMessage, Task> onMessageReceived)
@@ -74,6 +100,11 @@ public sealed class HttpInboundDispatcher(
             await bodyStream.CopyToAsync(memoryStream, cancellationToken).ConfigureAwait(false);
             
             var payload = memoryStream.ToArray();
+
+            var tags = new KeyValuePair<string, object?>[] { new("mesh_id", targetMeshId) };
+            messagesReceivedCounter.Add(1, tags);
+            payloadBytesHistogram.Record(payload.Length, tags);
+
             var message = serializer.DeserializeFromBytes<IMeshMessage>(payload);
 
             if (message is null) 
@@ -134,5 +165,11 @@ public sealed class HttpInboundDispatcher(
         var v2Major = version2.Split('.')[0];
 
         return string.Equals(v1Major, v2Major, StringComparison.Ordinal);
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        meter.Dispose();
     }
 }

@@ -2,6 +2,7 @@ namespace Ama.Enterprise.CRDT.Distributed.TableStorage.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -18,7 +19,7 @@ using Ama.Enterprise.CRDT.Distributed.TableStorage.Models;
 /// <summary>
 /// A centralized unified Azure Table Storage implementation capturing overarching CRDT trees bounding asynchronously mapped DVV tracking bounds.
 /// </summary>
-public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
+public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage, IDisposable
 {
     private const string GlobalDvvPartitionKey = "GlobalDVV";
     private const string DocumentStatePartitionKey = "DocumentState";
@@ -29,10 +30,17 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<TableStorageDistributedCrdtStorage> logger;
 
+    private readonly Meter meter;
+    private readonly Counter<long> operationsReadCounter;
+    private readonly Counter<long> operationsWriteCounter;
+    private readonly Counter<long> operationsDeleteCounter;
+    private readonly Histogram<long> payloadBytesHistogram;
+
     public TableStorageDistributedCrdtStorage(
         IOptions<TableStorageCrdtOptions> options,
         ICrdtSerializer serializer,
-        ILogger<TableStorageDistributedCrdtStorage> logger)
+        ILogger<TableStorageDistributedCrdtStorage> logger,
+        IMeterFactory? meterFactory = null)
     {
         if (options == null) throw new ArgumentNullException(nameof(options));
         
@@ -58,6 +66,24 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         {
             this.tableClient.CreateIfNotExists();
         }
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.TableStorage") ?? new Meter("Ama.Enterprise.CRDT.Distributed.TableStorage");
+        this.operationsReadCounter = this.meter.CreateCounter<long>(
+            "crdt.storage.table.reads", 
+            "operations", 
+            "Total read operations from table storage");
+        this.operationsWriteCounter = this.meter.CreateCounter<long>(
+            "crdt.storage.table.writes", 
+            "operations", 
+            "Total write operations to table storage");
+        this.operationsDeleteCounter = this.meter.CreateCounter<long>(
+            "crdt.storage.table.deletes", 
+            "operations", 
+            "Total delete operations from table storage");
+        this.payloadBytesHistogram = this.meter.CreateHistogram<long>(
+            "crdt.storage.table.payload_bytes", 
+            "bytes", 
+            "Size of payloads read or written");
     }
 
     public async Task<DottedVersionVector?> LoadGlobalVersionVectorAsync(string replicaId, CancellationToken cancellationToken = default)
@@ -69,7 +95,15 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
             var response = await this.tableClient.GetEntityAsync<CrdtTableEntity>(GlobalDvvPartitionKey, replicaId, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (response?.Value != null)
             {
+                var tags = new KeyValuePair<string, object?>[] { new("type", "dvv") };
+                this.operationsReadCounter.Add(1, tags);
+
                 var payload = response.Value.GetPayload();
+                if (payload != null)
+                {
+                    this.payloadBytesHistogram.Record(payload.Length, tags);
+                }
+
                 return this.serializer.DeserializeFromBytes<DottedVersionVector>(payload);
             }
         }
@@ -92,7 +126,15 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
         try
         {
+            var tags = new KeyValuePair<string, object?>[] { new("type", "dvv") };
+            this.operationsWriteCounter.Add(1, tags);
+
             var payload = this.serializer.SerializeToBytes(globalVersionVector);
+            if (payload != null)
+            {
+                this.payloadBytesHistogram.Record(payload.Length, tags);
+            }
+
             var entity = new CrdtTableEntity
             {
                 PartitionKey = GlobalDvvPartitionKey,
@@ -117,7 +159,15 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
             var response = await this.tableClient.GetEntityAsync<CrdtTableEntity>(DocumentStatePartitionKey, documentId, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (response?.Value != null)
             {
+                var tags = new KeyValuePair<string, object?>[] { new("type", "document") };
+                this.operationsReadCounter.Add(1, tags);
+
                 var payload = response.Value.GetPayload();
+                if (payload != null)
+                {
+                    this.payloadBytesHistogram.Record(payload.Length, tags);
+                }
+
                 return this.serializer.DeserializeFromBytes<CrdtDocument<TState>>(payload);
             }
         }
@@ -140,7 +190,15 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
         try
         {
+            var tags = new KeyValuePair<string, object?>[] { new("type", "document") };
+            this.operationsWriteCounter.Add(1, tags);
+
             var payload = this.serializer.SerializeToBytes(document);
+            if (payload != null)
+            {
+                this.payloadBytesHistogram.Record(payload.Length, tags);
+            }
+
             var entity = new CrdtTableEntity
             {
                 PartitionKey = DocumentStatePartitionKey,
@@ -163,6 +221,9 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         try
         {
             await this.tableClient.DeleteEntityAsync(DocumentStatePartitionKey, documentId, cancellationToken: cancellationToken).ConfigureAwait(false);
+            
+            var tags = new KeyValuePair<string, object?>[] { new("type", "document") };
+            this.operationsDeleteCounter.Add(1, tags);
         }
         catch (RequestFailedException ex) when (ex.Status == 404)
         {
@@ -180,6 +241,9 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         if (operations == null) throw new ArgumentNullException(nameof(operations));
         if (operations.Count == 0) return;
 
+        var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
+        this.operationsWriteCounter.Add(operations.Count, tags);
+
         var groupedByReplica = operations.GroupBy(op => op.ReplicaId);
 
         foreach (var group in groupedByReplica)
@@ -192,6 +256,11 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
                 var rowKey = GetJournalRowKey(op.GlobalClock);
                 var journaledOp = new JournaledOperation(documentId, op);
                 var payload = this.serializer.SerializeToBytes(journaledOp);
+
+                if (payload != null)
+                {
+                    this.payloadBytesHistogram.Record(payload.Length, tags);
+                }
 
                 var entity = new CrdtTableEntity
                 {
@@ -222,6 +291,9 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         if (operations == null) throw new ArgumentNullException(nameof(operations));
         if (operations.Count == 0) return;
 
+        var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
+        this.operationsWriteCounter.Add(operations.Count, tags);
+
         var groupedByReplica = operations.GroupBy(op => op.ReplicaId);
 
         foreach (var group in groupedByReplica)
@@ -234,6 +306,11 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
                 var rowKey = GetJournalRowKey(op.GlobalClock);
                 var journaledOp = new JournaledOperation(documentId, op);
                 var payload = this.serializer.SerializeToBytes(journaledOp);
+
+                if (payload != null)
+                {
+                    this.payloadBytesHistogram.Record(payload.Length, tags);
+                }
 
                 var entity = new CrdtTableEntity
                 {
@@ -269,10 +346,18 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         var filter = $"PartitionKey eq '{partitionKey}' and RowKey gt '{minRowKey}' and RowKey le '{maxRowKey}'";
 
         var query = this.tableClient.QueryAsync<CrdtTableEntity>(filter, cancellationToken: cancellationToken);
+        var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
 
         await foreach (var entity in query.WithCancellation(cancellationToken))
         {
+            this.operationsReadCounter.Add(1, tags);
+
             var payload = entity.GetPayload();
+            if (payload != null)
+            {
+                this.payloadBytesHistogram.Record(payload.Length, tags);
+            }
+
             var op = this.serializer.DeserializeFromBytes<JournaledOperation>(payload);
             if (op != null)
             {
@@ -287,6 +372,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         if (globalClocks == null) throw new ArgumentNullException(nameof(globalClocks));
 
         var partitionKey = GetJournalPartitionKey(originReplicaId);
+        var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
 
         foreach (var clock in globalClocks)
         {
@@ -306,7 +392,14 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
             if (response?.Value != null)
             {
+                this.operationsReadCounter.Add(1, tags);
+
                 var payload = response.Value.GetPayload();
+                if (payload != null)
+                {
+                    this.payloadBytesHistogram.Record(payload.Length, tags);
+                }
+
                 var op = this.serializer.DeserializeFromBytes<JournaledOperation>(payload);
                 yield return op;
             }
@@ -321,10 +414,18 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         var filter = $"PartitionKey ge '{startPartition}' and PartitionKey le '{endPartition}'";
 
         var query = this.tableClient.QueryAsync<CrdtTableEntity>(filter, cancellationToken: cancellationToken);
+        var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
 
         await foreach (var entity in query.WithCancellation(cancellationToken))
         {
+            this.operationsReadCounter.Add(1, tags);
+
             var payload = entity.GetPayload();
+            if (payload != null)
+            {
+                this.payloadBytesHistogram.Record(payload.Length, tags);
+            }
+
             var op = this.serializer.DeserializeFromBytes<JournaledOperation>(payload);
             yield return op;
         }
@@ -333,6 +434,8 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
     public async Task TrimAsync(IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default)
     {
         if (globalMinimumVersionVector == null) throw new ArgumentNullException(nameof(globalMinimumVersionVector));
+
+        var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
 
         foreach (var kvp in globalMinimumVersionVector)
         {
@@ -350,6 +453,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
             await foreach (var entity in query.WithCancellation(cancellationToken))
             {
+                this.operationsDeleteCounter.Add(1, tags);
                 batch.Add(new TableTransactionAction(TableTransactionActionType.Delete, entity));
 
                 if (batch.Count == 100)
@@ -369,4 +473,9 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
     private static string GetJournalPartitionKey(string replicaId) => $"{JournalPartitionPrefix}{replicaId}";
     
     private static string GetJournalRowKey(long globalClock) => globalClock.ToString("D20");
+
+    public void Dispose()
+    {
+        this.meter.Dispose();
+    }
 }

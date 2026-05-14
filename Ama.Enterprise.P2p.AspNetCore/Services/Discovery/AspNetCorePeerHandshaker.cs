@@ -1,6 +1,8 @@
 namespace Ama.Enterprise.P2p.AspNetCore.Services.Discovery;
 
 using System;
+using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -32,6 +34,10 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IHostedService, 
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<AspNetCorePeerHandshaker> logger;
 
+    private readonly Meter meter;
+    private readonly Counter<long> handshakesSentCounter;
+    private readonly Counter<long> handshakesReceivedCounter;
+
     private IHost? webHost;
     private bool isDisposed;
 
@@ -45,7 +51,8 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IHostedService, 
         PeerEndpoint localEndpoint,
         IHttpClientFactory httpClientFactory,
         ICrdtSerializer serializer,
-        ILogger<AspNetCorePeerHandshaker> logger)
+        ILogger<AspNetCorePeerHandshaker> logger,
+        IMeterFactory? meterFactory = null)
     {
         ArgumentNullException.ThrowIfNull(meshId);
         ArgumentNullException.ThrowIfNull(optionsMonitor);
@@ -62,6 +69,16 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IHostedService, 
         this.httpClientFactory = httpClientFactory;
         this.serializer = serializer;
         this.logger = logger;
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.P2p.AspNetCorePeerHandshaker") ?? new Meter("Ama.Enterprise.P2p.AspNetCorePeerHandshaker");
+        this.handshakesSentCounter = this.meter.CreateCounter<long>(
+            "p2p.discovery.aspnetcore.handshakes_sent", 
+            "handshakes", 
+            "Total handshakes sent via ASP.NET Core");
+        this.handshakesReceivedCounter = this.meter.CreateCounter<long>(
+            "p2p.discovery.aspnetcore.handshakes_received", 
+            "handshakes", 
+            "Total handshakes received via ASP.NET Core");
     }
 
     /// <inheritdoc />
@@ -166,6 +183,8 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IHostedService, 
             if (response.IsSuccessStatusCode)
             {
                 var responseBytes = await response.Content.ReadAsByteArrayAsync(timeoutCts.Token).ConfigureAwait(false);
+                var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
+                handshakesSentCounter.Add(1, tags);
                 return serializer.DeserializeFromBytes<PeerNode>(responseBytes);
             }
             
@@ -193,6 +212,9 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IHostedService, 
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
         try
         {
+            var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
+            handshakesReceivedCounter.Add(1, tags);
+
             using var ms = new MemoryStream();
             await context.Request.Body.CopyToAsync(ms).ConfigureAwait(false);
             var remoteNode = serializer.DeserializeFromBytes<PeerNode>(ms.ToArray());
@@ -227,6 +249,7 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IHostedService, 
             return;
         }
 
+        meter.Dispose();
         webHost?.Dispose();
         isDisposed = true;
     }

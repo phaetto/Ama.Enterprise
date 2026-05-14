@@ -1,6 +1,8 @@
 namespace Ama.Enterprise.P2p.AspNetCore.Services;
 
 using System;
+using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -17,7 +19,7 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Implements outbound transport using HTTP POST requests mapped specifically to a target ASP.NET Core mesh listener.
 /// </summary>
-public sealed class AspNetCoreTransport : ITransport
+public sealed class AspNetCoreTransport : ITransport, IDisposable
 {
     private readonly string meshId;
     private readonly IOptionsMonitor<AspNetCoreTransportOptions> optionsMonitor;
@@ -25,6 +27,10 @@ public sealed class AspNetCoreTransport : ITransport
     private readonly ICrdtSerializer serializer;
     private readonly IPeerRegistry peerRegistry;
     private readonly ILogger<AspNetCoreTransport> logger;
+
+    private readonly Meter meter;
+    private readonly Counter<long> messagesSentCounter;
+    private readonly Histogram<long> payloadBytesHistogram;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AspNetCoreTransport"/> class.
@@ -35,7 +41,8 @@ public sealed class AspNetCoreTransport : ITransport
         IHttpClientFactory httpClientFactory,
         ICrdtSerializer serializer,
         IPeerRegistry peerRegistry,
-        ILogger<AspNetCoreTransport> logger)
+        ILogger<AspNetCoreTransport> logger,
+        IMeterFactory? meterFactory = null)
     {
         ArgumentNullException.ThrowIfNull(meshId);
         ArgumentNullException.ThrowIfNull(optionsMonitor);
@@ -50,6 +57,16 @@ public sealed class AspNetCoreTransport : ITransport
         this.serializer = serializer;
         this.peerRegistry = peerRegistry;
         this.logger = logger;
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.P2p.AspNetCoreTransport") ?? new Meter("Ama.Enterprise.P2p.AspNetCoreTransport");
+        this.messagesSentCounter = this.meter.CreateCounter<long>(
+            "p2p.transport.aspnetcore.messages_sent", 
+            "messages", 
+            "Total messages sent via ASP.NET Core transport");
+        this.payloadBytesHistogram = this.meter.CreateHistogram<long>(
+            "p2p.transport.aspnetcore.outbound_payload_bytes", 
+            "bytes", 
+            "Size of outbound ASP.NET Core payload in bytes");
     }
 
     /// <inheritdoc />
@@ -102,6 +119,11 @@ public sealed class AspNetCoreTransport : ITransport
         client.Timeout = TimeSpan.FromSeconds(5);
 
         var payload = serializer.SerializeToBytes(message);
+
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
+        messagesSentCounter.Add(1, tags);
+        payloadBytesHistogram.Record(payload.Length, tags);
+
         using var content = new ByteArrayContent(payload);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
 
@@ -133,5 +155,11 @@ public sealed class AspNetCoreTransport : ITransport
 
             throw;
         }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        meter.Dispose();
     }
 }

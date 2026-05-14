@@ -1,6 +1,8 @@
 namespace Ama.Enterprise.P2p.WebRTC.Services;
 
 using System;
+using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
@@ -9,23 +11,48 @@ using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Implements generalized inbound data queue listeners hooked inherently directly to the Data Channel bindings safely cleanly gracefully securely seamlessly elegantly properly natively effectively dynamically safely accurately smoothly elegantly efficiently.
+/// Implements generalized inbound data queue listeners hooked inherently directly to the Data Channel bindings.
 /// </summary>
-/// <remarks>
-/// Initializes a new instance of the <see cref="WebRtcTransportListener"/> class.
-/// </remarks>
-public sealed class WebRtcTransportListener(
-    string meshId,
-    IWebRtcConnectionManager connectionManager,
-    ICrdtSerializer serializer,
-    ILogger<WebRtcTransportListener> logger) : ITransportListener, IDisposable
+public sealed class WebRtcTransportListener : ITransportListener, IDisposable
 {
-    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-    private readonly IWebRtcConnectionManager connectionManager = connectionManager ?? throw new ArgumentNullException(nameof(connectionManager));
-    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-    private readonly ILogger<WebRtcTransportListener> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly string meshId;
+    private readonly IWebRtcConnectionManager connectionManager;
+    private readonly ICrdtSerializer serializer;
+    private readonly ILogger<WebRtcTransportListener> logger;
+    
+    private readonly Meter meter;
+    private readonly Counter<long> messagesReceivedCounter;
+    private readonly Histogram<long> payloadBytesHistogram;
     
     private Func<IMeshMessage, Task>? onMessageReceivedCallback;
+
+    public WebRtcTransportListener(
+        string meshId,
+        IWebRtcConnectionManager connectionManager,
+        ICrdtSerializer serializer,
+        ILogger<WebRtcTransportListener> logger,
+        IMeterFactory? meterFactory = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
+        ArgumentNullException.ThrowIfNull(connectionManager);
+        ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        this.meshId = meshId;
+        this.connectionManager = connectionManager;
+        this.serializer = serializer;
+        this.logger = logger;
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.P2p.WebRtcTransportListener") ?? new Meter("Ama.Enterprise.P2p.WebRtcTransportListener");
+        this.messagesReceivedCounter = this.meter.CreateCounter<long>(
+            "p2p.transport.webrtc.messages_received", 
+            "messages", 
+            "Total messages received via WebRTC transport");
+        this.payloadBytesHistogram = this.meter.CreateHistogram<long>(
+            "p2p.transport.webrtc.inbound_payload_bytes", 
+            "bytes", 
+            "Size of inbound WebRTC payload in bytes");
+    }
 
     /// <inheritdoc />
     public Task StartListeningAsync(Func<IMeshMessage, Task> onMessageReceived, CancellationToken cancellationToken)
@@ -44,7 +71,7 @@ public sealed class WebRtcTransportListener(
     {
         connectionManager.OnMessageReceived -= OnConnectionManagerMessageReceived;
         
-        logger.LogInformation("[{MeshId}] Stopped listening for integrated WebRTC generic polymorphic explicitly correctly naturally logically mapped messages.", meshId);
+        logger.LogInformation("[{MeshId}] Stopped listening for integrated WebRTC mapped messages.", meshId);
 
         return Task.CompletedTask;
     }
@@ -55,6 +82,10 @@ public sealed class WebRtcTransportListener(
 
         try
         {
+            var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
+            messagesReceivedCounter.Add(1, tags);
+            payloadBytesHistogram.Record(payload.Length, tags);
+
             var message = serializer.DeserializeFromBytes<IMeshMessage>(payload);
 
             if (message is not null)
@@ -63,7 +94,7 @@ public sealed class WebRtcTransportListener(
             }
             else
             {
-                logger.LogWarning("[{MeshId}] Received invalid or malformed general polymorphic explicitly naturally rationally properly organically gracefully securely intelligently elegantly gracefully naturally accurately organically message over WebRTC from connection {ConnectionId}.", meshId, connectionId);
+                logger.LogWarning("[{MeshId}] Received invalid or malformed mapped message over WebRTC from connection {ConnectionId}.", meshId, connectionId);
             }
         }
         catch (Exception ex)
@@ -76,5 +107,6 @@ public sealed class WebRtcTransportListener(
     public void Dispose()
     {
         connectionManager.OnMessageReceived -= OnConnectionManagerMessageReceived;
+        meter.Dispose();
     }
 }

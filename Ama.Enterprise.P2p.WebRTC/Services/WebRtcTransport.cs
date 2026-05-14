@@ -1,6 +1,8 @@
 namespace Ama.Enterprise.P2p.WebRTC.Services;
 
 using System;
+using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
@@ -10,21 +12,46 @@ using Ama.Enterprise.P2p.WebRTC.Models;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Implements outbound generic transport dynamically mapping polymorphic messages across isolated WebRTC Data Channels correctly smartly cleanly securely flawlessly effortlessly elegantly rationally completely elegantly flawlessly safely gracefully optimally successfully logically.
+/// Implements outbound generic transport dynamically mapping polymorphic messages across isolated WebRTC Data Channels.
 /// </summary>
-/// <remarks>
-/// Initializes a new instance of the <see cref="WebRtcTransport"/> class.
-/// </remarks>
-public sealed class WebRtcTransport(
-    string meshId,
-    IWebRtcConnectionManager connectionManager,
-    ICrdtSerializer serializer,
-    ILogger<WebRtcTransport> logger) : ITransport
+public sealed class WebRtcTransport : ITransport, IDisposable
 {
-    private readonly string meshId = meshId ?? throw new ArgumentNullException(nameof(meshId));
-    private readonly IWebRtcConnectionManager connectionManager = connectionManager ?? throw new ArgumentNullException(nameof(connectionManager));
-    private readonly ICrdtSerializer serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-    private readonly ILogger<WebRtcTransport> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly string meshId;
+    private readonly IWebRtcConnectionManager connectionManager;
+    private readonly ICrdtSerializer serializer;
+    private readonly ILogger<WebRtcTransport> logger;
+    
+    private readonly Meter meter;
+    private readonly Counter<long> messagesSentCounter;
+    private readonly Histogram<long> outboundPayloadBytesHistogram;
+
+    public WebRtcTransport(
+        string meshId,
+        IWebRtcConnectionManager connectionManager,
+        ICrdtSerializer serializer,
+        ILogger<WebRtcTransport> logger,
+        IMeterFactory? meterFactory = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
+        ArgumentNullException.ThrowIfNull(connectionManager);
+        ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        this.meshId = meshId;
+        this.connectionManager = connectionManager;
+        this.serializer = serializer;
+        this.logger = logger;
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.P2p.WebRtcTransport") ?? new Meter("Ama.Enterprise.P2p.WebRtcTransport");
+        this.messagesSentCounter = this.meter.CreateCounter<long>(
+            "p2p.transport.webrtc.messages_sent", 
+            "messages", 
+            "Total messages sent via WebRTC transport");
+        this.outboundPayloadBytesHistogram = this.meter.CreateHistogram<long>(
+            "p2p.transport.webrtc.outbound_payload_bytes", 
+            "bytes", 
+            "Size of outbound WebRTC payload in bytes");
+    }
 
     /// <inheritdoc />
     public bool CanHandle(PeerEndpoint endpoint) => endpoint is WebRtcPeerEndpoint;
@@ -39,6 +66,17 @@ public sealed class WebRtcTransport(
         }
 
         var payload = serializer.SerializeToBytes(message);
+        
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
+        messagesSentCounter.Add(1, tags);
+        outboundPayloadBytesHistogram.Record(payload.Length, tags);
+        
         return connectionManager.SendMessageAsync(webrtcEndpoint.ConnectionId, payload, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        meter.Dispose();
     }
 }
