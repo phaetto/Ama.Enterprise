@@ -1,6 +1,8 @@
 namespace Ama.Enterprise.P2p.WebRTC.AspNetCore.Services;
 
 using System;
+using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.IO;
 using System.Net;
 using System.Threading;
@@ -28,6 +30,11 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<WebRtcSignalingServer> logger;
 
+    private readonly Meter meter;
+    private readonly Counter<long> requestsReceivedCounter;
+    private readonly Histogram<long> payloadOutHistogram;
+    private readonly Histogram<long> payloadInHistogram;
+
     private IHost? webHost;
     private bool isDisposed;
 
@@ -36,7 +43,8 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
         IOptionsMonitor<WebRtcSignalingOptions> optionsMonitor,
         IWebRtcInvitationService invitationService,
         ICrdtSerializer serializer,
-        ILogger<WebRtcSignalingServer> logger)
+        ILogger<WebRtcSignalingServer> logger,
+        IMeterFactory? meterFactory = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
         ArgumentNullException.ThrowIfNull(optionsMonitor);
@@ -49,6 +57,20 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
         this.invitationService = invitationService;
         this.serializer = serializer;
         this.logger = logger;
+
+        this.meter = meterFactory?.Create("Ama.Enterprise.P2p.WebRtcSignalingServer") ?? new Meter("Ama.Enterprise.P2p.WebRtcSignalingServer");
+        this.requestsReceivedCounter = this.meter.CreateCounter<long>(
+            "p2p.webrtc.signaling.server.requests_received", 
+            "requests", 
+            "Total mapped explicit inbound WebRTC signaling requests safely orchestrated natively");
+        this.payloadOutHistogram = this.meter.CreateHistogram<long>(
+            "p2p.webrtc.signaling.server.outbound_bytes", 
+            "bytes", 
+            "Size of outbound bounds dynamically mapped WebRTC signaling payloads explicitly in bytes");
+        this.payloadInHistogram = this.meter.CreateHistogram<long>(
+            "p2p.webrtc.signaling.server.inbound_bytes", 
+            "bytes", 
+            "Size of inbound natively isolated WebRTC signaling payloads explicitly in bytes");
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -139,11 +161,16 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
 
     private async Task HandleOfferAsync(HttpContext context)
     {
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId), new("action", "offer") };
+        requestsReceivedCounter.Add(1, tags);
+
         try
         {
             var offer = await invitationService.CreateInvitationAsync(context.RequestAborted).ConfigureAwait(false);
             var responseBytes = serializer.SerializeToBytes(offer);
             
+            payloadOutHistogram.Record(responseBytes.Length, tags);
+
             context.Response.StatusCode = StatusCodes.Status200OK;
             context.Response.ContentType = "application/json";
             context.Response.ContentLength = responseBytes.Length;
@@ -158,14 +185,21 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
 
     private async Task HandleAnswerAsync(HttpContext context)
     {
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId), new("action", "answer") };
+        requestsReceivedCounter.Add(1, tags);
+
         try
         {
             using var ms = new MemoryStream();
             await context.Request.Body.CopyToAsync(ms, context.RequestAborted).ConfigureAwait(false);
+            
+            payloadInHistogram.Record(ms.Length, tags);
             var offer = serializer.DeserializeFromBytes<WebRtcInvitationOffer>(ms.ToArray());
 
             var answer = await invitationService.AcceptInvitationAsync(offer.SdpOffer, context.RequestAborted).ConfigureAwait(false);
             var responseBytes = serializer.SerializeToBytes(answer);
+
+            payloadOutHistogram.Record(responseBytes.Length, tags);
 
             context.Response.StatusCode = StatusCodes.Status200OK;
             context.Response.ContentType = "application/json";
@@ -181,10 +215,15 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
 
     private async Task HandleFinalizeAsync(HttpContext context)
     {
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId), new("action", "finalize") };
+        requestsReceivedCounter.Add(1, tags);
+
         try
         {
             using var ms = new MemoryStream();
             await context.Request.Body.CopyToAsync(ms, context.RequestAborted).ConfigureAwait(false);
+            
+            payloadInHistogram.Record(ms.Length, tags);
             var answer = serializer.DeserializeFromBytes<WebRtcInvitationAnswer>(ms.ToArray());
 
             await invitationService.FinalizeInvitationAsync(answer.ConnectionId, answer.SdpAnswer, context.RequestAborted).ConfigureAwait(false);
@@ -201,6 +240,7 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
     {
         if (isDisposed) return;
         webHost?.Dispose();
+        meter.Dispose();
         isDisposed = true;
     }
 }
