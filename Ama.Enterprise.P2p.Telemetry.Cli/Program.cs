@@ -41,7 +41,12 @@ internal sealed class Program
         var handshakePort = GetNextAvailablePort(httpPort + 1);
 
         // Need base services and serialization
-        services.AddCrdt();
+        services.AddCrdt()
+                .AddCrdtSystemTextJson(useBrotliCompression: true);
+
+        //services.AddCrdtMessagePack(
+        //    Ama.Enterprise.CRDT.MessagePack.Formatters.ShowCase_MessagePackResolver.Instance
+        //);
 
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IClusterMetricsAggregator, ClusterMetricsAggregator>();

@@ -253,6 +253,14 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         await Task.CompletedTask;
     }
 
+    public Task<long> GetJournalCountAsync(CancellationToken cancellationToken = default)
+    {
+        lock (syncRoot)
+        {
+            return Task.FromResult((long)journal.Count);
+        }
+    }
+
     public void Trim(IReadOnlyDictionary<string, long> gmvv)
     {
         ArgumentNullException.ThrowIfNull(gmvv);

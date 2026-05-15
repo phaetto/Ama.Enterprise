@@ -1,6 +1,9 @@
 <Solution>
   <Folder Name="/Analyzers/">
+    <Project Path="Ama.Enterprise.CRDT.Analyzers.UnitTests/Ama.Enterprise.CRDT.Analyzers.UnitTests.csproj" Id="2cacdc77-25d8-4390-8d29-7f3da41092b3" />
     <Project Path="Ama.Enterprise.CRDT.Analyzers/Ama.Enterprise.CRDT.Analyzers.csproj" Id="ca718036-9dd1-42b1-a53a-158a6336f699" />
+    <Project Path="Ama.Enterprise.CRDT.MessagePack.Analyzers.UnitTests/Ama.Enterprise.CRDT.MessagePack.Analyzers.UnitTests.csproj" />
+    <Project Path="Ama.Enterprise.CRDT.MessagePack.Analyzers/Ama.Enterprise.CRDT.MessagePack.Analyzers.csproj" />
     <Project Path="Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj" />
     <Project Path="Ama.Enterprise.Project.Analyzers/Ama.Enterprise.Project.Analyzers.csproj" />
   </Folder>
@@ -37,7 +40,10 @@
   <Project Path="Ama.Enterprise.CRDT.Distributed.TableStorage/Ama.Enterprise.CRDT.Distributed.TableStorage.csproj" Id="b760640c-c398-4458-a771-53ea772b31d2" />
   <Project Path="Ama.Enterprise.CRDT.Distributed.UnitTests/Ama.Enterprise.CRDT.Distributed.UnitTests.csproj" Id="2048c2a6-0842-4d57-a42e-94919ded6fa4" />
   <Project Path="Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj" Id="2fe2382f-1652-48b6-b2e4-6f07cb4214dc" />
+  <Project Path="Ama.Enterprise.CRDT.MemoryPack.UnitTests/Ama.Enterprise.CRDT.MemoryPack.UnitTests.csproj" Id="8b26bc34-b185-4249-88d2-2cdcde370549" />
   <Project Path="Ama.Enterprise.CRDT.MemoryPack/Ama.Enterprise.CRDT.MemoryPack.csproj" Id="f0f76679-d0a0-41fc-a832-5b09055fcfd0" />
+  <Project Path="Ama.Enterprise.CRDT.MessagePack.UnitTests/Ama.Enterprise.CRDT.MessagePack.UnitTests.csproj" Id="d5cffb87-ecff-47cd-b060-28f635451996" />
+  <Project Path="Ama.Enterprise.CRDT.MessagePack/Ama.Enterprise.CRDT.MessagePack.csproj" />
   <Project Path="Ama.Enterprise.CRDT.TableStorage/Ama.Enterprise.CRDT.TableStorage.csproj" Id="807a871d-7aad-43f6-83c2-48e62e019c07" />
   <Project Path="Ama.Enterprise.P2p.AspNetCore.IntegrationTests/Ama.Enterprise.P2p.AspNetCore.IntegrationTests.csproj" />
   <Project Path="Ama.Enterprise.P2p.AspNetCore/Ama.Enterprise.P2p.AspNetCore.csproj" />

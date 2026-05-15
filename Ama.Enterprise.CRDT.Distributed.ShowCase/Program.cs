@@ -65,7 +65,8 @@ public static class Program
                 .AddCrdtJsonTypeInfoResolver(ShowCaseJsonContext.Default)
                 .AddCrdtAotContext(new ShowCaseCrdtAotContext())
                 .AddCrdtSerializableType<TaskItem>("task-item")
-                .AddCrdtSerializableType<DeviceStatus>("device-status");
+                .AddCrdtSerializableType<DeviceStatus>("device-status")
+                .AddCrdtSystemTextJson(useBrotliCompression: true);
 
         // Register document types into the orchestrator and expose generic interfaces via explicit transparent forwarders
         services.AddDistributedDocumentType<TaskListState>("task-list");
@@ -168,6 +169,39 @@ public static class Program
             // UI refresh bindings
             taskManager.StateChanged += (sender, eventArgs) => DrawState(orchestrator, taskManager, fleetManager);
             fleetManager.StateChanged += (sender, eventArgs) => DrawState(orchestrator, taskManager, fleetManager);
+
+#if DEBUG
+            if (Debugger.IsAttached)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        // Ensure the document exists first to avoid invalid mutations
+                        await orchestrator.CreateDocumentAsync("bbb", "task-list", cts.Token).ConfigureAwait(false);
+                        logger.LogInformation("Debug mode detected. Pumping 150 changes/sec to task_001...");
+
+                        // Batching 15 requests every 100ms yields 150 requests/sec reliably.
+                        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(100));
+                        while (await timer.WaitForNextTickAsync(cts.Token).ConfigureAwait(false))
+                        {
+                            for (var i = 0; i < 15; i++)
+                            {
+                                await taskManager.SetTaskAsync("bbb", "task_001", "TaskBased", false, cts.Token).ConfigureAwait(false);
+                            }
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Expected during graceful shutdown
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Load generator failed.");
+                    }
+                }, cts.Token);
+            }
+#endif
 
             DrawMenu();
             DrawState(orchestrator, taskManager, fleetManager);
