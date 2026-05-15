@@ -1,4 +1,5 @@
 namespace Ama.Enterprise.CRDT.Distributed.Models;
+
 /// <summary>
 /// Configuration options for the Distributed CRDT module.
 /// </summary>
@@ -43,4 +44,11 @@ public sealed class DistributedCrdtOptions
     /// Defaults to 1000. Set to 0 to disable forced limits (relying strictly on safe GMVV trims).
     /// </summary>
     public int JournalTrimThreshold { get; set; } = 1000;
+
+    /// <summary>
+    /// Gets or sets the Time-To-Live (TTL) in seconds for CRDT metadata compaction.
+    /// When operations exceed this age, their associated metadata (like tombstones) is eligible for garbage collection.
+    /// Defaults to 0 (compaction disabled).
+    /// </summary>
+    public int CompactionTtlSeconds { get; set; } = 0;
 }

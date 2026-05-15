@@ -34,7 +34,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Services/TableStorageDistributedCrdtStorage.cs` | Azure Table Storage distributed backend implementing explicitly robust efficient native partition evaluations fetching constrained `GetJournalCountAsync` natively natively. |
 | `$/Ama.Enterprise.CRDT.Distributed.UnitTests/Ama.Enterprise.CRDT.Distributed.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj` | No description provided. |
-| `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | Extension methods for bootstrapping CRDT dependencies. Updated to natively validate `JournalTrimThreshold`. |
+| `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | Extension methods for bootstrapping CRDT dependencies. Updated to add dynamic ThresholdCompactionPolicyFactory resolutions utilizing `CompactionTtlSeconds`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtEvictionRejectionMessage.cs` | Message broadcasted to forcefully reject and re-bootstrap nodes that have been tombstoned by the cluster, preventing amnesia edge cases. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtMessageWrapper.cs` | Envelope wrapper mapping generic messages targeting specifically identified CRDT documents across the network topology. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtOperationsMessage.cs` | Transmission model conveying replicated CRDT intent patches targeted asynchronously across active nodes. |
@@ -42,7 +42,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtRegistryState.cs` | Global P2P synced directory state handling distributed multi-document topologies, ensuring active instantiation maps across nodes. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtSnapshotMessage.cs` | Message payload containing a complete materialized CRDT document snapshot, used as a fallback synchronization mechanism when log truncation gaps are detected. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtStateSyncMessage.cs` | Structure carrying generic synchronization states formatted across anti-entropy operations representing document DVV. |
-| `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtOptions.cs` | Added `JournalTrimThreshold` property enforcing configurable aggressive journaling trimming bounds cleanly. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtOptions.cs` | Added `JournalTrimThreshold` property enforcing configurable aggressive journaling trimming bounds cleanly, alongside `CompactionTtlSeconds` enabling time-based garbage collection thresholds explicitly. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtP2pJsonContext.cs` | JSON serialization context mapping AOT bindings resolving eviction message constraints. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtReplicaRegistration.cs` | Represents a dynamically registered Replica ID enforcing discrete CRDT multi-mesh state architectures inherently. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtSystemAotContext.cs` | AOT contextual reflection mapping for internal orchestrator registry CRDT scopes, bridging models. |

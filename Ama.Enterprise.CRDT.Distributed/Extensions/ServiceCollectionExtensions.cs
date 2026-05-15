@@ -5,12 +5,15 @@ using System.Diagnostics.CodeAnalysis;
 using Ama.CRDT.Extensions;
 using Ama.CRDT.Models;
 using Ama.CRDT.Services.Decorators;
+using Ama.CRDT.Services.GarbageCollection;
+using Ama.CRDT.Services.Providers;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.Services.P2p;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Extension methods for registering distributed CRDT state logic supporting multi-replica environments.
@@ -44,6 +47,8 @@ public static class ServiceCollectionExtensions
                 "PeerEvictionTtlSeconds must be greater than or equal to the CheckpointIntervalSeconds as evictions are processed during checkpoint cycles.")
             .Validate(options => options.JournalTrimThreshold >= 0, 
                 "JournalTrimThreshold cannot be negative.")
+            .Validate(options => options.CompactionTtlSeconds >= 0, 
+                "CompactionTtlSeconds cannot be negative.")
             .ValidateOnStart();
 
         services.AddCrdt()
@@ -60,6 +65,20 @@ public static class ServiceCollectionExtensions
         services.AddCrdtApplicatorDecorator<JournalingApplicatorDecorator>(DecoratorBehavior.After);
         services.AddCrdtPatcherDecorator<JournalingPatcherDecorator>(DecoratorBehavior.After);
         services.AddCrdtApplicatorDecorator<CompactingApplicatorDecorator>(DecoratorBehavior.After);
+
+        services.AddCrdtCompactionPolicyFactory(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<DistributedCrdtOptions>>().Value;
+            if (options.CompactionTtlSeconds > 0)
+            {
+                return new ThresholdCompactionPolicyFactory(
+                    TimeSpan.FromSeconds(options.CompactionTtlSeconds),
+                    sp.GetRequiredService<ICrdtTimestampProvider>());
+            }
+
+            // Disabled compaction (threshold is minimal possible timestamp, never compacts)
+            return new ThresholdCompactionPolicyFactory(() => new EpochTimestamp(long.MinValue));
+        });
 
         services.TryAddSingleton<IDistributedCrdtScopeFactory, DistributedCrdtScopeFactory>();
         services.TryAddSingleton<DistributedCrdtScopeManager>();
