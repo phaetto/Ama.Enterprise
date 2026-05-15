@@ -57,6 +57,13 @@ public interface IDistributedCrdtStorage : ICrdtOperationJournal
     Task DeleteDocumentAsync(string documentId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Retrieves the total number of journaled operations currently stored, evaluating limits efficiently.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The total operation count natively.</returns>
+    Task<long> GetJournalCountAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Asynchronously trims the underlying operation journal securely to remove obsolete operations strictly mapped across the background synchronized version vector bounds.
     /// </summary>
     /// <param name="globalMinimumVersionVector">The mapped version vector boundaries resolving safe historic patch removal limits.</param>

@@ -35,4 +35,12 @@ public sealed class DistributedCrdtOptions
     /// If enabled (> 0), must be at least 3x the <see cref="AntiEntropyIntervalSeconds"/> and >= <see cref="CheckpointIntervalSeconds"/> to prevent structural cluster oscillation.
     /// </summary>
     public int PeerEvictionTtlSeconds { get; set; } = 0;
+
+    /// <summary>
+    /// Gets or sets the threshold limit for the total number of operations kept in the background journal.
+    /// When this limit is exceeded, an aggressive trim is forced utilizing the local version vector,
+    /// seamlessly offloading lagging peer synchronization entirely to fallback Snapshot mechanisms.
+    /// Defaults to 1000. Set to 0 to disable forced limits (relying strictly on safe GMVV trims).
+    /// </summary>
+    public int JournalTrimThreshold { get; set; } = 1000;
 }

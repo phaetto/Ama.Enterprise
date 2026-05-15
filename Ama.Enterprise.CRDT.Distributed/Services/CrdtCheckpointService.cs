@@ -117,21 +117,38 @@ public sealed class CrdtCheckpointService : BackgroundService
 
                     await scope.Storage.SaveGlobalVersionVectorAsync(scope.ReplicaId, safelyPersistedDvv, stoppingToken).ConfigureAwait(false);
 
-                    var clusterStates = new List<DottedVersionVector>(scope.ClusterTracker.GetClusterStates())
+                    long journalCount = 0;
+                    if (options.Value.JournalTrimThreshold > 0)
                     {
-                        safelyPersistedDvv
-                    };
+                        journalCount = await scope.Storage.GetJournalCountAsync(stoppingToken).ConfigureAwait(false);
+                    }
 
-                    if (clusterStates.Count > 0)
+                    if (options.Value.JournalTrimThreshold > 0 && journalCount >= options.Value.JournalTrimThreshold)
                     {
-                        var syncService = scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
-                        var gmvv = syncService.CalculateGlobalMinimumVersionVector(clusterStates);
-
-                        if (gmvv.Count > 0)
+                        // Force an aggressive journal trim dropping all acknowledged local operations
+                        // and inherently offloading synchronization for lagging peers over to efficient full snapshot mechanisms.
+                        await scope.Storage.TrimAsync(safelyPersistedDvv.Versions.ToDictionary(), stoppingToken).ConfigureAwait(false);
+                        trimmedJournalsCounter.Add(1, tag);
+                        logger.LogWarning("[{ReplicaId}] Journal size ({Count}) exceeded threshold ({Threshold}). Forced an aggressive journal trim relying on fallback snapshot synchronization.", scope.ReplicaId, journalCount, options.Value.JournalTrimThreshold);
+                    }
+                    else
+                    {
+                        var clusterStates = new List<DottedVersionVector>(scope.ClusterTracker.GetClusterStates())
                         {
-                            await scope.Storage.TrimAsync(gmvv, stoppingToken).ConfigureAwait(false);
-                            trimmedJournalsCounter.Add(1, tag);
-                            logger.LogTrace("[{ReplicaId}] Executed background journal trim matching Global Minimum Version Vector bounds.", scope.ReplicaId);
+                            safelyPersistedDvv
+                        };
+
+                        if (clusterStates.Count > 0)
+                        {
+                            var syncService = scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
+                            var gmvv = syncService.CalculateGlobalMinimumVersionVector(clusterStates);
+
+                            if (gmvv.Count > 0)
+                            {
+                                await scope.Storage.TrimAsync(gmvv, stoppingToken).ConfigureAwait(false);
+                                trimmedJournalsCounter.Add(1, tag);
+                                logger.LogTrace("[{ReplicaId}] Executed background journal trim matching Global Minimum Version Vector bounds.", scope.ReplicaId);
+                            }
                         }
                     }
                 }

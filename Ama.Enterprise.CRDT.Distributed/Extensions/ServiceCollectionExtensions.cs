@@ -42,6 +42,8 @@ public static class ServiceCollectionExtensions
                 "PeerEvictionTtlSeconds must be at least 3 times the AntiEntropyIntervalSeconds to prevent peer topology oscillation.")
             .Validate(options => options.PeerEvictionTtlSeconds == 0 || options.PeerEvictionTtlSeconds >= options.CheckpointIntervalSeconds, 
                 "PeerEvictionTtlSeconds must be greater than or equal to the CheckpointIntervalSeconds as evictions are processed during checkpoint cycles.")
+            .Validate(options => options.JournalTrimThreshold >= 0, 
+                "JournalTrimThreshold cannot be negative.")
             .ValidateOnStart();
 
         services.AddCrdt()

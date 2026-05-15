@@ -16,6 +16,7 @@ using Ama.CRDT.Services.Journaling;
 using Ama.CRDT.Services.Serialization;
 using Ama.CRDT.Services.Versioning;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
+using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.UnitTests.Attributes;
@@ -273,5 +274,68 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         doc2!.DocumentId.ShouldBe("test-replayed-doc");
         doc2.Document.Data.DataMap.ShouldContainKeyAndValue("key1", "ReplayedData1");
         doc2.Document.Data.DataMap.ShouldContainKeyAndValue("key2", "ReplayedData2");
+    }
+
+    [IntegrationFact]
+    public async Task CrdtCheckpointService_ShouldAggressivelyTrimJournal_WhenThresholdIsExceeded()
+    {
+        // Arrange
+        var sharedStorage = new MemoryCrdtStorage();
+
+        var sp = BuildNode("Replica1", services =>
+        {
+            // Override the default options injected by BuildNode to trigger fast checkpoints and tight bounds limits
+            services.Configure<DistributedCrdtOptions>(opt =>
+            {
+                opt.CheckpointIntervalSeconds = 1;
+                opt.JournalTrimThreshold = 5;
+            });
+            services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(sharedStorage));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var patcher = scope.ServiceProvider.GetRequiredService<ICrdtPatcher>();
+
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("trim-test-doc", "journal-doc", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
+        var doc = orchestrator.GetDocument<JournalTestState>("trim-test-doc")!;
+
+        // Generate and apply more than 5 operations to exceed the aggressive trim threshold natively
+        for (int i = 0; i < 10; i++)
+        {
+            var intent = new MapSetIntent($"key{i}", $"value{i}");
+            var op = patcher.GenerateOperation(doc.Document, x => x.DataMap, intent);
+            await doc.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
+        }
+
+        // Verify journal has accumulated operations successfully before background trimming begins
+        var initialJournalOps = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
+        initialJournalOps.Count.ShouldBeGreaterThan(10);
+
+        // Fetch the active background service managing the checkpoints
+        var checkpointService = sp.GetServices<IHostedService>().OfType<CrdtCheckpointService>().First();
+        
+        // Act - Start the background service manually executing the threshold bounds logic
+        await checkpointService.StartAsync(CancellationToken.None);
+
+        // Provide enough time to trigger the periodic check-pointing background tick (1 second configured interval)
+        await Task.Delay(1500);
+
+        // Stop the service gracefully natively dropping active loops
+        await checkpointService.StopAsync(CancellationToken.None);
+
+        // Assert - The mechanism detects unbounded lists exceeding the threshold and drops trailing limits natively
+        var trimmedJournalOps = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
+        
+        trimmedJournalOps.Count.ShouldBeLessThan(initialJournalOps.Count);
+        
+        // Since there is only one localized node tracking this global structural matrix natively, the overarching GMVV
+        // evaluates exclusively up to the local logical head clock. Meaning it strictly forces aggressive log truncation
+        // fully dropping limits to or below the enforced capacity thresholds efficiently correctly.
+        trimmedJournalOps.Count.ShouldBeLessThanOrEqualTo(5);
     }
 }

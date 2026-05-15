@@ -406,6 +406,27 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         }
     }
 
+    public async Task<long> GetJournalCountAsync(CancellationToken cancellationToken = default)
+    {
+        var startPartition = JournalPartitionPrefix;
+        var endPartition = JournalPartitionPrefix + "~";
+
+        var filter = $"PartitionKey ge '{startPartition}' and PartitionKey le '{endPartition}'";
+
+        var query = this.tableClient.QueryAsync<CrdtTableEntity>(filter, select: new[] { "PartitionKey", "RowKey" }, cancellationToken: cancellationToken);
+        
+        long count = 0;
+        var tags = new KeyValuePair<string, object?>[] { new("type", "journal_count") };
+
+        await foreach (var _ in query.WithCancellation(cancellationToken))
+        {
+            count++;
+            this.operationsReadCounter.Add(1, tags);
+        }
+
+        return count;
+    }
+
     public async IAsyncEnumerable<JournaledOperation> GetAllJournaledOperationsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var startPartition = JournalPartitionPrefix;

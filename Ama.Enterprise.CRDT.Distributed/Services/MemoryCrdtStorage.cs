@@ -99,6 +99,15 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     }
 
     /// <inheritdoc />
+    public Task<long> GetJournalCountAsync(CancellationToken cancellationToken = default)
+    {
+        lock (syncRoot)
+        {
+            return Task.FromResult((long)operations.Count);
+        }
+    }
+
+    /// <inheritdoc />
     public void Trim(IReadOnlyDictionary<string, long> gmvv)
     {
         ArgumentNullException.ThrowIfNull(gmvv);
