@@ -8,6 +8,7 @@ using System.Net.NetworkInformation;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Extensions;
+using Ama.Enterprise.CRDT.MessagePack.Extensions;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
@@ -44,9 +45,10 @@ internal sealed class Program
         services.AddCrdt()
                 .AddCrdtSystemTextJson(useBrotliCompression: true);
 
-        //services.AddCrdtMessagePack(
-        //    Ama.Enterprise.CRDT.MessagePack.Formatters.ShowCase_MessagePackResolver.Instance
-        //);
+        // TODO: Something is not loading here
+        services.AddCrdtMessagePack(
+            CRDT.MessagePack.Formatters.Ama_Enterprise_CRDT_MessagePack_MessagePackResolver.Instance
+        );
 
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IClusterMetricsAggregator, ClusterMetricsAggregator>();

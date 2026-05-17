@@ -50,6 +50,54 @@ public sealed class MessagePackCrdtSerializerTests
         result.ShouldNotBeNull();
         result.ShouldBe(data);
     }
+    
+    [Fact]
+    public void SerializeToBytes_ShouldSerializeAndDeserializeRawByteArray()
+    {
+        byte[] data = [10, 20, 30, 40, 255];
+        
+        var bytes = sut.SerializeToBytes(data);
+        var result = sut.DeserializeFromBytes<byte[]>(bytes);
+
+        result.ShouldNotBeNull();
+        result.ShouldBe(data);
+        
+        // Verifies the payload correctly utilizes MessagePack BIN 8 (0xc4)
+        // instead of falling back to a structured ARRAY serialization (0x95).
+        bytes[0].ShouldBe((byte)0xc4);
+    }
+
+    [Fact]
+    public void SerializeToBytes_ShouldSerializeAndDeserializeEmptyByteArray()
+    {
+        byte[] data = Array.Empty<byte>();
+        
+        var bytes = sut.SerializeToBytes(data);
+        var result = sut.DeserializeFromBytes<byte[]>(bytes);
+
+        result.ShouldNotBeNull();
+        result.ShouldBeEmpty();
+        
+        // Verifies empty arrays also map strictly as MessagePack BIN 8
+        bytes[0].ShouldBe((byte)0xc4);
+        bytes[1].ShouldBe((byte)0);
+    }
+
+    [Fact]
+    public void SerializeToBytes_NullInput_ReturnsNilByte()
+    {
+        TestModel? data = null;
+        var bytes = sut.SerializeToBytes(data!);
+        bytes.ShouldNotBeNull();
+        bytes.Length.ShouldBeGreaterThan(0);
+        bytes[0].ShouldBe((byte)0xc0); // MessagePack Nil byte
+    }
+
+    [Fact]
+    public void DeserializeFromBytes_EmptyInput_ThrowsMessagePackSerializationException()
+    {
+        Should.Throw<MessagePackSerializationException>(() => sut.DeserializeFromBytes<TestModel>(Array.Empty<byte>()));
+    }
 
     [Fact]
     public void SerializeToString_ShouldSerializeAndDeserializeGeneric()
@@ -73,6 +121,29 @@ public sealed class MessagePackCrdtSerializerTests
 
         result.ShouldNotBeNull();
         result.ShouldBe(data);
+    }
+    
+    [Fact]
+    public void SerializeToString_NullInput_ReturnsBase64Nil()
+    {
+        TestModel? data = null;
+        var result = sut.SerializeToString(data!);
+        result.ShouldNotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public void DeserializeFromString_NullOrWhiteSpace_ThrowsException()
+    {
+        Should.Throw<Exception>(() => sut.DeserializeFromString<TestModel>(null!));
+        Should.Throw<Exception>(() => sut.DeserializeFromString<TestModel>(string.Empty));
+        Should.Throw<Exception>(() => sut.DeserializeFromString<TestModel>("   "));
+    }
+
+    [Fact]
+    public void DeserializeFromString_InvalidBase64_ThrowsException()
+    {
+        var invalidBase64 = "This_Is_Not_Valid_Base64!!!";
+        Should.Throw<Exception>(() => sut.DeserializeFromString<TestModel>(invalidBase64));
     }
 
     [Fact]
@@ -103,6 +174,19 @@ public sealed class MessagePackCrdtSerializerTests
 
         result.ShouldNotBeNull();
         result.ShouldBe(data);
+    }
+
+    [Fact]
+    public async Task SerializeAsync_NullStream_ThrowsException()
+    {
+        var data = new TestModel { Name = "TestAsyncObj", Value = 888 };
+        await Should.ThrowAsync<Exception>(async () => await sut.SerializeAsync(null!, data, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task DeserializeAsync_NullStream_ThrowsException()
+    {
+        await Should.ThrowAsync<Exception>(async () => await sut.DeserializeAsync<TestModel>(null!, CancellationToken.None));
     }
 
     [Fact]

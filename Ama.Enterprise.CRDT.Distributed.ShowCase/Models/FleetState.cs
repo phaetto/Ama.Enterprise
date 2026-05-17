@@ -15,5 +15,5 @@ public sealed class FleetState
     /// <summary>
     /// Gets or sets the mapped sequence tracking device statuses.
     /// </summary>
-    public Dictionary<string, DeviceStatus> Devices { get; set; } = new(System.StringComparer.Ordinal);
+    public Dictionary<string, DeviceStatus> Devices { get; set; } = new(StringComparer.Ordinal);
 }

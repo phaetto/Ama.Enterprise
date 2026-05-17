@@ -1,16 +1,18 @@
 namespace Ama.Enterprise.P2p.Extensions;
 
-using System;
-using System.Linq;
-using System.Text.Json.Serialization.Metadata;
+using Ama.CRDT.Extensions;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Discovery;
+using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.Services.Discovery;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System;
+using System.Linq;
+using System.Text.Json.Serialization.Metadata;
 
 /// <summary>
 /// Extension methods for registering UDP multicast peer discovery components tied to a specific mesh profile.

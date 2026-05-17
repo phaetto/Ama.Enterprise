@@ -15,5 +15,5 @@ public sealed class TaskListState
     /// <summary>
     /// Gets or sets the mapped sequence tracking tasks.
     /// </summary>
-    public Dictionary<string, TaskItem> Tasks { get; set; } = new(System.StringComparer.Ordinal);
+    public Dictionary<string, TaskItem> Tasks { get; set; } = new(StringComparer.Ordinal);
 }

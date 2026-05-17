@@ -14,6 +14,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<ProjectReference Include="..\Ama.Enterprise.CRDT.MessagePack\Ama.Enterprise.CRDT.MessagePack.csproj" />
 		<ProjectReference Include="..\Ama.Enterprise.P2p.Telemetry\Ama.Enterprise.P2p.Telemetry.csproj" />
 	</ItemGroup>
 
