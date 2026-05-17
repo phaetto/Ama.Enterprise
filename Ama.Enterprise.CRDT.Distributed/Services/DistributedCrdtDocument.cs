@@ -1,9 +1,11 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Ama.CRDT.Extensions;
 using Ama.CRDT.Models;
@@ -11,43 +13,39 @@ using Ama.CRDT.Services;
 using Ama.CRDT.Services.Providers;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Models;
-using Ama.Enterprise.P2p.Models.Core;
-using Ama.Enterprise.P2p.Services.Core;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Generic document manager responsible for maintaining consistency and routing P2P actions for a specific CRDT tree.
+/// Generic document manager responsible for maintaining consistency mapping isolated local causal models for a specific CRDT tree.
 /// </summary>
 public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<TState>, IDisposable where TState : class, new()
 {
     private readonly ReplicaContext replicaContext;
     private readonly IAsyncCrdtApplicator applicator;
     private readonly ICrdtMetadataManager metadataManager;
-    private readonly IServiceProvider serviceProvider;
     private readonly ICrdtSerializer serializer;
     private readonly IDistributedCrdtStorage storage;
     private readonly ILogger<DistributedCrdtDocument<TState>> logger;
     private readonly bool activeSyncEnabled;
     private readonly TState initialState;
     
-    // Fast synchronous lock for atomic reference/flag swapping
+    // Fast synchronous lock for atomic reference/flag swapping against torn struct reads exclusively.
     private readonly object syncRoot = new();
     
-    // Asynchronous lock guaranteeing strictly serialized patch/operation pipelines to prevent Lost Update anomalies
-    private readonly SemaphoreSlim modificationLock = new(1, 1);
+    // Single-reader channel completely eliminating Thread locks allocating non-thread-safe applicator sequential streams
+    private readonly Channel<PooledDocumentCommand<TState>> commandChannel;
+    private readonly ConcurrentQueue<PooledDocumentCommand<TState>> commandPool = new();
+    private readonly CancellationTokenSource disposeCts = new();
+    private readonly Task processingTask;
     
     private volatile bool isDirty;
 
     private readonly Meter meter;
     private readonly Counter<long> patchAppliedCounter;
     private readonly Counter<long> operationsAppliedCounter;
-    private readonly Counter<long> snapshotsDispatchedCounter;
     private readonly Counter<long> snapshotsMergedCounter;
     private readonly Counter<long> checkPointSavedCounter;
-    private readonly Counter<long> broadcastBytesCounter;
-    private readonly Counter<long> snapshotBytesDispatchedCounter;
 
     /// <inheritdoc />
     public string DocumentId { get; }
@@ -58,13 +56,15 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// <inheritdoc />
     public event EventHandler? StateChanged;
 
+    /// <inheritdoc />
+    public event EventHandler<IReadOnlyList<CrdtOperation>>? OperationsGenerated;
+
     public DistributedCrdtDocument(
         TState initialState,
         ReplicaContext replicaContext,
         IAsyncCrdtApplicator applicator,
         ICrdtMetadataManager metadataManager,
         IOptions<DistributedCrdtOptions> options,
-        IServiceProvider serviceProvider,
         ICrdtSerializer serializer,
         IDistributedCrdtStorage storage,
         ILogger<DistributedCrdtDocument<TState>> logger,
@@ -78,7 +78,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         this.replicaContext = replicaContext ?? throw new ArgumentNullException(nameof(replicaContext));
         this.applicator = applicator ?? throw new ArgumentNullException(nameof(applicator));
         this.metadataManager = metadataManager ?? throw new ArgumentNullException(nameof(metadataManager));
-        this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -94,32 +93,112 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.DistributedCrdtDocument") ?? new Meter("Ama.Enterprise.CRDT.Distributed.DistributedCrdtDocument");
         this.patchAppliedCounter = this.meter.CreateCounter<long>("crdt.document.patches_applied", "patches", "Total local patches natively applied mapping intentions");
         this.operationsAppliedCounter = this.meter.CreateCounter<long>("crdt.document.operations_applied", "operations", "Total remote operations synchronized locally successfully");
-        this.snapshotsDispatchedCounter = this.meter.CreateCounter<long>("crdt.document.snapshots_dispatched", "snapshots", "Total full state snapshots explicitly provided responding to log gaps");
         this.snapshotsMergedCounter = this.meter.CreateCounter<long>("crdt.document.snapshots_merged", "snapshots", "Total incoming full snapshots superseding states");
         this.checkPointSavedCounter = this.meter.CreateCounter<long>("crdt.document.checkpoints_saved", "checkpoints", "Total underlying storage checkpoint alignments executed");
-        this.broadcastBytesCounter = this.meter.CreateCounter<long>("crdt.document.broadcast_bytes", "bytes", "Total bytes broadcasted across real-time operation syncs");
-        this.snapshotBytesDispatchedCounter = this.meter.CreateCounter<long>("crdt.document.snapshot_bytes_dispatched", "bytes", "Total bytes dispatched for full state snapshot fallbacks");
+
+        this.commandChannel = Channel.CreateUnbounded<PooledDocumentCommand<TState>>(new UnboundedChannelOptions 
+        { 
+            SingleReader = true, 
+            SingleWriter = false 
+        });
+
+        // Initiates the lock-free sequential execution loop immediately
+        this.processingTask = Task.Run(ProcessChannelAsync);
+    }
+
+    private PooledDocumentCommand<TState> GetCommand() => commandPool.TryDequeue(out var cmd) ? cmd : new PooledDocumentCommand<TState>();
+
+    private void ReturnCommand(PooledDocumentCommand<TState> cmd)
+    {
+        cmd.Reset();
+        commandPool.Enqueue(cmd);
+    }
+
+    private async Task ProcessChannelAsync()
+    {
+        try
+        {
+            await foreach (var cmd in commandChannel.Reader.ReadAllAsync(disposeCts.Token).ConfigureAwait(false))
+            {
+                try
+                {
+                    cmd.CancellationToken.ThrowIfCancellationRequested();
+
+                    switch (cmd.Type)
+                    {
+                        case DocumentCommandType.Initialize:
+                            await ProcessInitializeInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
+                            break;
+                        case DocumentCommandType.ApplyPatch:
+                            await ProcessApplyPatchInternalAsync(cmd).ConfigureAwait(false);
+                            break;
+                        case DocumentCommandType.ApplyOperations:
+                            await ProcessApplyOperationsInternalAsync(cmd).ConfigureAwait(false);
+                            break;
+                        case DocumentCommandType.GetSnapshotData:
+                            ProcessGetSnapshotDataInternal(cmd);
+                            break;
+                        case DocumentCommandType.MergeSnapshot:
+                            ProcessMergeSnapshotInternal(cmd);
+                            break;
+                        case DocumentCommandType.Checkpoint:
+                            await ProcessCheckpointInternalAsync(cmd).ConfigureAwait(false);
+                            break;
+                        case DocumentCommandType.EvictReplica:
+                            ProcessEvictReplicaInternal(cmd);
+                            break;
+                        case DocumentCommandType.ResetLocalState:
+                            ProcessResetLocalStateInternal();
+                            break;
+                    }
+
+                    cmd.SetResult();
+                }
+                catch (OperationCanceledException)
+                {
+                    cmd.SetException(new OperationCanceledException("Document operation cancelled."));
+                }
+                catch (Exception ex)
+                {
+                    cmd.SetException(ex);
+                }
+            }
+        }
+        catch (OperationCanceledException) { /* Clean graceful termination */ }
+        catch (Exception ex)
+        {
+            logger.LogCritical(ex, "Distributed CRDT document lock-free processing loop critically faulted.");
+        }
     }
 
     /// <inheritdoc />
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        var cmd = GetCommand();
+        cmd.Type = DocumentCommandType.Initialize;
+        cmd.CancellationToken = cancellationToken;
+
+        commandChannel.Writer.TryWrite(cmd);
+        try
+        {
+            await cmd.ExecuteAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            ReturnCommand(cmd);
+        }
+    }
+
+    private async Task ProcessInitializeInternalAsync(CancellationToken cancellationToken)
     {
         try
         {
             var storedDoc = await storage.LoadDocumentAsync<TState>(DocumentId, cancellationToken).ConfigureAwait(false);
             if (storedDoc != null)
             {
-                await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-                try
+                lock (syncRoot)
                 {
-                    lock (syncRoot)
-                    {
-                        Document = storedDoc.Value;
-                    }
-                }
-                finally
-                {
-                    modificationLock.Release();
+                    Document = storedDoc.Value;
                 }
 
                 StateChanged?.Invoke(this, EventArgs.Empty);
@@ -135,37 +214,41 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// <inheritdoc />
     public async Task ApplyPatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default)
     {
-        await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var cmd = GetCommand();
+        cmd.Type = DocumentCommandType.ApplyPatch;
+        cmd.Patch = patch;
+        cmd.CancellationToken = cancellationToken;
+
+        commandChannel.Writer.TryWrite(cmd);
         try
         {
-            CrdtDocument<TState> currentDoc;
-            lock (syncRoot)
-            {
-                currentDoc = Document;
-            }
-
-            var result = await applicator.ApplyPatchAsync(currentDoc, patch).ConfigureAwait(false);
-
-            lock (syncRoot)
-            {
-                Document = result.Document;
-                isDirty = true;
-            }
+            await cmd.ExecuteAsync().ConfigureAwait(false);
         }
         finally
         {
-            modificationLock.Release();
+            ReturnCommand(cmd);
+        }
+    }
+
+    private async Task ProcessApplyPatchInternalAsync(PooledDocumentCommand<TState> cmd)
+    {
+        CrdtDocument<TState> currentDoc;
+        lock (syncRoot) { currentDoc = Document; }
+
+        var result = await applicator.ApplyPatchAsync(currentDoc, cmd.Patch!.Value).ConfigureAwait(false);
+
+        lock (syncRoot)
+        {
+            Document = result.Document;
+            isDirty = true;
         }
 
         patchAppliedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         StateChanged?.Invoke(this, EventArgs.Empty);
 
-        if (activeSyncEnabled && patch.Operations != null)
+        if (activeSyncEnabled && cmd.Patch!.Value.Operations != null && cmd.Patch.Value.Operations.Count > 0)
         {
-            foreach (var operation in patch.Operations)
-            {
-                await BroadcastOperationAsync(operation, cancellationToken).ConfigureAwait(false);
-            }
+            OperationsGenerated?.Invoke(this, cmd.Patch.Value.Operations);
         }
     }
 
@@ -173,8 +256,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     public DottedVersionVector GetLocalState()
     {
         var sourceDvv = replicaContext.GlobalVersionVector;
-
-        // Lock to prevent cross-thread collection modification errors during serialization mappings
         lock (sourceDvv)
         {
             return sourceDvv.DeepClone();
@@ -187,83 +268,76 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         ArgumentNullException.ThrowIfNull(operations);
         if (operations.Count == 0) return;
 
-        await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var cmd = GetCommand();
+        cmd.Type = DocumentCommandType.ApplyOperations;
+        cmd.Operations = operations;
+        cmd.CancellationToken = cancellationToken;
+
+        commandChannel.Writer.TryWrite(cmd);
         try
         {
-            CrdtDocument<TState> currentDoc;
-            lock (syncRoot)
-            {
-                currentDoc = Document;
-            }
-
-            async IAsyncEnumerable<JournaledOperation> GetStreamAsync()
-            {
-                foreach (var op in operations)
-                {
-                    yield return new JournaledOperation(DocumentId, op);
-                }
-                await Task.CompletedTask;
-            }
-
-            var result = await applicator.ApplyOperationsAsync(currentDoc, GetStreamAsync()).ConfigureAwait(false);
-
-            lock (syncRoot)
-            {
-                Document = result.Document;
-                isDirty = true;
-            }
+            await cmd.ExecuteAsync().ConfigureAwait(false);
         }
         finally
         {
-            modificationLock.Release();
+            ReturnCommand(cmd);
+        }
+    }
+
+    private async Task ProcessApplyOperationsInternalAsync(PooledDocumentCommand<TState> cmd)
+    {
+        CrdtDocument<TState> currentDoc;
+        lock (syncRoot) { currentDoc = Document; }
+
+        async IAsyncEnumerable<JournaledOperation> GetStreamAsync()
+        {
+            foreach (var op in cmd.Operations!)
+            {
+                yield return new JournaledOperation(DocumentId, op);
+            }
+            await Task.CompletedTask;
         }
 
-        operationsAppliedCounter.Add(operations.Count, new KeyValuePair<string, object?>("document_id", DocumentId));
+        var result = await applicator.ApplyOperationsAsync(currentDoc, GetStreamAsync()).ConfigureAwait(false);
+
+        lock (syncRoot)
+        {
+            Document = result.Document;
+            isDirty = true;
+        }
+
+        operationsAppliedCounter.Add(cmd.Operations!.Count, new KeyValuePair<string, object?>("document_id", DocumentId));
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <inheritdoc />
-    public async Task ProvideSnapshotAsync(string targetReplicaId, PeerId targetPeerId, CancellationToken cancellationToken = default)
+    public async Task<CrdtSnapshotDataDto> GetSnapshotDataAsync(CancellationToken cancellationToken = default)
     {
+        var cmd = GetCommand();
+        cmd.Type = DocumentCommandType.GetSnapshotData;
+        cmd.CancellationToken = cancellationToken;
+
+        commandChannel.Writer.TryWrite(cmd);
         try
         {
-            CrdtDocument<TState> currentDoc;
-            DottedVersionVector globalState;
-
-            // Strict Pipeline lock ensures extraction of Document and DVV cannot be horizontally torn by concurrent active patches
-            await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                lock (syncRoot)
-                {
-                    currentDoc = Document;
-                }
-                
-                globalState = GetLocalState(); 
-            }
-            finally
-            {
-                modificationLock.Release();
-            }
-
-            var snapshotData = serializer.SerializeToBytes(currentDoc);
-            var resMsg = new CrdtSnapshotMessage(replicaContext.ReplicaId, snapshotData, globalState);
-            var payload = serializer.SerializeToBytes(resMsg);
-
-            var wrapper = new CrdtMessageWrapper(DocumentId, "CrdtSnapshot", payload);
-            var finalBytes = serializer.SerializeToBytes(wrapper);
-
-            var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
-            await directSender.SendDirectAsync(targetPeerId, finalBytes, cancellationToken).ConfigureAwait(false); 
-            
-            snapshotsDispatchedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-            snapshotBytesDispatchedCounter.Add(finalBytes.Length, new KeyValuePair<string, object?>("document_id", DocumentId));
-            logger.LogInformation("Dispatched targeted complete document snapshot fallback payload for document {DocumentId} to peer {PeerId}.", DocumentId, targetPeerId.Value);
+            await cmd.ExecuteAsync().ConfigureAwait(false);
+            return new CrdtSnapshotDataDto(cmd.ResultSnapshotData!, cmd.ResultGlobalState!);
         }
-        catch (Exception ex)
+        finally
         {
-            logger.LogError(ex, "Failed to dispatch snapshot fallback payload for document {DocumentId}.", DocumentId);
+            ReturnCommand(cmd);
         }
+    }
+
+    private void ProcessGetSnapshotDataInternal(PooledDocumentCommand<TState> cmd)
+    {
+        CrdtDocument<TState> currentDoc;
+        lock (syncRoot) { currentDoc = Document; }
+        
+        var globalState = GetLocalState(); 
+
+        cmd.ResultSnapshotData = serializer.SerializeToBytes(currentDoc);
+        cmd.ResultGlobalState = globalState;
     }
 
     /// <inheritdoc />
@@ -271,28 +345,38 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     {
         if (snapshotData == null || snapshotData.Length == 0) return;
 
+        var cmd = GetCommand();
+        cmd.Type = DocumentCommandType.MergeSnapshot;
+        cmd.SnapshotData = snapshotData;
+        cmd.GlobalState = globalState;
+        cmd.CancellationToken = cancellationToken;
+
+        commandChannel.Writer.TryWrite(cmd);
         try
         {
-            var snapshotDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(snapshotData);
+            await cmd.ExecuteAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            ReturnCommand(cmd);
+        }
+    }
 
-            await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
+    private void ProcessMergeSnapshotInternal(PooledDocumentCommand<TState> cmd)
+    {
+        try
+        {
+            var snapshotDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(cmd.SnapshotData!);
+
+            lock (syncRoot)
             {
-                lock (syncRoot)
-                {
-                    Document = snapshotDoc;
-                    isDirty = true;
-                }
-
-                // Crucial alignment: Overwrite tracked encompassing P2P tracking vectors matching the provider.
-                lock (replicaContext.GlobalVersionVector)
-                {
-                    replicaContext.GlobalVersionVector.Merge(globalState);
-                }
+                Document = snapshotDoc;
+                isDirty = true;
             }
-            finally
+
+            lock (replicaContext.GlobalVersionVector)
             {
-                modificationLock.Release();
+                replicaContext.GlobalVersionVector.Merge(cmd.GlobalState!);
             }
 
             snapshotsMergedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
@@ -308,36 +392,42 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// <inheritdoc />
     public async Task CheckpointAsync(CancellationToken cancellationToken = default)
     {
-        if (!isDirty)
+        var cmd = GetCommand();
+        cmd.Type = DocumentCommandType.Checkpoint;
+        cmd.CancellationToken = cancellationToken;
+
+        commandChannel.Writer.TryWrite(cmd);
+        try
         {
-            return;
+            await cmd.ExecuteAsync().ConfigureAwait(false);
         }
+        finally
+        {
+            ReturnCommand(cmd);
+        }
+    }
+
+    private async Task ProcessCheckpointInternalAsync(PooledDocumentCommand<TState> cmd)
+    {
+        if (!isDirty) return;
 
         CrdtDocument<TState> currentDoc;
-
         lock (syncRoot)
         {
             currentDoc = Document;
-            // Acknowledge the dirty state prior to asynchronous I/O to prevent 
-            // concurrent writes during saving from being ignored.
             isDirty = false; 
         }
 
         try
         {
-            // Intentionally bubble exceptions so orchestrator aborts overarching global log modifications avoiding write ahead gaps
-            await storage.SaveDocumentAsync(DocumentId, currentDoc, cancellationToken).ConfigureAwait(false);
+            await storage.SaveDocumentAsync(DocumentId, currentDoc, cmd.CancellationToken).ConfigureAwait(false);
             
             checkPointSavedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
             logger.LogDebug("Successfully saved checkpoint to persistent storage for document {DocumentId}.", DocumentId);
         }
         catch (Exception)
         {
-            lock (syncRoot)
-            {
-                // Revert flag on failure so the orchestrator attempts mapping it again on the next loop
-                isDirty = true;
-            }
+            lock (syncRoot) { isDirty = true; }
             throw;
         }
     }
@@ -347,70 +437,69 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     {
         if (string.IsNullOrWhiteSpace(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
 
-        await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var cmd = GetCommand();
+        cmd.Type = DocumentCommandType.EvictReplica;
+        cmd.ReplicaIdToEvict = replicaId;
+        cmd.CancellationToken = cancellationToken;
+
+        commandChannel.Writer.TryWrite(cmd);
         try
         {
-            lock (syncRoot)
-            {
-                metadataManager.EvictReplica(Document, replicaId);
-                isDirty = true;
-            }
+            await cmd.ExecuteAsync().ConfigureAwait(false);
         }
         finally
         {
-            modificationLock.Release();
+            ReturnCommand(cmd);
         }
+    }
 
+    private void ProcessEvictReplicaInternal(PooledDocumentCommand<TState> cmd)
+    {
+        lock (syncRoot)
+        {
+            metadataManager.EvictReplica(Document, cmd.ReplicaIdToEvict!);
+            isDirty = true;
+        }
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <inheritdoc />
     public async Task ResetLocalStateAsync(string oldReplicaId, CancellationToken cancellationToken = default)
     {
-        await modificationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var cmd = GetCommand();
+        cmd.Type = DocumentCommandType.ResetLocalState;
+        cmd.OldReplicaId = oldReplicaId;
+        cmd.CancellationToken = cancellationToken;
+
+        commandChannel.Writer.TryWrite(cmd);
         try
         {
-            lock (syncRoot)
-            {
-                var metadata = metadataManager.Initialize(initialState);
-                Document = new CrdtDocument<TState>(initialState, metadata);
-                isDirty = true;
-            }
+            await cmd.ExecuteAsync().ConfigureAwait(false);
         }
         finally
         {
-            modificationLock.Release();
+            ReturnCommand(cmd);
         }
-
-        StateChanged?.Invoke(this, EventArgs.Empty);
-        logger.LogInformation("Successfully performed a hard reset following identity re-bootstrap for document {DocumentId}.", DocumentId);
     }
 
-    private async Task BroadcastOperationAsync(CrdtOperation operation, CancellationToken cancellationToken)
+    private void ProcessResetLocalStateInternal()
     {
-        try
+        lock (syncRoot)
         {
-            var p2pProtocol = serviceProvider.GetRequiredService<IP2pAlgorithm>();
-            var opsMsg = new CrdtOperationsMessage(replicaContext.ReplicaId, new[] { operation });
-            var payload = serializer.SerializeToBytes(opsMsg);
-            
-            var wrapper = new CrdtMessageWrapper(DocumentId, "CrdtOps", payload);
-            var finalBytes = serializer.SerializeToBytes(wrapper);
-
-            broadcastBytesCounter.Add(finalBytes.Length, new KeyValuePair<string, object?>("document_id", DocumentId));
-
-            await p2pProtocol.BroadcastAsync(finalBytes, cancellationToken).ConfigureAwait(false);
+            var metadata = metadataManager.Initialize(initialState);
+            Document = new CrdtDocument<TState>(initialState, metadata);
+            isDirty = true;
         }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Failed to broadcast active sync operation for document {DocumentId}.", DocumentId);
-        }
+        StateChanged?.Invoke(this, EventArgs.Empty);
+        logger.LogInformation("Successfully performed a hard reset following identity re-bootstrap for document {DocumentId}.", DocumentId);
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
-        modificationLock.Dispose();
+        disposeCts.Cancel();
+        commandChannel.Writer.TryComplete();
+        disposeCts.Dispose();
         meter.Dispose();
     }
 }

@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
+using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
@@ -19,6 +20,11 @@ public interface IDistributedCrdtDocument
     string DocumentId { get; }
 
     /// <summary>
+    /// Fired when new causal operations have been generated locally and are ready to be broadcasted to remote peers.
+    /// </summary>
+    event EventHandler<IReadOnlyList<CrdtOperation>>? OperationsGenerated;
+
+    /// <summary>
     /// Initializes the document, loading initial state from persistent storage if configured natively.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
@@ -31,14 +37,14 @@ public interface IDistributedCrdtDocument
     DottedVersionVector GetLocalState();
 
     /// <summary>
+    /// Retrieves a completely materialized snapshot payload superseding local structure dependencies alongside explicitly targeted overarching global bounds.
+    /// </summary>
+    Task<CrdtSnapshotDataDto> GetSnapshotDataAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Applies incoming operations retrieved from a remote replica to the local document state.
     /// </summary>
     Task ApplyOperationsAsync(IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Serializes the current local state and dispatches it directly as a targeted snapshot following an unrecoverable journal truncation gap.
-    /// </summary>
-    Task ProvideSnapshotAsync(string targetReplicaId, PeerId targetPeerId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Applies a completely materialized snapshot payload superseding local structure dependencies alongside explicitly targeted overarching global bounds.

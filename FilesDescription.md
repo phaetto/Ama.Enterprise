@@ -10,6 +10,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/Ama.Enterprise.CRDT.Distributed.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/AntiEntropyStateSyncIntegrationTests.cs` | Integration tests verifying that state synchronization extracts unified missing operations. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/BackgroundAndStorageIntegrationTests.cs` | Handled breaking DI changes by invoking `IApplicationPayloadHandler` avoiding obsolete generic envelopes during manual fallback sync testing. |
+| `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/ConcurrencyIntegrationTests.cs` | Integration tests verifying the lock-free multi-threaded command pooling and channel concurrency behaviors of the `CrdtDocumentOrchestrator` under heavy parallel loads. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/DocumentOrchestratorIntegrationTests.cs` | Integration tests verifying the multi-document orchestration matrix, dynamic CRDT lifecycle creation, and tombstoning limits. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/EvictionEdgeCasesIntegrationTests.cs` | Integration tests explicitly demonstrating and replicating the four edge case vulnerabilities associated with tombstoning, eviction data amnesia, unbounded journals, and snapshot overwrites. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/JournalingAndSnapshottingIntegrationTests.cs` | Refactored tests to bypass obsolete document wrapper methods querying central synchronization services for missing journals. |
@@ -41,6 +42,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtOperationsMessage.cs` | Transmission model conveying replicated CRDT intent patches targeted asynchronously across active nodes. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtRegistryEntry.cs` | Represents metadata about an active or tombstoned distributed CRDT document mapped via the global cluster registry. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtRegistryState.cs` | Global P2P synced directory state handling distributed multi-document topologies, ensuring active instantiation maps across nodes. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtSnapshotDataDto.cs` | DTO representing a serialized snapshot payload explicitly avoiding tuple usage across generic bounds safely natively. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtSnapshotMessage.cs` | Message payload containing a complete materialized CRDT document snapshot, used as a fallback synchronization mechanism when log truncation gaps are detected. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtStateSyncMessage.cs` | Structure carrying generic synchronization states formatted across anti-entropy operations representing document DVV. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtOptions.cs` | Added `JournalBackpressureCeilingThreshold` enforcing dynamic hard limits allowing backpressure stalls when journal bounds vastly outpace trimming natively. |
@@ -48,18 +50,20 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtReplicaRegistration.cs` | Represents a dynamically registered Replica ID enforcing discrete CRDT multi-mesh state architectures inherently. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtSystemAotContext.cs` | AOT contextual reflection mapping for internal orchestrator registry CRDT scopes, bridging models. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtSystemJsonContext.cs` | JSON serialization context guaranteeing AOT compatibility for internal orchestrator registry CRDT scopes. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/PooledDocumentCommand.cs` | Custom awaitable envelope implementing an IValueTaskSource object pool for the Single-Reader lock-free document channels mapping generic execution efficiently natively safely cleanly avoiding garbage blockages. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/PooledOrchestratorCommand.cs` | Custom awaitable envelope implementing an IValueTaskSource object pool for the lock-free Single-Reader orchestrator channel executing commands sequentially natively reliably natively securely inherently natively safely explicitly safely mapping constraints. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ClusterStateTracker.cs` | Singleton thread-safe implementation capturing localized maps representing overarching remote state matrix limits. Modified `RemovePeerByNetworkId` preventing amnesia by intentionally preserving CRDT vectors, decoupling network routes and avoiding destructive structural gaps. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtCheckpointService.cs` | Background service responsible for periodic check-pointing. Updated to incorporate a configurable aggressive journal trim matching `JournalTrimThreshold` actively offloading unbounded limits natively utilizing snapshot synchronization. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Centralized generic orchestrator managing global localized active P2P CRDT document bindings. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Adjusted explicitly to consume the new `CrdtSnapshotDataDto` properly tracking bounds reliably instead of tuples natively. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtEvictionService.cs` | Implementation of `ICrdtEvictionService` extracting the eviction logic, avoiding duplication. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtInitializationService.cs` | Refactored to mutate the shared scope context in-place, closing the split-brain scope disconnect bug and avoiding destroyed instances. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Removed obsolete `GetMissingOperationsAsync`. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Updated `GetSnapshotDataAsync` returning an explicit `CrdtSnapshotDataDto` effectively mapping bounds cleanly. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeFactory.cs` | Factory mapping internal ServiceProvider boundaries generating isolated persistent generic structural boundaries. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeManager.cs` | Centralized singleton tracker actively managing explicit long-lived background scopes per instantiated replica natively. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IClusterStateTracker.cs` | Tracks the last known synchronization bounds. Updated exposing logical tombstone identity mechanisms alongside `TombstonePeerByNetworkId` targeting topology exits. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ICrdtDocumentOrchestrator.cs` | Generic manager facilitating multi-document runtime allocations, resolving logical decentralized P2P creation and deletion payloads. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ICrdtEvictionService.cs` | Interface for a dedicated service that orchestrates replica eviction and local identity re-bootstrapping across all CRDT documents. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtDocument.cs` | Removed obsolete `GetMissingOperationsAsync` as journal resolutions are centralized. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtDocument.cs` | Removed tuple return type from `GetSnapshotDataAsync` returning an explicit DTO instead strictly adhering to architecture rules. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtScope.cs` | Encapsulates the long-lived structural boundaries for a strictly identified generic localized CRDT replica. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtScopeFactory.cs` | Factory interface tracking explicit CRDT scope instantiations dynamically natively resolving bounds. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtStorage.cs` | Added `GetJournalCountAsync` dynamically allowing evaluation of bounds. |

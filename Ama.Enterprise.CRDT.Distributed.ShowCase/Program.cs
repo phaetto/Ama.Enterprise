@@ -58,8 +58,8 @@ public static class Program
             options.CheckpointIntervalSeconds = 30;
             options.AntiEntropyInitialDelaySeconds = 2;
             options.AntiEntropyIntervalSeconds = 5;
-            //options.JournalHardCeilingTrimThreshold = 2000;
-            //options.JournalTrimThreshold = 300;
+            options.JournalHardCeilingTrimThreshold = 1000;
+            options.JournalTrimThreshold = 300;
         });
 
         services.AddDistributedCrdtReplica(replicaId);
@@ -294,60 +294,52 @@ public static class Program
                                         try
                                         {
                                             await orchestrator.CreateDocumentAsync("nail", "task-list", token).ConfigureAwait(false);
-                                            logger.LogInformation("Hammer mode activated. Pumping {Cps} changes/sec to doc 'nail'...", cps);
+                                            logger.LogInformation("Hammer mode activated. Target: {Cps} ops/sec against doc 'nail'...", cps);
 
-                                            if (cps <= 3000)
+                                            var sw = Stopwatch.StartNew();
+                                            var reportSw = Stopwatch.StartNew();
+                                            long opsCompleted = 0;
+                                            long lastReportedOps = 0;
+
+                                            // Bounded pool of 10 keys: keeps document state size small
+                                            // but exercises CRDT map updates visibly in the console UI
+                                            var taskIds = Enumerable.Range(1, 10).Select(i => $"nail-task-{i}").ToArray();
+
+                                            while (!token.IsCancellationRequested)
                                             {
-                                                var intervalMs = 100;
-                                                var batchSize = cps / 10;
-                                                if (batchSize == 0)
+                                                var targetOps = (long)(sw.Elapsed.TotalSeconds * cps);
+                                                var batch = targetOps - opsCompleted;
+
+                                                if (batch > 0)
                                                 {
-                                                    batchSize = 1;
-                                                    intervalMs = 1000 / cps;
+                                                    // Cap to prevent blocking the while loop for too long, allowing cancellation and reporting
+                                                    if (batch > 1000)
+                                                    {
+                                                        batch = 1000;
+                                                    }
+
+                                                    for (var i = 0; i < batch; i++)
+                                                    {
+                                                        var taskId = taskIds[Random.Shared.Next(taskIds.Length)];
+                                                        var isDone = (opsCompleted + i) % 2 == 0;
+                                                        await taskManager.SetTaskAsync("nail", taskId, $"Hammered payload {opsCompleted + i}", isDone, token).ConfigureAwait(false);
+                                                    }
+                                                    
+                                                    opsCompleted += batch;
+                                                }
+                                                else
+                                                {
+                                                    // Yield using standard timer tick avoiding harsh CPU burn when caught up
+                                                    await Task.Delay(1, token).ConfigureAwait(false);
                                                 }
 
-                                                using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(intervalMs));
-                                                while (await timer.WaitForNextTickAsync(token).ConfigureAwait(false))
+                                                // Output actual telemetry every second to track bottlenecks natively
+                                                if (reportSw.Elapsed.TotalSeconds >= 1.0)
                                                 {
-                                                    for (var i = 0; i < batchSize; i++)
-                                                    {
-                                                        await taskManager.SetTaskAsync("nail", "nail", "Did we nail it?", false, token).ConfigureAwait(false);
-                                                    }
-                                                }
-                                            }
-                                            else
-                                            {
-                                                // Extreme Throughput Mode (>1000 cps).
-                                                // When attacking a SINGLE CRDT Document ("nail"), utilizing multiple `Task.Run` workers
-                                                // degraded performance because they all collided on the strict internal causal SemaphoreSlim
-                                                // of that specific document. A single un-throttled tight loop natively bypasses Task-Scheduler
-                                                // lock congestion and maximizes serialized patch evaluation natively!
-                                                var sw = Stopwatch.StartNew();
-                                                long opsCompleted = 0;
-                                                
-                                                while (!token.IsCancellationRequested)
-                                                {
-                                                    var targetOps = (long)(sw.Elapsed.TotalSeconds * cps);
-                                                    var batch = targetOps - opsCompleted;
-
-                                                    if (batch > 0)
-                                                    {
-                                                        if (batch > 1000)
-                                                        {
-                                                            batch = 1000;
-                                                        }
-
-                                                        for (var i = 0; i < batch; i++)
-                                                        {
-                                                            await taskManager.SetTaskAsync("nail", "nail", "Did we nail it?", false, token).ConfigureAwait(false);
-                                                        }
-                                                        
-                                                        opsCompleted += batch;
-                                                    }
-                                                    else
-                                                    {
-                                                        await Task.Delay(1, token).ConfigureAwait(false);
-                                                    }
+                                                    var currentCps = opsCompleted - lastReportedOps;
+                                                    lastReportedOps = opsCompleted;
+                                                    reportSw.Restart();
+                                                    logger.LogInformation("[Hammer Telemetry] Target: {TargetCps}/s | Actual: {ActualCps}/s | Total Ops: {Total}", cps, currentCps, opsCompleted);
                                                 }
                                             }
                                         }

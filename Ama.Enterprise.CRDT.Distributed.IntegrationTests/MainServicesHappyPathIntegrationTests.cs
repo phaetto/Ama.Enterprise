@@ -155,7 +155,7 @@ public sealed class MainServicesHappyPathIntegrationTests
         docManager.Document.Data.StateValue.ShouldBe("initial");
 
         // Act - Ask for snapshot
-        await docManager.ProvideSnapshotAsync("RemoteReplica2", new PeerId(Guid.NewGuid()), CancellationToken.None);
+        await scope.Orchestrator.ProvideSnapshotAsync(docManager.DocumentId, "RemoteReplica2", new PeerId(Guid.NewGuid()), CancellationToken.None);
 
         // Assert - Ensure the component sent the payload over direct sender
         mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());

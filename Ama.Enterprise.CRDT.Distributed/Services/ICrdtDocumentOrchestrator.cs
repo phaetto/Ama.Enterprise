@@ -4,7 +4,9 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.CRDT.Models;
 using Ama.Enterprise.CRDT.Distributed.Models;
+using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
 /// Generic manager facilitating multi-document runtime allocations.
@@ -50,6 +52,16 @@ public interface ICrdtDocumentOrchestrator
     /// Processes localized matrix modifications.
     /// </summary>
     Task SyncDocumentsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Serializes the current local state and dispatches it directly as a targeted snapshot following an unrecoverable journal truncation gap.
+    /// </summary>
+    Task ProvideSnapshotAsync(string documentId, string targetReplicaId, PeerId targetPeerId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Broadcasts causally linked local mutations immediately to active remote replica connections avoiding structural divergence manually.
+    /// </summary>
+    Task BroadcastOperationsAsync(string documentId, IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Dispatches a targeted point-to-point synchronization request to evaluate causal differences avoiding broadcast storms natively.

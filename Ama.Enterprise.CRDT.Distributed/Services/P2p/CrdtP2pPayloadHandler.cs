@@ -115,7 +115,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
 
             if (syncMsg.ReplicaId != null && scope.ClusterTracker.IsReplicaTombstoned(syncMsg.ReplicaId))
             {
-                await RejectEvictedReplicaAsync(scope, meshId, scope.Orchestrator.Registry, syncMsg.ReplicaId, cancellationToken).ConfigureAwait(false);
+                await RejectEvictedReplicaAsync(scope, meshId, scope.Orchestrator.Registry.DocumentId, syncMsg.ReplicaId, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -154,7 +154,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                 logger.LogWarning("[{ReplicaId}] Journal bounds trimmed or not available. Dispatching full snapshots natively.", replicaContext.ReplicaId);
                 foreach (var targetDoc in documents)
                 {
-                    await targetDoc.ProvideSnapshotAsync(syncMsg.ReplicaId, senderId, cancellationToken).ConfigureAwait(false);
+                    await scope.Orchestrator.ProvideSnapshotAsync(targetDoc.DocumentId, syncMsg.ReplicaId, senderId, cancellationToken).ConfigureAwait(false);
                 }
             }
             else if (syncResult.Operations.Count > 0 && directSender != null)
@@ -192,7 +192,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             
             if (opsMsg.ReplicaId != null && scope.ClusterTracker.IsReplicaTombstoned(opsMsg.ReplicaId))
             {
-                await RejectEvictedReplicaAsync(scope, meshId, targetDoc, opsMsg.ReplicaId, cancellationToken).ConfigureAwait(false);
+                await RejectEvictedReplicaAsync(scope, meshId, targetDoc.DocumentId, opsMsg.ReplicaId, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -218,7 +218,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             
             if (resMsg.ReplicaId != null && scope.ClusterTracker.IsReplicaTombstoned(resMsg.ReplicaId))
             {
-                await RejectEvictedReplicaAsync(scope, meshId, targetDoc, resMsg.ReplicaId, cancellationToken).ConfigureAwait(false);
+                await RejectEvictedReplicaAsync(scope, meshId, targetDoc.DocumentId, resMsg.ReplicaId, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -275,14 +275,14 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
         }
     }
 
-    private async Task RejectEvictedReplicaAsync(IDistributedCrdtScope scope, string meshId, IDistributedCrdtDocument targetDoc, string evictedReplicaId, CancellationToken cancellationToken)
+    private async Task RejectEvictedReplicaAsync(IDistributedCrdtScope scope, string meshId, string documentId, string evictedReplicaId, CancellationToken cancellationToken)
     {
-        logger.LogWarning("[{ReplicaId}] Rejecting P2P payload from tombstoned replica {EvictedReplicaId} for document {DocumentId}. Enforcing identity re-bootstrap.", scope.ReplicaId, evictedReplicaId, targetDoc.DocumentId);
+        logger.LogWarning("[{ReplicaId}] Rejecting P2P payload from tombstoned replica {EvictedReplicaId} for document {DocumentId}. Enforcing identity re-bootstrap.", scope.ReplicaId, evictedReplicaId, documentId);
         
         var rejectionMsg = new CrdtEvictionRejectionMessage(evictedReplicaId);
         var payload = serializer.SerializeToBytes(rejectionMsg);
         
-        var wrapper = new CrdtMessageWrapper(targetDoc.DocumentId, "CrdtEviction", payload);
+        var wrapper = new CrdtMessageWrapper(documentId, "CrdtEviction", payload);
         var wrapperBytes = serializer.SerializeToBytes(wrapper);
 
         var p2pProtocol = scope.ServiceProvider.GetService<IP2pAlgorithm>();
