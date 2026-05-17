@@ -100,53 +100,6 @@ public sealed class MessagePackCrdtSerializerTests
     }
 
     [Fact]
-    public void SerializeToString_ShouldSerializeAndDeserializeGeneric()
-    {
-        var data = new TestModel { Name = "Test3", Value = 789 };
-
-        var base64 = sut.SerializeToString(data);
-        var result = sut.DeserializeFromString<TestModel>(base64);
-
-        result.ShouldNotBeNull();
-        result.ShouldBe(data);
-    }
-
-    [Fact]
-    public void SerializeToString_ShouldSerializeAndDeserializeObject()
-    {
-        var data = new TestModel { Name = "Test4", Value = 101112 };
-
-        var base64 = sut.SerializeToString((object)data, typeof(TestModel));
-        var result = sut.DeserializeFromString(base64, typeof(TestModel)) as TestModel;
-
-        result.ShouldNotBeNull();
-        result.ShouldBe(data);
-    }
-    
-    [Fact]
-    public void SerializeToString_NullInput_ReturnsBase64Nil()
-    {
-        TestModel? data = null;
-        var result = sut.SerializeToString(data!);
-        result.ShouldNotBeNullOrWhiteSpace();
-    }
-
-    [Fact]
-    public void DeserializeFromString_NullOrWhiteSpace_ThrowsException()
-    {
-        Should.Throw<Exception>(() => sut.DeserializeFromString<TestModel>(null!));
-        Should.Throw<Exception>(() => sut.DeserializeFromString<TestModel>(string.Empty));
-        Should.Throw<Exception>(() => sut.DeserializeFromString<TestModel>("   "));
-    }
-
-    [Fact]
-    public void DeserializeFromString_InvalidBase64_ThrowsException()
-    {
-        var invalidBase64 = "This_Is_Not_Valid_Base64!!!";
-        Should.Throw<Exception>(() => sut.DeserializeFromString<TestModel>(invalidBase64));
-    }
-
-    [Fact]
     public async Task SerializeAsync_ShouldSerializeAndDeserializeGeneric()
     {
         var data = new TestModel { Name = "TestAsync", Value = 999 };

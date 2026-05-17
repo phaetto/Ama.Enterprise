@@ -40,8 +40,6 @@
   <Project Path="Ama.Enterprise.CRDT.Distributed.TableStorage/Ama.Enterprise.CRDT.Distributed.TableStorage.csproj" Id="b760640c-c398-4458-a771-53ea772b31d2" />
   <Project Path="Ama.Enterprise.CRDT.Distributed.UnitTests/Ama.Enterprise.CRDT.Distributed.UnitTests.csproj" Id="2048c2a6-0842-4d57-a42e-94919ded6fa4" />
   <Project Path="Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj" Id="2fe2382f-1652-48b6-b2e4-6f07cb4214dc" />
-  <Project Path="Ama.Enterprise.CRDT.MemoryPack.UnitTests/Ama.Enterprise.CRDT.MemoryPack.UnitTests.csproj" Id="8b26bc34-b185-4249-88d2-2cdcde370549" />
-  <Project Path="Ama.Enterprise.CRDT.MemoryPack/Ama.Enterprise.CRDT.MemoryPack.csproj" Id="f0f76679-d0a0-41fc-a832-5b09055fcfd0" />
   <Project Path="Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Ama.Enterprise.CRDT.MessagePack.IntegrationTests.csproj" Id="27b90f1f-2e28-44b5-8349-0eb61a2ab490" />
   <Project Path="Ama.Enterprise.CRDT.MessagePack.UnitTests/Ama.Enterprise.CRDT.MessagePack.UnitTests.csproj" Id="d5cffb87-ecff-47cd-b060-28f635451996" />
   <Project Path="Ama.Enterprise.CRDT.MessagePack/Ama.Enterprise.CRDT.MessagePack.csproj" />

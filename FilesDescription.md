@@ -6,9 +6,7 @@
 | `$/.github/workflows/publish-nuget.yml` | GitHub Actions workflow for automatically publishing preview packages to NuGet upon pushing to the master branch. |
 | `$/.gitignore` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Analyzers.UnitTests/Ama.Enterprise.CRDT.Analyzers.UnitTests.csproj` | No description provided. |
-| `$/Ama.Enterprise.CRDT.Analyzers.UnitTests/MessagePackFormatterGeneratorTests.cs` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Analyzers/Ama.Enterprise.CRDT.Analyzers.csproj` | No description provided. |
-| `$/Ama.Enterprise.CRDT.Analyzers/Generators/MessagePackFormatterGenerator.cs` | External Roslyn source generator intercepting `[JsonSerializable]` STJ attributes across dependencies natively synthesizing mapping logic into a highly decoupled native AOT compatible MessagePack binary formatters matching the core CRDT record models. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/Ama.Enterprise.CRDT.Distributed.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/AntiEntropyStateSyncIntegrationTests.cs` | Integration tests verifying that state synchronization extracts unified missing operations. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/BackgroundAndStorageIntegrationTests.cs` | Handled breaking DI changes by invoking `IApplicationPayloadHandler` avoiding obsolete generic envelopes during manual fallback sync testing. |
@@ -16,7 +14,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/EvictionEdgeCasesIntegrationTests.cs` | Integration tests explicitly demonstrating and replicating the four edge case vulnerabilities associated with tombstoning, eviction data amnesia, unbounded journals, and snapshot overwrites. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/JournalingAndSnapshottingIntegrationTests.cs` | Refactored tests to bypass obsolete document wrapper methods querying central synchronization services for missing journals. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/MainServicesHappyPathIntegrationTests.cs` | Updated integration test to use `IApplicationPayloadHandler` instead of obsolete message handlers and cleaned up excessive comments. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Ama.Enterprise.CRDT.Distributed.ShowCase.csproj` | No description provided. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Ama.Enterprise.CRDT.Distributed.ShowCase.csproj` | Included standard Native AOT compatible `Microsoft.Data.Sqlite` NuGet package enabling structured relational storage showcase implementation explicitly. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Constants.cs` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/DeviceStatus.cs` | Data structure representing the status of an IoT device. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/FleetState.cs` | Root CRDT document model representing fleet devices status, updated to inherit `IDistributedCrdtState`. |
@@ -28,7 +26,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetManager.cs` | Implementation handling intentions and queries for the fleet document. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/IFleetManager.cs` | Interface for managing the distributed fleet status CRDT document. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ITaskManager.cs` | Interface for managing the distributed task list CRDT document. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseCrdtStorage.cs` | Refactored to inject `DistributedCrdtReplicaRegistration` replacing obsolete options monitor and natively supporting static decoupled DI bounds. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseCrdtStorage.cs` | Refactored implementation from unstable high-contention memory maps and binary log files to a highly structured Native AOT compatible relational SQLite schema correctly handling distributed concurrency seamlessly cleanly cleanly explicitly dropping extensive memory garbage natively securely avoiding lock structures. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/TaskManager.cs` | Implementation handling intentions and queries for the task list document. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Ama.Enterprise.CRDT.Distributed.TableStorage.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Extensions/ServiceCollectionExtensions.cs` | Simplified Table Storage DI extensions to strictly register a single unified scoped storage natively explicitly removing fragmented routing limits. |
@@ -73,11 +71,15 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/StorageJournalForwarder.cs` | Injects localized implementations mapping back into underlying internal storage architectures, acting as the interface wrapper over globally active pipelines. |
 | `$/Ama.Enterprise.CRDT.MemoryPack.UnitTests/Ama.Enterprise.CRDT.MemoryPack.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.MemoryPack/Ama.Enterprise.CRDT.MemoryPack.csproj` | No description provided. |
+| `$/Ama.Enterprise.CRDT.MessagePack.Analyzers.UnitTests/Ama.Enterprise.CRDT.MessagePack.Analyzers.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.MessagePack.Analyzers.UnitTests/Architecture/KnownContextsArchitectureTests.cs` | Architecture unit tests dynamically scanning the local repository structure ensuring all decoupled generic `JsonSerializerContext` implementations strictly map against the `MessagePackFormatterGenerator` limits avoiding skipped AOT boundaries. |
 | `$/Ama.Enterprise.CRDT.MessagePack.Analyzers.UnitTests/MessagePackFormatterGeneratorTests.cs` | No description provided. |
-| `$/Ama.Enterprise.CRDT.MessagePack.Analyzers/Generators/MessagePackFormatterGenerator.cs` | Implemented complete STJ `[JsonDerivedType]` cross-compatibility actively generating self-contained polymorphic MessagePack formatters for abstract base models bypassing incorrect static mappings smoothly inherently. |
+| `$/Ama.Enterprise.CRDT.MessagePack.Analyzers/Ama.Enterprise.CRDT.MessagePack.Analyzers.csproj` | No description provided. |
+| `$/Ama.Enterprise.CRDT.MessagePack.Analyzers/Generators/MessagePackFormatterGenerator.cs` | Implemented complete STJ `[JsonDerivedType]` cross-compatibility actively generating self-contained polymorphic MessagePack formatters for abstract base models bypassing incorrect static mappings smoothly inherently. Added explicit detachment of `ReadOnlyMemory<byte>` preventing TCP zero-copy pipeline buffer overwrites seamlessly ensuring isolated payloads. Integrated deterministic Type IDs mapping decoupled payload boundaries efficiently tracking misaligned structs across generic P2P meshes dynamically preserving fallback backwards compatibility safely. |
+| `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Ama.Enterprise.CRDT.MessagePack.IntegrationTests.csproj` | No description provided. |
+| `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Models/IntegrationTestModels.cs` | Added advanced test models covering nullable types, decimals, `TimeSpan`, `Uri`, bitwise flags enums, jagged arrays, and dictionaries with non-string keys, ensuring thorough AOT capability verifications. |
+| `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Services/MessagePackSerializerIntegrationTests.cs` | Included numerous advanced integration test cases verifying extremely long strings, nullable properties (both null and populated), jagged matrices, bitwise flags, advanced primitives (`decimal`, `Uri`, `TimeSpan`), and non-string dictionary constraints natively. |
 | `$/Ama.Enterprise.CRDT.MessagePack.UnitTests/Ama.Enterprise.CRDT.MessagePack.UnitTests.csproj` | No description provided. |
-| `$/Ama.Enterprise.CRDT.MessagePack.UnitTests/Extensions/ServiceCollectionExtensionsTests.cs` | Unit tests for `ServiceCollectionExtensions` ensuring `ICrdtSerializer` and its dependencies are registered within the dependency injection container. |
 | `$/Ama.Enterprise.CRDT.MessagePack.UnitTests/Formatters/CrdtPolymorphicMessagePackFormatterTests.cs` | Unit tests for `CrdtPolymorphicMessagePackFormatter` verifying array formatting logic and unregistered polymorphic bounds throwing. |
 | `$/Ama.Enterprise.CRDT.MessagePack.UnitTests/Formatters/CrdtPolymorphicMessagePackRegistryTests.cs` | Unit tests verifying generic AOT delegate caching and resolution explicitly bounded in CrdtPolymorphicMessagePackRegistry. |
 | `$/Ama.Enterprise.CRDT.MessagePack.UnitTests/Models/TestModel.cs` | Test model simulating a binary serializable DTO utilizing `MessagePackObject` annotations. |
@@ -158,7 +160,7 @@
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransport.cs` | Outbound mapping evaluating strict decoupled MQTT client managers natively. Refactored input validatons explicitly. |
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransportListener.cs` | Inbound listener registering standard network hooks dynamically bound to mapped multi-mesh brokers securely. |
 | `$/Ama.Enterprise.P2p.Telemetry.Cli/Ama.Enterprise.P2p.Telemetry.Cli.csproj` | No description provided. |
-| `$/Ama.Enterprise.P2p.Telemetry.Cli/Program.cs` | Console application serving as a live in-place telemetry dashboard, connecting to a P2P mesh and displaying dynamically aggregated metrics. Replaced custom console dashboard logic with Terminal.Gui providing a native scrollable table, client list, and total active peer aggregations. Updated to intersect incoming telemetry endpoints with `IPeerRegistry` state, explicitly dropping inactive/dead nodes from UI aggregations seamlessly natively. |
+| `$/Ama.Enterprise.P2p.Telemetry.Cli/Program.cs` | Console application serving as a live in-place telemetry dashboard, connecting to a P2P mesh and displaying dynamically aggregated metrics. Replaced custom console dashboard logic with Terminal.Gui providing a native scrollable table, client list, and total active peer aggregations. Updated to intersect incoming telemetry endpoints with `IPeerRegistry` state, explicitly dropping inactive/dead nodes from UI aggregations seamlessly natively. Added menu bar enabling telemetry export to local Markdown table natively capturing the current visual state seamlessly securely. |
 | `$/Ama.Enterprise.P2p.Telemetry.IntegrationTests/Ama.Enterprise.P2p.Telemetry.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.Telemetry.IntegrationTests/Services/TelemetryNetworkIntegrationTests.cs` | Updated to test custom meter boundaries by asserting on custom metric scopes native configurations natively. |
 | `$/Ama.Enterprise.P2p.Telemetry.UnitTests/Ama.Enterprise.P2p.Telemetry.UnitTests.csproj` | Unit tests project for validating P2P telemetry aggregations and metric extrapolation behaviors natively tracking .NET 10 time boundaries. |
@@ -274,7 +276,7 @@
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpDiscoveryJsonContext.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerDiscovery.cs` | Implementation of UDP peer discovery. Updated to actively handshake and register incoming discovery peers when getting discovered, avoiding one-sided peer topologies. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerHandshaker.cs` | Moved outbound pre-flight serialization directly into try-catch blocks securing explicit exception bubbling against silent background dispatcher drops. |
-| `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | Refactored encompassing overarching multi-mesh core states evaluating dynamic incoming deduplications and isolated health evaluations efficiently avoiding duplication. |
+| `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | Refactored internal deduplication strategy replacing single long-lived dictionary with a thread-safe sliding double-buffer (dictionary rotation), completely eliminating Gen 2 heap fragmentation and full-collection iteration overheads. |
 | `$/Ama.Enterprise.P2p/Services/Transports/TcpTransport.cs` | Implements isolated outbound transport using robust TCP streams explicitly mapped against bounded architectures. |
 | `$/Ama.Enterprise.P2p/Services/Transports/TcpTransportListener.cs` | Implements inbound network listener extracting localized pure TCP streams mapping native robust pipelines. |
 | `$/Ama.Enterprise.P2p/Services/Transports/UdpTransport.cs` | Implements completely decoupled, natively mapped lightweight UDP datagram delivery mechanisms efficiently safely. |

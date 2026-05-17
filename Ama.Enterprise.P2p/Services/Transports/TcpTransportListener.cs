@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.Services.Transports;
 
 using System;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
@@ -190,34 +191,42 @@ public sealed class TcpTransportListener : ITransportListener, IDisposable
                         break;
                     }
 
-                    var payload = new byte[payloadLength];
-                    await stream.ReadExactlyAsync(payload, cancellationToken).ConfigureAwait(false);
-
-                    var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
-                    messagesReceivedCounter.Add(1, tags);
-                    payloadBytesHistogram.Record(payload.Length, tags);
-
-                    var message = serializer.DeserializeFromBytes<IMeshMessage>(payload);
-                    if (message is not null)
+                    byte[] rentedBuffer = ArrayPool<byte>.Shared.Rent(payloadLength);
+                    try
                     {
-                        if (!IsMajorVersionCompatible(message.ProtocolVersion, Constants.ProtocolVersion))
-                        {
-                            logger.LogWarning("[{MeshId}] Rejected message explicitly: Decoded version {MsgVersion} mismatches localized constraints {LocalVersion}.", 
-                                meshId, message.ProtocolVersion, Constants.ProtocolVersion);
-                            continue;
-                        }
+                        await stream.ReadExactlyAsync(rentedBuffer.AsMemory(0, payloadLength), cancellationToken).ConfigureAwait(false);
 
-                        if (!string.Equals(message.MeshId, meshId, StringComparison.Ordinal))
-                        {
-                            logger.LogWarning("[{MeshId}] Dropped TCP payload resolving foreign architectural target {ForeignMeshId}.", meshId, message.MeshId);
-                            continue;
-                        }
+                        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
+                        messagesReceivedCounter.Add(1, tags);
+                        payloadBytesHistogram.Record(payloadLength, tags);
 
-                        await onMessageReceived(message).ConfigureAwait(false);
+                        var message = serializer.DeserializeFromBytes<IMeshMessage>(rentedBuffer.AsSpan(0, payloadLength).ToArray());
+                        
+                        if (message is not null)
+                        {
+                            if (!IsMajorVersionCompatible(message.ProtocolVersion, Constants.ProtocolVersion))
+                            {
+                                logger.LogWarning("[{MeshId}] Rejected message explicitly: Decoded version {MsgVersion} mismatches localized constraints {LocalVersion}.", 
+                                    meshId, message.ProtocolVersion, Constants.ProtocolVersion);
+                                continue;
+                            }
+
+                            if (!string.Equals(message.MeshId, meshId, StringComparison.Ordinal))
+                            {
+                                logger.LogWarning("[{MeshId}] Dropped TCP payload resolving foreign architectural target {ForeignMeshId}.", meshId, message.MeshId);
+                                continue;
+                            }
+
+                            await onMessageReceived(message).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            logger.LogWarning("[{MeshId}] Rejected corrupt localized TCP envelope bridging natively unreadable bounds.", meshId);
+                        }
                     }
-                    else
+                    finally
                     {
-                        logger.LogWarning("[{MeshId}] Rejected corrupt localized TCP envelope bridging natively unreadable bounds.", meshId);
+                        ArrayPool<byte>.Shared.Return(rentedBuffer);
                     }
                 }
             }

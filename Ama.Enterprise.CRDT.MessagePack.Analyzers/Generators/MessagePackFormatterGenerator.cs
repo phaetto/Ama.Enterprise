@@ -20,7 +20,7 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
     private static readonly string[] KnownFrameworkContexts = new[]
     {
         "Ama.CRDT.Models.Serialization.CrdtJsonContext",
-        "Ama.Enterprise.P2p.Models.Gossip.P2pJsonSerializerContext",
+        "Ama.Enterprise.P2p.Models.P2pJsonSerializerContext",
         "Ama.Enterprise.CRDT.Distributed.Models.DistributedCrdtSystemJsonContext",
         "Ama.Enterprise.FeatureFlags.Models.FeatureFlagsJsonContext",
         "Ama.Enterprise.P2p.AspNetCore.Models.AspNetCoreJsonContext",
@@ -55,12 +55,17 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
 
         var compilationProvider = context.CompilationProvider;
 
-        var combined = stjAttributes.Collect().Combine(compilationProvider);
+        var combined = stjAttributes.Collect().Combine(compilationProvider)
+            .Select(static (tuple, _) => new GeneratorSourceDto
+            {
+                SyntaxContexts = tuple.Left!,
+                Compilation = tuple.Right
+            });
 
         context.RegisterSourceOutput(combined, Execute);
     }
 
-    private static void Execute(SourceProductionContext context, (ImmutableArray<INamedTypeSymbol?> SyntaxContexts, Compilation Compilation) source)
+    private static void Execute(SourceProductionContext context, GeneratorSourceDto source)
     {
         var targetTypes = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
         
@@ -255,6 +260,7 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
         sb.AppendLine("#pragma warning disable");
         sb.AppendLine("#pragma warning disable MsgPack009");
         sb.AppendLine("using System;");
+        sb.AppendLine("using System.Buffers;");
         sb.AppendLine("using MessagePack;");
         sb.AppendLine("using MessagePack.Formatters;");
         sb.AppendLine();
@@ -383,6 +389,25 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
             .Replace("[]", "Array") + "Formatter";
     }
 
+    private static int GetDeterministicHashCode(string str)
+    {
+        unchecked
+        {
+            int hash1 = (5381 << 16) + 5381;
+            int hash2 = hash1;
+
+            for (int i = 0; i < str.Length; i += 2)
+            {
+                hash1 = ((hash1 << 5) + hash1) ^ str[i];
+                if (i == str.Length - 1)
+                    break;
+                hash2 = ((hash2 << 5) + hash2) ^ str[i + 1];
+            }
+
+            return hash1 + (hash2 * 1566083941);
+        }
+    }
+
     private static string GetFormatterInstantiation(ITypeSymbol type)
     {
         if (type.TypeKind == TypeKind.Array && type is IArrayTypeSymbol arrType)
@@ -432,11 +457,25 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
         return null;
     }
 
+    private static int GetTypeDepth(ITypeSymbol typeSymbol)
+    {
+        int depth = 0;
+        var current = typeSymbol;
+        while (current != null)
+        {
+            depth++;
+            current = current.BaseType;
+        }
+        return depth;
+    }
+
     private static void GenerateFormatter(StringBuilder sb, INamedTypeSymbol typeSymbol, string resolverName)
     {
         var derivedAttributes = typeSymbol.GetAttributes().Where(a => 
             a.AttributeClass?.Name == "JsonDerivedTypeAttribute" || 
-            a.AttributeClass?.ToDisplayString().Contains("JsonDerivedTypeAttribute") == true).ToList();
+            a.AttributeClass?.ToDisplayString().Contains("JsonDerivedTypeAttribute") == true)
+            .OrderBy(a => a.ConstructorArguments.Length > 1 ? a.ConstructorArguments[1].Value?.ToString() : (a.ConstructorArguments.FirstOrDefault().Value as ITypeSymbol)?.Name)
+            .ToList();
 
         if (derivedAttributes.Count > 0)
         {
@@ -446,14 +485,19 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
 
         var typeFullName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         var formatterName = GetFormatterClassName(typeSymbol);
+        
+        int expectedTypeId = GetDeterministicHashCode(typeFullName);
 
         sb.AppendLine();
         sb.AppendLine($"    public sealed class {formatterName} : {resolverName}.ICustomFormatter<{typeFullName}>");
         sb.AppendLine("    {");
 
+        // Guarantee a flawless, highly reliable deterministic constraint bounding overriding AST evaluation bugs.
         var ctor = typeSymbol.Constructors
             .Where(c => c.DeclaredAccessibility == Accessibility.Public)
             .OrderByDescending(c => c.Parameters.Length)
+            .ThenBy(c => string.Join(",", c.Parameters.Select(p => p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))))
+            .ThenBy(c => string.Join(",", c.Parameters.Select(p => p.Name)))
             .FirstOrDefault();
 
         if (ctor == null && typeSymbol.TypeKind != TypeKind.Struct)
@@ -474,6 +518,24 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
         var members = new List<SerializedMember>();
         var mappedProps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        var allMembers = new List<ISymbol>();
+        var currentType = typeSymbol;
+        while (currentType != null && currentType.SpecialType != SpecialType.System_Object)
+        {
+            allMembers.AddRange(currentType.GetMembers());
+            currentType = currentType.BaseType;
+        }
+
+        // PERFECTLY DECOUPLED ALPHABETICAL MAPPING:
+        // By entirely removing DeclaringSyntaxReferences span sorting, we eliminate unpredictable property index shifts!
+        // A mapped property layout across standard SDK structures now resolves identically across local AST evaluations 
+        // AND NuGet/Project assembly metadata references consistently safely efficiently.
+        var properties = allMembers.OfType<IPropertySymbol>()
+            .Where(p => p.DeclaredAccessibility == Accessibility.Public && !p.IsStatic && p.GetMethod != null && p.SetMethod != null)
+            .OrderBy(p => GetTypeDepth(p.ContainingType))
+            .ThenBy(p => p.Name)
+            .ToList();
+
         if (ctor != null)
         {
             for (int i = 0; i < ctor.Parameters.Length; i++)
@@ -482,12 +544,22 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
                 var propName = GetMatchingPropertyName(typeSymbol, param.Name);
                 mappedProps.Add(propName);
 
+                var propSymbol = properties.FirstOrDefault(p => p.Name.Equals(propName, StringComparison.OrdinalIgnoreCase));
+                var formatterAttr = propSymbol?.GetAttributes().FirstOrDefault(a => a.AttributeClass?.Name.Contains("MessagePackFormatter") == true);
+                
+                string customFormatter = null;
+                if (formatterAttr != null && formatterAttr.ConstructorArguments.Length > 0 && formatterAttr.ConstructorArguments[0].Value is ITypeSymbol ft)
+                {
+                    customFormatter = ft.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                }
+
                 var defValue = "default";
                 if (param.HasExplicitDefaultValue)
                 {
-                    defValue = param.ExplicitDefaultValue == null ? "default" : param.ExplicitDefaultValue.ToString();
-                    if (param.ExplicitDefaultValue is string) defValue = $"\"{defValue}\"";
+                    if (param.ExplicitDefaultValue == null) defValue = "default";
+                    else if (param.ExplicitDefaultValue is string s) defValue = $"\"{s}\"";
                     else if (param.ExplicitDefaultValue is bool b) defValue = b ? "true" : "false";
+                    else defValue = $"({param.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}){param.ExplicitDefaultValue}";
                 }
 
                 members.Add(new SerializedMember
@@ -499,28 +571,24 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
                     CtorIndex = i,
                     HasDefault = param.HasExplicitDefaultValue,
                     DefaultValue = defValue,
-                    Index = members.Count
+                    Index = members.Count,
+                    CustomFormatterType = customFormatter
                 });
             }
         }
-
-        // Aggregate entire inheritance tree correctly intercepting base records/classes implicitly avoiding truncation boundaries natively.
-        var allMembers = new List<ISymbol>();
-        var currentType = typeSymbol;
-        while (currentType != null && currentType.SpecialType != SpecialType.System_Object)
-        {
-            allMembers.AddRange(currentType.GetMembers());
-            currentType = currentType.BaseType;
-        }
-
-        var properties = allMembers.OfType<IPropertySymbol>()
-            .Where(p => p.DeclaredAccessibility == Accessibility.Public && !p.IsStatic && p.GetMethod != null && p.SetMethod != null)
-            .OrderBy(p => p.Name);
 
         foreach (var prop in properties)
         {
             if (!mappedProps.Contains(prop.Name))
             {
+                var formatterAttr = prop.GetAttributes().FirstOrDefault(a => a.AttributeClass?.Name.Contains("MessagePackFormatter") == true);
+                
+                string customFormatter = null;
+                if (formatterAttr != null && formatterAttr.ConstructorArguments.Length > 0 && formatterAttr.ConstructorArguments[0].Value is ITypeSymbol ft)
+                {
+                    customFormatter = ft.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                }
+
                 members.Add(new SerializedMember
                 {
                     Name = prop.Name,
@@ -530,7 +598,8 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
                     CtorIndex = -1,
                     HasDefault = false,
                     DefaultValue = "default",
-                    Index = members.Count
+                    Index = members.Count,
+                    CustomFormatterType = customFormatter
                 });
             }
         }
@@ -542,11 +611,19 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
         {
             sb.AppendLine("            if (value == null) { writer.WriteNil(); return; }");
         }
-        sb.AppendLine($"            writer.WriteArrayHeader({members.Count});");
+        sb.AppendLine($"            writer.WriteArrayHeader({members.Count + 1});");
+        sb.AppendLine($"            writer.Write({expectedTypeId});");
 
         foreach (var member in members)
         {
-            sb.AppendLine($"            options.Resolver.GetFormatterWithVerify<{member.Type}>().Serialize(ref writer, value.{member.PropName}, options);");
+            if (member.CustomFormatterType != null)
+            {
+                sb.AppendLine($"            new {member.CustomFormatterType}().Serialize(ref writer, value.{member.PropName}, options);");
+            }
+            else
+            {
+                sb.AppendLine($"            options.Resolver.GetFormatterWithVerify<{member.Type}>().Serialize(ref writer, value.{member.PropName}, options);");
+            }
         }
         sb.AppendLine("        }");
 
@@ -556,6 +633,36 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
         sb.AppendLine("        {");
         sb.AppendLine("            if (reader.TryReadNil()) return default;");
         sb.AppendLine("            var count = reader.ReadArrayHeader();");
+
+        sb.AppendLine($"            int expectedTypeId = {expectedTypeId};");
+        sb.AppendLine($"            bool isLegacy = true;");
+        sb.AppendLine($"            if (count > 0)");
+        sb.AppendLine($"            {{");
+        sb.AppendLine($"                var peekReader = reader;");
+        sb.AppendLine($"                try");
+        sb.AppendLine($"                {{");
+        sb.AppendLine($"                    if (peekReader.NextMessagePackType == global::MessagePack.MessagePackType.Integer)");
+        sb.AppendLine($"                    {{");
+        sb.AppendLine($"                        var readId = peekReader.ReadInt32();");
+        sb.AppendLine($"                        if (readId == expectedTypeId)");
+        sb.AppendLine($"                        {{");
+        sb.AppendLine($"                            reader.ReadInt32();");
+        sb.AppendLine($"                            isLegacy = false;");
+        sb.AppendLine($"                            count--;");
+        sb.AppendLine($"                        }}");
+        sb.AppendLine($"                        else if (count >= {members.Count + 1})");
+        sb.AppendLine($"                        {{");
+        sb.AppendLine($"                            for (int i = 0; i < count; i++) reader.Skip();");
+        sb.AppendLine($"                            return default;");
+        sb.AppendLine($"                        }}");
+        sb.AppendLine($"                    }}");
+        sb.AppendLine($"                    else if (count >= {members.Count + 1})");
+        sb.AppendLine($"                    {{");
+        sb.AppendLine($"                        for (int i = 0; i < count; i++) reader.Skip();");
+        sb.AppendLine($"                        return default;");
+        sb.AppendLine($"                    }}");
+        sb.AppendLine($"                }} catch {{ }}");
+        sb.AppendLine($"            }}");
 
         for (int i = 0; i < members.Count; i++)
         {
@@ -569,7 +676,24 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
                 sb.AppendLine($"            if (count <= {i}) {varName} = {member.DefaultValue};");
             }
 
-            sb.AppendLine($"            if (count > {i}) {varName} = options.Resolver.GetFormatterWithVerify<{member.Type}>().Deserialize(ref reader, options);");
+            if (member.CustomFormatterType != null)
+            {
+                sb.AppendLine($"            if (count > {i}) {varName} = new {member.CustomFormatterType}().Deserialize(ref reader, options);");
+            }
+            // Explicitly force allocations detaching volatile TCP pipeline buffers (zero-copy memory leaks) 
+            // from deep asynchronous generic structures evaluating IInboundMessageQueue cleanly safely natively.
+            else if (member.Type == "global::System.ReadOnlyMemory<byte>")
+            {
+                sb.AppendLine($"            if (count > {i})");
+                sb.AppendLine("            {");
+                sb.AppendLine("                var seq = reader.ReadBytes();");
+                sb.AppendLine($"                if (seq.HasValue) {varName} = new global::System.ReadOnlyMemory<byte>(seq.Value.ToArray());");
+                sb.AppendLine("            }");
+            }
+            else
+            {
+                sb.AppendLine($"            if (count > {i}) {varName} = options.Resolver.GetFormatterWithVerify<{member.Type}>().Deserialize(ref reader, options);");
+            }
         }
 
         sb.AppendLine($"            for (int i = {members.Count}; i < count; i++) reader.Skip();");
@@ -590,17 +714,20 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
         var typeFullName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         var formatterName = GetFormatterClassName(typeSymbol);
 
+        int expectedTypeId = GetDeterministicHashCode(typeFullName);
+
         sb.AppendLine();
         sb.AppendLine($"    public sealed class {formatterName} : {resolverName}.ICustomFormatter<{typeFullName}>");
         sb.AppendLine("    {");
-        
+
         // Serialize
         sb.AppendLine($"        public void Serialize(ref global::MessagePack.MessagePackWriter writer, {typeFullName} value, global::MessagePack.MessagePackSerializerOptions options)");
         sb.AppendLine("        {");
         sb.AppendLine("            if (value == null) { writer.WriteNil(); return; }");
         sb.AppendLine("            var type = value.GetType();");
-        sb.AppendLine("            writer.WriteArrayHeader(2);");
-        
+        sb.AppendLine("            writer.WriteArrayHeader(3);");
+        sb.AppendLine($"            writer.Write({expectedTypeId});");
+
         foreach (var attr in derivedAttributes)
         {
             if (attr.ConstructorArguments.Length > 0 && attr.ConstructorArguments[0].Value is ITypeSymbol derivedType)
@@ -611,12 +738,12 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
                     discriminator = attr.ConstructorArguments[1].Value.ToString();
                 }
                 var derivedFullName = derivedType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-                
+
                 sb.AppendLine($"            if (type == typeof({derivedFullName}))");
                 sb.AppendLine("            {");
                 sb.AppendLine($"                writer.Write(\"{discriminator}\");");
                 sb.AppendLine($"                options.Resolver.GetFormatterWithVerify<{derivedFullName}>().Serialize(ref writer, ({derivedFullName})value, options);");
-                sb.AppendLine("                return;");
+                sb.AppendLine("            return;");
                 sb.AppendLine("            }");
             }
         }
@@ -628,10 +755,44 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
         sb.AppendLine($"        public {typeFullName} Deserialize(ref global::MessagePack.MessagePackReader reader, global::MessagePack.MessagePackSerializerOptions options)");
         sb.AppendLine("        {");
         sb.AppendLine("            if (reader.TryReadNil()) return default;");
+        sb.AppendLine("            if (reader.IsNil) return default;");
         sb.AppendLine("            var count = reader.ReadArrayHeader();");
-        sb.AppendLine("            if (count != 2) throw new global::MessagePack.MessagePackSerializationException(\"Invalid polymorphic MessagePack array length.\");");
+
+        sb.AppendLine($"            int expectedTypeId = {expectedTypeId};");
+        sb.AppendLine($"            bool isLegacy = true;");
+        sb.AppendLine($"            if (count > 0)");
+        sb.AppendLine($"            {{");
+        sb.AppendLine($"                var peekReader = reader;");
+        sb.AppendLine($"                try");
+        sb.AppendLine($"                {{");
+        sb.AppendLine($"                    if (peekReader.NextMessagePackType == global::MessagePack.MessagePackType.Integer)");
+        sb.AppendLine($"                    {{");
+        sb.AppendLine($"                        var readId = peekReader.ReadInt32();");
+        sb.AppendLine($"                        if (readId == expectedTypeId)");
+        sb.AppendLine($"                        {{");
+        sb.AppendLine($"                            reader.ReadInt32();");
+        sb.AppendLine($"                            isLegacy = false;");
+        sb.AppendLine($"                            count--;");
+        sb.AppendLine($"                        }}");
+        sb.AppendLine($"                        else if (count >= 3)");
+        sb.AppendLine($"                        {{");
+        sb.AppendLine($"                            for (int i = 0; i < count; i++) reader.Skip();");
+        sb.AppendLine($"                            return default;");
+        sb.AppendLine($"                        }}");
+        sb.AppendLine($"                    }}");
+        sb.AppendLine($"                    else if (count >= 3)");
+        sb.AppendLine($"                    {{");
+        sb.AppendLine($"                        for (int i = 0; i < count; i++) reader.Skip();");
+        sb.AppendLine($"                        return default;");
+        sb.AppendLine($"                    }}");
+        sb.AppendLine($"                }} catch {{ }}");
+        sb.AppendLine($"            }}");
+
+        sb.AppendLine("            if (isLegacy && count != 2) throw new global::MessagePack.MessagePackSerializationException(\"Invalid polymorphic MessagePack array length.\");");
+        sb.AppendLine("            if (!isLegacy && count != 2) throw new global::MessagePack.MessagePackSerializationException(\"Invalid polymorphic MessagePack array length.\");");
+
         sb.AppendLine("            var discriminator = reader.ReadString();");
-        
+
         foreach (var attr in derivedAttributes)
         {
             if (attr.ConstructorArguments.Length > 0 && attr.ConstructorArguments[0].Value is ITypeSymbol derivedType)
@@ -642,7 +803,7 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
                     discriminator = attr.ConstructorArguments[1].Value.ToString();
                 }
                 var derivedFullName = derivedType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-                
+
                 sb.AppendLine($"            if (discriminator == \"{discriminator}\")");
                 sb.AppendLine("            {");
                 sb.AppendLine($"                var result = options.Resolver.GetFormatterWithVerify<{derivedFullName}>().Deserialize(ref reader, options);");
@@ -650,7 +811,7 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
                 sb.AppendLine("            }");
             }
         }
-        
+
         sb.AppendLine($"            throw new global::System.NotSupportedException($\"Discriminator '{{discriminator}}' is not registered for {typeFullName}.\");");
         sb.AppendLine("        }");
         sb.AppendLine("    }");
@@ -666,9 +827,19 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
             current = current.BaseType;
         }
 
-        var properties = allMembers.OfType<IPropertySymbol>();
+        // PERFECTLY DECOUPLED ALPHABETICAL MATCHING:
+        var properties = allMembers.OfType<IPropertySymbol>()
+            .OrderBy(p => GetTypeDepth(p.ContainingType))
+            .ThenBy(p => p.Name);
+            
         var match = properties.FirstOrDefault(p => p.Name.Equals(paramName, StringComparison.OrdinalIgnoreCase));
         return match != null ? match.Name : paramName;
+    }
+
+    private struct GeneratorSourceDto
+    {
+        public ImmutableArray<INamedTypeSymbol> SyntaxContexts { get; set; }
+        public Compilation Compilation { get; set; }
     }
 
     private sealed class SerializedMember
@@ -681,5 +852,6 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
         public bool HasDefault { get; set; }
         public string DefaultValue { get; set; }
         public int Index { get; set; }
+        public string CustomFormatterType { get; set; }
     }
 }

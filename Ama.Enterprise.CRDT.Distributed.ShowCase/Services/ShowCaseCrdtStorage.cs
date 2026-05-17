@@ -2,7 +2,6 @@ namespace Ama.Enterprise.CRDT.Distributed.ShowCase.Services;
 
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -11,20 +10,17 @@ using Ama.CRDT.Models;
 using Ama.CRDT.Services;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Services;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Showcase implementation of a unified storage mechanism mapping the entire CRDT state tree, global DVV, and journaling natively locally.
+/// Showcase implementation of a unified storage mechanism mapping the entire CRDT state tree, global DVV, and journaling locally via Native AOT friendly SQLite.
 /// </summary>
 public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
 {
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<ShowCaseCrdtStorage> logger;
-    
-    private readonly List<JournaledOperation> journal = new();
-    private readonly object syncRoot = new();
-
-    private readonly string loadedReplicaId;
+    private readonly string connectionString;
 
     public ShowCaseCrdtStorage(
         ReplicaContext replicaContext,
@@ -35,99 +31,118 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        this.loadedReplicaId = replicaContext.ReplicaId;
+        this.connectionString = $"Data Source=showcase_crdt_{replicaContext.ReplicaId}.db;Cache=Shared;";
         
-        LoadJournalSynchronously();
+        InitializeDatabase();
     }
 
     public async Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
     {
         if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
 
-        var filePath = GetDocumentFilePath(documentId);
-        if (!File.Exists(filePath))
-        {
-            return null;
-        }
-
         try
         {
-            var bytes = await File.ReadAllBytesAsync(filePath, cancellationToken).ConfigureAwait(false);
-            return serializer.DeserializeFromBytes<CrdtDocument<TState>>(bytes);
+            using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT Payload FROM Documents WHERE DocumentId = @DocId";
+            AddParameter(command, "@DocId", documentId);
+
+            var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+            if (result is byte[] bytes)
+            {
+                return serializer.DeserializeFromBytes<CrdtDocument<TState>>(bytes);
+            }
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to load document from {FilePath}", filePath);
-            return null;
+            logger.LogError(ex, "Failed to load document '{DocumentId}' from SQLite", documentId);
         }
+
+        return null;
     }
 
     public async Task SaveDocumentAsync<TState>(string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new()
     {
         if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
-        if (document == null) throw new ArgumentNullException(nameof(document));
+        ArgumentNullException.ThrowIfNull(document);
 
-        var filePath = GetDocumentFilePath(documentId);
         try
         {
             var bytes = serializer.SerializeToBytes(document);
-            await File.WriteAllBytesAsync(filePath, bytes, cancellationToken).ConfigureAwait(false);
+            
+            using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            
+            using var command = connection.CreateCommand();
+            command.CommandText = "INSERT OR REPLACE INTO Documents (DocumentId, Payload) VALUES (@DocId, @Payload)";
+            AddParameter(command, "@DocId", documentId);
+            AddParameter(command, "@Payload", bytes);
+            
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to save document to {FilePath}", filePath);
+            logger.LogError(ex, "Failed to save document '{DocumentId}' to SQLite", documentId);
         }
     }
 
-    public Task DeleteDocumentAsync(string documentId, CancellationToken cancellationToken = default)
+    public async Task DeleteDocumentAsync(string documentId, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(documentId)) return Task.CompletedTask;
+        if (string.IsNullOrEmpty(documentId)) return;
 
-        var filePath = GetDocumentFilePath(documentId);
-        if (File.Exists(filePath))
+        try
         {
-            try
-            {
-                File.Delete(filePath);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to actively safely locally delete structurally mapped CRDT document from {FilePath}", filePath);
-            }
-        }
+            using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            using var transaction = connection.BeginTransaction();
 
-        lock (syncRoot)
+            using var cmd1 = connection.CreateCommand();
+            cmd1.Transaction = transaction;
+            cmd1.CommandText = "DELETE FROM Documents WHERE DocumentId = @DocId";
+            AddParameter(cmd1, "@DocId", documentId);
+            await cmd1.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+
+            using var cmd2 = connection.CreateCommand();
+            cmd2.Transaction = transaction;
+            cmd2.CommandText = "DELETE FROM Journal WHERE DocumentId = @DocId";
+            AddParameter(cmd2, "@DocId", documentId);
+            await cmd2.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
         {
-            var removed = journal.RemoveAll(o => o.DocumentId == documentId);
-            if (removed > 0)
-            {
-                SaveJournalSynchronously();
-            }
+            logger.LogError(ex, "Failed to completely actively delete mapped CRDT document '{DocumentId}' from SQLite", documentId);
         }
-
-        return Task.CompletedTask;
     }
 
     public async Task<DottedVersionVector?> LoadGlobalVersionVectorAsync(string replicaId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(replicaId)) throw new ArgumentException("Value cannot be null or empty.", nameof(replicaId));
 
-        var filePath = GetGlobalFilePath(replicaId);
-        if (!File.Exists(filePath))
-        {
-            return null;
-        }
-
         try
         {
-            var bytes = await File.ReadAllBytesAsync(filePath, cancellationToken).ConfigureAwait(false);
-            return serializer.DeserializeFromBytes<DottedVersionVector>(bytes);
+            using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT Payload FROM GlobalDvv WHERE ReplicaId = @RepId";
+            AddParameter(command, "@RepId", replicaId);
+
+            var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+            if (result is byte[] bytes)
+            {
+                return serializer.DeserializeFromBytes<DottedVersionVector>(bytes);
+            }
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to load global DVV from {FilePath}", filePath);
-            return null;
+            logger.LogError(ex, "Failed to load global DVV for '{ReplicaId}' from SQLite", replicaId);
         }
+
+        return null;
     }
 
     public async Task SaveGlobalVersionVectorAsync(string replicaId, DottedVersionVector globalVersionVector, CancellationToken cancellationToken = default)
@@ -135,15 +150,23 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         if (string.IsNullOrEmpty(replicaId)) throw new ArgumentException("Value cannot be null or empty.", nameof(replicaId));
         ArgumentNullException.ThrowIfNull(globalVersionVector);
 
-        var filePath = GetGlobalFilePath(replicaId);
         try
         {
             var bytes = serializer.SerializeToBytes(globalVersionVector);
-            await File.WriteAllBytesAsync(filePath, bytes, cancellationToken).ConfigureAwait(false);
+            
+            using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            
+            using var command = connection.CreateCommand();
+            command.CommandText = "INSERT OR REPLACE INTO GlobalDvv (ReplicaId, Payload) VALUES (@RepId, @Payload)";
+            AddParameter(command, "@RepId", replicaId);
+            AddParameter(command, "@Payload", bytes);
+            
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to save global DVV to {FilePath}", filePath);
+            logger.LogError(ex, "Failed to save global DVV to SQLite");
         }
     }
 
@@ -151,23 +174,41 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
     {
         if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
         ArgumentNullException.ThrowIfNull(operationsList);
+        if (operationsList.Count == 0) return;
 
-        lock (syncRoot)
+        try
         {
-            var added = false;
+            using var connection = new SqliteConnection(connectionString);
+            connection.Open();
+            using var transaction = connection.BeginTransaction();
+            
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "INSERT OR IGNORE INTO Journal (Id, DocumentId, ReplicaId, GlobalClock, Payload) VALUES (@Id, @DocId, @RepId, @Clock, @Payload)";
+
+            var pId = command.CreateParameter(); pId.ParameterName = "@Id"; command.Parameters.Add(pId);
+            var pDoc = command.CreateParameter(); pDoc.ParameterName = "@DocId"; command.Parameters.Add(pDoc);
+            var pRep = command.CreateParameter(); pRep.ParameterName = "@RepId"; command.Parameters.Add(pRep);
+            var pClock = command.CreateParameter(); pClock.ParameterName = "@Clock"; command.Parameters.Add(pClock);
+            var pPayload = command.CreateParameter(); pPayload.ParameterName = "@Payload"; command.Parameters.Add(pPayload);
+
             foreach (var op in operationsList)
             {
-                if (!journal.Any(o => o.Operation.Id == op.Id))
-                {
-                    journal.Add(new JournaledOperation(documentId, op));
-                    added = true;
-                }
+                var journaled = new JournaledOperation(documentId, op);
+                pId.Value = op.Id;
+                pDoc.Value = documentId;
+                pRep.Value = op.ReplicaId;
+                pClock.Value = op.GlobalClock;
+                pPayload.Value = serializer.SerializeToBytes(journaled);
+                
+                command.ExecuteNonQuery();
             }
 
-            if (added)
-            {
-                SaveJournalSynchronously();
-            }
+            transaction.Commit();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to append synchronously to SQLite journal");
         }
     }
 
@@ -175,36 +216,41 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
     {
         if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
         ArgumentNullException.ThrowIfNull(operationsList);
+        if (operationsList.Count == 0) return;
 
-        bool added = false;
-        List<JournaledOperation> snapshot;
-        string filePath;
-
-        lock (syncRoot)
+        try
         {
+            using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            using var transaction = connection.BeginTransaction();
+            
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "INSERT OR IGNORE INTO Journal (Id, DocumentId, ReplicaId, GlobalClock, Payload) VALUES (@Id, @DocId, @RepId, @Clock, @Payload)";
+
+            var pId = command.CreateParameter(); pId.ParameterName = "@Id"; command.Parameters.Add(pId);
+            var pDoc = command.CreateParameter(); pDoc.ParameterName = "@DocId"; command.Parameters.Add(pDoc);
+            var pRep = command.CreateParameter(); pRep.ParameterName = "@RepId"; command.Parameters.Add(pRep);
+            var pClock = command.CreateParameter(); pClock.ParameterName = "@Clock"; command.Parameters.Add(pClock);
+            var pPayload = command.CreateParameter(); pPayload.ParameterName = "@Payload"; command.Parameters.Add(pPayload);
+
             foreach (var op in operationsList)
             {
-                if (!journal.Any(o => o.Operation.Id == op.Id))
-                {
-                    journal.Add(new JournaledOperation(documentId, op));
-                    added = true;
-                }
+                var journaled = new JournaledOperation(documentId, op);
+                pId.Value = op.Id;
+                pDoc.Value = documentId;
+                pRep.Value = op.ReplicaId;
+                pClock.Value = op.GlobalClock;
+                pPayload.Value = serializer.SerializeToBytes(journaled);
+                
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
-            snapshot = journal.ToList();
-            filePath = GetJournalFilePath();
-        }
 
-        if (added)
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
         {
-            try
-            {
-                var bytes = serializer.SerializeToBytes(snapshot);
-                await File.WriteAllBytesAsync(filePath, bytes, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to asynchronously save journal to {FilePath}", filePath);
-            }
+            logger.LogError(ex, "Failed to asynchronously save operations to SQLite journal");
         }
     }
 
@@ -212,15 +258,27 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
     {
         if (string.IsNullOrEmpty(originReplicaId)) throw new ArgumentException("Value cannot be null or empty.", nameof(originReplicaId));
 
-        List<JournaledOperation> snapshot;
-        lock (syncRoot) { snapshot = journal.ToList(); }
+        using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Payload FROM Journal WHERE ReplicaId = @RepId AND GlobalClock > @Min AND GlobalClock <= @Max ORDER BY GlobalClock ASC";
+        AddParameter(command, "@RepId", originReplicaId);
+        AddParameter(command, "@Min", minGlobalClock);
+        AddParameter(command, "@Max", maxGlobalClock);
 
-        foreach (var op in snapshot.Where(o => o.Operation.ReplicaId == originReplicaId && o.Operation.GlobalClock > minGlobalClock && o.Operation.GlobalClock <= maxGlobalClock))
+        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            yield return op;
+            if (reader["Payload"] is byte[] bytes)
+            {
+                var op = serializer.DeserializeFromBytes<JournaledOperation>(bytes);
+                if (op != null)
+                {
+                    yield return op;
+                }
+            }
         }
-        await Task.CompletedTask;
     }
 
     public async IAsyncEnumerable<JournaledOperation> GetOperationsByDotsAsync(string originReplicaId, IEnumerable<long> globalClocks, [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -228,99 +286,188 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         if (string.IsNullOrEmpty(originReplicaId)) throw new ArgumentException("Value cannot be null or empty.", nameof(originReplicaId));
         ArgumentNullException.ThrowIfNull(globalClocks);
 
-        var clocks = globalClocks.ToHashSet();
-        List<JournaledOperation> snapshot;
-        lock (syncRoot) { snapshot = journal.ToList(); }
+        var clocksList = globalClocks.ToList();
+        if (clocksList.Count == 0) yield break;
 
-        foreach (var op in snapshot.Where(o => o.Operation.ReplicaId == originReplicaId && clocks.Contains(o.Operation.GlobalClock)))
+        using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        foreach (var chunk in clocksList.Chunk(900)) // Max sqlite vars is 999 natively avoiding limits
         {
             cancellationToken.ThrowIfCancellationRequested();
-            yield return op;
+            var inClause = string.Join(",", chunk);
+            
+            using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT Payload FROM Journal WHERE ReplicaId = @RepId AND GlobalClock IN ({inClause}) ORDER BY GlobalClock ASC";
+            AddParameter(command, "@RepId", originReplicaId);
+
+            using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (reader["Payload"] is byte[] bytes)
+                {
+                    var op = serializer.DeserializeFromBytes<JournaledOperation>(bytes);
+                    if (op != null)
+                    {
+                        yield return op;
+                    }
+                }
+            }
         }
-        await Task.CompletedTask;
     }
 
     public async IAsyncEnumerable<JournaledOperation> GetAllJournaledOperationsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        List<JournaledOperation> snapshot;
-        lock (syncRoot) { snapshot = journal.ToList(); }
+        using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Payload FROM Journal ORDER BY GlobalClock ASC";
 
-        foreach (var op in snapshot)
+        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            yield return op;
+            if (reader["Payload"] is byte[] bytes)
+            {
+                var op = serializer.DeserializeFromBytes<JournaledOperation>(bytes);
+                if (op != null)
+                {
+                    yield return op;
+                }
+            }
         }
-        await Task.CompletedTask;
     }
 
-    public Task<long> GetJournalCountAsync(CancellationToken cancellationToken = default)
+    public async Task<long> GetJournalCountAsync(CancellationToken cancellationToken = default)
     {
-        lock (syncRoot)
+        try
         {
-            return Task.FromResult((long)journal.Count);
+            using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM Journal";
+
+            var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+            return Convert.ToInt64(result);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to get SQLite journal count");
+            return 0;
         }
     }
 
     public void Trim(IReadOnlyDictionary<string, long> gmvv)
     {
         ArgumentNullException.ThrowIfNull(gmvv);
-
-        lock (syncRoot)
-        {
-            var removedCount = journal.RemoveAll(op => gmvv.TryGetValue(op.Operation.ReplicaId, out var minKnown) && op.Operation.GlobalClock <= minKnown);
-            if (removedCount > 0)
-            {
-                SaveJournalSynchronously();
-            }
-        }
-    }
-
-    public Task TrimAsync(IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default)
-    {
-        Trim(globalMinimumVersionVector);
-        return Task.CompletedTask;
-    }
-
-    private void LoadJournalSynchronously()
-    {
-        var filePath = GetJournalFilePath();
-        if (!File.Exists(filePath))
-        {
-            return;
-        }
+        if (gmvv.Count == 0) return;
 
         try
         {
-            var bytes = File.ReadAllBytes(filePath);
-            var loaded = serializer.DeserializeFromBytes<List<JournaledOperation>>(bytes);
-            if (loaded != null)
+            using var connection = new SqliteConnection(connectionString);
+            connection.Open();
+            using var transaction = connection.BeginTransaction();
+            
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "DELETE FROM Journal WHERE ReplicaId = @RepId AND GlobalClock <= @MaxClock";
+            
+            var pRepId = command.CreateParameter(); pRepId.ParameterName = "@RepId"; command.Parameters.Add(pRepId);
+            var pMax = command.CreateParameter(); pMax.ParameterName = "@MaxClock"; command.Parameters.Add(pMax);
+
+            foreach (var kvp in gmvv)
             {
-                journal.AddRange(loaded);
+                pRepId.Value = kvp.Key;
+                pMax.Value = kvp.Value;
+                command.ExecuteNonQuery();
             }
+
+            transaction.Commit();
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to load initialized journal from {FilePath}", filePath);
+            logger.LogError(ex, "Failed to synchronously trim SQLite journal natively");
         }
     }
 
-    private void SaveJournalSynchronously()
+    public async Task TrimAsync(IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default)
     {
-        var filePath = GetJournalFilePath();
+        ArgumentNullException.ThrowIfNull(globalMinimumVersionVector);
+        if (globalMinimumVersionVector.Count == 0) return;
+
         try
         {
-            var bytes = serializer.SerializeToBytes(journal);
-            File.WriteAllBytes(filePath, bytes);
+            using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            using var transaction = connection.BeginTransaction();
+            
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "DELETE FROM Journal WHERE ReplicaId = @RepId AND GlobalClock <= @MaxClock";
+            
+            var pRepId = command.CreateParameter(); pRepId.ParameterName = "@RepId"; command.Parameters.Add(pRepId);
+            var pMax = command.CreateParameter(); pMax.ParameterName = "@MaxClock"; command.Parameters.Add(pMax);
+
+            foreach (var kvp in globalMinimumVersionVector)
+            {
+                pRepId.Value = kvp.Key;
+                pMax.Value = kvp.Value;
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to synchronously save journal to {FilePath}", filePath);
+            logger.LogError(ex, "Failed to asynchronously trim SQLite journal gracefully");
         }
     }
 
-    private string GetDocumentFilePath(string docId) => $"{loadedReplicaId}_{docId}_state.json";
-    
-    private string GetGlobalFilePath(string rid) => $"{rid}_global_dvv.json";
-    
-    private string GetJournalFilePath() => $"{loadedReplicaId}_journal.json";
+    private void InitializeDatabase()
+    {
+        try
+        {
+            using var connection = new SqliteConnection(connectionString);
+            connection.Open();
+            
+            using var walCommand = connection.CreateCommand();
+            walCommand.CommandText = "PRAGMA journal_mode = 'wal';";
+            walCommand.ExecuteNonQuery();
+
+            using var command = connection.CreateCommand();
+            command.CommandText = @"
+                CREATE TABLE IF NOT EXISTS Documents (
+                    DocumentId TEXT PRIMARY KEY,
+                    Payload BLOB NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS GlobalDvv (
+                    ReplicaId TEXT PRIMARY KEY,
+                    Payload BLOB NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS Journal (
+                    Id TEXT PRIMARY KEY,
+                    DocumentId TEXT NOT NULL,
+                    ReplicaId TEXT NOT NULL,
+                    GlobalClock INTEGER NOT NULL,
+                    Payload BLOB NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IDX_Journal_Replica_Clock ON Journal(ReplicaId, GlobalClock);
+            ";
+            command.ExecuteNonQuery();
+        }
+        catch (Exception ex)
+        {
+            logger.LogCritical(ex, "Failed to natively structurally initialize SQLite showcase schema");
+            throw;
+        }
+    }
+
+    private static void AddParameter(SqliteCommand command, string name, object value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value ?? DBNull.Value;
+        command.Parameters.Add(parameter);
+    }
 }

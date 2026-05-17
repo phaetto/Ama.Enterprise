@@ -66,35 +66,6 @@ public sealed class MessagePackCrdtSerializer : ICrdtSerializer
     }
 
     /// <inheritdoc/>
-    public string SerializeToString<T>(T value)
-    {
-        // MessagePack is pure binary. To fulfill the string API safely, we Base64 encode the binary stream.
-        var bytes = MessagePackSerializer.Serialize(value, options);
-        return Convert.ToBase64String(bytes);
-    }
-
-    /// <inheritdoc/>
-    public string SerializeToString(object value, Type inputType)
-    {
-        var bytes = MessagePackSerializer.Serialize(inputType, value, options);
-        return Convert.ToBase64String(bytes);
-    }
-
-    /// <inheritdoc/>
-    public T? DeserializeFromString<T>(string data)
-    {
-        var bytes = Convert.FromBase64String(data);
-        return MessagePackSerializer.Deserialize<T>(bytes, options);
-    }
-
-    /// <inheritdoc/>
-    public object? DeserializeFromString(string data, Type returnType)
-    {
-        var bytes = Convert.FromBase64String(data);
-        return MessagePackSerializer.Deserialize(returnType, bytes, options);
-    }
-
-    /// <inheritdoc/>
     public T? Clone<T>(T original)
     {
         if (original is null) return default;

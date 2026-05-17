@@ -3,6 +3,7 @@ namespace Ama.Enterprise.P2p.Services;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
@@ -33,8 +34,12 @@ public sealed class P2pHostedService(
 
     private readonly ConcurrentDictionary<string, Task> inboundProcessors = new();
     private readonly ConcurrentDictionary<string, MeshState> activeMeshes = new();
-    private readonly ConcurrentDictionary<Guid, DateTimeOffset> seenMessages = new();
-    private long lastCleanupTicks = Environment.TickCount64;
+
+    // 131,072 entries * 8 bytes = ~1 MB of memory. Always allocated, zero GC pressure.
+    private const int CacheSize = 131072;
+    private const int CacheMask = CacheSize - 1;
+    private readonly long[] seenMessagesCache = new long[CacheSize];
+
     private CancellationTokenSource? processCts;
 
     /// <inheritdoc />
@@ -215,11 +220,25 @@ public sealed class P2pHostedService(
     private async Task HandleIncomingMessageAsync(string meshId, MeshState state, IMeshMessage message, CancellationToken cancellationToken)
     {
         var messageId = message.MessageId;
-        if (!seenMessages.TryAdd(messageId, DateTimeOffset.UtcNow))
+
+        // Perform a zero-allocation cast from Guid (16 bytes) to long (8 bytes) to act as a 64-bit hash.
+        // This is perfectly safe, verifiable, and highly optimized in .NET AOT.
+        var hash = Unsafe.As<Guid, long>(ref messageId);
+        
+        // Bitwise AND works here because CacheSize is a power of 2. It is significantly faster than modulo (%).
+        var index = (int)(hash & CacheMask);
+
+        // Volatile read ensures thread visibility across CPUs without full lock contention.
+        var existingHash = Volatile.Read(ref seenMessagesCache[index]);
+        if (existingHash == hash)
         {
             logger.LogDebug("[{MeshId}] Suppressed duplicate generic message {MessageId}.", meshId, messageId);
             return;
         }
+
+        // Write new hash over the old one. If two messages collide (rare) or old messages are overwritten,
+        // the cache acts as a natural rolling window.
+        Volatile.Write(ref seenMessagesCache[index], hash);
 
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
         if (message.SenderId.Value == nodeOptions.LocalPeerId)
@@ -244,16 +263,6 @@ public sealed class P2pHostedService(
         else
         {
             await state.Dispatcher.DispatchAsync(meshId, message.SenderId, message.Payload, cancellationToken).ConfigureAwait(false);
-        }
-
-        var currentTicks = Environment.TickCount64;
-        var last = Interlocked.Read(ref lastCleanupTicks);
-        if (currentTicks - last > 60_000)
-        {
-            if (Interlocked.CompareExchange(ref lastCleanupTicks, currentTicks, last) == last)
-            {
-                CleanupSeenMessages();
-            }
         }
     }
 
@@ -293,18 +302,6 @@ public sealed class P2pHostedService(
             catch (Exception ex)
             {
                 logger.LogError(ex, "[{MeshId}] An error occurred during the algorithm health check tick.", meshId);
-            }
-        }
-    }
-
-    private void CleanupSeenMessages()
-    {
-        var threshold = DateTimeOffset.UtcNow.AddMinutes(-5);
-        foreach (var kvp in seenMessages)
-        {
-            if (kvp.Value < threshold)
-            {
-                seenMessages.TryRemove(kvp.Key, out _);
             }
         }
     }

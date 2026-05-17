@@ -1,12 +1,5 @@
 namespace Ama.Enterprise.P2p.Telemetry.Cli;
 
-using System;
-using System.Collections.Generic;
-using System.Data;
-using System.Linq;
-using System.Net.NetworkInformation;
-using System.Threading;
-using System.Threading.Tasks;
 using Ama.CRDT.Extensions;
 using Ama.Enterprise.CRDT.MessagePack.Extensions;
 using Ama.Enterprise.P2p.Extensions;
@@ -17,7 +10,22 @@ using Ama.Enterprise.P2p.Telemetry.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.IO;
+using System.Linq;
+using System.Net.NetworkInformation;
+using System.Text;
+using System.Text.Json.Serialization;
+using System.Threading;
+using System.Threading.Tasks;
 using Terminal.Gui;
+
+[JsonSerializable(typeof(string))]
+public sealed partial class TelemetryCaseJsonContext : JsonSerializerContext
+{
+}
 
 internal sealed class Program
 {
@@ -45,9 +53,9 @@ internal sealed class Program
         services.AddCrdt()
                 .AddCrdtSystemTextJson(useBrotliCompression: true);
 
-        // TODO: Something is not loading here
         services.AddCrdtMessagePack(
-            CRDT.MessagePack.Formatters.Ama_Enterprise_CRDT_MessagePack_MessagePackResolver.Instance
+            CRDT.MessagePack.Formatters.Ama_Enterprise_CRDT_MessagePack_MessagePackResolver.Instance,
+            CRDT.MessagePack.Formatters.Ama_Enterprise_P2p_Telemetry_Cli_MessagePackResolver.Instance
         );
 
         services.AddSingleton(TimeProvider.System);
@@ -105,7 +113,7 @@ internal sealed class Program
             var window = new Window("P2P Cluster Telemetry Dashboard ('admin' mesh)")
             {
                 X = 0,
-                Y = 0,
+                Y = 1, // Shifted down to accommodate the MenuBar
                 Width = Dim.Fill(),
                 Height = Dim.Fill()
             };
@@ -172,9 +180,22 @@ internal sealed class Program
             };
             
             metricsFrame.Add(hideTelemetryMeshCheckbox, tableView);
-
             window.Add(peersFrame, metricsFrame);
-            top.Add(window);
+
+            var menu = new MenuBar(new MenuBarItem[] {
+                new MenuBarItem("_File", new MenuItem [] {
+                    new MenuItem("_Export to Markdown", "Exports current metrics to a local file", () => 
+                    {
+                        _ = ExportToMarkdownAsync(aggregator, metricsAggregator, peerRegistry, hideTelemetryMeshCheckbox.Checked, cts.Token);
+                    }),
+                    new MenuItem("_Quit", "Closes the application", () => {
+                        cts.Cancel();
+                        Application.RequestStop();
+                    })
+                })
+            });
+
+            top.Add(menu, window);
 
             // Ensure CTRL+Q, CTRL+C or ESC exits the Terminal.Gui loop cleanly
             top.KeyPress += (e) =>
@@ -333,6 +354,69 @@ internal sealed class Program
             tableView.Update();
             tableView.SetNeedsDisplay();
         });
+    }
+
+    private static async Task ExportToMarkdownAsync(
+        ITelemetryAggregator aggregator,
+        IClusterMetricsAggregator metricsAggregator,
+        IPeerRegistry peerRegistry,
+        bool hideAdmin,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var activePeers = await peerRegistry.GetPeersByStatusAsync("admin", PeerStatus.Active, cancellationToken).ConfigureAwait(false);
+            var activePeerIds = activePeers.Select(p => p.Id.Value).ToHashSet();
+            
+            var rawMetrics = aggregator.GetAllNodeMetrics().ToList();
+            metricsAggregator.ProcessPayloads(rawMetrics);
+
+            var activeSelection = SelectedPeerId;
+            var targetNodeIds = activeSelection == "All"
+                ? activePeerIds
+                : activePeerIds.Where(id => id.ToString("N").StartsWith(activeSelection)).ToHashSet();
+
+            var clusterAggregations = metricsAggregator.AggregateClusterMetrics(targetNodeIds);
+
+            var visibleAggregations = clusterAggregations.AsEnumerable();
+
+            if (hideAdmin)
+            {
+                visibleAggregations = visibleAggregations.Where(agg =>
+                    !agg.Tags.Any(t => t.Key.Equals("mesh_id", StringComparison.OrdinalIgnoreCase) && 
+                                       t.Value.Equals("admin", StringComparison.OrdinalIgnoreCase)));
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"# Telemetry Export - {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            sb.AppendLine($"**View:** {activeSelection} | **Active Peers:** {targetNodeIds.Count}");
+            sb.AppendLine();
+            sb.AppendLine("| Metric | Type | Sum | Min | Max | Rate/Sec | Rate/Min | Tags |");
+            sb.AppendLine("|---|---|---|---|---|---|---|---|");
+
+            foreach (var agg in visibleAggregations.OrderBy(m => m.Name))
+            {
+                var tagsStr = string.Join(", ", agg.Tags.Select(t => $"{t.Key}={t.Value}"));
+                sb.AppendLine($"| {agg.Name} | {agg.Type} | {FormatNumber(agg.Sum)} | {FormatNumber(agg.Min)} | {FormatNumber(agg.Max)} | {FormatNumber(agg.RatePerSecond)} | {FormatNumber(agg.RatePerMinute)} | {tagsStr} |");
+            }
+
+            var fileName = $"telemetry_export_{DateTime.Now:yyyyMMdd_HHmmss}.md";
+            var filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
+
+            await File.WriteAllTextAsync(filePath, sb.ToString(), cancellationToken).ConfigureAwait(false);
+
+            Application.MainLoop.Invoke(() =>
+            {
+                MessageBox.Query("Export Successful", $"Telemetry exported successfully to:\n{filePath}", "OK");
+            });
+        }
+        catch (Exception ex)
+        {
+            Application.MainLoop.Invoke(() =>
+            {
+                MessageBox.ErrorQuery("Export Failed", $"An error occurred during export:\n{ex.Message}", "OK");
+            });
+        }
     }
 
     private static int GetNextAvailablePort(int startingPort)
