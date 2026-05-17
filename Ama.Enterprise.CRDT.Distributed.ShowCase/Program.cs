@@ -53,7 +53,7 @@ public static class Program
         services.AddDistributedCrdtCore(options =>
         {
             options.ActiveSyncEnabled = true;
-            options.PeerEvictionTtlSeconds = 60;
+            options.PeerEvictionTtlSeconds = 300;
             options.CheckpointIntervalSeconds = 60;
             options.AntiEntropyInitialDelaySeconds = 1;
             options.AntiEntropyIntervalSeconds = 5;
@@ -180,38 +180,7 @@ public static class Program
             taskManager.StateChanged += (sender, eventArgs) => DrawState(orchestrator, taskManager, fleetManager);
             fleetManager.StateChanged += (sender, eventArgs) => DrawState(orchestrator, taskManager, fleetManager);
 
-#if DEBUG
-            if (Debugger.IsAttached)
-            {
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        // Ensure the document exists first to avoid invalid mutations
-                        await orchestrator.CreateDocumentAsync("bbb", "task-list", cts.Token).ConfigureAwait(false);
-                        logger.LogInformation("Debug mode detected. Pumping 150 changes/sec to task_001...");
-
-                        // Batching 15 requests every 100ms yields 150 requests/sec reliably.
-                        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(100));
-                        while (await timer.WaitForNextTickAsync(cts.Token).ConfigureAwait(false))
-                        {
-                            for (var i = 0; i < 15; i++)
-                            {
-                                await taskManager.SetTaskAsync("bbb", "task_001", "TaskBased", false, cts.Token).ConfigureAwait(false);
-                            }
-                        }
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        // Expected during graceful shutdown
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Load generator failed.");
-                    }
-                }, cts.Token);
-            }
-#endif
+            CancellationTokenSource? hammerCts = null;
 
             DrawMenu();
             DrawState(orchestrator, taskManager, fleetManager);
@@ -280,6 +249,111 @@ public static class Program
                                 WriteLineLocked("Usage: fdel <docId> <deviceId>");
                             break;
 
+                        case "hammer":
+                            if (parts.Length >= 2 && int.TryParse(parts[1], out var cps))
+                            {
+                                if (hammerCts is not null)
+                                {
+                                    await hammerCts.CancelAsync().ConfigureAwait(false);
+                                    hammerCts.Dispose();
+                                    hammerCts = null;
+                                    logger.LogInformation("Hammer mode stopped.");
+                                }
+
+                                if (cps > 0)
+                                {
+                                    hammerCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+                                    var token = hammerCts.Token;
+
+                                    _ = Task.Run(async () =>
+                                    {
+                                        try
+                                        {
+                                            await orchestrator.CreateDocumentAsync("nail", "task-list", token).ConfigureAwait(false);
+                                            logger.LogInformation("Hammer mode activated. Pumping {Cps} changes/sec to doc 'nail'...", cps);
+
+                                            if (cps <= 1000)
+                                            {
+                                                var intervalMs = 100;
+                                                var batchSize = cps / 10;
+                                                if (batchSize == 0)
+                                                {
+                                                    batchSize = 1;
+                                                    intervalMs = 1000 / cps;
+                                                }
+
+                                                using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(intervalMs));
+                                                while (await timer.WaitForNextTickAsync(token).ConfigureAwait(false))
+                                                {
+                                                    for (var i = 0; i < batchSize; i++)
+                                                    {
+                                                        await taskManager.SetTaskAsync("nail", "nail", "Did we nail it?", false, token).ConfigureAwait(false);
+                                                    }
+                                                }
+                                            }
+                                            else
+                                            {
+                                                var workerCount = Math.Max(2, Environment.ProcessorCount / 2);
+                                                var baseCps = cps / workerCount;
+                                                var remainder = cps % workerCount;
+                                                var sw = Stopwatch.StartNew();
+
+                                                var workers = new Task[workerCount];
+                                                for (var w = 0; w < workerCount; w++)
+                                                {
+                                                    var workerCps = baseCps + (w < remainder ? 1 : 0);
+                                                    workers[w] = Task.Run(async () =>
+                                                    {
+                                                        long workerOpsCompleted = 0;
+                                                        while (!token.IsCancellationRequested)
+                                                        {
+                                                            var targetOps = (long)(sw.Elapsed.TotalSeconds * workerCps);
+                                                            var batch = targetOps - workerOpsCompleted;
+
+                                                            if (batch > 0)
+                                                            {
+                                                                if (batch > 1000)
+                                                                {
+                                                                    batch = 1000;
+                                                                }
+
+                                                                var tasks = new Task[batch];
+                                                                for (var i = 0; i < batch; i++)
+                                                                {
+                                                                    tasks[i] = taskManager.SetTaskAsync("nail", "nail", "Did we nail it?", false, token);
+                                                                }
+
+                                                                await Task.WhenAll(tasks).ConfigureAwait(false);
+                                                                workerOpsCompleted += batch;
+                                                            }
+                                                            else
+                                                            {
+                                                                await Task.Delay(1, token).ConfigureAwait(false);
+                                                            }
+                                                        }
+                                                    }, token);
+                                                }
+
+                                                await Task.WhenAll(workers).ConfigureAwait(false);
+                                            }
+                                        }
+                                        catch (OperationCanceledException)
+                                        {
+                                            // Expected during cancellation
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            logger.LogError(ex, "Hammer generator failed.");
+                                        }
+                                    }, token);
+                                }
+                            }
+                            else
+                            {
+                                WriteLineLocked("Usage: hammer <changes_per_second> (use 0 to stop)");
+                            }
+                            break;
+
                         case "clone":
                             CloneProcess(logger);
                             break;
@@ -346,6 +420,7 @@ public static class Program
             Console.WriteLine(" tdel <docId> <taskId>                          - Removes a task item");
             Console.WriteLine(" fset <docId> <deviceId> <true|false> <batt>    - Adds/Updates a fleet device");
             Console.WriteLine(" fdel <docId> <deviceId>                        - Removes a fleet device");
+            Console.WriteLine(" hammer <cps>                                   - Pumps <cps> changes/sec into doc 'nail' (0 to stop)");
             Console.WriteLine(" clone                                          - Spawns a new node process");
             Console.WriteLine(" exit                                           - Shuts down the node");
             Console.WriteLine("=================================================\n");
