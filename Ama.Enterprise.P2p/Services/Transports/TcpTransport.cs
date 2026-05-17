@@ -96,7 +96,7 @@ public sealed class TcpTransport : ITransport, IDisposable
         }
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(TimeSpan.FromSeconds(5));
+        cts.CancelAfter(TimeSpan.FromSeconds(5)); // TODO: put to options, search for all CancelAfter
 
         var endpointLock = endpointLocks.GetOrAdd(tcpEndpoint, _ => new SemaphoreSlim(1, 1));
         await endpointLock.WaitAsync(cts.Token).ConfigureAwait(false);

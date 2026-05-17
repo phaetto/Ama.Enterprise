@@ -211,7 +211,7 @@ public sealed class TelemetryPushAlgorithm : IDisposable
             return;
         }
 
-        var checkInterval = TimeSpan.FromSeconds(5);
+        var checkInterval = TimeSpan.FromSeconds(5); // TODO: Add/Use to options
         while (!cancellationToken.IsCancellationRequested)
         {
             try

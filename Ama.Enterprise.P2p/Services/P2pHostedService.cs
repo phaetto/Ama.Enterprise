@@ -268,7 +268,7 @@ public sealed class P2pHostedService(
 
     private async Task HealthCheckLoopAsync(string meshId, MeshState state, CancellationToken cancellationToken)
     {
-        var checkInterval = TimeSpan.FromSeconds(5);
+        var checkInterval = TimeSpan.FromSeconds(5); // TODO: Add/Use to options
         while (!cancellationToken.IsCancellationRequested)
         {
             try

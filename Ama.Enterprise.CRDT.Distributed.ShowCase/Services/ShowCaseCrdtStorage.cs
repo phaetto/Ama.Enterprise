@@ -15,12 +15,20 @@ using Microsoft.Extensions.Logging;
 
 /// <summary>
 /// Showcase implementation of a unified storage mechanism mapping the entire CRDT state tree, global DVV, and journaling locally via Native AOT friendly SQLite.
+/// Utilizes the Single-Writer / Multiple-Reader WAL pattern maximizing extreme asynchronous throughput without DB lock contention.
 /// </summary>
-public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
+public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
 {
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<ShowCaseCrdtStorage> logger;
     private readonly string connectionString;
+    
+    // SQLite allows unlimited concurrent readers, but strictly 1 writer.
+    // To prevent the managed Connection Pool from thrashing and throwing "database is locked" errors during heavy Hammer tests,
+    // we dedicate a single permanently open connection for all writes and protect it with an in-memory Semaphore.
+    private readonly SqliteConnection writeConnection;
+    private readonly SemaphoreSlim writeLock = new(1, 1);
+    private bool disposed;
 
     public ShowCaseCrdtStorage(
         ReplicaContext replicaContext,
@@ -31,9 +39,13 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        this.connectionString = $"Data Source=showcase_crdt_{replicaContext.ReplicaId}.db;Cache=Shared;";
+        this.connectionString = $"Data Source=showcase_crdt_{replicaContext.ReplicaId}.db;Cache=Shared;Pooling=True;";
         
         InitializeDatabase();
+
+        // Establish the dedicated write connection
+        this.writeConnection = new SqliteConnection(connectionString);
+        this.writeConnection.Open();
     }
 
     public async Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
@@ -66,16 +78,13 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
     public async Task SaveDocumentAsync<TState>(string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new()
     {
         if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
-        ArgumentNullException.ThrowIfNull(document);
 
+        var bytes = serializer.SerializeToBytes(document);
+
+        await writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var bytes = serializer.SerializeToBytes(document);
-            
-            using var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            
-            using var command = connection.CreateCommand();
+            using var command = writeConnection.CreateCommand();
             command.CommandText = "INSERT OR REPLACE INTO Documents (DocumentId, Payload) VALUES (@DocId, @Payload)";
             AddParameter(command, "@DocId", documentId);
             AddParameter(command, "@Payload", bytes);
@@ -86,25 +95,28 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         {
             logger.LogError(ex, "Failed to save document '{DocumentId}' to SQLite", documentId);
         }
+        finally
+        {
+            writeLock.Release();
+        }
     }
 
     public async Task DeleteDocumentAsync(string documentId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(documentId)) return;
 
+        await writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            using var transaction = connection.BeginTransaction();
+            using var transaction = writeConnection.BeginTransaction();
 
-            using var cmd1 = connection.CreateCommand();
+            using var cmd1 = writeConnection.CreateCommand();
             cmd1.Transaction = transaction;
             cmd1.CommandText = "DELETE FROM Documents WHERE DocumentId = @DocId";
             AddParameter(cmd1, "@DocId", documentId);
             await cmd1.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 
-            using var cmd2 = connection.CreateCommand();
+            using var cmd2 = writeConnection.CreateCommand();
             cmd2.Transaction = transaction;
             cmd2.CommandText = "DELETE FROM Journal WHERE DocumentId = @DocId";
             AddParameter(cmd2, "@DocId", documentId);
@@ -115,6 +127,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to completely actively delete mapped CRDT document '{DocumentId}' from SQLite", documentId);
+        }
+        finally
+        {
+            writeLock.Release();
         }
     }
 
@@ -150,14 +166,12 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         if (string.IsNullOrEmpty(replicaId)) throw new ArgumentException("Value cannot be null or empty.", nameof(replicaId));
         ArgumentNullException.ThrowIfNull(globalVersionVector);
 
+        var bytes = serializer.SerializeToBytes(globalVersionVector);
+
+        await writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var bytes = serializer.SerializeToBytes(globalVersionVector);
-            
-            using var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            
-            using var command = connection.CreateCommand();
+            using var command = writeConnection.CreateCommand();
             command.CommandText = "INSERT OR REPLACE INTO GlobalDvv (ReplicaId, Payload) VALUES (@RepId, @Payload)";
             AddParameter(command, "@RepId", replicaId);
             AddParameter(command, "@Payload", bytes);
@@ -168,6 +182,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         {
             logger.LogError(ex, "Failed to save global DVV to SQLite");
         }
+        finally
+        {
+            writeLock.Release();
+        }
     }
 
     public void Append(string documentId, IReadOnlyList<CrdtOperation> operationsList)
@@ -176,13 +194,12 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         ArgumentNullException.ThrowIfNull(operationsList);
         if (operationsList.Count == 0) return;
 
+        writeLock.Wait();
         try
         {
-            using var connection = new SqliteConnection(connectionString);
-            connection.Open();
-            using var transaction = connection.BeginTransaction();
+            using var transaction = writeConnection.BeginTransaction();
             
-            using var command = connection.CreateCommand();
+            using var command = writeConnection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = "INSERT OR IGNORE INTO Journal (Id, DocumentId, ReplicaId, GlobalClock, Payload) VALUES (@Id, @DocId, @RepId, @Clock, @Payload)";
 
@@ -210,6 +227,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         {
             logger.LogError(ex, "Failed to append synchronously to SQLite journal");
         }
+        finally
+        {
+            writeLock.Release();
+        }
     }
 
     public async Task AppendAsync(string documentId, IReadOnlyList<CrdtOperation> operationsList, CancellationToken cancellationToken = default)
@@ -218,13 +239,12 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         ArgumentNullException.ThrowIfNull(operationsList);
         if (operationsList.Count == 0) return;
 
+        await writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            using var transaction = connection.BeginTransaction();
+            using var transaction = writeConnection.BeginTransaction();
             
-            using var command = connection.CreateCommand();
+            using var command = writeConnection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = "INSERT OR IGNORE INTO Journal (Id, DocumentId, ReplicaId, GlobalClock, Payload) VALUES (@Id, @DocId, @RepId, @Clock, @Payload)";
 
@@ -251,6 +271,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to asynchronously save operations to SQLite journal");
+        }
+        finally
+        {
+            writeLock.Release();
         }
     }
 
@@ -292,7 +316,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         using var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-        foreach (var chunk in clocksList.Chunk(900)) // Max sqlite vars is 999 natively avoiding limits
+        foreach (var chunk in clocksList.Chunk(900))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var inClause = string.Join(",", chunk);
@@ -363,13 +387,12 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         ArgumentNullException.ThrowIfNull(gmvv);
         if (gmvv.Count == 0) return;
 
+        writeLock.Wait();
         try
         {
-            using var connection = new SqliteConnection(connectionString);
-            connection.Open();
-            using var transaction = connection.BeginTransaction();
+            using var transaction = writeConnection.BeginTransaction();
             
-            using var command = connection.CreateCommand();
+            using var command = writeConnection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = "DELETE FROM Journal WHERE ReplicaId = @RepId AND GlobalClock <= @MaxClock";
             
@@ -389,6 +412,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         {
             logger.LogError(ex, "Failed to synchronously trim SQLite journal natively");
         }
+        finally
+        {
+            writeLock.Release();
+        }
     }
 
     public async Task TrimAsync(IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default)
@@ -396,13 +423,12 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         ArgumentNullException.ThrowIfNull(globalMinimumVersionVector);
         if (globalMinimumVersionVector.Count == 0) return;
 
+        await writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            using var transaction = connection.BeginTransaction();
+            using var transaction = writeConnection.BeginTransaction();
             
-            using var command = connection.CreateCommand();
+            using var command = writeConnection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = "DELETE FROM Journal WHERE ReplicaId = @RepId AND GlobalClock <= @MaxClock";
             
@@ -422,6 +448,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         {
             logger.LogError(ex, "Failed to asynchronously trim SQLite journal gracefully");
         }
+        finally
+        {
+            writeLock.Release();
+        }
     }
 
     private void InitializeDatabase()
@@ -431,9 +461,9 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
             using var connection = new SqliteConnection(connectionString);
             connection.Open();
             
-            using var walCommand = connection.CreateCommand();
-            walCommand.CommandText = "PRAGMA journal_mode = 'wal';";
-            walCommand.ExecuteNonQuery();
+            using var initCommand = connection.CreateCommand();
+            initCommand.CommandText = "PRAGMA journal_mode = 'wal'; PRAGMA synchronous = OFF; PRAGMA temp_store = MEMORY;";
+            initCommand.ExecuteNonQuery();
 
             using var command = connection.CreateCommand();
             command.CommandText = @"
@@ -469,5 +499,14 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage
         parameter.ParameterName = name;
         parameter.Value = value ?? DBNull.Value;
         command.Parameters.Add(parameter);
+    }
+
+    public void Dispose()
+    {
+        if (disposed) return;
+        disposed = true;
+        
+        writeConnection.Dispose();
+        writeLock.Dispose();
     }
 }

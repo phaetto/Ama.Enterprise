@@ -284,8 +284,8 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
 
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
-            
+            await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false); // TODO: Add/Use to options
+
             if (backgroundTaskCancellationSource?.IsCancellationRequested == false)
             {
                 await ConnectAndSubscribeAsync(backgroundTaskCancellationSource.Token).ConfigureAwait(false);

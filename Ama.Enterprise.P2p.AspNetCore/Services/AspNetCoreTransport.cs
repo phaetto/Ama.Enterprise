@@ -116,7 +116,7 @@ public sealed class AspNetCoreTransport : ITransport, IDisposable
         var url = $"{scheme}://{targetEndpoint.Host}:{targetEndpoint.Port}{basePath}/{meshId}";
 
         using var client = httpClientFactory.CreateClient("P2pAspNetCoreTransport");
-        client.Timeout = TimeSpan.FromSeconds(5);
+        client.Timeout = TimeSpan.FromSeconds(5); // TODO: Add/Use to options
 
         var payload = serializer.SerializeToBytes(message);
 

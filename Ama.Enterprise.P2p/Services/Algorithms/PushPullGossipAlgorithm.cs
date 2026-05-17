@@ -325,7 +325,7 @@ public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
                 var options = pushPullOptionsMonitor.Get(meshId);
                 if (!options.EnablePushPull)
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false); // TODO: Add/Use to options
                     continue;
                 }
 

@@ -98,7 +98,7 @@ public sealed class UdpTransport : ITransport, IDisposable
         }
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(TimeSpan.FromSeconds(5));
+        cts.CancelAfter(TimeSpan.FromSeconds(5)); // TODO: Add/Use to options
 
         using var client = new UdpClient();
 

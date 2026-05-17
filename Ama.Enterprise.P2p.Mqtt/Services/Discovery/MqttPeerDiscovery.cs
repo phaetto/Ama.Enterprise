@@ -373,8 +373,8 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
 
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
-            
+            await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false); // TODO: Add/Use to options
+
             if (backgroundTaskCancellationSource?.IsCancellationRequested == false)
             {
                 await ConnectAndSubscribeAsync(backgroundTaskCancellationSource.Token).ConfigureAwait(false);
