@@ -26,6 +26,7 @@ public static class Program
     private static readonly object ConsoleLock = new();
     private static int currentPort;
     private static int currentAdminPort;
+    private static volatile bool _needsRedraw;
 
     public static async Task Main(string[] args)
     {
@@ -54,9 +55,11 @@ public static class Program
         {
             options.ActiveSyncEnabled = true;
             options.PeerEvictionTtlSeconds = 300;
-            options.CheckpointIntervalSeconds = 60;
-            options.AntiEntropyInitialDelaySeconds = 1;
+            options.CheckpointIntervalSeconds = 30;
+            options.AntiEntropyInitialDelaySeconds = 2;
             options.AntiEntropyIntervalSeconds = 5;
+            //options.JournalHardCeilingTrimThreshold = 2000;
+            //options.JournalTrimThreshold = 300;
         });
 
         services.AddDistributedCrdtReplica(replicaId);
@@ -82,7 +85,7 @@ public static class Program
         services.AddDistributedCrdtService<IFleetManager, FleetManager>();
 
         // Register Showcase file-based CRDT storage overriding memory fallbacks for all documents
-        services.AddDistributedCrdtStorage<ShowCaseCrdtStorage>();
+        //services.AddDistributedCrdtStorage<ShowCaseCrdtStorage>();
 
         // Register the background multi-document orchestration and route inbound intents from the network
         services.AddDistributedCrdtP2p("internal", replicaId);
@@ -176,9 +179,30 @@ public static class Program
             var taskManager = scope.ServiceProvider.GetRequiredService<ITaskManager>();
             var fleetManager = scope.ServiceProvider.GetRequiredService<IFleetManager>();
 
-            // UI refresh bindings
-            taskManager.StateChanged += (sender, eventArgs) => DrawState(orchestrator, taskManager, fleetManager);
-            fleetManager.StateChanged += (sender, eventArgs) => DrawState(orchestrator, taskManager, fleetManager);
+            // UI refresh bindings via a debounced dirty flag instead of synchronous drawing
+            taskManager.StateChanged += (sender, eventArgs) => _needsRedraw = true;
+            fleetManager.StateChanged += (sender, eventArgs) => _needsRedraw = true;
+
+            // Background UI rendering task to decouple Console I/O from hot CRDT operations
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var uiTimer = new PeriodicTimer(TimeSpan.FromMilliseconds(500));
+                    while (await uiTimer.WaitForNextTickAsync(cts.Token).ConfigureAwait(false))
+                    {
+                        if (_needsRedraw)
+                        {
+                            _needsRedraw = false;
+                            DrawState(orchestrator, taskManager, fleetManager);
+                        }
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    // Clean shutdown
+                }
+            }, cts.Token);
 
             CancellationTokenSource? hammerCts = null;
 
@@ -272,7 +296,7 @@ public static class Program
                                             await orchestrator.CreateDocumentAsync("nail", "task-list", token).ConfigureAwait(false);
                                             logger.LogInformation("Hammer mode activated. Pumping {Cps} changes/sec to doc 'nail'...", cps);
 
-                                            if (cps <= 1000)
+                                            if (cps <= 3000)
                                             {
                                                 var intervalMs = 100;
                                                 var batchSize = cps / 10;
@@ -293,48 +317,38 @@ public static class Program
                                             }
                                             else
                                             {
-                                                var workerCount = Math.Max(2, Environment.ProcessorCount / 2);
-                                                var baseCps = cps / workerCount;
-                                                var remainder = cps % workerCount;
+                                                // Extreme Throughput Mode (>1000 cps).
+                                                // When attacking a SINGLE CRDT Document ("nail"), utilizing multiple `Task.Run` workers
+                                                // degraded performance because they all collided on the strict internal causal SemaphoreSlim
+                                                // of that specific document. A single un-throttled tight loop natively bypasses Task-Scheduler
+                                                // lock congestion and maximizes serialized patch evaluation natively!
                                                 var sw = Stopwatch.StartNew();
-
-                                                var workers = new Task[workerCount];
-                                                for (var w = 0; w < workerCount; w++)
+                                                long opsCompleted = 0;
+                                                
+                                                while (!token.IsCancellationRequested)
                                                 {
-                                                    var workerCps = baseCps + (w < remainder ? 1 : 0);
-                                                    workers[w] = Task.Run(async () =>
+                                                    var targetOps = (long)(sw.Elapsed.TotalSeconds * cps);
+                                                    var batch = targetOps - opsCompleted;
+
+                                                    if (batch > 0)
                                                     {
-                                                        long workerOpsCompleted = 0;
-                                                        while (!token.IsCancellationRequested)
+                                                        if (batch > 1000)
                                                         {
-                                                            var targetOps = (long)(sw.Elapsed.TotalSeconds * workerCps);
-                                                            var batch = targetOps - workerOpsCompleted;
-
-                                                            if (batch > 0)
-                                                            {
-                                                                if (batch > 1000)
-                                                                {
-                                                                    batch = 1000;
-                                                                }
-
-                                                                var tasks = new Task[batch];
-                                                                for (var i = 0; i < batch; i++)
-                                                                {
-                                                                    tasks[i] = taskManager.SetTaskAsync("nail", "nail", "Did we nail it?", false, token);
-                                                                }
-
-                                                                await Task.WhenAll(tasks).ConfigureAwait(false);
-                                                                workerOpsCompleted += batch;
-                                                            }
-                                                            else
-                                                            {
-                                                                await Task.Delay(1, token).ConfigureAwait(false);
-                                                            }
+                                                            batch = 1000;
                                                         }
-                                                    }, token);
-                                                }
 
-                                                await Task.WhenAll(workers).ConfigureAwait(false);
+                                                        for (var i = 0; i < batch; i++)
+                                                        {
+                                                            await taskManager.SetTaskAsync("nail", "nail", "Did we nail it?", false, token).ConfigureAwait(false);
+                                                        }
+                                                        
+                                                        opsCompleted += batch;
+                                                    }
+                                                    else
+                                                    {
+                                                        await Task.Delay(1, token).ConfigureAwait(false);
+                                                    }
+                                                }
                                             }
                                         }
                                         catch (OperationCanceledException)

@@ -46,6 +46,12 @@ public sealed class DistributedCrdtOptions
     public int JournalTrimThreshold { get; set; } = 1000;
 
     /// <summary>
+    /// Gets or sets the hard ceiling threshold for the journal size.
+    /// When the active journal count exceeds this limit, journal will trim aggresively in place.
+    /// </summary>
+    public int JournalHardCeilingTrimThreshold { get; set; } = 5000;
+
+    /// <summary>
     /// Gets or sets the Time-To-Live (TTL) in seconds for CRDT metadata compaction.
     /// When operations exceed this age, their associated metadata (like tombstones) is eligible for garbage collection.
     /// Defaults to 0 (compaction disabled).

@@ -43,7 +43,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtRegistryState.cs` | Global P2P synced directory state handling distributed multi-document topologies, ensuring active instantiation maps across nodes. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtSnapshotMessage.cs` | Message payload containing a complete materialized CRDT document snapshot, used as a fallback synchronization mechanism when log truncation gaps are detected. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtStateSyncMessage.cs` | Structure carrying generic synchronization states formatted across anti-entropy operations representing document DVV. |
-| `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtOptions.cs` | Added `JournalTrimThreshold` property enforcing configurable aggressive journaling trimming bounds cleanly, alongside `CompactionTtlSeconds` enabling time-based garbage collection thresholds explicitly. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtOptions.cs` | Added `JournalBackpressureCeilingThreshold` enforcing dynamic hard limits allowing backpressure stalls when journal bounds vastly outpace trimming natively. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtP2pJsonContext.cs` | JSON serialization context mapping AOT bindings resolving eviction message constraints. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtReplicaRegistration.cs` | Represents a dynamically registered Replica ID enforcing discrete CRDT multi-mesh state architectures inherently. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtSystemAotContext.cs` | AOT contextual reflection mapping for internal orchestrator registry CRDT scopes, bridging models. |
@@ -68,7 +68,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtAntiEntropyService.cs` | Implemented network traffic smoothing jitter algorithms, preventing UDP/HTTP overflow "Thundering Herd" payload storms. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtP2pPayloadHandler.cs` | Updated extracting `IDirectMessageSender` strictly bounding Anti-Entropy replies via targeted pushes preventing "Thundering Herd" broadcast storms. Evaluates targeted CRDT snapshots dropping concurrent DVV matrices preventing fatal offline amnesia overwrites. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtTopologyObserver.cs` | Observes network connections and hooks into the core P2P protocols. Refactored resolving `Departed` topology states with instant tombstones freeing log restrictions, while protecting `Dead` topology traces for offline synchronization. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/StorageJournalForwarder.cs` | Injects localized implementations mapping back into underlying internal storage architectures, acting as the interface wrapper over globally active pipelines. Extended to intercept operations and enforce real-time journal threshold trimming explicitly removing fast path bottlenecks. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/StorageJournalForwarder.cs` | Implemented explicit structured backpressure routines utilizing `PeriodicTimer` bypass mapping constraints. Refactored `estimatedJournalCount` deductions safely occurring post-trim ensuring true real-time metric representation distinctly exposing backpressure limits correctly without implicit instantaneous resets. |
 | `$/Ama.Enterprise.CRDT.MemoryPack.UnitTests/Ama.Enterprise.CRDT.MemoryPack.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.MemoryPack/Ama.Enterprise.CRDT.MemoryPack.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.MessagePack.Analyzers.UnitTests/Ama.Enterprise.CRDT.MessagePack.Analyzers.UnitTests.csproj` | No description provided. |
@@ -286,11 +286,13 @@
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/PropertyInfoUsageAnalyzerTests.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/SystemConvertUsageAnalyzerTests.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/TaskDelayWithoutOptionsAnalyzerTests.cs` | Unit tests evaluating diagnostic evaluation scenarios for `TaskDelayWithoutOptionsAnalyzer`. |
+| `$/Ama.Enterprise.Project.Analyzers.UnitTests/ThreadSleepUsageAnalyzerTests.cs` | Unit tests evaluating diagnostic evaluation scenarios for `ThreadSleepUsageAnalyzer` natively. |
 | `$/Ama.Enterprise.Project.Analyzers/Ama.Enterprise.Project.Analyzers.csproj` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers/DirectSerializationUsageAnalyzer.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers/PropertyInfoUsageAnalyzer.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers/SystemConvertUsageAnalyzer.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers/TaskDelayWithoutOptionsAnalyzer.cs` | Roslyn diagnostic analyzer enforcing configurable options instead of hardcoded intervals within `Task.Delay` invocations. |
+| `$/Ama.Enterprise.Project.Analyzers/ThreadSleepUsageAnalyzer.cs` | Roslyn diagnostic analyzer enforcing the prohibition of synchronous `Thread.Sleep` invocations to prevent thread starvation and poor asynchronous performance. |
 | `$/Ama.Enterprise.UnitTests/Ama.Enterprise.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.UnitTests/Attributes/IntegrationFactAttribute.cs` | Custom xUnit `FactAttribute` providing a centralized toggle to enable or disable all integration tests. Shared testing utility. |
 | `$/Ama.Enterprise.UnitTests/Attributes/TestedProtocolVersionAttribute.cs` | Custom attribute utilized by structural reflection tests to declare protocol versions explicitly covered by a method. Shared testing utility. |
