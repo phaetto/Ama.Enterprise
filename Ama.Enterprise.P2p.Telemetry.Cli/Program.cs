@@ -17,15 +17,9 @@ using System.IO;
 using System.Linq;
 using System.Net.NetworkInformation;
 using System.Text;
-using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Terminal.Gui;
-
-[JsonSerializable(typeof(string))]
-public sealed partial class TelemetryCaseJsonContext : JsonSerializerContext
-{
-}
 
 internal sealed class Program
 {

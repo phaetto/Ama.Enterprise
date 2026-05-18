@@ -86,8 +86,6 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
             }
         }
 
-        if (targetTypes.Count == 0) return;
-
         var discoveredCustomTypes = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
         var discoveredCollectionTypes = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
         
