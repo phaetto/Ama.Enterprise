@@ -139,7 +139,6 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
             }
 
             if (type.SpecialType != SpecialType.None) continue; // Primitive/String/Object
-            if (type.TypeKind == TypeKind.Enum) continue;
 
             if (type is INamedTypeSymbol namedType)
             {
@@ -151,7 +150,13 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
                 var originalDef = namedType.OriginalDefinition.ToDisplayString(DefinitionFormat);
                 
                 // Exclude system basics
-                if (originalDef == "System.Object" || originalDef == "System.ValueType") continue;
+                if (originalDef == "System.Object" || originalDef == "System.ValueType" || originalDef == "System.Enum") continue;
+
+                if (namedType.TypeKind == TypeKind.Enum)
+                {
+                    customTypes.Add(namedType);
+                    continue;
+                }
 
                 if (namedType.IsGenericType)
                 {
@@ -471,6 +476,12 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
 
     private static void GenerateFormatter(StringBuilder sb, INamedTypeSymbol typeSymbol, string resolverName)
     {
+        if (typeSymbol.TypeKind == TypeKind.Enum)
+        {
+            GenerateEnumFormatter(sb, typeSymbol, resolverName);
+            return;
+        }
+
         var derivedAttributes = typeSymbol.GetAttributes().Where(a => 
             a.AttributeClass?.Name == "JsonDerivedTypeAttribute" || 
             a.AttributeClass?.ToDisplayString().Contains("JsonDerivedTypeAttribute") == true)
@@ -706,6 +717,46 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
         sb.AppendLine($"            return new {typeFullName}({ctorArgs}){objectInitializer};");
         sb.AppendLine("        }");
 
+        sb.AppendLine("    }");
+    }
+
+    private static void GenerateEnumFormatter(StringBuilder sb, INamedTypeSymbol typeSymbol, string resolverName)
+    {
+        var typeFullName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        var formatterName = GetFormatterClassName(typeSymbol);
+        var underlyingType = typeSymbol.EnumUnderlyingType?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) ?? "int";
+        
+        string readMethod = "ReadInt32";
+
+        switch (underlyingType)
+        {
+            case "byte": readMethod = "ReadByte"; break;
+            case "sbyte": readMethod = "ReadSByte"; break;
+            case "short": readMethod = "ReadInt16"; break;
+            case "ushort": readMethod = "ReadUInt16"; break;
+            case "int": readMethod = "ReadInt32"; break;
+            case "uint": readMethod = "ReadUInt32"; break;
+            case "long": readMethod = "ReadInt64"; break;
+            case "ulong": readMethod = "ReadUInt64"; break;
+            default: readMethod = "ReadInt32"; underlyingType = "int"; break;
+        }
+
+        sb.AppendLine();
+        sb.AppendLine($"    public sealed class {formatterName} : {resolverName}.ICustomFormatter<{typeFullName}>");
+        sb.AppendLine("    {");
+        
+        // Serialize
+        sb.AppendLine($"        public void Serialize(ref global::MessagePack.MessagePackWriter writer, {typeFullName} value, global::MessagePack.MessagePackSerializerOptions options)");
+        sb.AppendLine("        {");
+        sb.AppendLine($"            writer.Write(({underlyingType})value);");
+        sb.AppendLine("        }");
+
+        // Deserialize
+        sb.AppendLine();
+        sb.AppendLine($"        public {typeFullName} Deserialize(ref global::MessagePack.MessagePackReader reader, global::MessagePack.MessagePackSerializerOptions options)");
+        sb.AppendLine("        {");
+        sb.AppendLine($"            return ({typeFullName})reader.{readMethod}();");
+        sb.AppendLine("        }");
         sb.AppendLine("    }");
     }
 

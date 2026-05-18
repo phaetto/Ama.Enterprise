@@ -55,7 +55,7 @@ public static class Program
         services.AddDistributedCrdtCore(options =>
         {
             options.ActiveSyncEnabled = true;
-            options.PeerEvictionTtlSeconds = 0; // TODO: Fix
+            options.PeerEvictionTtlSeconds = 0;
             options.CheckpointIntervalSeconds = 30;
             options.AntiEntropyInitialDelaySeconds = 2;
             options.AntiEntropyIntervalSeconds = 5;

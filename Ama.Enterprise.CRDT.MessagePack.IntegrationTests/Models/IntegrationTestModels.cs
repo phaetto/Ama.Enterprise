@@ -534,6 +534,34 @@ public sealed record NonStringKeyDictionaryModel(
 }
 
 /// <summary>
+/// Simulates a byte-backed enum to test explicit underlying primitive code generation bypassing AOT runtime reflection faults natively.
+/// </summary>
+public enum SimulatedGossipMessageType : byte
+{
+    Unknown = 0,
+    Push = 1,
+    Pull = 2,
+    PushPull = 3
+}
+
+/// <summary>
+/// Data structure simulating a core messaging layer requiring isolated enum definitions flawlessly serialized natively.
+/// </summary>
+public sealed record SimulatedGossipMessage(
+    Guid MessageId,
+    SimulatedGossipMessageType MessageType
+) : IEquatable<SimulatedGossipMessage>
+{
+    public bool Equals(SimulatedGossipMessage? other)
+    {
+        if (other is null) return false;
+        return MessageId == other.MessageId && MessageType == other.MessageType;
+    }
+
+    public override int GetHashCode() => 0;
+}
+
+/// <summary>
 /// Decoupled AOT Source Generation bounds intentionally explicitly triggering MessagePack mappings cleanly via strict Standard System.Text.Json metadata context boundaries natively.
 /// </summary>
 [JsonSerializable(typeof(SimpleValueModel))]
@@ -556,6 +584,8 @@ public sealed record NonStringKeyDictionaryModel(
 [JsonSerializable(typeof(FlagsEnumModel))]
 [JsonSerializable(typeof(JaggedArrayModel))]
 [JsonSerializable(typeof(NonStringKeyDictionaryModel))]
+[JsonSerializable(typeof(SimulatedGossipMessageType))]
+[JsonSerializable(typeof(SimulatedGossipMessage))]
 public partial class MessagePackIntegrationTestContext : JsonSerializerContext
 {
 }

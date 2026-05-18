@@ -484,6 +484,38 @@ public sealed class MessagePackSerializerIntegrationTests
         result.ShouldBeNull();
     }
 
+    [Fact]
+    public void SerializeDeserialize_StandaloneCustomEnum_ReturnsEqualInstance()
+    {
+        // Arrange
+        var enumValue = SimulatedGossipMessageType.PushPull;
+
+        // Act
+        var bytes = crdtSerializer.SerializeToBytes(enumValue);
+        var result = crdtSerializer.DeserializeFromBytes<SimulatedGossipMessageType>(bytes);
+
+        // Assert
+        result.ShouldBe(enumValue);
+    }
+
+    [Fact]
+    public void SerializeDeserialize_CustomEnumWithinModel_ReturnsEqualInstance()
+    {
+        // Arrange
+        var model = new SimulatedGossipMessage(
+            MessageId: Guid.NewGuid(),
+            MessageType: SimulatedGossipMessageType.Pull
+        );
+
+        // Act
+        var bytes = crdtSerializer.SerializeToBytes(model);
+        var result = crdtSerializer.DeserializeFromBytes<SimulatedGossipMessage>(bytes);
+
+        // Assert
+        result.ShouldNotBeNull();
+        result.ShouldBe(model);
+    }
+
     private static ICrdtSerializer InitializeSerializer()
     {
         var services = new ServiceCollection();
