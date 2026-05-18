@@ -47,6 +47,13 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly Counter<long> snapshotsMergedCounter;
     private readonly Counter<long> checkPointSavedCounter;
 
+    // Channel metrics
+    private readonly Counter<long> commandsEnqueuedCounter;
+    private readonly Counter<long> commandsProcessedCounter;
+    private readonly Counter<long> commandFailuresCounter;
+    private readonly ObservableGauge<int> channelQueueLengthGauge;
+    private readonly ObservableGauge<int> commandPoolSizeGauge;
+
     /// <inheritdoc />
     public string DocumentId { get; }
 
@@ -90,17 +97,29 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         var metadata = metadataManager.Initialize(initialState);
         Document = new CrdtDocument<TState>(initialState, metadata);
 
+        this.commandChannel = Channel.CreateUnbounded<PooledDocumentCommand<TState>>(new UnboundedChannelOptions 
+        { 
+            SingleReader = true, 
+            SingleWriter = false 
+        });
+
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.DistributedCrdtDocument") ?? new Meter("Ama.Enterprise.CRDT.Distributed.DistributedCrdtDocument");
         this.patchAppliedCounter = this.meter.CreateCounter<long>("crdt.document.patches_applied", "patches", "Total local patches natively applied mapping intentions");
         this.operationsAppliedCounter = this.meter.CreateCounter<long>("crdt.document.operations_applied", "operations", "Total remote operations synchronized locally successfully");
         this.snapshotsMergedCounter = this.meter.CreateCounter<long>("crdt.document.snapshots_merged", "snapshots", "Total incoming full snapshots superseding states");
         this.checkPointSavedCounter = this.meter.CreateCounter<long>("crdt.document.checkpoints_saved", "checkpoints", "Total underlying storage checkpoint alignments executed");
 
-        this.commandChannel = Channel.CreateUnbounded<PooledDocumentCommand<TState>>(new UnboundedChannelOptions 
-        { 
-            SingleReader = true, 
-            SingleWriter = false 
-        });
+        this.commandsEnqueuedCounter = this.meter.CreateCounter<long>("crdt.document.channel.commands_enqueued", "commands", "Total document commands enqueued to the lock-free channel");
+        this.commandsProcessedCounter = this.meter.CreateCounter<long>("crdt.document.channel.commands_processed", "commands", "Total document commands processed by the channel");
+        this.commandFailuresCounter = this.meter.CreateCounter<long>("crdt.document.channel.command_failures", "errors", "Total document command processing failures");
+        
+        this.channelQueueLengthGauge = this.meter.CreateObservableGauge("crdt.document.channel.queue_length", 
+            () => new Measurement<int>(this.commandChannel.Reader.CanCount ? this.commandChannel.Reader.Count : 0, new KeyValuePair<string, object?>("document_id", this.DocumentId)), 
+            "commands", "Current number of pending document commands");
+            
+        this.commandPoolSizeGauge = this.meter.CreateObservableGauge("crdt.document.channel.pool_size", 
+            () => new Measurement<int>(this.commandPool.Count, new KeyValuePair<string, object?>("document_id", this.DocumentId)), 
+            "commands", "Current size of the document command object pool");
 
         // Initiates the lock-free sequential execution loop immediately
         this.processingTask = Task.Run(ProcessChannelAsync);
@@ -153,6 +172,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                     }
 
                     cmd.SetResult();
+                    commandsProcessedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
                 }
                 catch (OperationCanceledException)
                 {
@@ -160,6 +180,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 }
                 catch (Exception ex)
                 {
+                    commandFailuresCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
                     cmd.SetException(ex);
                 }
             }
@@ -179,6 +200,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         cmd.CancellationToken = cancellationToken;
 
         commandChannel.Writer.TryWrite(cmd);
+        commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         try
         {
             await cmd.ExecuteAsync().ConfigureAwait(false);
@@ -220,6 +242,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         cmd.CancellationToken = cancellationToken;
 
         commandChannel.Writer.TryWrite(cmd);
+        commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         try
         {
             await cmd.ExecuteAsync().ConfigureAwait(false);
@@ -274,6 +297,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         cmd.CancellationToken = cancellationToken;
 
         commandChannel.Writer.TryWrite(cmd);
+        commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         try
         {
             await cmd.ExecuteAsync().ConfigureAwait(false);
@@ -318,6 +342,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         cmd.CancellationToken = cancellationToken;
 
         commandChannel.Writer.TryWrite(cmd);
+        commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         try
         {
             await cmd.ExecuteAsync().ConfigureAwait(false);
@@ -352,6 +377,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         cmd.CancellationToken = cancellationToken;
 
         commandChannel.Writer.TryWrite(cmd);
+        commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         try
         {
             await cmd.ExecuteAsync().ConfigureAwait(false);
@@ -397,6 +423,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         cmd.CancellationToken = cancellationToken;
 
         commandChannel.Writer.TryWrite(cmd);
+        commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         try
         {
             await cmd.ExecuteAsync().ConfigureAwait(false);
@@ -443,6 +470,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         cmd.CancellationToken = cancellationToken;
 
         commandChannel.Writer.TryWrite(cmd);
+        commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         try
         {
             await cmd.ExecuteAsync().ConfigureAwait(false);
@@ -472,6 +500,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         cmd.CancellationToken = cancellationToken;
 
         commandChannel.Writer.TryWrite(cmd);
+        commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         try
         {
             await cmd.ExecuteAsync().ConfigureAwait(false);

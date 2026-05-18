@@ -42,6 +42,13 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     private readonly Counter<long> snapshotBytesDispatchedCounter;
     private readonly Counter<long> broadcastBytesCounter;
     
+    // Channel metrics
+    private readonly Counter<long> commandsEnqueuedCounter;
+    private readonly Counter<long> commandsProcessedCounter;
+    private readonly Counter<long> commandFailuresCounter;
+    private readonly ObservableGauge<int> channelQueueLengthGauge;
+    private readonly ObservableGauge<int> commandPoolSizeGauge;
+    
     public IDistributedCrdtDocument<CrdtRegistryState> Registry { get; private set; } = null!;
 
     public event EventHandler? DocumentsChanged;
@@ -58,6 +65,12 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         this.patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
+        this.commandChannel = Channel.CreateUnbounded<PooledOrchestratorCommand>(new UnboundedChannelOptions 
+        { 
+            SingleReader = true, 
+            SingleWriter = false 
+        });
+
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.CrdtDocumentOrchestrator") ?? new Meter("Ama.Enterprise.CRDT.Distributed.CrdtDocumentOrchestrator");
         this.documentCreatedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.documents_created", "documents", "Total CRDT documents mapped dynamically");
         this.documentDeletedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.documents_deleted", "documents", "Total CRDT documents permanently tombstoned");
@@ -66,11 +79,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         this.snapshotBytesDispatchedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.snapshot_bytes_dispatched", "bytes", "Total bytes dispatched for full state snapshot fallbacks");
         this.broadcastBytesCounter = this.meter.CreateCounter<long>("crdt.orchestrator.broadcast_bytes", "bytes", "Total bytes broadcasted across real-time operation syncs");
 
-        this.commandChannel = Channel.CreateUnbounded<PooledOrchestratorCommand>(new UnboundedChannelOptions 
-        { 
-            SingleReader = true, 
-            SingleWriter = false 
-        });
+        this.commandsEnqueuedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.channel.commands_enqueued", "commands", "Total orchestrator commands enqueued to the lock-free channel");
+        this.commandsProcessedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.channel.commands_processed", "commands", "Total orchestrator commands processed by the channel");
+        this.commandFailuresCounter = this.meter.CreateCounter<long>("crdt.orchestrator.channel.command_failures", "errors", "Total orchestrator command processing failures");
+        this.channelQueueLengthGauge = this.meter.CreateObservableGauge("crdt.orchestrator.channel.queue_length", () => this.commandChannel.Reader.CanCount ? this.commandChannel.Reader.Count : 0, "commands", "Current number of pending orchestrator commands");
+        this.commandPoolSizeGauge = this.meter.CreateObservableGauge("crdt.orchestrator.channel.pool_size", () => this.commandPool.Count, "commands", "Current size of the orchestrator command object pool");
 
         this.processingTask = Task.Run(ProcessChannelAsync);
     }
@@ -119,6 +132,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                     }
 
                     cmd.SetResult();
+                    commandsProcessedCounter.Add(1);
                 }
                 catch (OperationCanceledException)
                 {
@@ -126,6 +140,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 }
                 catch (Exception ex)
                 {
+                    commandFailuresCounter.Add(1);
                     cmd.SetException(ex);
                 }
             }
@@ -144,6 +159,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         cmd.CancellationToken = cancellationToken;
 
         commandChannel.Writer.TryWrite(cmd);
+        commandsEnqueuedCounter.Add(1);
         try
         {
             await cmd.ExecuteAsync().ConfigureAwait(false);
@@ -187,6 +203,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         cmd.CancellationToken = cancellationToken;
 
         commandChannel.Writer.TryWrite(cmd);
+        commandsEnqueuedCounter.Add(1);
         try
         {
             await cmd.ExecuteAsync().ConfigureAwait(false);
@@ -287,6 +304,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         cmd.CancellationToken = cancellationToken;
 
         commandChannel.Writer.TryWrite(cmd);
+        commandsEnqueuedCounter.Add(1);
         try
         {
             await cmd.ExecuteAsync().ConfigureAwait(false);
@@ -314,6 +332,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         cmd.CancellationToken = cancellationToken;
 
         commandChannel.Writer.TryWrite(cmd);
+        commandsEnqueuedCounter.Add(1);
         try
         {
             await cmd.ExecuteAsync().ConfigureAwait(false);
@@ -346,6 +365,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         cmd.CancellationToken = cancellationToken;
 
         commandChannel.Writer.TryWrite(cmd);
+        commandsEnqueuedCounter.Add(1);
         try
         {
             await cmd.ExecuteAsync().ConfigureAwait(false);
@@ -401,6 +421,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         cmd.CancellationToken = cancellationToken;
 
         commandChannel.Writer.TryWrite(cmd);
+        commandsEnqueuedCounter.Add(1);
         try
         {
             await cmd.ExecuteAsync().ConfigureAwait(false);
@@ -442,6 +463,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         cmd.CancellationToken = cancellationToken;
 
         commandChannel.Writer.TryWrite(cmd);
+        commandsEnqueuedCounter.Add(1);
         try
         {
             await cmd.ExecuteAsync().ConfigureAwait(false);

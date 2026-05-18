@@ -6,6 +6,7 @@ using System.Linq;
 using System.Net.NetworkInformation;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 using Ama.CRDT.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Services;
@@ -54,7 +55,7 @@ public static class Program
         services.AddDistributedCrdtCore(options =>
         {
             options.ActiveSyncEnabled = true;
-            options.PeerEvictionTtlSeconds = 300;
+            options.PeerEvictionTtlSeconds = 0; // TODO: Fix
             options.CheckpointIntervalSeconds = 30;
             options.AntiEntropyInitialDelaySeconds = 2;
             options.AntiEntropyIntervalSeconds = 5;
@@ -85,7 +86,7 @@ public static class Program
         services.AddDistributedCrdtService<IFleetManager, FleetManager>();
 
         // Register Showcase file-based CRDT storage overriding memory fallbacks for all documents
-        //services.AddDistributedCrdtStorage<ShowCaseCrdtStorage>();
+        services.AddDistributedCrdtStorage<ShowCaseCrdtStorage>();
 
         // Register the background multi-document orchestration and route inbound intents from the network
         services.AddDistributedCrdtP2p("internal", replicaId);
@@ -305,6 +306,12 @@ public static class Program
                                             // but exercises CRDT map updates visibly in the console UI
                                             var taskIds = Enumerable.Range(1, 10).Select(i => $"nail-task-{i}").ToArray();
 
+                                            // Helper for concurrent dispatch avoiding closure captures or ValueTask casting ambiguities
+                                            async Task FirePayloadAsync(string tId, long index, bool done, CancellationToken ct)
+                                            {
+                                                await taskManager.SetTaskAsync("nail", tId, $"Hammered payload {index}", done, ct).ConfigureAwait(false);
+                                            }
+
                                             while (!token.IsCancellationRequested)
                                             {
                                                 var targetOps = (long)(sw.Elapsed.TotalSeconds * cps);
@@ -312,19 +319,25 @@ public static class Program
 
                                                 if (batch > 0)
                                                 {
-                                                    // Cap to prevent blocking the while loop for too long, allowing cancellation and reporting
-                                                    if (batch > 1000)
+                                                    // Increased cap explicitly permitting high-throughput bursts natively catching up safely
+                                                    if (batch > 5000)
                                                     {
-                                                        batch = 1000;
+                                                        batch = 5000;
                                                     }
+
+                                                    var pendingTasks = new List<Task>((int)batch);
 
                                                     for (var i = 0; i < batch; i++)
                                                     {
                                                         var taskId = taskIds[Random.Shared.Next(taskIds.Length)];
                                                         var isDone = (opsCompleted + i) % 2 == 0;
-                                                        await taskManager.SetTaskAsync("nail", taskId, $"Hammered payload {opsCompleted + i}", isDone, token).ConfigureAwait(false);
+                                                        
+                                                        // Enqueue operation without awaiting immediately
+                                                        pendingTasks.Add(FirePayloadAsync(taskId, opsCompleted + i, isDone, token));
                                                     }
                                                     
+                                                    // Await the entire batch concurrently, maximizing thread pool utilization and breaking the serial bottleneck
+                                                    await Task.WhenAll(pendingTasks).ConfigureAwait(false);
                                                     opsCompleted += batch;
                                                 }
                                                 else
