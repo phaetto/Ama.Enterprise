@@ -26,6 +26,14 @@ internal sealed class PooledOrchestratorCommand : IValueTaskSource
 {
     private ManualResetValueTaskSourceCore<bool> core;
 
+    public PooledOrchestratorCommand()
+    {
+        // Vital: Forces the continuation of the ValueTask to run on the ThreadPool.
+        // If false, SetResult() executes the caller's continuation inline, which can hijack the
+        // channel reader thread and block it (e.g., if the caller executes a synchronous wait like Console.ReadLine).
+        core.RunContinuationsAsynchronously = true;
+    }
+
     public OrchestratorCommandType Type { get; set; }
     public string? DocumentId { get; set; }
     public string? TypeAlias { get; set; }

@@ -26,6 +26,14 @@ internal sealed class PooledDocumentCommand<TState> : IValueTaskSource where TSt
 {
     private ManualResetValueTaskSourceCore<bool> core;
 
+    public PooledDocumentCommand()
+    {
+        // Vital: Forces the continuation of the ValueTask to run on the ThreadPool.
+        // If false, SetResult() executes the caller's continuation inline, which can hijack the
+        // channel reader thread and block it (e.g., if the caller executes a synchronous wait like Console.ReadLine).
+        core.RunContinuationsAsynchronously = true;
+    }
+
     public DocumentCommandType Type { get; set; }
     public CrdtPatch? Patch { get; set; }
     public IReadOnlyList<CrdtOperation>? Operations { get; set; }
