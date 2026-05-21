@@ -64,41 +64,37 @@ public sealed class WebRtcHttpPeerDiscovery : IWebRtcHttpPeerDiscovery, IDisposa
     {
         ArgumentNullException.ThrowIfNull(peerUri);
 
-        logger.LogTrace("[{MeshId}] Initiating explicit out-of-band WebRTC discovery for peer URI: {PeerUri}", meshId, peerUri);
+        logger.LogTrace("[{MeshId}] Initiating explicit out-of-band WebRTC WebSockets discovery for peer URI: {PeerUri}", meshId, peerUri);
         bool success = false;
 
         try
         {
-            var remoteOffer = await signalingClient.RequestOfferAsync(peerUri, meshId, pathPrefix, cancellationToken).ConfigureAwait(false);
-            if (remoteOffer == null)
+            var connectionId = await signalingClient.NegotiateOfferAsync(peerUri, meshId, pathPrefix, async (remoteOffer, ct) =>
             {
-                logger.LogWarning("[{MeshId}] Failed to retrieve explicit WebRTC offer from {PeerUri}.", meshId, peerUri);
-                return false;
+                var localAnswer = await invitationService.AcceptInvitationAsync(remoteOffer.SdpOffer, ct).ConfigureAwait(false);
+                return new WebRtcInvitationAnswer(remoteOffer.ConnectionId, localAnswer.SdpAnswer);
+            }, cancellationToken).ConfigureAwait(false);
+
+            if (!string.IsNullOrWhiteSpace(connectionId))
+            {
+                Guid connectionGuidId = Guid.Parse(connectionId);
+                var remoteEndpoint = new WebRtcPeerEndpoint(connectionGuidId);
+                var remoteNode = new PeerNode(new PeerId(connectionGuidId), remoteEndpoint);
+
+                var isAuthenticated = await authenticator.AuthenticateAsync(remoteNode, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
+                if (isAuthenticated)
+                {
+                    await failureDetector.RecordHeartbeatAsync(remoteNode.Id, cancellationToken).ConfigureAwait(false);
+                    await peerRegistry.AddOrUpdatePeerAsync(meshId, remoteNode, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
+                }
+
+                logger.LogInformation("[{MeshId}] Orchestrated WebRTC WebSockets signaling mapping connection natively to {PeerUri}.", meshId, peerUri);
+                success = true;
+                return true;
             }
 
-            var localAnswer = await invitationService.AcceptInvitationAsync(remoteOffer.Value.SdpOffer, cancellationToken).ConfigureAwait(false);
-            var answerDto = new WebRtcInvitationAnswer(remoteOffer.Value.ConnectionId, localAnswer.SdpAnswer);
-
-            var isFinalized = await signalingClient.FinalizeInvitationAsync(peerUri, meshId, pathPrefix, answerDto, cancellationToken).ConfigureAwait(false);
-            if (!isFinalized)
-            {
-                logger.LogWarning("[{MeshId}] Remote peer {PeerUri} rejected the WebRTC finalization explicitly.", meshId, peerUri);
-                return false;
-            }
-
-            var remoteEndpoint = new WebRtcPeerEndpoint(remoteOffer.Value.ConnectionId);
-            var remoteNode = new PeerNode(new PeerId(remoteOffer.Value.ConnectionId), remoteEndpoint);
-
-            var isAuthenticated = await authenticator.AuthenticateAsync(remoteNode, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
-            if (isAuthenticated)
-            {
-                await failureDetector.RecordHeartbeatAsync(remoteNode.Id, cancellationToken).ConfigureAwait(false);
-                await peerRegistry.AddOrUpdatePeerAsync(meshId, remoteNode, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
-            }
-
-            logger.LogInformation("[{MeshId}] Orchestrated WebRTC signaling mapping connection natively to {PeerUri}.", meshId, peerUri);
-            success = true;
-            return true;
+            logger.LogWarning("[{MeshId}] Remote peer {PeerUri} rejected the WebRTC finalization explicitly.", meshId, peerUri);
+            return false;
         }
         catch (Exception ex)
         {

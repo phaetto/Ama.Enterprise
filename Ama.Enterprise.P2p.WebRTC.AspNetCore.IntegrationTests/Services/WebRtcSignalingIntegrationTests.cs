@@ -31,39 +31,7 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
     private readonly NetworkResourceManager resourceManager = resourceManager ?? throw new ArgumentNullException(nameof(resourceManager));
 
     [IntegrationFact]
-    public async Task WebRtcSignalingClient_StandaloneMode_SendOfferAsync_Succeeds()
-    {
-        // Arrange
-        var meshId = "sig-mesh-send";
-        var portA = resourceManager.GetNextPort();
-        var portB = resourceManager.GetNextPort();
-
-        testOutputHelper.WriteLine($"Initializing standalone Node A on port {portA}...");
-        await using var nodeA = await CreateStandaloneTestNodeAsync(meshId, new PeerId(Guid.NewGuid()), portA);
-        
-        testOutputHelper.WriteLine($"Initializing standalone Node B on port {portB}...");
-        await using var nodeB = await CreateStandaloneTestNodeAsync(meshId, new PeerId(Guid.NewGuid()), portB);
-
-        var uriB = new Uri($"http://127.0.0.1:{portB}");
-
-        // Act
-        testOutputHelper.WriteLine("Node A creating internal WebRTC invitation...");
-        var localOffer = await nodeA.InvitationService.CreateInvitationAsync(CancellationToken.None);
-
-        testOutputHelper.WriteLine("Node A sending SDP offer to Node B explicit signaling endpoint...");
-        var answer = await nodeA.Client.SendOfferAsync(uriB, meshId, null, localOffer, CancellationToken.None);
-
-        // Assert
-        answer.ShouldNotBeNull();
-        answer.Value.SdpAnswer.ShouldNotBeNullOrWhiteSpace();
-        testOutputHelper.WriteLine("Node B responded with explicit SDP answer.");
-
-        testOutputHelper.WriteLine("Node A finalizing local connection mapping natively.");
-        await nodeA.InvitationService.FinalizeInvitationAsync(localOffer.ConnectionId, answer.Value.SdpAnswer, CancellationToken.None);
-    }
-
-    [IntegrationFact]
-    public async Task WebRtcSignalingClient_StandaloneMode_RequestOfferAndFinalize_Succeeds()
+    public async Task WebRtcSignalingClient_StandaloneMode_NegotiateOffer_Succeeds()
     {
         // Arrange
         var meshId = "sig-mesh-req";
@@ -76,60 +44,21 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
         var uriB = new Uri($"http://127.0.0.1:{portB}");
 
         // Act
-        testOutputHelper.WriteLine("Node A requesting SDP offer explicitly from Node B...");
-        var remoteOffer = await nodeA.Client.RequestOfferAsync(uriB, meshId, null, CancellationToken.None);
-        
-        remoteOffer.ShouldNotBeNull();
-        remoteOffer.Value.SdpOffer.ShouldNotBeNullOrWhiteSpace();
-
-        testOutputHelper.WriteLine("Node A answering remote SDP offer natively...");
-        var localAnswer = await nodeA.InvitationService.AcceptInvitationAsync(remoteOffer.Value.SdpOffer, CancellationToken.None);
-
-        // Map the explicit Node B remote connection ID back so Node B explicitly locates its pending WebRTC peer instance
-        var answerForNodeB = new WebRtcInvitationAnswer(remoteOffer.Value.ConnectionId, localAnswer.SdpAnswer);
-
-        testOutputHelper.WriteLine("Node A pushing active SDP answer to finalize Node B's connection state...");
-        var finalizeResult = await nodeA.Client.FinalizeInvitationAsync(uriB, meshId, null, answerForNodeB, CancellationToken.None);
+        testOutputHelper.WriteLine("Node A requesting SDP negotiation natively from Node B over WebSockets...");
+        var connectionId = await nodeA.Client.NegotiateOfferAsync(uriB, meshId, null, async (remoteOffer, ct) =>
+        {
+            testOutputHelper.WriteLine("Node A dynamically answering remote SDP offer...");
+            var localAnswer = await nodeA.InvitationService.AcceptInvitationAsync(remoteOffer.SdpOffer, ct).ConfigureAwait(false);
+            return new WebRtcInvitationAnswer(remoteOffer.ConnectionId, localAnswer.SdpAnswer);
+        }, CancellationToken.None);
         
         // Assert
-        finalizeResult.ShouldBeTrue();
-        testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange finalized explicitly.");
+        connectionId.ShouldNotBeNullOrWhiteSpace();
+        testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange negotiated explicitly over WebSockets.");
     }
 
     [IntegrationFact]
-    public async Task WebRtcSignalingClient_IntegratedMode_SendOfferAsync_Succeeds()
-    {
-        // Arrange
-        var meshId = "sig-mesh-integ-send";
-        var portA = resourceManager.GetNextPort();
-        var portB = resourceManager.GetNextPort();
-
-        testOutputHelper.WriteLine($"Initializing Integrated WebApplication Node A on port {portA}...");
-        await using var nodeA = await CreateIntegratedTestNodeAsync(meshId, new PeerId(Guid.NewGuid()), portA);
-        
-        testOutputHelper.WriteLine($"Initializing Integrated WebApplication Node B on port {portB}...");
-        await using var nodeB = await CreateIntegratedTestNodeAsync(meshId, new PeerId(Guid.NewGuid()), portB);
-
-        var uriB = new Uri($"http://127.0.0.1:{portB}");
-
-        // Act
-        testOutputHelper.WriteLine("Node A creating internal WebRTC invitation...");
-        var localOffer = await nodeA.InvitationService.CreateInvitationAsync(CancellationToken.None);
-
-        testOutputHelper.WriteLine("Node A sending SDP offer to Node B explicit integrated endpoint...");
-        var answer = await nodeA.Client.SendOfferAsync(uriB, meshId, null, localOffer, CancellationToken.None);
-
-        // Assert
-        answer.ShouldNotBeNull();
-        answer.Value.SdpAnswer.ShouldNotBeNullOrWhiteSpace();
-        testOutputHelper.WriteLine("Node B responded with explicit SDP answer through integrated HTTP bounds.");
-
-        testOutputHelper.WriteLine("Node A finalizing local connection mapping natively.");
-        await nodeA.InvitationService.FinalizeInvitationAsync(localOffer.ConnectionId, answer.Value.SdpAnswer, CancellationToken.None);
-    }
-
-    [IntegrationFact]
-    public async Task WebRtcSignalingClient_IntegratedMode_RequestOfferAndFinalize_Succeeds()
+    public async Task WebRtcSignalingClient_IntegratedMode_NegotiateOffer_Succeeds()
     {
         // Arrange
         var meshId = "sig-mesh-integ-req";
@@ -142,23 +71,17 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
         var uriB = new Uri($"http://127.0.0.1:{portB}");
 
         // Act
-        testOutputHelper.WriteLine("Node A requesting SDP offer explicitly from Integrated Node B...");
-        var remoteOffer = await nodeA.Client.RequestOfferAsync(uriB, meshId, null, CancellationToken.None);
-        
-        remoteOffer.ShouldNotBeNull();
-        remoteOffer.Value.SdpOffer.ShouldNotBeNullOrWhiteSpace();
-
-        testOutputHelper.WriteLine("Node A answering remote SDP offer natively...");
-        var localAnswer = await nodeA.InvitationService.AcceptInvitationAsync(remoteOffer.Value.SdpOffer, CancellationToken.None);
-
-        var answerForNodeB = new WebRtcInvitationAnswer(remoteOffer.Value.ConnectionId, localAnswer.SdpAnswer);
-
-        testOutputHelper.WriteLine("Node A pushing active SDP answer to finalize Integrated Node B's connection state...");
-        var finalizeResult = await nodeA.Client.FinalizeInvitationAsync(uriB, meshId, null, answerForNodeB, CancellationToken.None);
+        testOutputHelper.WriteLine("Node A requesting SDP negotiation explicitly from Integrated Node B over WebSockets...");
+        var connectionId = await nodeA.Client.NegotiateOfferAsync(uriB, meshId, null, async (remoteOffer, ct) =>
+        {
+            testOutputHelper.WriteLine("Node A answering remote Integrated SDP offer natively...");
+            var localAnswer = await nodeA.InvitationService.AcceptInvitationAsync(remoteOffer.SdpOffer, ct).ConfigureAwait(false);
+            return new WebRtcInvitationAnswer(remoteOffer.ConnectionId, localAnswer.SdpAnswer);
+        }, CancellationToken.None);
         
         // Assert
-        finalizeResult.ShouldBeTrue();
-        testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange finalized across integrated endpoints.");
+        connectionId.ShouldNotBeNullOrWhiteSpace();
+        testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange finalized across integrated WS endpoints.");
     }
 
     [IntegrationFact]
@@ -174,12 +97,15 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
         var offlineUri = new Uri($"http://127.0.0.1:{offlinePort}");
 
         // Act
-        testOutputHelper.WriteLine($"Node A requesting explicit offer from offline endpoint {offlineUri}...");
-        var offer = await nodeA.Client.RequestOfferAsync(offlineUri, meshId, null, CancellationToken.None);
+        testOutputHelper.WriteLine($"Node A requesting explicit WebSocket negotiation from offline endpoint {offlineUri}...");
+        var connectionId = await nodeA.Client.NegotiateOfferAsync(offlineUri, meshId, null, (offer, ct) => 
+        {
+            return Task.FromResult(new WebRtcInvitationAnswer(offer.ConnectionId, "dummy"));
+        }, CancellationToken.None);
         
         // Assert
-        offer.ShouldBeNull();
-        testOutputHelper.WriteLine("Client suppressed the connection failure structurally.");
+        connectionId.ShouldBeNull();
+        testOutputHelper.WriteLine("Client suppressed the WS connection failure structurally.");
     }
 
     [IntegrationFact]
@@ -201,7 +127,7 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
 
         // Assert
         result.ShouldBeTrue();
-        testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange automated explicitly using the discovery service.");
+        testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange automated explicitly using the WS discovery service.");
     }
 
     [IntegrationFact]
@@ -223,7 +149,7 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
 
         // Assert
         result.ShouldBeTrue();
-        testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange automated explicitly using the discovery service across integrated endpoints.");
+        testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange automated explicitly using the WS discovery service across integrated endpoints.");
     }
 
     [IntegrationFact]
@@ -239,7 +165,7 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
         var offlineUri = new Uri($"http://127.0.0.1:{offlinePort}");
 
         // Act
-        testOutputHelper.WriteLine($"Node A running explicit HTTP discovery connecting to offline peer {offlineUri}...");
+        testOutputHelper.WriteLine($"Node A running explicit WS discovery connecting to offline peer {offlineUri}...");
         var result = await nodeA.Discovery.DiscoverPeerAsync(offlineUri, null, CancellationToken.None);
 
         // Assert
@@ -349,6 +275,9 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
 
         var app = builder.Build();
         
+        // Ensure WebSockets are enabled so the WebRTC signaling mapped endpoint works cleanly securely
+        app.UseWebSockets();
+
         // Map WebRTC signaling endpoints for Integrated mode
         app.MapP2pWebRtcSignalingEndpoints();
 

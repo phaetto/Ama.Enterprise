@@ -3,8 +3,8 @@ namespace Ama.Enterprise.P2p.WebRTC.AspNetCore.Services;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
-using System.IO;
 using System.Net;
+using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
@@ -20,7 +20,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Implementation managing isolated ASP.NET Core HTTP out-of-band WebRTC signaling streams evaluating Integrated and Standalone modes explicitly.
+/// Implementation managing isolated ASP.NET Core WebSocket out-of-band WebRTC signaling streams evaluating Integrated and Standalone modes explicitly.
 /// </summary>
 public sealed class WebRtcSignalingServer : IHostedService, IDisposable
 {
@@ -62,7 +62,7 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
         this.requestsReceivedCounter = this.meter.CreateCounter<long>(
             "p2p.webrtc.signaling.server.requests_received", 
             "requests", 
-            "Total mapped explicit inbound WebRTC signaling requests safely orchestrated natively");
+            "Total mapped explicit inbound WebRTC WebSocket signaling sessions safely orchestrated natively");
         this.payloadOutHistogram = this.meter.CreateHistogram<long>(
             "p2p.webrtc.signaling.server.outbound_bytes", 
             "bytes", 
@@ -106,32 +106,26 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
 
                     webBuilder.Configure(app =>
                     {
+                        app.UseWebSockets();
+
                         var basePath = string.IsNullOrWhiteSpace(options.PathPrefix) ? "/ama-enterprise/webrtc-signaling" : options.PathPrefix.TrimEnd('/');
                         if (!basePath.StartsWith("/", StringComparison.Ordinal)) basePath = "/" + basePath;
                         
-                        var offerPath = $"{basePath}/{meshId}/offer";
-                        var answerPath = $"{basePath}/{meshId}/answer";
-                        var finalizePath = $"{basePath}/{meshId}/finalize";
+                        var wsPath = $"{basePath}/{meshId}/ws";
 
                         app.Run(async context =>
                         {
-                            if (context.Request.Method != HttpMethods.Post)
+                            if (context.Request.Path == wsPath)
                             {
-                                context.Response.StatusCode = StatusCodes.Status404NotFound;
-                                return;
-                            }
-
-                            if (context.Request.Path == offerPath)
-                            {
-                                await HandleOfferAsync(context).ConfigureAwait(false);
-                            }
-                            else if (context.Request.Path == answerPath)
-                            {
-                                await HandleAnswerAsync(context).ConfigureAwait(false);
-                            }
-                            else if (context.Request.Path == finalizePath)
-                            {
-                                await HandleFinalizeAsync(context).ConfigureAwait(false);
+                                if (context.WebSockets.IsWebSocketRequest)
+                                {
+                                    using var ws = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
+                                    await HandleWebSocketSignalingAsync(ws, context.RequestAborted).ConfigureAwait(false);
+                                }
+                                else
+                                {
+                                    context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                                }
                             }
                             else
                             {
@@ -143,7 +137,7 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
 
             webHost = builder.Build();
             await webHost.StartAsync(cancellationToken).ConfigureAwait(false);
-            logger.LogInformation("[{MeshId}] ASP.NET Core Standalone WebRTC Signaling started actively evaluating traffic explicitly on {Host}:{Port}", meshId, options.StandaloneListenHost, options.StandaloneListenPort);
+            logger.LogInformation("[{MeshId}] ASP.NET Core Standalone WebRTC Signaling started actively evaluating WS traffic explicitly on {Host}:{Port}", meshId, options.StandaloneListenHost, options.StandaloneListenPort);
         }
         else
         {
@@ -159,80 +153,76 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
         }
     }
 
-    private async Task HandleOfferAsync(HttpContext context)
+    private async Task HandleWebSocketSignalingAsync(WebSocket webSocket, CancellationToken cancellationToken)
     {
-        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId), new("action", "offer") };
+        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId), new("transport", "websocket") };
         requestsReceivedCounter.Add(1, tags);
 
         try
         {
-            var offer = await invitationService.CreateInvitationAsync(context.RequestAborted).ConfigureAwait(false);
-            var responseBytes = serializer.SerializeToBytes(offer);
-            
-            payloadOutHistogram.Record(responseBytes.Length, tags);
+            var (action, reqPayload) = await WebRtcSignalingWsHelper.ReceiveMessageAsync(webSocket, cancellationToken).ConfigureAwait(false);
+            payloadInHistogram.Record(reqPayload.Length, tags);
 
-            context.Response.StatusCode = StatusCodes.Status200OK;
-            context.Response.ContentType = "application/json";
-            context.Response.ContentLength = responseBytes.Length;
-            await context.Response.Body.WriteAsync(responseBytes, context.RequestAborted).ConfigureAwait(false);
+            if (action == WebRtcSignalingAction.RequestOffer)
+            {
+                var offer = await invitationService.CreateInvitationAsync(cancellationToken).ConfigureAwait(false);
+                var offerPayload = serializer.SerializeToBytes(offer);
+                
+                payloadOutHistogram.Record(offerPayload.Length, tags);
+                await WebRtcSignalingWsHelper.SendMessageAsync(webSocket, WebRtcSignalingAction.Offer, offerPayload, cancellationToken).ConfigureAwait(false);
+                
+                var (ansAction, ansPayload) = await WebRtcSignalingWsHelper.ReceiveMessageAsync(webSocket, cancellationToken).ConfigureAwait(false);
+                payloadInHistogram.Record(ansPayload.Length, tags);
+
+                if (ansAction == WebRtcSignalingAction.Answer)
+                {
+                    var answer = serializer.DeserializeFromBytes<WebRtcInvitationAnswer>(ansPayload);
+                    await invitationService.FinalizeInvitationAsync(answer.ConnectionId, answer.SdpAnswer, cancellationToken).ConfigureAwait(false);
+                    
+                    await WebRtcSignalingWsHelper.SendMessageAsync(webSocket, WebRtcSignalingAction.FinalizeAck, Array.Empty<byte>(), cancellationToken).ConfigureAwait(false);
+                    
+                    if (webSocket.State == WebSocketState.Open || webSocket.State == WebSocketState.CloseReceived)
+                    {
+                        await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Negotiation Complete", cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
+            else if (action == WebRtcSignalingAction.Offer)
+            {
+                var offer = serializer.DeserializeFromBytes<WebRtcInvitationOffer>(reqPayload);
+                var localAnswer = await invitationService.AcceptInvitationAsync(offer.SdpOffer, cancellationToken).ConfigureAwait(false);
+                var answerDto = new WebRtcInvitationAnswer(offer.ConnectionId, localAnswer.SdpAnswer);
+                var ansPayload = serializer.SerializeToBytes(answerDto);
+                
+                payloadOutHistogram.Record(ansPayload.Length, tags);
+                await WebRtcSignalingWsHelper.SendMessageAsync(webSocket, WebRtcSignalingAction.Answer, ansPayload, cancellationToken).ConfigureAwait(false);
+                
+                var (ackAction, ackPayload) = await WebRtcSignalingWsHelper.ReceiveMessageAsync(webSocket, cancellationToken).ConfigureAwait(false);
+                payloadInHistogram.Record(ackPayload.Length, tags);
+
+                if (ackAction == WebRtcSignalingAction.FinalizeAck)
+                {
+                    if (webSocket.State == WebSocketState.Open || webSocket.State == WebSocketState.CloseReceived)
+                    {
+                        await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Negotiation Complete", cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
+            else
+            {
+                if (webSocket.State == WebSocketState.Open)
+                {
+                    await webSocket.CloseAsync(WebSocketCloseStatus.InvalidMessageType, "Invalid Action", cancellationToken).ConfigureAwait(false);
+                }
+            }
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "[{MeshId}] Failed to generate explicit WebRTC invitation.", meshId);
-            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-        }
-    }
-
-    private async Task HandleAnswerAsync(HttpContext context)
-    {
-        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId), new("action", "answer") };
-        requestsReceivedCounter.Add(1, tags);
-
-        try
-        {
-            using var ms = new MemoryStream();
-            await context.Request.Body.CopyToAsync(ms, context.RequestAborted).ConfigureAwait(false);
-            
-            payloadInHistogram.Record(ms.Length, tags);
-            var offer = serializer.DeserializeFromBytes<WebRtcInvitationOffer>(ms.ToArray());
-
-            var answer = await invitationService.AcceptInvitationAsync(offer.SdpOffer, context.RequestAborted).ConfigureAwait(false);
-            var responseBytes = serializer.SerializeToBytes(answer);
-
-            payloadOutHistogram.Record(responseBytes.Length, tags);
-
-            context.Response.StatusCode = StatusCodes.Status200OK;
-            context.Response.ContentType = "application/json";
-            context.Response.ContentLength = responseBytes.Length;
-            await context.Response.Body.WriteAsync(responseBytes, context.RequestAborted).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "[{MeshId}] Failed to accept inbound WebRTC SDP offer.", meshId);
-            context.Response.StatusCode = StatusCodes.Status400BadRequest;
-        }
-    }
-
-    private async Task HandleFinalizeAsync(HttpContext context)
-    {
-        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId), new("action", "finalize") };
-        requestsReceivedCounter.Add(1, tags);
-
-        try
-        {
-            using var ms = new MemoryStream();
-            await context.Request.Body.CopyToAsync(ms, context.RequestAborted).ConfigureAwait(false);
-            
-            payloadInHistogram.Record(ms.Length, tags);
-            var answer = serializer.DeserializeFromBytes<WebRtcInvitationAnswer>(ms.ToArray());
-
-            await invitationService.FinalizeInvitationAsync(answer.ConnectionId, answer.SdpAnswer, context.RequestAborted).ConfigureAwait(false);
-            context.Response.StatusCode = StatusCodes.Status202Accepted;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "[{MeshId}] Failed to finalize explicit WebRTC invitation.", meshId);
-            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            logger.LogWarning(ex, "[{MeshId}] Exception encountered evaluating Standalone WebRTC signaling WebSockets explicitly natively.", meshId);
+            if (webSocket.State == WebSocketState.Open)
+            {
+                await webSocket.CloseAsync(WebSocketCloseStatus.InternalServerError, "Error", cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 
