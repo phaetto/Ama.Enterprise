@@ -86,4 +86,37 @@ public static class EndpointRouteBuilderExtensions
             }
         }));
     }
+
+    /// <summary>
+    /// Maps phase 1 inbound HTTP discovery endpoints tracking decoupled discovery topologies natively via ASP.NET Core integrations.
+    /// </summary>
+    /// <param name="endpoints">The explicitly constrained route builder mapping boundaries.</param>
+    /// <param name="routePrefix">The base path resolving Phase 1 decoupled probes. Defaults to "/ama-enterprise/p2p-discovery".</param>
+    /// <returns>A unified standard ASP.NET convention builder ensuring identical custom configurations.</returns>
+    public static IEndpointConventionBuilder MapP2pMeshDiscovery(this IEndpointRouteBuilder endpoints, string routePrefix = "/ama-enterprise/p2p-discovery")
+    {
+        ArgumentNullException.ThrowIfNull(endpoints);
+
+        var pattern = $"{routePrefix.TrimEnd('/')}/{{meshId}}";
+
+        return endpoints.MapPost(pattern, new RequestDelegate(async context =>
+        {
+            var meshId = context.GetRouteValue("meshId")?.ToString();
+            if (string.IsNullOrEmpty(meshId))
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                return;
+            }
+
+            var discovery = context.RequestServices.GetKeyedService<IPeerDiscovery>(meshId) as AspNetCorePeerDiscovery;
+            if (discovery is not null)
+            {
+                await discovery.HandleDiscoveryRequestAsync(context).ConfigureAwait(false);
+            }
+            else
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+            }
+        }));
+    }
 }
