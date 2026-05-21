@@ -74,7 +74,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             return;
         }
 
-        messagesProcessedCounter.Add(1, new System.Collections.Generic.KeyValuePair<string, object?>("message_type", wrapper.MessageType));
+        messagesProcessedCounter.Add(1, new KeyValuePair<string, object?>("message_type", wrapper.MessageType));
 
         if (wrapper.MessageType == "CrdtEviction")
         {
@@ -99,6 +99,10 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
         if (wrapper.MessageType == "CrdtOps")
         {
             await ProcessOperationsAsync(scope, targetDoc, meshId, wrapper, cancellationToken).ConfigureAwait(false);
+        }
+        else if (wrapper.MessageType == "CrdtPatch")
+        {
+            await ProcessPatchAsync(scope, targetDoc, meshId, wrapper, cancellationToken).ConfigureAwait(false);
         }
         else if (wrapper.MessageType == "CrdtSnapshot")
         {
@@ -202,11 +206,37 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             }
             
             await targetDoc.ApplyOperationsAsync(opsMsg.Operations, cancellationToken).ConfigureAwait(false);
-            operationsReceivedCounter.Add(opsMsg.Operations.Length, new System.Collections.Generic.KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
+            operationsReceivedCounter.Add(opsMsg.Operations.Length, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "[{ReplicaId}] Failed to process incoming CrdtOps message for document {DocumentId}.", scope.ReplicaId, targetDoc.DocumentId);
+        }
+    }
+
+    private async Task ProcessPatchAsync(IDistributedCrdtScope scope, IDistributedCrdtDocument targetDoc, string meshId, CrdtMessageWrapper wrapper, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var patchMsg = serializer.DeserializeFromBytes<CrdtPatchMessage>(wrapper.Payload!);
+            
+            if (patchMsg.ReplicaId != null && scope.ClusterTracker.IsReplicaTombstoned(patchMsg.ReplicaId))
+            {
+                await RejectEvictedReplicaAsync(scope, meshId, targetDoc.DocumentId, patchMsg.ReplicaId, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (patchMsg.Patch.Operations == null || patchMsg.Patch.Operations.Count == 0)
+            {
+                return;
+            }
+            
+            await targetDoc.ApplyOperationsAsync([.. patchMsg.Patch.Operations], cancellationToken).ConfigureAwait(false);
+            operationsReceivedCounter.Add(patchMsg.Patch.Operations.Count, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[{ReplicaId}] Failed to process incoming CrdtPatch message for document {DocumentId}.", scope.ReplicaId, targetDoc.DocumentId);
         }
     }
 
@@ -247,7 +277,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             scope.ClusterTracker.UpdatePeerState(resMsg.ReplicaId, senderId.Value.ToString(), resMsg.GlobalState);
             
             await targetDoc.MergeSnapshotAsync(resMsg.SnapshotData, resMsg.GlobalState, cancellationToken).ConfigureAwait(false);
-            snapshotsMergedCounter.Add(1, new System.Collections.Generic.KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
+            snapshotsMergedCounter.Add(1, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
         }
         catch (Exception ex)
         {
@@ -266,7 +296,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             if (rejectionMsg.EvictedReplicaId == replicaContext.ReplicaId)
             {
                 await scope.EvictionService.RebootLocalIdentityAsync(cancellationToken).ConfigureAwait(false);
-                rebootsHandledCounter.Add(1, new System.Collections.Generic.KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
+                rebootsHandledCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
             }
         }
         catch (Exception ex)

@@ -55,7 +55,7 @@ public sealed class CrdtAntiEntropyService : BackgroundService
                 try
                 {
                     await scope.Orchestrator.DispatchAntiEntropyStateAsync(stoppingToken).ConfigureAwait(false);
-                    antiEntropyCyclesCounter.Add(1, new System.Collections.Generic.KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
+                    antiEntropyCyclesCounter.Add(1, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
                 }
                 catch (OperationCanceledException)
                 {

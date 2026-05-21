@@ -173,7 +173,7 @@ public sealed class ConcurrencyIntegrationTests
             // Evenly distribute 3 distinct concurrent pipeline commands
             if (i % 3 == 0)
             {
-                await orchestrator.BroadcastOperationsAsync("doc-msg-1", Array.Empty<CrdtOperation>(), CancellationToken.None);
+                await orchestrator.BroadcastPatchAsync("doc-msg-1", It.IsAny<CrdtPatch>(), CancellationToken.None);
             }
             else if (i % 3 == 1)
             {

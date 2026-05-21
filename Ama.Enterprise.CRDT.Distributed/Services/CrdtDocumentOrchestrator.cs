@@ -77,7 +77,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         this.antiEntropySyncCounter = this.meter.CreateCounter<long>("crdt.orchestrator.anti_entropy_syncs", "syncs", "Total anti-entropy point-to-point synchronizations dispatched");
         this.snapshotsDispatchedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.snapshots_dispatched", "snapshots", "Total full state snapshots explicitly provided responding to log gaps");
         this.snapshotBytesDispatchedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.snapshot_bytes_dispatched", "bytes", "Total bytes dispatched for full state snapshot fallbacks");
-        this.broadcastBytesCounter = this.meter.CreateCounter<long>("crdt.orchestrator.broadcast_bytes", "bytes", "Total bytes broadcasted across real-time operation syncs");
+        this.broadcastBytesCounter = this.meter.CreateCounter<long>("crdt.orchestrator.broadcast_bytes", "bytes", "Total bytes broadcasted across real-time patch syncs");
 
         this.commandsEnqueuedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.channel.commands_enqueued", "commands", "Total orchestrator commands enqueued to the lock-free channel");
         this.commandsProcessedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.channel.commands_processed", "commands", "Total orchestrator commands processed by the channel");
@@ -126,8 +126,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                         case OrchestratorCommandType.ProvideSnapshot:
                             await ProcessProvideSnapshotInternalAsync(cmd).ConfigureAwait(false);
                             break;
-                        case OrchestratorCommandType.BroadcastOperations:
-                            await ProcessBroadcastOperationsInternalAsync(cmd).ConfigureAwait(false);
+                        case OrchestratorCommandType.BroadcastPatch:
+                            await ProcessBroadcastPatchInternalAsync(cmd).ConfigureAwait(false);
                             break;
                     }
 
@@ -178,7 +178,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         await Registry.InitializeAsync(cancellationToken).ConfigureAwait(false);
         
         Registry.StateChanged += OnRegistryStateChanged;
-        Registry.OperationsGenerated += OnDocumentOperationsGenerated;
+        Registry.PatchGenerated += OnDocumentPatchGenerated;
         
         await ProcessSyncDocumentsInternalAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -188,11 +188,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         _ = SyncDocumentsAsync(CancellationToken.None);
     }
 
-    private void OnDocumentOperationsGenerated(object? sender, IReadOnlyList<CrdtOperation> operations)
+    private void OnDocumentPatchGenerated(object? sender, CrdtPatch patch)
     {
         if (sender is IDistributedCrdtDocument doc)
         {
-            _ = BroadcastOperationsAsync(doc.DocumentId, operations, CancellationToken.None);
+            _ = BroadcastPatchAsync(doc.DocumentId, patch, CancellationToken.None);
         }
     }
 
@@ -233,7 +233,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                         
                         if (activeDocuments.TryAdd(kvp.Key, doc))
                         {
-                            doc.OperationsGenerated += OnDocumentOperationsGenerated;
+                            doc.PatchGenerated += OnDocumentPatchGenerated;
                             changed = true;
                             documentCreatedCounter.Add(1, new KeyValuePair<string, object?>("document_id", kvp.Key));
                             logger.LogInformation("Orchestrator dynamically mapped new CRDT document: {DocumentId}", kvp.Key);
@@ -259,7 +259,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             {
                 if (activeDocuments.TryRemove(docId, out var doc))
                 {
-                    doc.OperationsGenerated -= OnDocumentOperationsGenerated;
+                    doc.PatchGenerated -= OnDocumentPatchGenerated;
                     if (doc is IDisposable d) d.Dispose();
                     await storage.DeleteDocumentAsync(docId, cancellationToken).ConfigureAwait(false);
                     changed = true;
@@ -412,12 +412,12 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
     }
 
-    public async Task BroadcastOperationsAsync(string documentId, IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default)
+    public async Task BroadcastPatchAsync(string documentId, CrdtPatch patch, CancellationToken cancellationToken = default)
     {
         var cmd = GetCommand();
-        cmd.Type = OrchestratorCommandType.BroadcastOperations;
+        cmd.Type = OrchestratorCommandType.BroadcastPatch;
         cmd.DocumentId = documentId;
-        cmd.Operations = operations;
+        cmd.Patch = patch;
         cmd.CancellationToken = cancellationToken;
 
         commandChannel.Writer.TryWrite(cmd);
@@ -432,7 +432,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
     }
 
-    private async Task ProcessBroadcastOperationsInternalAsync(PooledOrchestratorCommand cmd)
+    private async Task ProcessBroadcastPatchInternalAsync(PooledOrchestratorCommand cmd)
     {
         try
         {
@@ -440,10 +440,10 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
             var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
 
-            var opsMsg = new CrdtOperationsMessage(replicaContext.ReplicaId, [.. cmd.Operations!]);
-            var payload = serializer.SerializeToBytes(opsMsg);
+            var patchMsg = new CrdtPatchMessage(replicaContext.ReplicaId, cmd.Patch!.Value);
+            var payload = serializer.SerializeToBytes(patchMsg);
             
-            var wrapper = new CrdtMessageWrapper(cmd.DocumentId!, "CrdtOps", payload);
+            var wrapper = new CrdtMessageWrapper(cmd.DocumentId!, "CrdtPatch", payload);
             var finalBytes = serializer.SerializeToBytes(wrapper);
 
             broadcastBytesCounter.Add(finalBytes.Length, new KeyValuePair<string, object?>("document_id", cmd.DocumentId));
@@ -452,7 +452,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to broadcast active sync operation for document {DocumentId}.", cmd.DocumentId);
+            logger.LogError(ex, "Failed to broadcast active sync patch for document {DocumentId}.", cmd.DocumentId);
         }
     }
 
@@ -514,13 +514,13 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         if (Registry != null)
         {
             Registry.StateChanged -= OnRegistryStateChanged;
-            Registry.OperationsGenerated -= OnDocumentOperationsGenerated;
+            Registry.PatchGenerated -= OnDocumentPatchGenerated;
             if (Registry is IDisposable rd) rd.Dispose();
         }
         
         foreach (var doc in activeDocuments.Values)
         {
-            doc.OperationsGenerated -= OnDocumentOperationsGenerated;
+            doc.PatchGenerated -= OnDocumentPatchGenerated;
             if (doc is IDisposable d) d.Dispose();
         }
         

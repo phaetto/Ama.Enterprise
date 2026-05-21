@@ -40,7 +40,7 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver, IDisposable
     /// <inheritdoc />
     public async Task OnPeerJoinedAsync(string meshId, PeerNode node, CancellationToken cancellationToken)
     {
-        peersJoinedCounter.Add(1, new System.Collections.Generic.KeyValuePair<string, object?>("mesh_id", meshId));
+        peersJoinedCounter.Add(1, new KeyValuePair<string, object?>("mesh_id", meshId));
 
         if (Interlocked.CompareExchange(ref hasConnected, 1, 0) == 0)
         {
@@ -68,7 +68,7 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver, IDisposable
             
             var scope = scopeManager.GetOrCreateScope(replicaId);
             scope.ClusterTracker.RemovePeerByNetworkId(stringId);
-            peersDepartedCounter.Add(1, new System.Collections.Generic.KeyValuePair<string, object?>("mesh_id", meshId));
+            peersDepartedCounter.Add(1, new KeyValuePair<string, object?>("mesh_id", meshId));
         }
         
         return Task.CompletedTask;
@@ -86,7 +86,7 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver, IDisposable
                 
                 var scope = scopeManager.GetOrCreateScope(replicaId);
                 scope.ClusterTracker.RemovePeerByNetworkId(stringId);
-                peersDepartedCounter.Add(1, new System.Collections.Generic.KeyValuePair<string, object?>("mesh_id", meshId));
+                peersDepartedCounter.Add(1, new KeyValuePair<string, object?>("mesh_id", meshId));
             }
         }
         return Task.CompletedTask;

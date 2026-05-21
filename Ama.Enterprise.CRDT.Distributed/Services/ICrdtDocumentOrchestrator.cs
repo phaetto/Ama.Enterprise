@@ -59,9 +59,9 @@ public interface ICrdtDocumentOrchestrator
     Task ProvideSnapshotAsync(string documentId, string targetReplicaId, PeerId targetPeerId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Broadcasts causally linked local mutations immediately to active remote replica connections avoiding structural divergence manually.
+    /// Broadcasts a causally linked local patch immediately to active remote replica connections avoiding structural divergence manually.
     /// </summary>
-    Task BroadcastOperationsAsync(string documentId, IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default);
+    Task BroadcastPatchAsync(string documentId, CrdtPatch patch, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Dispatches a targeted point-to-point synchronization request to evaluate causal differences avoiding broadcast storms natively.

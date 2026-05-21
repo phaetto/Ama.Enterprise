@@ -19,9 +19,9 @@ public interface IDistributedCrdtDocument
     string DocumentId { get; }
 
     /// <summary>
-    /// Fired when new causal operations have been generated locally and are ready to be broadcasted to remote peers.
+    /// Fired when a new patch has been generated locally and is ready to be broadcasted to remote peers.
     /// </summary>
-    event EventHandler<IReadOnlyList<CrdtOperation>>? OperationsGenerated;
+    event EventHandler<CrdtPatch>? PatchGenerated;
 
     /// <summary>
     /// Initializes the document, loading initial state from persistent storage if configured natively.

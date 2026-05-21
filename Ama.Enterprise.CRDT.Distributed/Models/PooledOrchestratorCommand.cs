@@ -16,7 +16,7 @@ internal enum OrchestratorCommandType
     DeleteDocument,
     DispatchAntiEntropyState,
     ProvideSnapshot,
-    BroadcastOperations
+    BroadcastPatch
 }
 
 /// <summary>
@@ -39,7 +39,7 @@ internal sealed class PooledOrchestratorCommand : IValueTaskSource
     public string? TypeAlias { get; set; }
     public string? TargetReplicaId { get; set; }
     public PeerId? TargetPeerId { get; set; }
-    public IReadOnlyList<CrdtOperation>? Operations { get; set; }
+    public CrdtPatch? Patch { get; set; }
     public CancellationToken CancellationToken { get; set; }
 
     public void Reset()
@@ -50,7 +50,7 @@ internal sealed class PooledOrchestratorCommand : IValueTaskSource
         TypeAlias = null;
         TargetReplicaId = null;
         TargetPeerId = null;
-        Operations = null;
+        Patch = null;
         CancellationToken = default;
     }
 

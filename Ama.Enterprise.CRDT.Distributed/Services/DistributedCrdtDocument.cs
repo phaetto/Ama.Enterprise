@@ -64,7 +64,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     public event EventHandler? StateChanged;
 
     /// <inheritdoc />
-    public event EventHandler<IReadOnlyList<CrdtOperation>>? OperationsGenerated;
+    public event EventHandler<CrdtPatch>? PatchGenerated;
 
     public DistributedCrdtDocument(
         TState initialState,
@@ -271,7 +271,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         if (activeSyncEnabled && cmd.Patch!.Value.Operations != null && cmd.Patch.Value.Operations.Count > 0)
         {
-            OperationsGenerated?.Invoke(this, cmd.Patch.Value.Operations);
+            PatchGenerated?.Invoke(this, cmd.Patch.Value);
         }
     }
 
