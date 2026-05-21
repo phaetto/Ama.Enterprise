@@ -207,6 +207,12 @@
 | `$/Ama.Enterprise.P2p.WebRTC.AspNetCore/Services/WebRtcSignalingClient.cs` | Implements the signaling client explicitly interacting with remote WebRTC out-of-band handshakes over full-duplex WebSockets, standardizing URI generation based on configured path settings. |
 | `$/Ama.Enterprise.P2p.WebRTC.AspNetCore/Services/WebRtcSignalingServer.cs` | Implementation managing isolated ASP.NET Core WebSocket out-of-band WebRTC signaling streams evaluating Integrated and Standalone modes explicitly. |
 | `$/Ama.Enterprise.P2p.WebRTC.AspNetCore/Services/WebRtcSignalingWsHelper.cs` | Internal helper safely wrapping explicit native WebSockets bounds isolating generic out-of-band envelope negotiations natively. |
+| `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Constants.cs` | Defines global constants such as document type aliases and default IDs for the WebRTC CRDT distributed signaling components. |
+| `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Extensions/ServiceCollectionExtensions.cs` | Dependency injection extensions for bootstrapping the CRDT-backed WebRTC signaling hub. |
+| `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Models/CrdtSignalingState.cs` | Root CRDT document model representing the WebRTC out-of-band signaling state drop-box. |
+| `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Models/DistributedSignalingAotContext.cs` | AOT JSON context for serializing the WebRTC CRDT distributed signaling state models. |
+| `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Services/CrdtSignalingManager.cs` | Implementation managing the WebRTC signaling drop-box, utilizing forceful broadcasting to bypass background interval latency. |
+| `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Services/ICrdtSignalingManager.cs` | Contract managing the WebRTC out-of-band signaling drop-box backed by a distributed CRDT state. |
 | `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Ama.Enterprise.P2p.WebRTC.IntegrationTests.csproj` | Added project references mapping MQTT signaling capabilities alongside copying explicit local settings explicitly. |
 | `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Services/WebRtcTransportIntegrationTests.cs` | Updated `TestMessage` implementing the newly enforced `ProtocolVersion` satisfying `IMeshMessage`. |
 | `$/Ama.Enterprise.P2p.WebRTC/Ama.Enterprise.P2p.WebRTC.csproj` | No description provided. |

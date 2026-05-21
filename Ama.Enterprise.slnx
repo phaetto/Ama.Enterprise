@@ -19,6 +19,7 @@
     <Project Path="Ama.Enterprise.P2p.Telemetry.IntegrationTests/Ama.Enterprise.P2p.Telemetry.IntegrationTests.csproj" Id="c24eaa7a-4b42-434d-aa9e-30abf4a4e40f" />
     <Project Path="Ama.Enterprise.P2p.Telemetry.UnitTests/Ama.Enterprise.P2p.Telemetry.UnitTests.csproj" />
     <Project Path="Ama.Enterprise.P2p.Telemetry/Ama.Enterprise.P2p.Telemetry.csproj" Id="480acf15-c35b-4d39-bed4-420bcdea75b4" />
+    <Project Path="Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Ama.Enterprise.P2p.WebRTC.DistributedSignaling.csproj" Id="40faf5c1-3151-4495-9dba-d18f49cb7cf5" />
   </Folder>
   <Folder Name="/ShowCases/">
     <Project Path="Ama.Enterprise.CRDT.Distributed.ShowCase/Ama.Enterprise.CRDT.Distributed.ShowCase.csproj" Id="9994275b-bff7-448d-8763-3a41999774cb" />
