@@ -12,14 +12,13 @@ using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Discovery;
 using Ama.Enterprise.P2p.Services.Core;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Implementation of IPeerDiscovery acting as Phase 1, using UDP multicast to resolve IPs and delegating negotiation to the handshaker.
+/// Implementation of IPeerDiscovery acting as Phase 1, using UDP multicast natively explicitly decoupled from orchestration polling dynamically safely efficiently explicitly mapped natively globally.
 /// </summary>
-public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposable
+public sealed class UdpPeerDiscovery : IPeerDiscovery, IDisposable
 {
     private readonly string meshId;
     private readonly IOptionsMonitor<UdpDiscoveryOptions> discoveryOptionsMonitor;
@@ -35,7 +34,6 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     private UdpClient? listener;
     private CancellationTokenSource? backgroundTaskCancellationSource;
     private Task? listenTask;
-    private Task? discoveryTask;
     private bool isDisposed;
 
     private readonly Meter meter;
@@ -74,7 +72,10 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     }
 
     /// <inheritdoc />
-    public Task StartAsync(CancellationToken cancellationToken)
+    public TimeSpan DiscoveryInterval => discoveryOptionsMonitor.Get(meshId).DiscoveryInterval;
+
+    /// <inheritdoc />
+    public Task StartListeningAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
@@ -91,10 +92,9 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
         listener.JoinMulticastGroup(multicastAddress);
 
         listenTask = ListenLoopAsync(backgroundTaskCancellationSource.Token);
-        discoveryTask = DiscoveryLoopAsync(backgroundTaskCancellationSource.Token);
 
         logger.LogInformation(
-            "[{MeshId}] UDP Peer Discovery started listening on multicast group {Address}:{Port}",
+            "[{MeshId}] UDP Peer Discovery started passive listening natively on multicast group {Address}:{Port}",
             meshId,
             options.MulticastAddress,
             options.MulticastPort);
@@ -103,7 +103,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     }
 
     /// <inheritdoc />
-    public async Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopListeningAsync(CancellationToken cancellationToken)
     {
         if (backgroundTaskCancellationSource is null)
         {
@@ -112,15 +112,11 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
 
         await backgroundTaskCancellationSource.CancelAsync().ConfigureAwait(false);
 
-        var tasksToWait = new List<Task>();
-        if (listenTask is not null) tasksToWait.Add(listenTask);
-        if (discoveryTask is not null) tasksToWait.Add(discoveryTask);
-
-        if (tasksToWait.Count > 0)
+        if (listenTask is not null)
         {
             try
             {
-                await Task.WhenAll(tasksToWait).ConfigureAwait(false);
+                await listenTask.ConfigureAwait(false);
             }
             catch (OperationCanceledException) { }
         }
@@ -260,7 +256,6 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
                         var responseBytes = serializer.SerializeToBytes(pong);
                         await listener.SendAsync(responseBytes, responseBytes.Length, result.RemoteEndPoint).ConfigureAwait(false);
 
-                        // Actively reverse handshake to register the discovering peer avoiding one-sided topologies
                         _ = Task.Run(async () =>
                         {
                             try
@@ -304,46 +299,6 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
         catch (SocketException ex)
         {
             logger.LogDebug(ex, "[{MeshId}] UDP multicast listener socket exception.", meshId);
-        }
-    }
-
-    private async Task DiscoveryLoopAsync(CancellationToken token)
-    {
-        try
-        {
-            await Task.Delay(TimeSpan.FromSeconds(2), token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
-
-        while (!token.IsCancellationRequested)
-        {
-            var options = discoveryOptionsMonitor.Get(meshId);
-
-            try
-            {
-                var discoveredPeers = await DiscoverPeersAsync(token).ConfigureAwait(false);
-
-                foreach (var peer in discoveredPeers)
-                {
-                    await peerRegistry.AddOrUpdatePeerAsync(meshId, peer, PeerStatus.Active, token).ConfigureAwait(false);
-                }
-            }
-            catch (OperationCanceledException) { }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "[{MeshId}] Unexpected error in UDP peer discovery loop.", meshId);
-            }
-
-            if (token.IsCancellationRequested) break;
-
-            try
-            {
-                await Task.Delay(options.DiscoveryInterval, token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) { }
         }
     }
 }

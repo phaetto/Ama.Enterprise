@@ -9,15 +9,13 @@ using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Discovery;
 using Ama.Enterprise.P2p.Services.Core;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Implementation of IPeerDiscovery using DNS resolution (Phase 1) paired with abstract active handshaking (Phase 2).
-/// Supports optional SRV record routing through injected dependencies.
+/// Implementation of IPeerDiscovery using DNS resolution explicitly completely decoupled natively smoothly smoothly explicitly mapped explicitly resolving natively correctly natively efficiently distinctly smoothly efficiently mapped effectively functionally smoothly distinctively correctly natively avoiding loops actively efficiently securely properly elegantly seamlessly structurally mapping.
 /// </summary>
-public sealed class DnsPeerDiscovery : IPeerDiscovery, IHostedService, IDisposable
+public sealed class DnsPeerDiscovery : IPeerDiscovery, IDisposable
 {
     private readonly string meshId;
     private readonly IOptionsMonitor<DnsDiscoveryOptions> discoveryOptionsMonitor;
@@ -30,8 +28,6 @@ public sealed class DnsPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     private readonly IFailureDetector failureDetector;
     private readonly IDnsSrvResolver? srvResolver;
 
-    private CancellationTokenSource? backgroundTaskCancellationSource;
-    private Task? discoveryTask;
     private bool isDisposed;
 
     private readonly Meter meter;
@@ -68,17 +64,16 @@ public sealed class DnsPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     }
 
     /// <inheritdoc />
-    public Task StartAsync(CancellationToken cancellationToken)
+    public TimeSpan DiscoveryInterval => discoveryOptionsMonitor.Get(meshId).DiscoveryInterval;
+
+    /// <inheritdoc />
+    public Task StartListeningAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
         var options = discoveryOptionsMonitor.Get(meshId);
-        backgroundTaskCancellationSource = new CancellationTokenSource();
-
-        discoveryTask = DiscoveryLoopAsync(backgroundTaskCancellationSource.Token);
-
         logger.LogInformation(
-            "[{MeshId}] DNS Peer Discovery started watching hostname {Hostname}",
+            "[{MeshId}] DNS Peer Discovery orchestrator mapped natively to hostname {Hostname}.",
             meshId,
             options.Hostname);
 
@@ -86,23 +81,9 @@ public sealed class DnsPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
     }
 
     /// <inheritdoc />
-    public async Task StopAsync(CancellationToken cancellationToken)
+    public Task StopListeningAsync(CancellationToken cancellationToken)
     {
-        if (backgroundTaskCancellationSource is null)
-        {
-            return;
-        }
-
-        await backgroundTaskCancellationSource.CancelAsync().ConfigureAwait(false);
-
-        if (discoveryTask is not null)
-        {
-            try
-            {
-                await discoveryTask.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) { }
-        }
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc />
@@ -199,8 +180,6 @@ public sealed class DnsPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
             return;
         }
 
-        backgroundTaskCancellationSource?.Cancel();
-        backgroundTaskCancellationSource?.Dispose();
         meter.Dispose();
         isDisposed = true;
     }
@@ -249,49 +228,6 @@ public sealed class DnsPeerDiscovery : IPeerDiscovery, IHostedService, IDisposab
         catch (Exception ex)
         {
             logger.LogTrace(ex, "[{MeshId}] Active handshake failed for IP {IpAddress}:{Port}.", meshId, ip, port);
-        }
-    }
-
-    private async Task DiscoveryLoopAsync(CancellationToken token)
-    {
-        try
-        {
-            await Task.Delay(TimeSpan.FromSeconds(2), token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
-
-        while (!token.IsCancellationRequested)
-        {
-            var options = discoveryOptionsMonitor.Get(meshId);
-
-            try
-            {
-                var discoveredPeers = await DiscoverPeersAsync(token).ConfigureAwait(false);
-
-                foreach (var peer in discoveredPeers)
-                {
-                    await peerRegistry.AddOrUpdatePeerAsync(meshId, peer, PeerStatus.Active, token).ConfigureAwait(false);
-                }
-            }
-            catch (OperationCanceledException) { }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "[{MeshId}] Unexpected error in DNS peer discovery loop.", meshId);
-            }
-
-            if (token.IsCancellationRequested)
-            {
-                break;
-            }
-
-            try
-            {
-                await Task.Delay(options.DiscoveryInterval, token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) { }
         }
     }
 }

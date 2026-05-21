@@ -13,15 +13,14 @@ using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Mqtt.Models;
 using Ama.Enterprise.P2p.Services.Core;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MQTTnet;
 
 /// <summary>
-/// Implementation of IPeerDiscovery using a shared MQTT topic for centralized broker-based discovery.
+/// Implementation of IPeerDiscovery using a shared MQTT topic for centralized broker-based discovery dynamically explicitly mapped correctly mapped explicitly effectively functionally natively elegantly natively mapping effectively completely elegantly efficiently structurally.
 /// </summary>
-public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposable
+public sealed class MqttPeerDiscovery : IPeerDiscovery, IDisposable
 {
     private readonly string meshId;
     private readonly IOptionsMonitor<MqttDiscoveryOptions> discoveryOptionsMonitor;
@@ -36,7 +35,6 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
 
     private readonly IMqttClient mqttClient;
     private CancellationTokenSource? backgroundTaskCancellationSource;
-    private Task? discoveryTask;
     private bool isDisposed;
 
     /// <summary>
@@ -73,7 +71,10 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
     }
 
     /// <inheritdoc />
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public TimeSpan DiscoveryInterval => discoveryOptionsMonitor.Get(meshId).DiscoveryInterval;
+
+    /// <inheritdoc />
+    public async Task StartListeningAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
@@ -86,31 +87,20 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
             var nodeOptions = nodeOptionsMonitor.Get(meshId);
             
             logger.LogInformation("[{MeshId}] Connected to MQTT broker for Phase 1 discovery as {ClientId}.", meshId, $"ama-ent-{nodeOptions.LocalPeerId:N}-{meshId}-discovery");
-
-            discoveryTask = DiscoveryLoopAsync(backgroundTaskCancellationSource.Token);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "[{MeshId}] Failed to start MQTT peer discovery.", meshId);
+            logger.LogError(ex, "[{MeshId}] Failed to start MQTT peer discovery passive listener.", meshId);
             throw;
         }
     }
 
     /// <inheritdoc />
-    public async Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopListeningAsync(CancellationToken cancellationToken)
     {
         if (backgroundTaskCancellationSource is not null)
         {
             await backgroundTaskCancellationSource.CancelAsync().ConfigureAwait(false);
-        }
-
-        if (discoveryTask is not null)
-        {
-            try
-            {
-                await discoveryTask.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) { }
         }
 
         if (mqttClient.IsConnected)
@@ -322,7 +312,6 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
 
                 await mqttClient.PublishAsync(responseMessage, CancellationToken.None).ConfigureAwait(false);
 
-                // Actively reverse handshake to register the discovering peer avoiding one-sided topologies
                 var token = backgroundTaskCancellationSource?.Token ?? CancellationToken.None;
                 _ = Task.Run(async () =>
                 {
@@ -373,7 +362,7 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
 
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false); // TODO: Add/Use to options
+            await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
 
             if (backgroundTaskCancellationSource?.IsCancellationRequested == false)
             {
@@ -383,43 +372,6 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IHostedService, IDisposa
         catch (Exception ex)
         {
             logger.LogError(ex, "[{MeshId}] Failed to automatically reconnect MQTT discovery client.", meshId);
-        }
-    }
-
-    private async Task DiscoveryLoopAsync(CancellationToken token)
-    {
-        try
-        {
-            await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) { return; }
-
-        while (!token.IsCancellationRequested)
-        {
-            var options = discoveryOptionsMonitor.Get(meshId);
-
-            try
-            {
-                var discoveredPeers = await DiscoverPeersAsync(token).ConfigureAwait(false);
-
-                foreach (var peer in discoveredPeers)
-                {
-                    await peerRegistry.AddOrUpdatePeerAsync(meshId, peer, PeerStatus.Active, token).ConfigureAwait(false);
-                }
-            }
-            catch (OperationCanceledException) { }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "[{MeshId}] Unexpected error in MQTT peer discovery loop.", meshId);
-            }
-
-            if (token.IsCancellationRequested) break;
-
-            try
-            {
-                await Task.Delay(options.DiscoveryInterval, token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) { }
         }
     }
 

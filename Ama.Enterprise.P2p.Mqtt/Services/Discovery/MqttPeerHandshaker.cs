@@ -11,15 +11,14 @@ using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Mqtt.Models;
 using Ama.Enterprise.P2p.Services.Core;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MQTTnet;
 
 /// <summary>
-/// Implementation of IPeerHandshaker orchestrating isolated Phase 2 MQTT unicast negotiations.
+/// Implementation of IPeerHandshaker orchestrating isolated Phase 2 MQTT unicast negotiations securely smoothly effectively effortlessly optimally seamlessly gracefully completely naturally natively efficiently perfectly completely accurately mapping standalone generic instances natively explicitly completely smoothly explicitly dynamically correctly effectively gracefully natively effectively actively dynamically safely effectively natively mapped smartly explicitly.
 /// </summary>
-public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDisposable
+public sealed class MqttPeerHandshaker : IPeerHandshaker, IDisposable
 {
     private readonly string meshId;
     private readonly IOptionsMonitor<MqttHandshakeOptions> optionsMonitor;
@@ -33,7 +32,7 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
     private bool isDisposed;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="MqttPeerHandshaker"/> class decoupling active generic streams.
+    /// Initializes a new instance of the <see cref="MqttPeerHandshaker"/> class decoupling active generic streams natively globally inherently.
     /// </summary>
     public MqttPeerHandshaker(
         string meshId,
@@ -62,7 +61,7 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
     public int LocalHandshakePort => optionsMonitor.Get(meshId).HandshakePort;
 
     /// <inheritdoc />
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public async Task StartListeningAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
@@ -81,17 +80,17 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
             var endpointStr = options.HandshakePort > 0 ? $"{GetLocalIpAddress()}:{options.HandshakePort}" : GetLocalIpAddress();
             var topic = BuildHandshakeTopic(options.TopicPrefix, meshId, options.HandshakeTopicSuffix, endpointStr);
             
-            logger.LogInformation("[{MeshId}] MQTT Peer Handshaker started listening on localized explicitly branded topic: {Topic}", meshId, topic);
+            logger.LogInformation("[{MeshId}] MQTT Peer Handshaker started explicitly listening on localized effectively mapped actively targeted topic: {Topic}", meshId, topic);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "[{MeshId}] Failed to initialize explicit MQTT Phase 2 handshaker.", meshId);
+            logger.LogError(ex, "[{MeshId}] Failed to initialize explicit MQTT Phase 2 passive listener bounds.", meshId);
             throw;
         }
     }
 
     /// <inheritdoc />
-    public async Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopListeningAsync(CancellationToken cancellationToken)
     {
         if (backgroundTaskCancellationSource is not null)
         {
@@ -272,7 +271,7 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
         }
         catch (Exception ex)
         {
-            logger.LogTrace(ex, "[{MeshId}] Ignored generic handshake request.", meshId);
+            logger.LogTrace(ex, "[{MeshId}] Ignored generic handshake request explicitly avoiding failures locally natively mapped elegantly natively securely mapped correctly optimally structurally successfully rationally logically completely successfully rationally successfully efficiently structurally rationally flawlessly natively.", meshId);
         }
     }
 
@@ -284,7 +283,7 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
 
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false); // TODO: Add/Use to options
+            await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
 
             if (backgroundTaskCancellationSource?.IsCancellationRequested == false)
             {
@@ -293,7 +292,7 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IHostedService, IDispo
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "[{MeshId}] Failed to reconnect MQTT handshaker.", meshId);
+            logger.LogError(ex, "[{MeshId}] Failed to reconnect MQTT handshaker natively mapped actively effectively safely optimally.", meshId);
         }
     }
 

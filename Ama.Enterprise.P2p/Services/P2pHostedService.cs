@@ -15,10 +15,8 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// An orchestrating background service that boots all configured Keyed P2P meshes across the application lifecycle.
+/// Orchestrates discovery loops and standard health checks natively explicitly decoupling logic from the protocol implementations cleanly.
 /// </summary>
-/// <remarks>
-/// Initializes a new instance of the <see cref="P2pHostedService"/> class.
-/// </remarks>
 public sealed class P2pHostedService(
     IServiceProvider serviceProvider,
     IEnumerable<P2pMeshMetadata> meshes,
@@ -35,7 +33,6 @@ public sealed class P2pHostedService(
     private readonly ConcurrentDictionary<string, Task> inboundProcessors = new();
     private readonly ConcurrentDictionary<string, MeshState> activeMeshes = new();
 
-    // 131,072 entries * 8 bytes = ~1 MB of memory. Always allocated, zero GC pressure.
     private const int CacheSize = 131072;
     private const int CacheMask = CacheSize - 1;
     private readonly long[] seenMessagesCache = new long[CacheSize];
@@ -106,15 +103,16 @@ public sealed class P2pHostedService(
             }
 
             var handshaker = serviceProvider.GetKeyedService<IPeerHandshaker>(mesh.MeshId);
-            if (handshaker is IHostedService hostedHandshaker)
+            if (handshaker is not null)
             {
-                await hostedHandshaker.StartAsync(cancellationToken).ConfigureAwait(false);
+                await handshaker.StartListeningAsync(cancellationToken).ConfigureAwait(false);
             }
 
             var discovery = serviceProvider.GetKeyedService<IPeerDiscovery>(mesh.MeshId);
-            if (discovery is IHostedService hostedDiscovery)
+            if (discovery is not null)
             {
-                await hostedDiscovery.StartAsync(cancellationToken).ConfigureAwait(false);
+                await discovery.StartListeningAsync(cancellationToken).ConfigureAwait(false);
+                state.DiscoveryLoopTask = Task.Run(() => DiscoveryLoopAsync(mesh.MeshId, state, discovery, state.LoopCts.Token), state.LoopCts.Token);
             }
         }
 
@@ -124,7 +122,6 @@ public sealed class P2pHostedService(
         }
         else
         {
-            // Start the overarching protocol across all defined meshes
             await p2pProtocol.StartAsync(cancellationToken).ConfigureAwait(false);
         }
     }
@@ -139,7 +136,6 @@ public sealed class P2pHostedService(
 
         if (p2pProtocol is not null)
         {
-            // Stop the protocol globally first to halt processing
             await p2pProtocol.StopAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -149,6 +145,10 @@ public sealed class P2pHostedService(
             if (state.HealthCheckLoopTask is not null)
             {
                 tasksToAwait.Add(state.HealthCheckLoopTask);
+            }
+            if (state.DiscoveryLoopTask is not null)
+            {
+                tasksToAwait.Add(state.DiscoveryLoopTask);
             }
         }
 
@@ -176,15 +176,15 @@ public sealed class P2pHostedService(
             logger.LogInformation("Orchestrating shutdown for P2P mesh network: {MeshId}", mesh.MeshId);
 
             var discovery = serviceProvider.GetKeyedService<IPeerDiscovery>(mesh.MeshId);
-            if (discovery is IHostedService hostedDiscovery)
+            if (discovery is not null)
             {
-                await hostedDiscovery.StopAsync(cancellationToken).ConfigureAwait(false);
+                await discovery.StopListeningAsync(cancellationToken).ConfigureAwait(false);
             }
 
             var handshaker = serviceProvider.GetKeyedService<IPeerHandshaker>(mesh.MeshId);
-            if (handshaker is IHostedService hostedHandshaker)
+            if (handshaker is not null)
             {
-                await hostedHandshaker.StopAsync(cancellationToken).ConfigureAwait(false);
+                await handshaker.StopListeningAsync(cancellationToken).ConfigureAwait(false);
             }
 
             var listeners = serviceProvider.GetKeyedServices<ITransportListener>(mesh.MeshId);
@@ -220,15 +220,8 @@ public sealed class P2pHostedService(
     private async Task HandleIncomingMessageAsync(string meshId, MeshState state, IMeshMessage message, CancellationToken cancellationToken)
     {
         var messageId = message.MessageId;
-
-        // Perform a zero-allocation cast from Guid (16 bytes) to long (8 bytes) to act as a 64-bit hash.
-        // This is perfectly safe, verifiable, and highly optimized in .NET AOT.
         var hash = Unsafe.As<Guid, long>(ref messageId);
-        
-        // Bitwise AND works here because CacheSize is a power of 2. It is significantly faster than modulo (%).
         var index = (int)(hash & CacheMask);
-
-        // Volatile read ensures thread visibility across CPUs without full lock contention.
         var existingHash = Volatile.Read(ref seenMessagesCache[index]);
         if (existingHash == hash)
         {
@@ -236,8 +229,6 @@ public sealed class P2pHostedService(
             return;
         }
 
-        // Write new hash over the old one. If two messages collide (rare) or old messages are overwritten,
-        // the cache acts as a natural rolling window.
         Volatile.Write(ref seenMessagesCache[index], hash);
 
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
@@ -306,6 +297,44 @@ public sealed class P2pHostedService(
         }
     }
 
+    private async Task DiscoveryLoopAsync(string meshId, MeshState state, IPeerDiscovery discovery, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var discoveredPeers = await discovery.DiscoverPeersAsync(cancellationToken).ConfigureAwait(false);
+
+                foreach (var peer in discoveredPeers)
+                {
+                    await state.PeerRegistry.AddOrUpdatePeerAsync(meshId, peer, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "[{MeshId}] Unexpected error in central peer discovery polling loop.", meshId);
+            }
+
+            if (cancellationToken.IsCancellationRequested) break;
+
+            try
+            {
+                await Task.Delay(discovery.DiscoveryInterval, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { }
+        }
+    }
+
     private sealed class MeshState : IDisposable
     {
         public string MeshId { get; }
@@ -314,6 +343,7 @@ public sealed class P2pHostedService(
         public IPeerRegistry PeerRegistry { get; }
 
         public Task? HealthCheckLoopTask { get; set; }
+        public Task? DiscoveryLoopTask { get; set; }
         public CancellationTokenSource? LoopCts { get; set; }
 
         public MeshState(string meshId, IApplicationPayloadDispatcher dispatcher, IFailureDetector failureDetector, IPeerRegistry peerRegistry)

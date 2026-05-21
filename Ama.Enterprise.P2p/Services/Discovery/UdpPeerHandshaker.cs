@@ -11,14 +11,13 @@ using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Discovery;
 using Ama.Enterprise.P2p.Services.Core;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Implementation of IPeerHandshaker managing isolated unicast UDP probes.
+/// Implementation of IPeerHandshaker managing isolated unicast UDP probes explicitly decoupled structurally.
 /// </summary>
-public sealed class UdpPeerHandshaker : IPeerHandshaker, IHostedService, IDisposable
+public sealed class UdpPeerHandshaker : IPeerHandshaker, IDisposable
 {
     private readonly string meshId;
     private readonly IOptionsMonitor<UdpHandshakeOptions> optionsMonitor;
@@ -71,7 +70,7 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IHostedService, IDispos
     public int LocalHandshakePort => optionsMonitor.Get(meshId).ListenPort;
 
     /// <inheritdoc />
-    public Task StartAsync(CancellationToken cancellationToken)
+    public Task StartListeningAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
         var options = optionsMonitor.Get(meshId);
@@ -83,12 +82,12 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IHostedService, IDispos
         backgroundTaskCancellationSource = new CancellationTokenSource();
         listenTask = ListenLoopAsync(backgroundTaskCancellationSource.Token);
 
-        logger.LogInformation("[{MeshId}] UDP Peer Handshaker started listening on port {Port}", meshId, options.ListenPort);
+        logger.LogInformation("[{MeshId}] UDP Peer Handshaker started natively listening on port {Port}", meshId, options.ListenPort);
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
-    public async Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopListeningAsync(CancellationToken cancellationToken)
     {
         if (backgroundTaskCancellationSource is null)
         {

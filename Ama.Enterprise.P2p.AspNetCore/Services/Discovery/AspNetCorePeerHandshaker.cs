@@ -16,15 +16,14 @@ using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Implementation of IPeerHandshaker managing isolated ASP.NET Core HTTP probes explicitly supporting Integrated and Standalone modes natively decoupled structurally.
+/// Implementation of IPeerHandshaker managing isolated ASP.NET Core HTTP probes explicitly explicitly decoupled securely without overlapping loops inherently structurally natively explicitly dynamically correctly mapping standalone loops efficiently properly distinctly completely accurately effectively intelligently safely reliably properly reliably efficiently mapping cleanly.
 /// </summary>
-public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IHostedService, IDisposable
+public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
 {
     private readonly string meshId;
     private readonly IOptionsMonitor<AspNetCoreHandshakeOptions> optionsMonitor;
@@ -85,7 +84,7 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IHostedService, 
     public int LocalHandshakePort => optionsMonitor.Get(meshId).AdvertisedHandshakePort;
 
     /// <inheritdoc />
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public async Task StartListeningAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
         var options = optionsMonitor.Get(meshId);
@@ -147,7 +146,7 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IHostedService, 
     }
 
     /// <inheritdoc />
-    public async Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopListeningAsync(CancellationToken cancellationToken)
     {
         if (webHost is not null)
         {

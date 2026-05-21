@@ -6,23 +6,33 @@ using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
-/// Defines a mechanism to actively negotiate and retrieve a remote peer's identity from an unresolved network endpoint.
-/// Represents Phase 2 in a Two-Phase indirect discovery architecture.
+/// Interface for orchestrating Phase 2 protocol negotiations and active listener bounds natively decoupled from background orchestration.
 /// </summary>
 public interface IPeerHandshaker
 {
     /// <summary>
-    /// Gets the localized port this specific handshaker is actively listening on.
-    /// This allows generic Phase 1 discovery mechanisms to broadcast the correct Phase 2 target natively.
+    /// Gets the explicitly configured local port used for handshaking natively.
     /// </summary>
     int LocalHandshakePort { get; }
 
     /// <summary>
-    /// Initiates an active connection to the specified endpoint identifier to exchange node identities.
+    /// Starts the inbound passive listener resolving remote incoming Phase 2 negotiations.
     /// </summary>
-    /// <param name="localNode">The local node identity to present to the remote peer.</param>
-    /// <param name="endpoint">The target network endpoint containing IP and designated Handshake port.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The remote peer's fully formed node details, or null if the handshake fails.</returns>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    Task StartListeningAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Stops the inbound passive listener cleanly.
+    /// </summary>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    Task StopListeningAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Initiates an active outbound Phase 2 handshake against a strictly specified remote endpoint safely natively.
+    /// </summary>
+    /// <param name="localNode">The explicit local peer identity initializing the network probe.</param>
+    /// <param name="endpoint">The explicitly bounded remote address target.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The negotiated remote peer identity implicitly verified.</returns>
     Task<PeerNode?> HandshakeAsync(PeerNode localNode, IPEndPoint endpoint, CancellationToken cancellationToken);
 }

@@ -40,11 +40,6 @@ public static class UdpDiscoveryServiceCollectionExtensions
 
         builder.Services.Configure(builder.MeshId, configureOptions);
 
-        if (!builder.Services.Any(s => s.ServiceType == typeof(IJsonTypeInfoResolver) && s.ServiceKey as string == "Ama.CRDT" && s.ImplementationInstance == UdpDiscoveryJsonContext.Default))
-        {
-            builder.Services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", UdpDiscoveryJsonContext.Default);
-        }
-
         builder.Services.AddKeyedSingleton<IPeerDiscovery>(builder.MeshId, (sp, key) =>
             new UdpPeerDiscovery(
                 (string)key!,
