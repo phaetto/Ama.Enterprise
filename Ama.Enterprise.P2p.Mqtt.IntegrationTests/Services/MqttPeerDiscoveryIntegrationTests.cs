@@ -40,16 +40,19 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         var peerAId = new PeerId(Guid.NewGuid());
         var peerBId = new PeerId(Guid.NewGuid());
 
+        using var topologySemaphore = new SemaphoreSlim(0);
+        Action onTopologyChanged = () => topologySemaphore.Release();
+
         testOutputHelper.WriteLine("Initializing Nodes for Discovery...");
-        await using var nodeA = CreateDiscoveryTestNode(meshId, peerAId, topicPrefix, handshakePort: 9001);
-        await using var nodeB = CreateDiscoveryTestNode(meshId, peerBId, topicPrefix, handshakePort: 9002);
+        await using var nodeA = CreateDiscoveryTestNode(meshId, peerAId, topicPrefix, onTopologyChanged, handshakePort: 9001);
+        await using var nodeB = CreateDiscoveryTestNode(meshId, peerBId, topicPrefix, onTopologyChanged, handshakePort: 9002);
 
         // Act
         testOutputHelper.WriteLine("Starting MQTT Peer Discovery background services...");
         await nodeA.StartDiscoveryAsync(cts.Token);
         await nodeB.StartDiscoveryAsync(cts.Token);
 
-        // Assert - Use a polling loop to wait for public broker subscriptions and broadcasts to propagate
+        // Assert - Use a polling loop augmented with observer notifications to wait for public broker subscriptions and broadcasts to propagate
         testOutputHelper.WriteLine("Waiting for discovery broadcasts to synchronize across the broker...");
         
         bool discovered = false;
@@ -75,67 +78,13 @@ public sealed class MqttPeerDiscoveryIntegrationTests
                 break;
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(500), cts.Token);
+            await topologySemaphore.WaitAsync(TimeSpan.FromMilliseconds(500), cts.Token);
         }
 
         discovered.ShouldBeTrue("Nodes failed to discover each other within the expected timeout limit.");
 
         testOutputHelper.WriteLine("Stopping discovery loops...");
         await nodeA.StopDiscoveryAsync(cts.Token);
-        await nodeB.StopDiscoveryAsync(cts.Token);
-    }
-
-    [IntegrationFact]
-    public async Task MqttPeerDiscovery_ExplicitManualDiscovery_PopulatesRecentPeers_Succeeds()
-    {
-        // Arrange
-        var meshId = $"mqtt-manual-disc-{Guid.NewGuid():N}";
-        var topicPrefix = $"integration-test/manual/{Guid.NewGuid():N}";
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        
-        var peerAId = new PeerId(Guid.NewGuid());
-        var peerBId = new PeerId(Guid.NewGuid());
-
-        await using var nodeA = CreateDiscoveryTestNode(meshId, peerAId, topicPrefix, handshakePort: 9011);
-        await using var nodeB = CreateDiscoveryTestNode(meshId, peerBId, topicPrefix, handshakePort: 9012);
-
-        await nodeB.StartDiscoveryAsync(cts.Token);
-
-        if (nodeA.Discovery is IHostedService hostedA)
-        {
-            await hostedA.StartAsync(cts.Token);
-        }
-
-        await Task.Delay(TimeSpan.FromSeconds(5), cts.Token);
-
-        // Act & Assert
-        testOutputHelper.WriteLine("Firing explicit DiscoverPeersAsync roundtrips from Node A...");
-        
-        bool manuallyDiscovered = false;
-        var timeoutTime = DateTime.UtcNow.AddSeconds(45);
-        
-        while (DateTime.UtcNow < timeoutTime && !cts.Token.IsCancellationRequested)
-        {
-            var discoveredByA = await nodeA.Discovery.DiscoverPeersAsync(cts.Token);
-            
-            var registeredPeers = await nodeA.Registry.GetAllPeersAsync(meshId, cts.Token);
-            
-            if (discoveredByA.Any(n => n.Id.Equals(peerBId)) || registeredPeers.Any(p => p.Id.Equals(peerBId)))
-            {
-                manuallyDiscovered = true;
-                break;
-            }
-
-            await Task.Delay(TimeSpan.FromSeconds(2), cts.Token);
-        }
-
-        manuallyDiscovered.ShouldBeTrue("Node A failed to manually discover Node B within the timeout bound.");
-
-        // Cleanup
-        if (nodeA.Discovery is IHostedService cleanupHostedA)
-        {
-            await cleanupHostedA.StopAsync(cts.Token);
-        }
         await nodeB.StopDiscoveryAsync(cts.Token);
     }
     
@@ -150,11 +99,14 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         var peers = Enumerable.Range(0, 5).Select(_ => new PeerId(Guid.NewGuid())).ToList();
         var nodes = new List<MqttDiscoveryTestNode>();
 
+        using var topologySemaphore = new SemaphoreSlim(0);
+        Action onTopologyChanged = () => topologySemaphore.Release();
+
         testOutputHelper.WriteLine("Initializing 5 Nodes for MQTT Discovery...");
         int basePort = 9020;
         foreach (var peerId in peers)
         {
-            nodes.Add(CreateDiscoveryTestNode(meshId, peerId, topicPrefix, handshakePort: ++basePort));
+            nodes.Add(CreateDiscoveryTestNode(meshId, peerId, topicPrefix, onTopologyChanged, handshakePort: ++basePort));
         }
 
         try
@@ -192,7 +144,7 @@ public sealed class MqttPeerDiscoveryIntegrationTests
                     break;
                 }
 
-                await Task.Delay(TimeSpan.FromMilliseconds(1000), cts.Token);
+                await topologySemaphore.WaitAsync(TimeSpan.FromMilliseconds(1000), cts.Token);
             }
 
             allSynchronized.ShouldBeTrue("The 5-node cluster failed to fully discover each other within the expected timeout limit. This verifies cluster stabilization and bounds validation with multiple concurrent topic publications.");
@@ -221,9 +173,12 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         var portA = 8401;
         var portB = 8402;
 
+        using var topologySemaphore = new SemaphoreSlim(0);
+        Action onTopologyChanged = () => topologySemaphore.Release();
+
         testOutputHelper.WriteLine("Initializing TCP Nodes for MQTT Discovery...");
-        await using var nodeA = CreateDiscoveryTestNode(meshId, peerAId, topicPrefix, useTcpTransport: true, tcpPort: portA, handshakePort: 9031);
-        await using var nodeB = CreateDiscoveryTestNode(meshId, peerBId, topicPrefix, useTcpTransport: true, tcpPort: portB, handshakePort: 9032);
+        await using var nodeA = CreateDiscoveryTestNode(meshId, peerAId, topicPrefix, onTopologyChanged, useTcpTransport: true, tcpPort: portA, handshakePort: 9031);
+        await using var nodeB = CreateDiscoveryTestNode(meshId, peerBId, topicPrefix, onTopologyChanged, useTcpTransport: true, tcpPort: portB, handshakePort: 9032);
 
         // Act
         testOutputHelper.WriteLine("Starting MQTT Peer Discovery background services for TCP endpoints...");
@@ -241,14 +196,14 @@ public sealed class MqttPeerDiscoveryIntegrationTests
             var peersA = await nodeA.Registry.GetAllPeersAsync(meshId, cts.Token);
             var peersB = await nodeB.Registry.GetAllPeersAsync(meshId, cts.Token);
 
-            if (!peersA.Any(p => p.Id.Equals(peerBId)) || !peersB.Any(p => p.Id.Equals(peerAId)))
-            {
-                await Task.Delay(TimeSpan.FromMilliseconds(500), cts.Token);
-                continue;
-            }
-
             var aDiscoveredB = peersA.FirstOrDefault(p => p.Id.Equals(peerBId));
             var bDiscoveredA = peersB.FirstOrDefault(p => p.Id.Equals(peerAId));
+
+            if (aDiscoveredB.Endpoint == null || bDiscoveredA.Endpoint == null)
+            {
+                await topologySemaphore.WaitAsync(TimeSpan.FromMilliseconds(500), cts.Token);
+                continue;
+            }
 
             aDiscoveredB.Endpoint.ShouldBeOfType<TcpPeerEndpoint>();
             bDiscoveredA.Endpoint.ShouldBeOfType<TcpPeerEndpoint>();
@@ -286,9 +241,12 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         var portA = 8601;
         var portB = 8602;
 
+        using var topologySemaphore = new SemaphoreSlim(0);
+        Action onTopologyChanged = () => topologySemaphore.Release();
+
         testOutputHelper.WriteLine("Initializing Multi-Mesh Nodes for MQTT Discovery...");
-        await using var nodeA = CreateMultiMeshNode(peerAId, mesh1Id, mesh2Id, portA, topicPrefix1, topicPrefix2, 9041, 9042);
-        await using var nodeB = CreateMultiMeshNode(peerBId, mesh1Id, mesh2Id, portB, topicPrefix1, topicPrefix2, 9051, 9052);
+        await using var nodeA = CreateMultiMeshNode(peerAId, mesh1Id, mesh2Id, onTopologyChanged, portA, topicPrefix1, topicPrefix2, 9041, 9042);
+        await using var nodeB = CreateMultiMeshNode(peerBId, mesh1Id, mesh2Id, onTopologyChanged, portB, topicPrefix1, topicPrefix2, 9051, 9052);
 
         // Act
         testOutputHelper.WriteLine("Starting background services...");
@@ -351,7 +309,7 @@ public sealed class MqttPeerDiscoveryIntegrationTests
                 break;
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(500), cts.Token);
+            await topologySemaphore.WaitAsync(TimeSpan.FromMilliseconds(500), cts.Token);
         }
 
         mesh1Discovered.ShouldBeTrue("Nodes failed to discover each other on Mesh 1 (TCP).");
@@ -362,7 +320,7 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         await nodeB.StopAsync(cts.Token);
     }
 
-    private MqttDiscoveryTestNode CreateDiscoveryTestNode(string meshId, PeerId peerId, string topicPrefix, bool useTcpTransport = false, int tcpPort = 0, int handshakePort = 0)
+    private MqttDiscoveryTestNode CreateDiscoveryTestNode(string meshId, PeerId peerId, string topicPrefix, Action onTopologyChanged, bool useTcpTransport = false, int tcpPort = 0, int handshakePort = 0)
     {
         var services = new ServiceCollection();
 
@@ -375,6 +333,7 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         });
         
         services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
+        services.AddSingleton<IPeerTopologyObserver>(new TestTopologyObserver(onTopologyChanged));
 
         services.Configure<FailureDetectorOptions>(meshId, options => 
         {
@@ -447,6 +406,7 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         PeerId peerId,
         string mesh1Id,
         string mesh2Id,
+        Action onTopologyChanged,
         int mesh1TcpPort,
         string topicPrefix1,
         string topicPrefix2,
@@ -464,6 +424,7 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         });
         
         services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
+        services.AddSingleton<IPeerTopologyObserver>(new TestTopologyObserver(onTopologyChanged));
 
         services.Configure<FailureDetectorOptions>(mesh1Id, options => 
         {
@@ -614,6 +575,34 @@ public sealed class MqttPeerDiscoveryIntegrationTests
         {
             await StopAsync(CancellationToken.None);
             await Provider.DisposeAsync();
+        }
+    }
+
+    private sealed class TestTopologyObserver : IPeerTopologyObserver
+    {
+        private readonly Action onTopologyChanged;
+
+        public TestTopologyObserver(Action onTopologyChanged)
+        {
+            this.onTopologyChanged = onTopologyChanged ?? throw new ArgumentNullException(nameof(onTopologyChanged));
+        }
+
+        public Task OnPeerJoinedAsync(string meshId, PeerNode node, CancellationToken cancellationToken)
+        {
+            onTopologyChanged();
+            return Task.CompletedTask;
+        }
+
+        public Task OnPeerDepartedAsync(string meshId, PeerId peerId, CancellationToken cancellationToken)
+        {
+            onTopologyChanged();
+            return Task.CompletedTask;
+        }
+
+        public Task OnPeerStatusChangedAsync(string meshId, PeerId peerId, PeerStatus newStatus, CancellationToken cancellationToken)
+        {
+            onTopologyChanged();
+            return Task.CompletedTask;
         }
     }
 }

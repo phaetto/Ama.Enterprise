@@ -24,6 +24,7 @@ using Xunit;
 using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Models;
 using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Handlers;
+using Ama.Enterprise.P2p.Models.Algorithms;
 
 /// <summary>
 /// Contains complex integration tests validating actual TCP binding, protocol cycles, and payload distributions.

@@ -21,6 +21,7 @@ using System.Linq;
 using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Models;
 using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Handlers;
+using Ama.Enterprise.P2p.Models.Algorithms;
 
 /// <summary>
 /// Integration tests verifying backwards compatibility and protocol versioning constraints natively using explicit TCP topologies.
