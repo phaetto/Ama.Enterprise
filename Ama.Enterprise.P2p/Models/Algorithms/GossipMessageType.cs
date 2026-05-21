@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.Models.Gossip;
+namespace Ama.Enterprise.P2p.Models.Algorithms;
 
 /// <summary>
 /// Defines the behavior and explicit target payload mapping of a generic gossip message, enabling advanced push-pull capabilities.

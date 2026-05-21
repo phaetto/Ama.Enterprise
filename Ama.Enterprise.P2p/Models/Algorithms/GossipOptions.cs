@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.Models.Gossip;
+namespace Ama.Enterprise.P2p.Models.Algorithms;
 
 using System;
 

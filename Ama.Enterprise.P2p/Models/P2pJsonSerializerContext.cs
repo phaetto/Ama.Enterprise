@@ -1,9 +1,9 @@
 namespace Ama.Enterprise.P2p.Models;
 
 using System.Text.Json.Serialization;
+using Ama.Enterprise.P2p.Models.Algorithms;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Discovery;
-using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Models.Transports;
 
 /// <summary>

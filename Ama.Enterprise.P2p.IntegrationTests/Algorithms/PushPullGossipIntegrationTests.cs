@@ -11,7 +11,6 @@ using Ama.Enterprise.UnitTests.Attributes;
 using Ama.Enterprise.UnitTests.Extensions;
 using Ama.Enterprise.UnitTests.Networking;
 using Ama.Enterprise.P2p.Models.Core;
-using Ama.Enterprise.P2p.Models.Gossip;
 using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.Services;
 using Ama.Enterprise.P2p.Services.Core;
@@ -23,6 +22,7 @@ using Shouldly;
 using Xunit;
 using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Models;
 using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Handlers;
+using Ama.Enterprise.P2p.Models.Algorithms;
 
 /// <summary>
 /// Integration tests verifying the structured Push-Pull Anti-Entropy gossip capabilities natively.

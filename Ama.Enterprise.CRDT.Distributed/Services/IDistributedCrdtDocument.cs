@@ -6,7 +6,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
 using Ama.Enterprise.CRDT.Distributed.Models;
-using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
 /// Defines the generic, non-typed interface for a distributed CRDT document manager.

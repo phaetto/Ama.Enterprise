@@ -42,8 +42,4 @@
 		<ProjectReference Include="..\Ama.Enterprise.Project.Analyzers\Ama.Enterprise.Project.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
 
-	<ItemGroup>
-	  <Folder Include="Models\Algorithms\" />
-	</ItemGroup>
-
 </Project>

@@ -2,7 +2,7 @@ namespace Ama.Enterprise.P2p.Models.Core;
 
 using System;
 using System.Text.Json.Serialization;
-using Ama.Enterprise.P2p.Models.Gossip;
+using Ama.Enterprise.P2p.Models.Algorithms;
 
 /// <summary>
 /// Imposes a centralized generic constraint on protocol messages to map their own synchronization mesh identifiers.
