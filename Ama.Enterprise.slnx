@@ -32,7 +32,8 @@
     <File Path=".github/workflows/publish-nuget.yml" />
     <File Path=".gitignore" />
     <File Path="CodingStandards.md" />
-    <File Path="LICENCE" />
+    <File Path="GPL-3.0-LICENSE" />
+    <File Path="README.md" />
   </Folder>
   <Folder Name="/Tooling/">
     <Project Path="Ama.Enterprise.UnitTests/Ama.Enterprise.UnitTests.csproj" Id="9bf82d30-d760-4e80-976f-f0e53086c9bd" />
