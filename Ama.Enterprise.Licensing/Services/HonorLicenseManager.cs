@@ -91,7 +91,7 @@ public sealed class HonorLicenseManager : ILicenseManager
                 CompanyName = null;
                 RegistrationDate = null;
                 
-                logger.LogError("Invalid Enterprise license key or certificate provided. Execution may be restricted.");
+                logger.LogError("Invalid Enterprise license key or certificate provided. Please update your license.");
             }
 
             return;
@@ -100,7 +100,7 @@ public sealed class HonorLicenseManager : ILicenseManager
         LicenseType = "Unknown";
         CompanyName = null;
         RegistrationDate = null;
-        logger.LogError("No valid license type declared. You must set DeclaredLicenseType to OpenSource or Enterprise to accept the terms of use.");
+        logger.LogError("No valid license type declared. You must set DeclaredLicenseType to OpenSource or Enterprise to accept the terms of use. Please use 'services.ConfigureAmaEnterpriseLicense' to configure a valid license.");
     }
 
     private string? LoadLicenseFromFile(string filePath)
