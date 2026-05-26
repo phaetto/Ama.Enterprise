@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.Services.Core;
+namespace Ama.Enterprise.Licensing.Services;
 
 /// <summary>
 /// Contract isolating the validation logic for the honor-based licensing system.

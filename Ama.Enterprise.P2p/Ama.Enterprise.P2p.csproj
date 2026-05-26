@@ -34,11 +34,11 @@
 
 	<ItemGroup>
 		<PackageReference Include="Ama.CRDT" Version="4.0.260515-ci1851" />
-		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.8" />
 		<PackageReference Include="Microsoft.Extensions.Http" Version="10.0.8" />
 	</ItemGroup>
 
 	<ItemGroup>
+		<ProjectReference Include="..\Ama.Enterprise.Licensing\Ama.Enterprise.Licensing.csproj" />
 		<ProjectReference Include="..\Ama.Enterprise.Project.Analyzers\Ama.Enterprise.Project.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
 

@@ -107,6 +107,14 @@
 | `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagBootstrapper.cs` | Refactored bootstrapping sequence evaluating multi-replica dynamic structural scopes efficiently overriding obsolete provider limits natively. |
 | `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagClusterManager.cs` | Refactored internal DI boundaries utilizing mapped orchestrators ensuring generic dynamic models are cached, decoupling interface requirements. |
 | `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagClusterManager.cs` | Interface for the feature flag cluster manager. |
+| `$/Ama.Enterprise.Licensing.UnitTests/Ama.Enterprise.Licensing.UnitTests.csproj` | No description provided. |
+| `$/Ama.Enterprise.Licensing.UnitTests/Services/HonorLicenseManagerTests.cs` | Evaluates generic honor checks mapping explicit cryptography bounds accurately natively successfully properly efficiently properly effortlessly structurally gracefully gracefully flawlessly smartly robustly natively cleanly explicitly optimally. |
+| `$/Ama.Enterprise.Licensing/Ama.Enterprise.Licensing.csproj` | No description provided. |
+| `$/Ama.Enterprise.Licensing/Extensions/ServiceCollectionExtensions.cs` | Configuration pipeline dynamically loading licensing options explicitly mapping structural boundaries organically robustly seamlessly effectively explicitly seamlessly cleanly natively safely effectively smoothly successfully successfully safely elegantly smoothly natively robustly effectively effectively safely. |
+| `$/Ama.Enterprise.Licensing/Models/LicenseOptions.cs` | Configuration structure holding explicit license strings and cryptographic public keys for honor-based bounding natively isolating domains distinctly securely securely explicitly. |
+| `$/Ama.Enterprise.Licensing/Services/HonorLicenseManager.cs` | Evaluates configured license parameters providing decoupled standalone logic mapping internal cryptographic checks seamlessly. |
+| `$/Ama.Enterprise.Licensing/Services/ILicenseManager.cs` | Interface separating generic honor-based logic capabilities gracefully avoiding tightly coupled bounds explicitly structurally. |
+| `$/Ama.Enterprise.Licensing/Services/LicenseStartupService.cs` | Starts up active evaluations natively executing internal generic licensing checks completely transparently actively securely dynamically securely successfully rationally intelligently correctly correctly completely successfully smoothly seamlessly correctly optimally smoothly naturally safely. |
 | `$/Ama.Enterprise.P2p.AspNetCore.IntegrationTests/Ama.Enterprise.P2p.AspNetCore.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.AspNetCore.IntegrationTests/Services/AspNetCorePeerDiscoveryIntegrationTests.cs` | Integration tests explicitly validating standard active ASP.NET Core HTTP polling discovery resolving Phase 1 topologies natively and implicitly triggering Phase 2 handshakes spanning Standalone and natively bounded Integrated Kestrel architectures safely. |
 | `$/Ama.Enterprise.P2p.AspNetCore.IntegrationTests/Services/AspNetCorePeerHandshakeIntegrationTests.cs` | Refactored integration tests verifying the decoupled ASP.NET Core Standalone peer handshaker explicitly natively natively discovering topologies securely and reliably efficiently natively. |
@@ -140,7 +148,6 @@
 | `$/Ama.Enterprise.P2p.IntegrationTests/Ama.Enterprise.P2p.IntegrationTests.csproj` | Integration tests project for validating P2P networking components via HTTP loopbacks. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Architecture/VersioningArchitectureTests.cs` | Architectural tests that parse the CI/CD deployment files ensuring specific deployed versions always possess explicit test coverage. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Discovery/DnsPeerDiscoveryIntegrationTests.cs` | Integration tests verifying DNS peer discovery natively resolves target domains and dispatches accurate Phase 2 handshakes against discovered IPs. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Services/Core/LicenseManagerIntegrationTests.cs` | Integration tests verifying cryptographic RSA signature validations for the generic honor-based license manager. |
 | `$/Ama.Enterprise.P2p.Mqtt.IntegrationTests/Ama.Enterprise.P2p.Mqtt.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.Mqtt.IntegrationTests/Services/MqttPeerDiscoveryIntegrationTests.cs` | Integration tests verifying MQTT peer discovery mapping decoupled multi-mesh architectures natively. Migrated to use `TcpTransport` and `TcpPeerEndpoint` dynamically correctly correctly correctly dropping obsolete HTTP transport bindings. |
 | `$/Ama.Enterprise.P2p.Mqtt.IntegrationTests/Services/MqttTransportIntegrationTests.cs` | Integration tests verifying end-to-end MQTT transport functionality evaluating isolated inbound subscriptions. |
@@ -238,7 +245,6 @@
 | `$/Ama.Enterprise.P2p/Models/Algorithms/PushPullGossipOptions.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
 | `$/Ama.Enterprise.P2p/Models/Core/IMeshMessage.cs` | Added required standardized `SenderId` bounding origin payloads explicitly decoupled traversing generic algorithms identically. |
-| `$/Ama.Enterprise.P2p/Models/Core/LicenseOptions.cs` | Configuration options for tracking the honor-based license setup explicitly, extended with public key cryptography configurations. |
 | `$/Ama.Enterprise.P2p/Models/Core/P2pMeshMetadata.cs` | Metadata record registering a specific mesh identifier into the global dependency container for orchestration. |
 | `$/Ama.Enterprise.P2p/Models/Core/P2pNodeOptions.cs` | Centralized generic configuration options holding the core node identity (ID and Endpoint) for the P2P Mesh. Updated to enforce a static, process-wide global peer identifier to satisfy repeatable idempotent tracker validations. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerEndpoint.cs` | Abstract base record for peer endpoints, configured with JSON polymorphic attributes mapping same-assembly derivatives to support standard AOT serialization. |
@@ -259,13 +265,11 @@
 | `$/Ama.Enterprise.P2p/Services/Algorithms/PushPullGossipAlgorithm.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/ApplicationPayloadDispatcher.cs` | Composite orchestrator dispatching to abstract domain observers. |
 | `$/Ama.Enterprise.P2p/Services/Core/DirectMessageSender.cs` | Implements localized targeted point-to-point generic delivery dynamically fetching active peering bindings avoiding overarching network broadcast storms. |
-| `$/Ama.Enterprise.P2p/Services/Core/HonorLicenseManager.cs` | Implementation tracking generic honor-based checks evaluating provided bounds explicitly natively via RSA cryptographic signatures. |
 | `$/Ama.Enterprise.P2p/Services/Core/IApplicationPayloadDispatcher.cs` | Dispatches targeted application payloads. |
 | `$/Ama.Enterprise.P2p/Services/Core/IApplicationPayloadHandler.cs` | Defines a domain-level consumer decoupling underlying distribution protocols. |
 | `$/Ama.Enterprise.P2p/Services/Core/IDirectMessageSender.cs` | Defines a targeted point-to-point payload delivery contract decoupling anti-entropy processes from gossip epidemic broadcasts explicitly honoring the Single Responsibility Principle. |
 | `$/Ama.Enterprise.P2p/Services/Core/IFailureDetector.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IInboundMessageQueue.cs` | Defines an internal queue for decoupling inbound network listeners from the protocol logic. |
-| `$/Ama.Enterprise.P2p/Services/Core/ILicenseManager.cs` | Contract isolating the validation logic for the honor-based licensing system. |
 | `$/Ama.Enterprise.P2p/Services/Core/IP2pAlgorithm.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerAuthenticator.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerDiscovery.cs` | Defines mechanisms for discovering other peers. Refactored to completely decouple active discovery probes and internal passive listeners from local background loops. |
@@ -278,7 +282,6 @@
 | `$/Ama.Enterprise.P2p/Services/Core/ITransportRouter.cs` | Interface for routing outgoing messages to the appropriate transport based on the endpoint type. |
 | `$/Ama.Enterprise.P2p/Services/Core/InMemoryPeerRegistry.cs` | Implements an in-memory thread-safe registry tracking peering topology globally using a flat dictionary mapping. |
 | `$/Ama.Enterprise.P2p/Services/Core/InboundMessageQueue.cs` | Channel-backed implementation of the inbound message queue. |
-| `$/Ama.Enterprise.P2p/Services/Core/LicenseStartupService.cs` | Background startup service tracking the single explicit license validation step cleanly without overlapping boundaries. |
 | `$/Ama.Enterprise.P2p/Services/Core/PassThroughPeerAuthenticator.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/RandomPeerSelector.cs` | Implementation of IPeerSelector utilizing random distribution selection. |
 | `$/Ama.Enterprise.P2p/Services/Core/TimeBasedFailureDetector.cs` | Implementation of IFailureDetector using abstract heartbeats decoupled from specific protocol options. |
@@ -314,7 +317,7 @@
 | `$/Ama.Enterprise.slnx` | Purged unreferenced obsolete entries bridging merged internal bounds (`Ama.Enterprise.P2p.Http.Core` and `Ama.Enterprise.P2p.Kestrel`). |
 | `$/CodingStandards.md` | No description provided. |
 | `$/FilesDescription.md` | No description provided. |
-| `$/LICENCE` | No description provided. |
+| `$/GPL-3.0-LICENSE` | No description provided. |
 | `$/README.md` | Primary introduction documentation explaining the core architecture, capabilities, getting started guide, and repository structure for the decentralized P2P toolkit. |
 | `$/apps-todo.txt` | No description provided. |
 | `$/p2p-mesh-architectures.md` | No description provided. |

@@ -45,6 +45,8 @@
   <Project Path="Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Ama.Enterprise.CRDT.MessagePack.IntegrationTests.csproj" Id="27b90f1f-2e28-44b5-8349-0eb61a2ab490" />
   <Project Path="Ama.Enterprise.CRDT.MessagePack.UnitTests/Ama.Enterprise.CRDT.MessagePack.UnitTests.csproj" Id="d5cffb87-ecff-47cd-b060-28f635451996" />
   <Project Path="Ama.Enterprise.CRDT.MessagePack/Ama.Enterprise.CRDT.MessagePack.csproj" />
+  <Project Path="Ama.Enterprise.Licensing.UnitTests/Ama.Enterprise.Licensing.UnitTests.csproj" Id="2c29f30b-0009-462d-8ac5-b8eb6185820f" />
+  <Project Path="Ama.Enterprise.Licensing/Ama.Enterprise.Licensing.csproj" Id="d1395419-e169-4599-92df-cdbe2cfc864b" />
   <Project Path="Ama.Enterprise.P2p.AspNetCore.IntegrationTests/Ama.Enterprise.P2p.AspNetCore.IntegrationTests.csproj" />
   <Project Path="Ama.Enterprise.P2p.AspNetCore/Ama.Enterprise.P2p.AspNetCore.csproj" />
   <Project Path="Ama.Enterprise.P2p.IntegrationTests/Ama.Enterprise.P2p.IntegrationTests.csproj" Id="15a7eaaf-b3d8-4ec7-a32b-25a409f265c7" />

@@ -1,15 +1,16 @@
 namespace Ama.Enterprise.CRDT.MessagePack.Extensions;
 
-using System;
 using Ama.CRDT.Models;
 using Ama.CRDT.Models.Partitioning;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.MessagePack.Formatters;
+using Ama.Enterprise.Licensing.Extensions;
 using global::MessagePack;
 using global::MessagePack.Formatters;
 using global::MessagePack.Resolvers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using System;
 
 /// <summary>
 /// Extension methods for configuring MessagePack binary serialization for the CRDT engine.
@@ -25,6 +26,8 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddCrdtMessagePack(this IServiceCollection services, params IFormatterResolver[] customResolvers)
     {
         ArgumentNullException.ThrowIfNull(services);
+
+        services.AddAmaEnterpriseLicense();
 
         services.TryAddKeyedSingleton("Ama.CRDT.MessagePack", (sp, key) =>
         {

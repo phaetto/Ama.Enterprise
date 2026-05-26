@@ -1,9 +1,9 @@
-namespace Ama.Enterprise.P2p.Services.Core;
+namespace Ama.Enterprise.Licensing.Services;
 
 using System;
 using System.IO;
 using System.Security.Cryptography;
-using Ama.Enterprise.P2p.Models.Core;
+using Ama.Enterprise.Licensing.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -43,7 +43,7 @@ public sealed class HonorLicenseManager : ILicenseManager
         if (string.IsNullOrWhiteSpace(key))
         {
             LicenseType = "Open Source License";
-            // TODO: Custom text for the Open Source default fallback can be updated here.
+            // Custom text for the Open Source default fallback can be updated here.
             logger.LogInformation("No honor license provided. Defaulting natively to: {LicenseType}. Custom text: 'Thank you for using the Open Source version.'", LicenseType);
             return;
         }
@@ -56,7 +56,7 @@ public sealed class HonorLicenseManager : ILicenseManager
         else
         {
             LicenseType = "Open Source License";
-            // TODO: Custom text for the Open Source default fallback can be updated here.
+            // Custom text for the Open Source default fallback can be updated here.
             logger.LogWarning("Invalid honor license provided. Defaulting natively back to: {LicenseType}. Custom text: 'Thank you for using the Open Source version.'", LicenseType);
         }
     }

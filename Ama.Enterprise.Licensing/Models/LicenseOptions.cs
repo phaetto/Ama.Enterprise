@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.Models.Core;
+namespace Ama.Enterprise.Licensing.Models;
 
 using System;
 

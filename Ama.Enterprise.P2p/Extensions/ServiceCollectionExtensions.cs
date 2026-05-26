@@ -4,6 +4,7 @@ using System;
 using System.Linq;
 using System.Text.Json.Serialization.Metadata;
 using Ama.CRDT.Services.Serialization;
+using Ama.Enterprise.Licensing.Extensions;
 using Ama.Enterprise.P2p.Models;
 using Ama.Enterprise.P2p.Models.Algorithms;
 using Ama.Enterprise.P2p.Models.Core;
@@ -50,7 +51,7 @@ public static class ServiceCollectionExtensions
             services.Configure(meshId, configureNodeOptions);
         }
 
-        services.AddAmaLicense();
+        services.AddAmaEnterpriseLicense();
 
         if (!services.Any(s => s.ImplementationType == typeof(P2pHostedService)))
         {
@@ -275,33 +276,5 @@ public static class ServiceCollectionExtensions
         builder.Services.Configure(builder.MeshId, configureOptions);
 
         return builder;
-    }
-
-    /// <summary>
-    /// Registers the generic honor-based licensing dependencies.
-    /// </summary>
-    public static IServiceCollection AddAmaLicense(
-        this IServiceCollection services,
-        Action<LicenseOptions>? configureOptions = null)
-    {
-        ArgumentNullException.ThrowIfNull(services);
-
-        if (configureOptions is not null)
-        {
-            services.Configure(configureOptions);
-        }
-        else
-        {
-            services.Configure<LicenseOptions>(_ => { });
-        }
-
-        services.TryAddSingleton<ILicenseManager, HonorLicenseManager>();
-
-        if (!services.Any(s => s.ImplementationType == typeof(LicenseStartupService)))
-        {
-            services.AddHostedService<LicenseStartupService>();
-        }
-
-        return services;
     }
 }

@@ -1,16 +1,16 @@
-namespace Ama.Enterprise.P2p.IntegrationTests.Services.Core;
+namespace Ama.Enterprise.Licensing.UnitTests.Services;
 
 using System;
 using System.Security.Cryptography;
 using System.Text;
-using Ama.Enterprise.P2p.Models.Core;
-using Ama.Enterprise.P2p.Services.Core;
+using Ama.Enterprise.Licensing.Models;
+using Ama.Enterprise.Licensing.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
-public sealed class LicenseManagerIntegrationTests
+public sealed class HonorLicenseManagerTests
 {
     [Fact]
     public void ValidateLicense_WithValidCryptographicSignature_ShouldSetEnterpriseLicense()

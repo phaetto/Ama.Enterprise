@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.P2p.Services.Core;
+namespace Ama.Enterprise.Licensing.Services;
 
 using System;
 using System.Threading;
