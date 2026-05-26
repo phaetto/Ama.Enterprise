@@ -13,7 +13,7 @@ A .NET 10 enterprise-grade toolkit for building decentralized, masterless Peer-t
   - **MQTT**: Decoupled multi-mesh architectures using standard IoT brokers for discovery and transport.
 - **Pluggable Peer Discovery**: Locate peers dynamically using UDP Multicast, DNS A/SRV records, or active HTTP polling depending on your infrastructure constraints.
 - **Distributed CRDT Orchestrator**: Manage the lifecycles of hundreds of distributed CRDT documents dynamically. Create, sync, and tombstone documents across the mesh automatically with built-in snapshotting and journal truncation.
-- **Storage Backends**: Persist distributed states safely using ephemeral Memory, relational Native AOT SQLite, or massively scalable Azure Table Storage backends.
+- **Storage Backends**: Persist distributed states safely using ephemeral Memory, scalable Azure Table Storage or easily connect your own backend (`Ama.Enterprise.CRDT.Distributed.ShowCase` has it own implementation of AOT SQLite).
 - **Built-in Telemetry**: Natively integrated with `System.Diagnostics.Metrics`. It includes a P2P metric aggregator that pushes time-series hardware and mesh statistics across isolated nodes dynamically.
 
 ## Project Structure & Architecture
@@ -49,10 +49,18 @@ using Microsoft.Extensions.DependencyInjection;
 using Ama.CRDT.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.P2p.Extensions;
+using Ama.Enterprise.Licensing.Extensions;
+using Ama.Enterprise.Licensing.Models;
 
 var services = new ServiceCollection();
 
-// 1. Add Distributed CRDT Core Services
+// 1. Declare Open Source or Enterprise license type
+services.ConfigureAmaEnterpriseLicense(options =>
+{
+    options.DeclaredLicenseType = DeclaredLicenseType.OpenSource;
+});
+
+// 2. Add Distributed CRDT Core Services
 services.AddDistributedCrdtCore(options =>
 {
     options.ActiveSyncEnabled = true;
@@ -60,20 +68,20 @@ services.AddDistributedCrdtCore(options =>
     options.AntiEntropyIntervalSeconds = 5;
 });
 
-// 2. Register your AOT JSON Contexts and Types
+// 3. Register your AOT JSON Contexts and Types
 services.AddCrdt()
         .AddCrdtJsonTypeInfoResolver(MyJsonContext.Default)
         .AddCrdtAotContext(new MyCrdtAotContext())
         .AddCrdtSerializableType<TaskItem>("task-item")
         .AddCrdtSystemTextJson();
 
-// 3. Register generic CRDT documents into the Orchestrator
+// 4. Register generic CRDT documents into the Orchestrator
 services.AddDistributedDocumentType<TaskListState>("task-list");
 
-// 4. Bind the Orchestrator to a specific P2P Mesh architecture
+// 5. Bind the Orchestrator to a specific P2P Mesh architecture
 services.AddDistributedCrdtP2p("internal", replicaId: "node-1");
 
-// 5. Configure the Network Mesh (Transports & Discovery)
+// 6. Configure the Network Mesh (Transports & Discovery)
 services.AddP2pMesh("internal")
         .AddGossipNetwork()
         .AddTcpTransport(options => { options.ListenPort = 8100; })
@@ -132,7 +140,7 @@ To maintain full transparency, please note that AI coding assistants and Large L
 
 ## License & Pricing
 
-`Ama.Enterprise` is built on a sustainable, developer-first licensing model. I believe in trusting developers. There is no draconian DRM, no obfuscation, and absolutely no "phone home" analytics or telemetry.
+`Ama.Enterprise` is built on a sustainable, developer-first licensing model. I believe in trusting developers. There is no draconian DRM, and absolutely no "phone home" analytics or telemetry.
 
 To balance open-source accessibility with the reality of maintaining enterprise-grade distributed systems, `Ama.Enterprise` uses a revenue-capped dual license system enforced by an honor-based cryptographic key.
 
@@ -153,24 +161,25 @@ This license is for established companies, enterprises, heavily funded startups,
 If your organization generates $1,000,000 USD or more in gross annual revenue, has a budget over $1,000,000 USD, has raised $1,000,000 USD or more in outside capital, or is a government/quasi-government agency, you are required to purchase an Enterprise License.
 
 When you purchase an Enterprise License, you are paying for three things:
-1. Legal Compliance & Risk Mitigation: An enterprise EULA that clears your legal department and passes automated compliance scanners (like Snyk or Black Duck).
+1. Legal Compliance & Risk Mitigation: An enterprise EULA that clears your legal department.
 2. Guaranteed Support SLAs: Direct access to the author for architectural guidance, debugging, and prioritized bug fixes.
 3. The Sustainability of the Toolkit: Ensuring the P2P mesh and CRDT engine you rely on continues to receive updates, security patches, and new features.
 
 ### How the "Honor-Based" System Works
-Infrastructure developers despise DRM, and so do I. License servers introduce single points of failure that have no place in a masterless P2P mesh.
+Developers despise DRM, and so do I. License servers introduce single points of failure that have no place in a masterless P2P mesh.
 
 `Ama.Enterprise` uses an honor-based cryptographic license:
 * When you purchase a license, you receive a Base64-encoded RSA signature string.
 * You inject this string during your application's DI bootstrap phase:
 
 ```csharp
+services.ConfigureAmaEnterpriseLicense(options =>
+{
+    options.DeclaredLicenseType = DeclaredLicenseType.Enterprise;
+    options.LicenseKey = "RSA-SIGNED-BASE64-KEY-STRING";
+});
+
 services.AddP2pMesh("internal")
-        .ConfigureLicense(options =>
-        {
-            options.Licensee = "Your Company Name";
-            options.LicenseKey = "RSA-SIGNED-BASE64-KEY-STRING";
-        })
         // ... add transports and discovery mechanisms
 ```
 
