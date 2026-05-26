@@ -11,7 +11,7 @@ A .NET 10 enterprise-grade toolkit for building decentralized, masterless Peer-t
   - **ASP.NET Core (Kestrel)**: Bind P2P meshes directly into existing web host pipelines natively.
   - **WebRTC**: Out-of-band signaling and data channels for direct browser-to-server or NAT-traversing node communication.
   - **MQTT**: Decoupled multi-mesh architectures using standard IoT brokers for discovery and transport.
-- **Pluggable Peer Discovery**: Locate peers dynamically using UDP Multicast, DNS SRV records, or active HTTP polling depending on your infrastructure constraints.
+- **Pluggable Peer Discovery**: Locate peers dynamically using UDP Multicast, DNS A/SRV records, or active HTTP polling depending on your infrastructure constraints.
 - **Distributed CRDT Orchestrator**: Manage the lifecycles of hundreds of distributed CRDT documents dynamically. Create, sync, and tombstone documents across the mesh automatically with built-in snapshotting and journal truncation.
 - **Storage Backends**: Persist distributed states safely using ephemeral Memory, relational Native AOT SQLite, or massively scalable Azure Table Storage backends.
 - **Built-in Telemetry**: Natively integrated with `System.Diagnostics.Metrics`. It includes a P2P metric aggregator that pushes time-series hardware and mesh statistics across isolated nodes dynamically.
@@ -130,21 +130,39 @@ dotnet test
 
 To maintain full transparency, please note that AI coding assistants and Large Language Models (LLMs) were actively used in the design, development, testing, and documentation of this repository. While AI tools significantly accelerated the generation of code and ideas, all output was rigorously reviewed, steered, tested, and refined by human developers (me). I believe in leveraging these tools to enhance productivity while taking complete responsibility for the library's architecture, security, and mathematical correctness.
 
-## License
+## License & Pricing
 
-While the library is under the first release (< 1.0.0) the code is licensed under [GPL-3.0](./GPL-3.0-LICENSE).
+`Ama.Enterprise` is built on a sustainable, developer-first licensing model. I believe in trusting developers. There is no draconian DRM, no obfuscation, and absolutely no "phone home" analytics or telemetry.
 
-Future releases will (_only a plan for now_) be dual-licensed depending on the company's revenue, or MIT for all others. Custom licenses can be provided if you contact the author.
+To balance open-source accessibility with the reality of maintaining enterprise-grade distributed systems, `Ama.Enterprise` uses a revenue-capped dual license system enforced by an honor-based cryptographic key.
 
-### Honor-Based Licensing System
+### Types of license
 
-To balance open-source accessibility with sustainable enterprise development, this toolkit employs a non-intrusive, honor-based licensing model. I believe in trusting developers. **_There is no draconian DRM, no obfuscation, and no hidden "phone home" analytics_**.
+#### 1. Community License (Free)
+This license is designed for startups, indie developers, hobbyists, and non-profit open-source projects.
 
-The built-in `HonorLicenseManager` uses standard RSA cryptographic signatures to validate commercial or custom enterprise keys locally. When you purchase or receive a custom license, you are provided with a signed key that you inject during your application's bootstrap phase.
+You qualify for the free Community License if your company or you as an individual have less than $1,000,000 USD in annual gross revenue, or if you are a registered non-profit with less than a $1,000,000 USD annual total budget. Government or quasi-government agencies do not qualify. 
 
-#### How to configure your License Key
+Note: To remain eligible, your entity or organization must not have ever received more than $1,000,000 USD in capital from outside sources, such as private equity or venture capital.
 
-If you operate under a custom or enterprise license, you need to configure your unique license key during the dependency injection phase. This ensures that your mesh operates in compliance with your commercial agreement without generating missing license warnings in your logs.
+You do not need a license key. The software will run completely unrestricted.
+
+#### 2. Enterprise License (Paid)
+This license is for established companies, enterprises, heavily funded startups, and government agencies.
+
+If your organization generates $1,000,000 USD or more in gross annual revenue, has a budget over $1,000,000 USD, has raised $1,000,000 USD or more in outside capital, or is a government/quasi-government agency, you are required to purchase an Enterprise License.
+
+When you purchase an Enterprise License, you are paying for three things:
+1. Legal Compliance & Risk Mitigation: An enterprise EULA that clears your legal department and passes automated compliance scanners (like Snyk or Black Duck).
+2. Guaranteed Support SLAs: Direct access to the author for architectural guidance, debugging, and prioritized bug fixes.
+3. The Sustainability of the Toolkit: Ensuring the P2P mesh and CRDT engine you rely on continues to receive updates, security patches, and new features.
+
+### How the "Honor-Based" System Works
+Infrastructure developers despise DRM, and so do I. License servers introduce single points of failure that have no place in a masterless P2P mesh.
+
+`Ama.Enterprise` uses an honor-based cryptographic license:
+* When you purchase a license, you receive a Base64-encoded RSA signature string.
+* You inject this string during your application's DI bootstrap phase:
 
 ```csharp
 services.AddP2pMesh("internal")
@@ -156,4 +174,17 @@ services.AddP2pMesh("internal")
         // ... add transports and discovery mechanisms
 ```
 
-*If you require a commercial license or have questions about dual-licensing thresholds, please contact the author.*
+* The node validates the cryptographic signature locally. No network requests are ever made.
+* If a license is missing or expired, the node will never crash, pause, or throttle your application. It will simply emit a single warning to your application logs on startup reminding you to acquire a license. Your mesh will remain 100% operational.
+
+### Agencies and Consultancies
+If you are an agency or consultancy building software for a client, the licensing requirement applies to the end-client running the software in production. 
+* If your client qualifies under the thresholds, the Community License applies.
+* If you are building a system for a large company or government entity exceeding the thresholds, the end-client (or the specific project budget) must procure the Enterprise License.
+
+### Enterprise Support & SLAs
+If you decide to buy the Enterprise license in addition to supporting the project you get accountability as well. An Enterprise License includes the following support guarantees:
+
+* Direct Developer Access: Private email and issue-tracker access directly to the library's developer.
+* Prioritized Hotfixes: If you find a critical bug in the core CRDT or P2P networking layers, a patched NuGet package will be provided as fast as possible.
+* Architectural Guidance: Up to 2 hours per year of direct architectural review to ensure you are configuring your CRDTs, mesh topologies, and data models correctly for your specific use case.
