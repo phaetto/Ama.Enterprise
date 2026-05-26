@@ -24,6 +24,7 @@
 		<RepositoryUrl>https://github.com/phaetto/Ama.Enterprise</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageTags>cli;tool;p2p;telemetry;metrics;dashboard;terminal;aot</PackageTags>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
 
 		<!-- SourceLink and Symbol Configuration -->
 		<PublishRepositoryUrl>true</PublishRepositoryUrl>
@@ -48,6 +49,10 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\Ama.Enterprise.CRDT.MessagePack.Analyzers\Ama.Enterprise.CRDT.MessagePack.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="..\README.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
 
 </Project>
