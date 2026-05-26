@@ -4,7 +4,6 @@ using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using System.Text;
 using System.Text.Json;
 using Ama.Enterprise.Licensing.Models;
 using Ama.Enterprise.Licensing.Services;
@@ -29,12 +28,16 @@ public sealed class HonorLicenseManagerTests
         
         var licenseKey = $"{Convert.ToBase64String(payloadBytes)}.{Convert.ToBase64String(signatureBytes)}";
         
-        var options = Options.Create(new LicenseOptions
+        var licenseOptions = new LicenseOptions
         {
-            DeclaredLicenseType = DeclaredLicenseType.Enterprise,
             LicenseKey = licenseKey,
             CertificatePem = "mocked-pem"
-        });
+        };
+
+        // Reflection or explicit method required since the property setter is internal explicitly
+        licenseOptions.GetType().GetProperty(nameof(LicenseOptions.DeclaredLicenseType))?.SetValue(licenseOptions, DeclaredLicenseType.Enterprise);
+
+        var options = Options.Create(licenseOptions);
 
         var loaderMock = new Mock<ICertificateLoader>();
         loaderMock.Setup(x => x.LoadFromPem("mocked-pem")).Returns(publicCert);
@@ -63,12 +66,13 @@ public sealed class HonorLicenseManagerTests
         
         var licenseKey = $"{Convert.ToBase64String(payloadBytes)}.{Convert.ToBase64String(signatureBytes)}";
         
-        var options = Options.Create(new LicenseOptions
+        var licenseOptions = new LicenseOptions
         {
-            DeclaredLicenseType = DeclaredLicenseType.Enterprise,
             LicenseKey = licenseKey,
             CertificatePem = "mocked-pem"
-        });
+        };
+        licenseOptions.GetType().GetProperty(nameof(LicenseOptions.DeclaredLicenseType))?.SetValue(licenseOptions, DeclaredLicenseType.Enterprise);
+        var options = Options.Create(licenseOptions);
         
         var loaderMock = new Mock<ICertificateLoader>();
         loaderMock.Setup(x => x.LoadFromPem("mocked-pem")).Returns(publicCert);
@@ -91,12 +95,13 @@ public sealed class HonorLicenseManagerTests
         using var publicCert = GenerateTestKeypair(out var privateKey);
         using var keyRef = privateKey;
         
-        var options = Options.Create(new LicenseOptions
+        var licenseOptions = new LicenseOptions
         {
-            DeclaredLicenseType = DeclaredLicenseType.Enterprise,
             LicenseKey = "malformed-license-key",
             CertificatePem = "mocked-pem"
-        });
+        };
+        licenseOptions.GetType().GetProperty(nameof(LicenseOptions.DeclaredLicenseType))?.SetValue(licenseOptions, DeclaredLicenseType.Enterprise);
+        var options = Options.Create(licenseOptions);
         
         var loaderMock = new Mock<ICertificateLoader>();
         loaderMock.Setup(x => x.LoadFromPem("mocked-pem")).Returns(publicCert);
@@ -114,11 +119,12 @@ public sealed class HonorLicenseManagerTests
     public void ValidateLicense_WithEmptyLicense_ShouldDefaultToUnknown()
     {
         // Arrange
-        var options = Options.Create(new LicenseOptions
+        var licenseOptions = new LicenseOptions
         {
-            DeclaredLicenseType = DeclaredLicenseType.Enterprise,
             LicenseKey = string.Empty
-        });
+        };
+        licenseOptions.GetType().GetProperty(nameof(LicenseOptions.DeclaredLicenseType))?.SetValue(licenseOptions, DeclaredLicenseType.Enterprise);
+        var options = Options.Create(licenseOptions);
         
         var loaderMock = new Mock<ICertificateLoader>();
         var manager = new HonorLicenseManager(options, loaderMock.Object, NullLogger<HonorLicenseManager>.Instance);
@@ -134,10 +140,9 @@ public sealed class HonorLicenseManagerTests
     public void ValidateLicense_WhenDeclaredOpenSource_ShouldSetOpenSource()
     {
         // Arrange
-        var options = Options.Create(new LicenseOptions
-        {
-            DeclaredLicenseType = DeclaredLicenseType.OpenSource
-        });
+        var licenseOptions = new LicenseOptions();
+        licenseOptions.GetType().GetProperty(nameof(LicenseOptions.DeclaredLicenseType))?.SetValue(licenseOptions, DeclaredLicenseType.OpenSource);
+        var options = Options.Create(licenseOptions);
         
         var loaderMock = new Mock<ICertificateLoader>();
         var manager = new HonorLicenseManager(options, loaderMock.Object, NullLogger<HonorLicenseManager>.Instance);
@@ -155,10 +160,7 @@ public sealed class HonorLicenseManagerTests
     public void ValidateLicense_WhenDeclaredUnknown_ShouldSetUnknown()
     {
         // Arrange
-        var options = Options.Create(new LicenseOptions
-        {
-            DeclaredLicenseType = DeclaredLicenseType.Unknown
-        });
+        var options = Options.Create(new LicenseOptions());
         
         var loaderMock = new Mock<ICertificateLoader>();
         var manager = new HonorLicenseManager(options, loaderMock.Object, NullLogger<HonorLicenseManager>.Instance);
@@ -174,12 +176,13 @@ public sealed class HonorLicenseManagerTests
     public void ValidateLicense_WithMissingCertificate_ShouldSetUnknown()
     {
         // Arrange
-        var options = Options.Create(new LicenseOptions
+        var licenseOptions = new LicenseOptions
         {
-            DeclaredLicenseType = DeclaredLicenseType.Enterprise,
             LicenseKey = "validBase64.validBase64",
             CertificatePem = "mocked-pem"
-        });
+        };
+        licenseOptions.GetType().GetProperty(nameof(LicenseOptions.DeclaredLicenseType))?.SetValue(licenseOptions, DeclaredLicenseType.Enterprise);
+        var options = Options.Create(licenseOptions);
         
         var loaderMock = new Mock<ICertificateLoader>();
         loaderMock.Setup(x => x.LoadFromPem("mocked-pem")).Returns((X509Certificate2?)null);
@@ -211,12 +214,13 @@ public sealed class HonorLicenseManagerTests
         {
             File.WriteAllText(tempFilePath, licenseKey);
 
-            var options = Options.Create(new LicenseOptions
+            var licenseOptions = new LicenseOptions
             {
-                DeclaredLicenseType = DeclaredLicenseType.Enterprise,
                 LicenseFilePath = tempFilePath,
                 CertificatePem = "mocked-pem"
-            });
+            };
+            licenseOptions.GetType().GetProperty(nameof(LicenseOptions.DeclaredLicenseType))?.SetValue(licenseOptions, DeclaredLicenseType.Enterprise);
+            var options = Options.Create(licenseOptions);
 
             var loaderMock = new Mock<ICertificateLoader>();
             loaderMock.Setup(x => x.LoadFromPem("mocked-pem")).Returns(publicCert);
@@ -252,12 +256,13 @@ public sealed class HonorLicenseManagerTests
         
         var licenseKey = $"{Convert.ToBase64String(payloadBytes)}.{Convert.ToBase64String(signatureBytes)}";
         
-        var options = Options.Create(new LicenseOptions
+        var licenseOptions = new LicenseOptions
         {
-            DeclaredLicenseType = DeclaredLicenseType.Enterprise,
             LicenseKey = licenseKey,
             CertificateBase64 = "mocked-base64"
-        });
+        };
+        licenseOptions.GetType().GetProperty(nameof(LicenseOptions.DeclaredLicenseType))?.SetValue(licenseOptions, DeclaredLicenseType.Enterprise);
+        var options = Options.Create(licenseOptions);
 
         var loaderMock = new Mock<ICertificateLoader>();
         loaderMock.Setup(x => x.LoadFromBase64("mocked-base64", null)).Returns(publicCert);

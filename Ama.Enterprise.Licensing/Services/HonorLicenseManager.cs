@@ -47,6 +47,22 @@ public sealed class HonorLicenseManager : ILicenseManager
     /// <inheritdoc />
     public void ValidateLicense()
     {
+        if (OperatingSystem.IsBrowser())
+        {
+            if (options.DeclaredLicenseType == DeclaredLicenseType.Enterprise || 
+                !string.IsNullOrWhiteSpace(options.LicenseKey) || 
+                !string.IsNullOrWhiteSpace(options.LicenseFilePath))
+            {
+                throw new InvalidOperationException("Enterprise licensing components detected in a client-side environment. Enterprise licenses must not be distributed or validated client-side.");
+            }
+
+            LicenseType = "Client-Side";
+            CompanyName = null;
+            RegistrationDate = null;
+            logger.LogInformation("Client-side environment detected. License validation is inherently delegated to the backend infrastructure.");
+            return;
+        }
+
         if (options.DeclaredLicenseType == DeclaredLicenseType.OpenSource)
         {
             LicenseType = "Open Source";

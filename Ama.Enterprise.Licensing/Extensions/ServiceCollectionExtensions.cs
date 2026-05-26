@@ -2,6 +2,7 @@ namespace Ama.Enterprise.Licensing.Extensions;
 
 using System;
 using System.Linq;
+using System.Runtime.Versioning;
 using Ama.Enterprise.Licensing.Models;
 using Ama.Enterprise.Licensing.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,7 +20,7 @@ public static class ServiceCollectionExtensions
     /// <returns>The updated service collection.</returns>
     /// <remarks>
     /// This method registers the internal licensing managers and background startup services. 
-    /// You must also invoke <see cref="ConfigureAmaEnterpriseLicense"/> to set the required configuration.
+    /// You must also invoke either <see cref="ConfigureAmaOpenSourceLicense"/> or <see cref="ConfigureAmaEnterpriseLicense"/> to set the required configuration.
     /// </remarks>
     /// <example>
     /// <code>
@@ -42,33 +43,50 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Configures the options for the honor-based licensing setup.
+    /// Configures the application to operate under the Open Source license terms.
+    /// </summary>
+    /// <param name="services">The service collection to configure the options for.</param>
+    /// <returns>The updated service collection.</returns>
+    /// <remarks>
+    /// This method explicitly declares the open-source intent and is perfectly safe for client-side (Blazor WebAssembly) execution.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// builder.Services.ConfigureAmaOpenSourceLicense();
+    /// </code>
+    /// </example>
+    public static IServiceCollection ConfigureAmaOpenSourceLicense(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.Configure<LicenseOptions>(options =>
+        {
+            options.DeclaredLicenseType = DeclaredLicenseType.OpenSource;
+        });
+
+        return services;
+    }
+
+    /// <summary>
+    /// Configures the options for the Enterprise honor-based licensing setup.
     /// </summary>
     /// <param name="services">The service collection to configure the options for.</param>
     /// <param name="configureOptions">An action to configure the <see cref="LicenseOptions"/>.</param>
     /// <returns>The updated service collection.</returns>
     /// <remarks>
-    /// It is required to set the <see cref="LicenseOptions.DeclaredLicenseType"/> property. 
-    /// If left unset or set to Unknown, the licensing manager will log an error.
+    /// This method automatically enforces the <see cref="DeclaredLicenseType.Enterprise"/> mode.
+    /// Due to security constraints, declaring an enterprise license natively on client-side environments (such as Blazor WebAssembly) is prohibited and will throw a compilation error.
     /// </remarks>
     /// <example>
-    /// To declare an Open Source license:
-    /// <code>
-    /// builder.Services.ConfigureAmaEnterpriseLicense(options =>
-    /// {
-    ///     options.DeclaredLicenseType = DeclaredLicenseType.OpenSource;
-    /// });
-    /// </code>
-    /// 
     /// To declare an Enterprise license:
     /// <code>
     /// builder.Services.ConfigureAmaEnterpriseLicense(options =>
     /// {
-    ///     options.DeclaredLicenseType = DeclaredLicenseType.Enterprise;
     ///     options.LicenseKey = "your-license-key-here";
     /// });
     /// </code>
     /// </example>
+    [UnsupportedOSPlatform("browser")]
     public static IServiceCollection ConfigureAmaEnterpriseLicense(
         this IServiceCollection services,
         Action<LicenseOptions> configureOptions)
@@ -76,7 +94,11 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configureOptions);
 
-        services.Configure(configureOptions);
+        services.Configure<LicenseOptions>(options =>
+        {
+            configureOptions(options);
+            options.DeclaredLicenseType = DeclaredLicenseType.Enterprise;
+        });
 
         return services;
     }

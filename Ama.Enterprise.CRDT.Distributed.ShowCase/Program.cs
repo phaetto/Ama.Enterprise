@@ -54,10 +54,7 @@ public static class Program
         });
 
         // Register licensing
-        services.ConfigureAmaEnterpriseLicense(options =>
-        {
-            options.DeclaredLicenseType = DeclaredLicenseType.OpenSource;
-        });
+        services.ConfigureAmaOpenSourceLicense();
 
         // Add core CRDT distributed services and resolve the orchestrator
         services.AddDistributedCrdtCore(options =>

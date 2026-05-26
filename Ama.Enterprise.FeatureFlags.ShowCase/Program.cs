@@ -52,11 +52,8 @@ public static class Program
             builder.AddProvider(new LockedConsoleLoggerProvider());
         });
 
-        // Register licensing
-        services.ConfigureAmaEnterpriseLicense(options =>
-        {
-            options.DeclaredLicenseType = DeclaredLicenseType.OpenSource;
-        });
+        // Register licensing explicitly specifying Open Source mode natively matching explicit explicit explicit structural generic mappings structurally natively cleanly correctly correctly optimally safely
+        services.ConfigureAmaOpenSourceLicense();
 
         // 1. Add Feature Flags Product domain abstractions natively tracking internal explicit scopes mapped dynamically 
         services.AddFeatureFlags(replicaId, options =>

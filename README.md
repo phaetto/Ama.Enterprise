@@ -55,10 +55,7 @@ using Ama.Enterprise.Licensing.Models;
 var services = new ServiceCollection();
 
 // 1. Declare Open Source or Enterprise license type
-services.ConfigureAmaEnterpriseLicense(options =>
-{
-    options.DeclaredLicenseType = DeclaredLicenseType.OpenSource;
-});
+services.ConfigureAmaOpenSourceLicense();
 
 // 2. Add Distributed CRDT Core Services
 services.AddDistributedCrdtCore(options =>
@@ -175,7 +172,6 @@ Developers despise DRM, and so do I. License servers introduce single points of 
 ```csharp
 services.ConfigureAmaEnterpriseLicense(options =>
 {
-    options.DeclaredLicenseType = DeclaredLicenseType.Enterprise;
     options.LicenseKey = "RSA-SIGNED-BASE64-KEY-STRING";
 });
 
@@ -183,6 +179,7 @@ services.AddP2pMesh("internal")
         // ... add transports and discovery mechanisms
 ```
 
+* To prevent inadvertently leaking private enterprise licenses into public-facing frontends, the `ConfigureAmaEnterpriseLicense` API forces a compile-time error (`[UnsupportedOSPlatform("browser")]`) if called from a Blazor WebAssembly environment. Client-side environments strictly rely on backend services for validation.
 * The node validates the cryptographic signature locally. No network requests are ever made.
 * If a license is missing or expired, the node will never crash, pause, or throttle your application. It will simply emit a single warning to your application logs on startup reminding you to acquire a license. Your mesh will remain 100% operational.
 

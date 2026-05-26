@@ -9,9 +9,9 @@ using System.Security.Cryptography.X509Certificates;
 public sealed class LicenseOptions : IEquatable<LicenseOptions>
 {
     /// <summary>
-    /// Gets or sets the declared license type, demonstrating acceptance of terms.
+    /// Gets the declared license type, demonstrating acceptance of terms.
     /// </summary>
-    public DeclaredLicenseType DeclaredLicenseType { get; set; } = DeclaredLicenseType.Unknown;
+    public DeclaredLicenseType DeclaredLicenseType { get; internal set; } = DeclaredLicenseType.Unknown;
 
     /// <summary>
     /// Gets or sets the manual license string.
