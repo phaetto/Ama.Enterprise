@@ -18,6 +18,8 @@ using Ama.Enterprise.P2p.Telemetry.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Ama.Enterprise.Licensing.Extensions;
+using Ama.Enterprise.Licensing.Models;
 
 /// <summary>
 /// Entry point for demonstrating Multiple Distributed CRDTs orchestrated via a global registry.
@@ -50,7 +52,13 @@ public static class Program
             builder.ClearProviders();
             builder.AddProvider(new LockedConsoleLoggerProvider());
         });
-        
+
+        // Register licensing
+        services.ConfigureAmaEnterpriseLicense(options =>
+        {
+            options.DeclaredLicenseType = DeclaredLicenseType.OpenSource;
+        });
+
         // Add core CRDT distributed services and resolve the orchestrator
         services.AddDistributedCrdtCore(options =>
         {

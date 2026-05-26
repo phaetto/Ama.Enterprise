@@ -2,11 +2,13 @@ namespace Ama.Enterprise.Licensing.UnitTests.Services;
 
 using System;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Ama.Enterprise.Licensing.Models;
 using Ama.Enterprise.Licensing.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 using Shouldly;
 using Xunit;
 
@@ -16,22 +18,25 @@ public sealed class HonorLicenseManagerTests
     public void ValidateLicense_WithValidCryptographicSignature_ShouldSetEnterpriseLicense()
     {
         // Arrange
-        using var rsa = RSA.Create(2048);
-        var publicKeyPem = rsa.ExportSubjectPublicKeyInfoPem();
+        using var publicCert = GenerateTestKeypair(out var privateKey);
+        using var keyRef = privateKey;
         
         var payload = "EnterpriseVersion=1.0";
         var payloadBytes = Encoding.UTF8.GetBytes(payload);
-        var signatureBytes = rsa.SignData(payloadBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var signatureBytes = privateKey.SignData(payloadBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         
         var licenseKey = $"{Convert.ToBase64String(payloadBytes)}.{Convert.ToBase64String(signatureBytes)}";
         
         var options = Options.Create(new LicenseOptions
         {
             LicenseKey = licenseKey,
-            PublicKeyPem = publicKeyPem
+            CertificatePem = "mocked-pem"
         });
+
+        var loaderMock = new Mock<ICertificateLoader>();
+        loaderMock.Setup(x => x.LoadFromPem("mocked-pem")).Returns(publicCert);
         
-        var manager = new HonorLicenseManager(options, NullLogger<HonorLicenseManager>.Instance);
+        var manager = new HonorLicenseManager(options, loaderMock.Object, NullLogger<HonorLicenseManager>.Instance);
 
         // Act
         manager.ValidateLicense();
@@ -44,9 +49,8 @@ public sealed class HonorLicenseManagerTests
     public void ValidateLicense_WithInvalidSignature_ShouldFallbackToOpenSourceLicense()
     {
         // Arrange
-        using var rsa = RSA.Create(2048);
+        using var publicCert = GenerateTestKeypair(out var _);
         using var rsaInvalid = RSA.Create(2048);
-        var publicKeyPem = rsa.ExportSubjectPublicKeyInfoPem();
         
         var payload = "EnterpriseVersion=1.0";
         var payloadBytes = Encoding.UTF8.GetBytes(payload);
@@ -57,10 +61,13 @@ public sealed class HonorLicenseManagerTests
         var options = Options.Create(new LicenseOptions
         {
             LicenseKey = licenseKey,
-            PublicKeyPem = publicKeyPem
+            CertificatePem = "mocked-pem"
         });
         
-        var manager = new HonorLicenseManager(options, NullLogger<HonorLicenseManager>.Instance);
+        var loaderMock = new Mock<ICertificateLoader>();
+        loaderMock.Setup(x => x.LoadFromPem("mocked-pem")).Returns(publicCert);
+
+        var manager = new HonorLicenseManager(options, loaderMock.Object, NullLogger<HonorLicenseManager>.Instance);
 
         // Act
         manager.ValidateLicense();
@@ -73,16 +80,19 @@ public sealed class HonorLicenseManagerTests
     public void ValidateLicense_WithMalformedLicense_ShouldFallbackToOpenSourceLicense()
     {
         // Arrange
-        using var rsa = RSA.Create(2048);
-        var publicKeyPem = rsa.ExportSubjectPublicKeyInfoPem();
+        using var publicCert = GenerateTestKeypair(out var privateKey);
+        using var keyRef = privateKey;
         
         var options = Options.Create(new LicenseOptions
         {
             LicenseKey = "malformed-license-key",
-            PublicKeyPem = publicKeyPem
+            CertificatePem = "mocked-pem"
         });
         
-        var manager = new HonorLicenseManager(options, NullLogger<HonorLicenseManager>.Instance);
+        var loaderMock = new Mock<ICertificateLoader>();
+        loaderMock.Setup(x => x.LoadFromPem("mocked-pem")).Returns(publicCert);
+
+        var manager = new HonorLicenseManager(options, loaderMock.Object, NullLogger<HonorLicenseManager>.Instance);
 
         // Act
         manager.ValidateLicense();
@@ -100,12 +110,21 @@ public sealed class HonorLicenseManagerTests
             LicenseKey = string.Empty
         });
         
-        var manager = new HonorLicenseManager(options, NullLogger<HonorLicenseManager>.Instance);
+        var loaderMock = new Mock<ICertificateLoader>();
+        var manager = new HonorLicenseManager(options, loaderMock.Object, NullLogger<HonorLicenseManager>.Instance);
 
         // Act
         manager.ValidateLicense();
 
         // Assert
         manager.LicenseType.ShouldBe("Open Source License");
+    }
+
+    private static X509Certificate2 GenerateTestKeypair(out RSA privateKey)
+    {
+        privateKey = RSA.Create(2048);
+        var request = new CertificateRequest("cn=test", privateKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var cert = request.CreateSelfSigned(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1));
+        return new X509Certificate2(cert.Export(X509ContentType.Cert));
     }
 }

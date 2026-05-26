@@ -4,6 +4,8 @@ using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.FeatureFlags.Extensions;
 using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Services;
+using Ama.Enterprise.Licensing.Extensions;
+using Ama.Enterprise.Licensing.Models;
 using Ama.Enterprise.P2p.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -48,6 +50,12 @@ public static class Program
             // Optionally clear default providers and use our synchronized console logger
             builder.ClearProviders();
             builder.AddProvider(new LockedConsoleLoggerProvider());
+        });
+
+        // Register licensing
+        services.ConfigureAmaEnterpriseLicense(options =>
+        {
+            options.DeclaredLicenseType = DeclaredLicenseType.OpenSource;
         });
 
         // 1. Add Feature Flags Product domain abstractions natively tracking internal explicit scopes mapped dynamically 
