@@ -66,9 +66,6 @@ jobs:
           dotnet pack Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj --configuration Release --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} -p:PackageVersion=${{ env.PACKAGE_VERSION }} -p:AssemblyVersion=${{ env.ASSEMBLY_VERSION }}
           dotnet pack Ama.Enterprise.CRDT.Analyzers/Ama.Enterprise.CRDT.Analyzers.csproj --configuration Release --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} -p:PackageVersion=${{ env.PACKAGE_VERSION }} -p:AssemblyVersion=${{ env.ASSEMBLY_VERSION }}
           dotnet pack Ama.Enterprise.CRDT.TableStorage/Ama.Enterprise.CRDT.TableStorage.csproj --configuration Release --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} -p:PackageVersion=${{ env.PACKAGE_VERSION }} -p:AssemblyVersion=${{ env.ASSEMBLY_VERSION }}
-          dotnet pack Ama.Enterprise.CRDT.OpenTelemetry/Ama.Enterprise.CRDT.OpenTelemetry.csproj --configuration Release --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} -p:PackageVersion=${{ env.PACKAGE_VERSION }} -p:AssemblyVersion=${{ env.ASSEMBLY_VERSION }}
-          dotnet pack Ama.Enterprise.CRDT.Testing/Ama.Enterprise.CRDT.Testing.csproj --configuration Release --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} -p:PackageVersion=${{ env.PACKAGE_VERSION }} -p:AssemblyVersion=${{ env.ASSEMBLY_VERSION }}
-          dotnet pack Ama.Enterprise.CRDT.UI/Ama.Enterprise.CRDT.UI.csproj --configuration Release --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} -p:PackageVersion=${{ env.PACKAGE_VERSION }} -p:AssemblyVersion=${{ env.ASSEMBLY_VERSION }}
 
       - name: List created packages
         run: ls -R ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
@@ -84,9 +81,6 @@ jobs:
             "Ama.Enterprise.FeatureFlags"
             "Ama.Enterprise.CRDT.Analyzers"
             "Ama.Enterprise.CRDT.TableStorage"
-            "Ama.Enterprise.CRDT.OpenTelemetry"
-            "Ama.Enterprise.CRDT.Testing"
-            "Ama.Enterprise.CRDT.UI"
           )
           for pkg in "${packages[@]}"; do
             echo "Fetching versions for $pkg..."

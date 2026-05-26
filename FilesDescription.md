@@ -2,8 +2,8 @@
 | --- | --- |
 | `$/.editorconfig` | No description provided. |
 | `$/.github/workflows/ci.yml` | GitHub Actions workflow for building and testing the solution on PRs and non-master branch pushes. |
-| `$/.github/workflows/publish-nuget-manual.yml` | GitHub Actions workflow for manually publishing stable releases to NuGet with explicit version inputs. |
-| `$/.github/workflows/publish-nuget.yml` | GitHub Actions workflow for automatically publishing preview packages to NuGet upon pushing to the master branch. |
+| `$/.github/workflows/publish-nuget-manual.yml` | Removed `Ama.Enterprise.P2p.Telemetry.Cli` from manual packing and automated pre-release cleanup arrays to halt its distribution temporarily. |
+| `$/.github/workflows/publish-nuget.yml` | Reverted deployment steps for `Ama.Enterprise.P2p.Telemetry.Cli` explicitly removing it from active publication pipelines. |
 | `$/.gitignore` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Analyzers.UnitTests/Ama.Enterprise.CRDT.Analyzers.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Analyzers/Ama.Enterprise.CRDT.Analyzers.csproj` | No description provided. |
@@ -175,7 +175,7 @@
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttClientManager.cs` | Updated to strictly isolate topic subscriptions and client connection IDs by injecting the explicit `meshId`, preventing cross-mesh broker collisions. |
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransport.cs` | Outbound mapping evaluating strict decoupled MQTT client managers natively. Refactored input validatons explicitly. |
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransportListener.cs` | Inbound listener registering standard network hooks dynamically bound to mapped multi-mesh brokers securely. |
-| `$/Ama.Enterprise.P2p.Telemetry.Cli/Ama.Enterprise.P2p.Telemetry.Cli.csproj` | No description provided. |
+| `$/Ama.Enterprise.P2p.Telemetry.Cli/Ama.Enterprise.P2p.Telemetry.Cli.csproj` | Configured project as an executable .NET tool, adding required NuGet metadata and PackAsTool directives. |
 | `$/Ama.Enterprise.P2p.Telemetry.Cli/Program.cs` | Console application serving as a live in-place telemetry dashboard. Removed obsolete dummy `TelemetryCaseJsonContext` now that the MessagePack generator deploys fallback resolvers unconditionally natively. |
 | `$/Ama.Enterprise.P2p.Telemetry.IntegrationTests/Ama.Enterprise.P2p.Telemetry.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.Telemetry.IntegrationTests/Services/TelemetryNetworkIntegrationTests.cs` | Updated to test custom meter boundaries by asserting on custom metric scopes native configurations natively. |

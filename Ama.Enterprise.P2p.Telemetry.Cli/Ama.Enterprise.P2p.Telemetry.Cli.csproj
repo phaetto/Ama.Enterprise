@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
@@ -7,6 +7,34 @@
 		<Nullable>enable</Nullable>
 		<PublishAot>true</PublishAot>
 		<InvariantGlobalization>true</InvariantGlobalization>
+		<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+		<IsAotCompatible>true</IsAotCompatible>
+	</PropertyGroup>
+
+	<!-- NuGet Packaging & .NET Tool configuration -->
+	<PropertyGroup>
+		<IsPackable>true</IsPackable>
+		<PackAsTool>true</PackAsTool>
+		<ToolCommandName>ama-telemetry</ToolCommandName>
+		
+		<PackageId>Ama.Enterprise.P2p.Telemetry.Cli</PackageId>
+		<Version>0.0.0</Version>
+		<Authors>Alexander Mantzoukas</Authors>
+		<Description>Live in-place telemetry dashboard for Ama.Enterprise P2P networks.</Description>
+		<RepositoryUrl>https://github.com/phaetto/Ama.Enterprise</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageTags>cli;tool;p2p;telemetry;metrics;dashboard;terminal;aot</PackageTags>
+
+		<!-- SourceLink and Symbol Configuration -->
+		<PublishRepositoryUrl>true</PublishRepositoryUrl>
+		<EmbedUntrackedSources>true</EmbedUntrackedSources>
+		<IncludeSymbols>true</IncludeSymbols>
+		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+		<!-- Generate XML documentation file -->
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<!-- Suppress warning for missing comments on internal/private members -->
+		<NoWarn>$(NoWarn);1591</NoWarn>
 	</PropertyGroup>
 
 	<ItemGroup>
