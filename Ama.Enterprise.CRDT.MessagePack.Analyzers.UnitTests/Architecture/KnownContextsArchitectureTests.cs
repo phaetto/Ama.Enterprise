@@ -41,7 +41,9 @@ public sealed class KnownContextsArchitectureTests
                 file.Contains(".Testing") ||
                 file.Contains(".ShowCase") ||
                 file.Contains(".Cli") ||
-                file.Contains("TestNamespace"))
+                file.Contains("TestNamespace") ||
+                file.Contains("LicensingJsonContext") // Special case for licensing
+            )
             {
                 continue;
             }

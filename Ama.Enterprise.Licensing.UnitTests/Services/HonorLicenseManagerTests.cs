@@ -5,6 +5,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Text.Json;
 using Ama.Enterprise.Licensing.Models;
 using Ama.Enterprise.Licensing.Services;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -16,14 +17,14 @@ using Xunit;
 public sealed class HonorLicenseManagerTests
 {
     [Fact]
-    public void ValidateLicense_WithValidCryptographicSignature_ShouldSetEnterpriseLicense()
+    public void ValidateLicense_WithValidCryptographicSignature_ShouldSetEnterpriseLicenseAndExtractJsonPayload()
     {
         // Arrange
         using var publicCert = GenerateTestKeypair(out var privateKey);
         using var keyRef = privateKey;
         
-        var payload = "EnterpriseVersion=1.0";
-        var payloadBytes = Encoding.UTF8.GetBytes(payload);
+        var payloadObj = new LicensePayload("Acme Corp", new DateTimeOffset(2023, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payloadObj, LicensingJsonContext.Default.LicensePayload);
         var signatureBytes = privateKey.SignData(payloadBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         
         var licenseKey = $"{Convert.ToBase64String(payloadBytes)}.{Convert.ToBase64String(signatureBytes)}";
@@ -45,6 +46,8 @@ public sealed class HonorLicenseManagerTests
 
         // Assert
         manager.LicenseType.ShouldBe("Enterprise");
+        manager.CompanyName.ShouldBe("Acme Corp");
+        manager.RegistrationDate.ShouldBe(new DateTimeOffset(2023, 1, 1, 0, 0, 0, TimeSpan.Zero));
     }
 
     [Fact]
@@ -54,8 +57,8 @@ public sealed class HonorLicenseManagerTests
         using var publicCert = GenerateTestKeypair(out var _);
         using var rsaInvalid = RSA.Create(2048);
         
-        var payload = "EnterpriseVersion=1.0";
-        var payloadBytes = Encoding.UTF8.GetBytes(payload);
+        var payloadObj = new LicensePayload("Evil Corp", DateTimeOffset.UtcNow);
+        var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payloadObj, LicensingJsonContext.Default.LicensePayload);
         var signatureBytes = rsaInvalid.SignData(payloadBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         
         var licenseKey = $"{Convert.ToBase64String(payloadBytes)}.{Convert.ToBase64String(signatureBytes)}";
@@ -77,6 +80,8 @@ public sealed class HonorLicenseManagerTests
 
         // Assert
         manager.LicenseType.ShouldBe("Unknown");
+        manager.CompanyName.ShouldBeNull();
+        manager.RegistrationDate.ShouldBeNull();
     }
 
     [Fact]
@@ -142,6 +147,8 @@ public sealed class HonorLicenseManagerTests
 
         // Assert
         manager.LicenseType.ShouldBe("Open Source");
+        manager.CompanyName.ShouldBeNull();
+        manager.RegistrationDate.ShouldBeNull();
     }
 
     [Fact]
@@ -193,8 +200,8 @@ public sealed class HonorLicenseManagerTests
         using var publicCert = GenerateTestKeypair(out var privateKey);
         using var keyRef = privateKey;
         
-        var payload = "EnterpriseVersion=1.0";
-        var payloadBytes = Encoding.UTF8.GetBytes(payload);
+        var payloadObj = new LicensePayload("File Corp", new DateTimeOffset(2024, 5, 10, 0, 0, 0, TimeSpan.Zero));
+        var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payloadObj, LicensingJsonContext.Default.LicensePayload);
         var signatureBytes = privateKey.SignData(payloadBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         
         var licenseKey = $"{Convert.ToBase64String(payloadBytes)}.{Convert.ToBase64String(signatureBytes)}";
@@ -221,6 +228,7 @@ public sealed class HonorLicenseManagerTests
 
             // Assert
             manager.LicenseType.ShouldBe("Enterprise");
+            manager.CompanyName.ShouldBe("File Corp");
         }
         finally
         {
@@ -238,8 +246,8 @@ public sealed class HonorLicenseManagerTests
         using var publicCert = GenerateTestKeypair(out var privateKey);
         using var keyRef = privateKey;
         
-        var payload = "EnterpriseVersion=1.0";
-        var payloadBytes = Encoding.UTF8.GetBytes(payload);
+        var payloadObj = new LicensePayload("Base64 Corp", new DateTimeOffset(2025, 2, 2, 0, 0, 0, TimeSpan.Zero));
+        var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payloadObj, LicensingJsonContext.Default.LicensePayload);
         var signatureBytes = privateKey.SignData(payloadBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         
         var licenseKey = $"{Convert.ToBase64String(payloadBytes)}.{Convert.ToBase64String(signatureBytes)}";
@@ -261,6 +269,7 @@ public sealed class HonorLicenseManagerTests
 
         // Assert
         manager.LicenseType.ShouldBe("Enterprise");
+        manager.CompanyName.ShouldBe("Base64 Corp");
     }
 
     private static X509Certificate2 GenerateTestKeypair(out RSA privateKey)

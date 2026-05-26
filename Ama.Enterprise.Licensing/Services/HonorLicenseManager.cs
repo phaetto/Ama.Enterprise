@@ -4,12 +4,13 @@ using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text.Json;
 using Ama.Enterprise.Licensing.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Implementation tracking honor-based checks evaluating provided bounds.
+/// Implementation tracking honor-based checks evaluating provided bounds and explicit JSON constraints structurally.
 /// </summary>
 public sealed class HonorLicenseManager : ILicenseManager
 {
@@ -19,6 +20,12 @@ public sealed class HonorLicenseManager : ILicenseManager
 
     /// <inheritdoc />
     public string LicenseType { get; private set; } = "Unknown";
+
+    /// <inheritdoc />
+    public string? CompanyName { get; private set; }
+
+    /// <inheritdoc />
+    public DateTimeOffset? RegistrationDate { get; private set; }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="HonorLicenseManager"/> class.
@@ -43,6 +50,8 @@ public sealed class HonorLicenseManager : ILicenseManager
         if (options.DeclaredLicenseType == DeclaredLicenseType.OpenSource)
         {
             LicenseType = "Open Source";
+            CompanyName = null;
+            RegistrationDate = null;
             logger.LogInformation("Open Source license terms accepted. Thank you for playing fair.");
             return;
         }
@@ -59,20 +68,29 @@ public sealed class HonorLicenseManager : ILicenseManager
             if (string.IsNullOrWhiteSpace(key))
             {
                 LicenseType = "Unknown";
+                CompanyName = null;
+                RegistrationDate = null;
                 logger.LogError("Enterprise license declared, but no valid license key or file path was provided.");
                 return;
             }
 
             using var cert = GetConfiguredCertificate();
+            var validPayload = VerifyLicense(key, cert);
 
-            if (VerifyLicense(key, cert))
+            if (validPayload.HasValue)
             {
                 LicenseType = "Enterprise";
-                logger.LogInformation("Valid Enterprise license detected. Operating under: {LicenseType}.", LicenseType);
+                CompanyName = validPayload.Value.CompanyName;
+                RegistrationDate = validPayload.Value.RegistrationDate;
+                
+                logger.LogInformation("Valid Enterprise license detected for {CompanyName}. Operating under: {LicenseType}.", CompanyName ?? "Unknown Entity", LicenseType);
             }
             else
             {
                 LicenseType = "Unknown";
+                CompanyName = null;
+                RegistrationDate = null;
+                
                 logger.LogError("Invalid Enterprise license key or certificate provided. Execution may be restricted.");
             }
 
@@ -80,6 +98,8 @@ public sealed class HonorLicenseManager : ILicenseManager
         }
 
         LicenseType = "Unknown";
+        CompanyName = null;
+        RegistrationDate = null;
         logger.LogError("No valid license type declared. You must set DeclaredLicenseType to OpenSource or Enterprise to accept the terms of use.");
     }
 
@@ -125,19 +145,20 @@ public sealed class HonorLicenseManager : ILicenseManager
         return null;
     }
 
-    private bool VerifyLicense(string licenseKey, X509Certificate2? certificate)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CRDTPROJ0003:Avoid direct use of JSON serialization", Justification = "Licensing should only use Text JSON, do not mix with binary serialization")]
+    private LicensePayload? VerifyLicense(string licenseKey, X509Certificate2? certificate)
     {
         try
         {
             if (certificate is null)
             {
-                return false;
+                return null;
             }
 
             var parts = licenseKey.Split('.');
             if (parts.Length != 2)
             {
-                return false;
+                return null;
             }
 
             var payloadBytes = Convert.FromBase64String(parts[0]);
@@ -147,15 +168,20 @@ public sealed class HonorLicenseManager : ILicenseManager
             if (rsa is null)
             {
                 logger.LogWarning("The configured certificate does not contain an RSA public key structure.");
-                return false;
+                return null;
             }
 
-            return rsa.VerifyData(payloadBytes, signatureBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            if (!rsa.VerifyData(payloadBytes, signatureBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
+            {
+                return null;
+            }
+
+            return JsonSerializer.Deserialize(payloadBytes, LicensingJsonContext.Default.LicensePayload);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Cryptographic license validation failed.");
-            return false;
+            logger.LogWarning(ex, "Cryptographic license parsing or validation failed.");
+            return null;
         }
     }
 }
