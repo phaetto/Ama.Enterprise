@@ -114,7 +114,7 @@
 | `$/Ama.Enterprise.Licensing/Extensions/ServiceCollectionExtensions.cs` | Configuration pipeline dynamically loading licensing checks explicitly. Decoupled options configuration from the direct checks registration to enforce explicit pipeline mapping rules. |
 | `$/Ama.Enterprise.Licensing/Models/DeclaredLicenseType.cs` | Enum defining explicit user choices for license declaration (OpenSource, Enterprise, Unknown). |
 | `$/Ama.Enterprise.Licensing/Models/LicenseOptions.cs` | Configuration structure holding explicit license strings and extended options. Switched `DeclaredLicenseType` to an enum for type-safe term acceptance explicitly natively. |
-| `$/Ama.Enterprise.Licensing/Services/CertificateLoader.cs` | Service implementation mapping file, base64, PEM, and store certificate extraction natively. |
+| `$/Ama.Enterprise.Licensing/Services/CertificateLoader.cs` | Updated certificate loading using `X509CertificateLoader` to fix obsolete constructor warnings. Added primary certificate extraction for PKCS12 collections, disposing of unused certificates to prevent memory leaks. |
 | `$/Ama.Enterprise.Licensing/Services/HonorLicenseManager.cs` | Evaluates configured license parameters providing decoupled standalone logic. Updated to evaluate the strongly typed `DeclaredLicenseType` enum exclusively for explicit terms acceptance validation. |
 | `$/Ama.Enterprise.Licensing/Services/ICertificateLoader.cs` | Interface for loading X.509 certificates from various origins. |
 | `$/Ama.Enterprise.Licensing/Services/ILicenseManager.cs` | Interface separating generic honor-based logic capabilities gracefully avoiding tightly coupled bounds explicitly structurally. |

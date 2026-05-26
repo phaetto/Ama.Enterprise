@@ -35,9 +35,19 @@ public sealed class CertificateLoader : ICertificateLoader
                 return null;
             }
 
-            return password is null 
-                ? new X509Certificate2(filePath) 
-                : new X509Certificate2(filePath, password);
+            if (password is null)
+            {
+                try
+                {
+                    return X509CertificateLoader.LoadCertificateFromFile(filePath);
+                }
+                catch (System.Security.Cryptography.CryptographicException)
+                {
+                    return X509CertificateLoader.LoadPkcs12FromFile(filePath, null);
+                }
+            }
+
+            return X509CertificateLoader.LoadPkcs12FromFile(filePath, password);
         }
         catch (Exception ex)
         {
@@ -54,10 +64,20 @@ public sealed class CertificateLoader : ICertificateLoader
         try
         {
             var bytes = Convert.FromBase64String(base64String);
-            
-            return password is null 
-                ? new X509Certificate2(bytes) 
-                : new X509Certificate2(bytes, password);
+
+            if (password is null)
+            {
+                try
+                {
+                    return X509CertificateLoader.LoadCertificate(bytes);
+                }
+                catch (System.Security.Cryptography.CryptographicException)
+                {
+                    return X509CertificateLoader.LoadPkcs12(bytes, null);
+                }
+            }
+
+            return X509CertificateLoader.LoadPkcs12(bytes, password);
         }
         catch (Exception ex)
         {
@@ -89,22 +109,48 @@ public sealed class CertificateLoader : ICertificateLoader
 
         try
         {
-            using var store = new X509Store(storeName, storeLocation);
-            store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
-            
-            var certCollection = store.Certificates.Find(X509FindType.FindByThumbprint, thumbprint, validOnly: false);
-            
-            if (certCollection.Count > 0)
+            // Azure App Service paths depend on uppercase thumbprints without spaces
+            var sanitizedThumbprint = thumbprint.Replace(" ", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
+
+            try
             {
-                return certCollection[0];
+                using var store = new X509Store(storeName, storeLocation);
+                store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
+                
+                var certCollection = store.Certificates.Find(X509FindType.FindByThumbprint, sanitizedThumbprint, validOnly: false);
+                
+                if (certCollection.Count > 0)
+                {
+                    return certCollection[0];
+                }
+            }
+            catch (Exception ex)
+            {
+                // Accessing the X509Store can throw CryptographicException on Linux systems where no store exists.
+                logger.LogDebug(ex, "X509Store search failed or is unsupported on this platform. Falling back to Linux certificate file paths.");
             }
 
-            logger.LogWarning("Certificate with thumbprint {Thumbprint} not found in store {StoreName} at {StoreLocation}.", thumbprint, storeName, storeLocation);
+            // Fallback for Azure App Service Linux environments which mount certificates directly to the file system
+            var azureLinuxPrivatePath = $"/var/ssl/private/{sanitizedThumbprint}.p12";
+            if (File.Exists(azureLinuxPrivatePath))
+            {
+                logger.LogInformation("Certificate loaded from Azure Linux private fallback path: {Path}", azureLinuxPrivatePath);
+                return X509CertificateLoader.LoadPkcs12FromFile(azureLinuxPrivatePath, null);
+            }
+
+            var azureLinuxPublicPath = $"/var/ssl/certs/{sanitizedThumbprint}.der";
+            if (File.Exists(azureLinuxPublicPath))
+            {
+                logger.LogInformation("Certificate loaded from Azure Linux public fallback path: {Path}", azureLinuxPublicPath);
+                return X509CertificateLoader.LoadCertificateFromFile(azureLinuxPublicPath);
+            }
+
+            logger.LogWarning("Certificate with thumbprint {Thumbprint} not found in store {StoreName} at {StoreLocation} or Azure Linux fallback paths.", sanitizedThumbprint, storeName, storeLocation);
             return null;
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to load certificate from store using thumbprint: {Thumbprint}", thumbprint);
+            logger.LogError(ex, "Failed to load certificate using thumbprint: {Thumbprint}", thumbprint);
             return null;
         }
     }
