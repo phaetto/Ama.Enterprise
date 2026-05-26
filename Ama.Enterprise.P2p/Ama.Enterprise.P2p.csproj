@@ -16,13 +16,12 @@
 		<Description>Core decentralized peer-to-peer mesh networking toolkit designed for high-performance distributed application topologies.</Description>
 		<RepositoryUrl>https://github.com/phaetto/Ama.Enterprise</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
-		<PackageLicenseExpression>Proprietary</PackageLicenseExpression>
 		<PackageTags>crdt;p2p;gossip;distributed-systems;networking;collaboration;conflict-free</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 
 		<!-- SourceLink and Symbol Configuration -->
-		<PublishRepositoryUrl>false</PublishRepositoryUrl>
-		<EmbedUntrackedSources>false</EmbedUntrackedSources>
+		<PublishRepositoryUrl>true</PublishRepositoryUrl>
+		<EmbedUntrackedSources>true</EmbedUntrackedSources>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 

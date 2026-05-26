@@ -16,13 +16,12 @@
 		<Description>CRDT-backed distributed signaling hub orchestrating out-of-band WebRTC handshakes for decentralized P2P meshes.</Description>
 		<RepositoryUrl>https://github.com/phaetto/Ama.Enterprise</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
-		<PackageLicenseExpression>Proprietary</PackageLicenseExpression>
 		<PackageTags>webrtc;signaling;crdt;p2p;distributed-systems;networking</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 
 		<!-- SourceLink and Symbol Configuration -->
-		<PublishRepositoryUrl>false</PublishRepositoryUrl>
-		<EmbedUntrackedSources>false</EmbedUntrackedSources>
+		<PublishRepositoryUrl>true</PublishRepositoryUrl>
+		<EmbedUntrackedSources>true</EmbedUntrackedSources>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 

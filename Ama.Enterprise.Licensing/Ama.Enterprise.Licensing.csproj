@@ -16,13 +16,12 @@
 		<Description>Enterprise licensing management and evaluation infrastructure for Ama.Enterprise deployments.</Description>
 		<RepositoryUrl>https://github.com/phaetto/Ama.Enterprise</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
-		<PackageLicenseExpression>Proprietary</PackageLicenseExpression>
 		<PackageTags>licensing;enterprise;security;certificates</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 
 		<!-- SourceLink and Symbol Configuration -->
-		<PublishRepositoryUrl>false</PublishRepositoryUrl>
-		<EmbedUntrackedSources>false</EmbedUntrackedSources>
+		<PublishRepositoryUrl>true</PublishRepositoryUrl>
+		<EmbedUntrackedSources>true</EmbedUntrackedSources>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 
