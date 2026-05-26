@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<TargetFramework>net10.0</TargetFramework>
@@ -13,11 +13,11 @@
 		<PackageId>Ama.Enterprise.Licensing</PackageId>
 		<Version>0.0.0</Version>
 		<Authors>Alexander Mantzoukas</Authors>
-		<Description>Distributed multi-tenant document pooling, routing, and synchronization over P2P networks for Ama.CRDT.</Description>
+		<Description>Enterprise licensing management and evaluation infrastructure for Ama.Enterprise deployments.</Description>
 		<RepositoryUrl>https://github.com/phaetto/Ama.Enterprise</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageLicenseExpression>Proprietary</PackageLicenseExpression>
-		<PackageTags>crdt;p2p;gossip;distributed-systems;collaboration;conflict-free;anti-entropy</PackageTags>
+		<PackageTags>licensing;enterprise;security;certificates</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 
 		<!-- SourceLink and Symbol Configuration -->

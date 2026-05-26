@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<TargetFramework>net10.0</TargetFramework>
@@ -13,11 +13,11 @@
 		<PackageId>Ama.Enterprise.P2p</PackageId>
 		<Version>0.0.0</Version>
 		<Authors>Alexander Mantzoukas</Authors>
-		<Description></Description>
+		<Description>Core decentralized peer-to-peer mesh networking toolkit designed for high-performance distributed application topologies.</Description>
 		<RepositoryUrl>https://github.com/phaetto/Ama.Enterprise</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageLicenseExpression>Proprietary</PackageLicenseExpression>
-		<PackageTags>crdt;p2p;gossip;distributed-systems;collaboration;conflict-free</PackageTags>
+		<PackageTags>crdt;p2p;gossip;distributed-systems;networking;collaboration;conflict-free</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 
 		<!-- SourceLink and Symbol Configuration -->

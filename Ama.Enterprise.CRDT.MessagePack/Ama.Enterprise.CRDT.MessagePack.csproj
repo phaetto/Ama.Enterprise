@@ -10,14 +10,14 @@
 
 	<PropertyGroup>
 		<IsPackable>true</IsPackable>
-		<PackageId>Ama.Enterprise.CRDT.MemoryPack</PackageId>
+		<PackageId>Ama.Enterprise.CRDT.MessagePack</PackageId>
 		<Version>0.0.0</Version>
 		<Authors>Alexander Mantzoukas</Authors>
-		<Description></Description>
+		<Description>Native AOT compatible MessagePack serialization integration for Ama.CRDT distributed nodes.</Description>
 		<RepositoryUrl>https://github.com/phaetto/Ama.Enterprise</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageLicenseExpression>Proprietary</PackageLicenseExpression>
-		<PackageTags></PackageTags>
+		<PackageTags>crdt;messagepack;serialization;aot;performance</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 
 		<!-- SourceLink and Symbol Configuration -->
@@ -40,6 +40,10 @@
 	<ItemGroup>
 		<ProjectReference Include="..\Ama.Enterprise.CRDT.MessagePack.Analyzers\Ama.Enterprise.CRDT.MessagePack.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 		<ProjectReference Include="..\Ama.Enterprise.Licensing\Ama.Enterprise.Licensing.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="$(TargetDir)..\Ama.Enterprise.CRDT.MessagePack.Analyzers\bin\Release\netstandard2.0\*" pack="true" PackagePath="analyzers/dotnet/cs"></None>
 	</ItemGroup>
 
 </Project>

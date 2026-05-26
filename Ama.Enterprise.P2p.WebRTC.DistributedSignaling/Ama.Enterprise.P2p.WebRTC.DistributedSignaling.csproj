@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<TargetFramework>net10.0</TargetFramework>
@@ -13,11 +13,11 @@
 		<PackageId>Ama.Enterprise.P2p.WebRTC.DistributedSignaling</PackageId>
 		<Version>0.0.0</Version>
 		<Authors>Alexander Mantzoukas</Authors>
-		<Description></Description>
+		<Description>CRDT-backed distributed signaling hub orchestrating out-of-band WebRTC handshakes for decentralized P2P meshes.</Description>
 		<RepositoryUrl>https://github.com/phaetto/Ama.Enterprise</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageLicenseExpression>Proprietary</PackageLicenseExpression>
-		<PackageTags></PackageTags>
+		<PackageTags>webrtc;signaling;crdt;p2p;distributed-systems;networking</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 
 		<!-- SourceLink and Symbol Configuration -->

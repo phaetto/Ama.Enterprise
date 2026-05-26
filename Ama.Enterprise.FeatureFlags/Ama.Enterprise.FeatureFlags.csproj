@@ -15,7 +15,7 @@
 		<RepositoryUrl>https://github.com/phaetto/Ama.Enterprise</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageLicenseExpression>Proprietary</PackageLicenseExpression>
-		<PackageTags>feature=flags;crdt;p2p;gossip;distributed-systems;collaboration;conflict-free</PackageTags>
+		<PackageTags>feature-flags;crdt;p2p;gossip;distributed-systems;collaboration;conflict-free</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 
 		<!-- SourceLink and Symbol Configuration -->

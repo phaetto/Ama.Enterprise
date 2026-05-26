@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<TargetFramework>net10.0</TargetFramework>
@@ -13,11 +13,11 @@
 		<PackageId>Ama.Enterprise.P2p.Telemetry</PackageId>
 		<Version>0.0.0</Version>
 		<Authors>Alexander Mantzoukas</Authors>
-		<Description></Description>
+		<Description>Decentralized telemetry and metric aggregation capabilities across peer-to-peer network meshes.</Description>
 		<RepositoryUrl>https://github.com/phaetto/Ama.Enterprise</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageLicenseExpression>Proprietary</PackageLicenseExpression>
-		<PackageTags></PackageTags>
+		<PackageTags>p2p;telemetry;metrics;diagnostics;distributed-systems;gossip</PackageTags>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 
 		<!-- SourceLink and Symbol Configuration -->
