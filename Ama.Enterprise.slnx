@@ -32,7 +32,6 @@
     <File Path=".github/workflows/publish-nuget.yml" />
     <File Path=".gitignore" />
     <File Path="CodingStandards.md" />
-    <File Path="GPL-3.0-LICENSE" />
     <File Path="README.md" />
   </Folder>
   <Folder Name="/Tooling/">

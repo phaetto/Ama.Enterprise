@@ -267,6 +267,7 @@
 | `$/Ama.Enterprise.P2p/Models/Transports/TcpTransportOptions.cs` | Configuration options explicitly bound for configuring active TCP transport connectivity. Implemented IEquatable to comply with the standard bounding. |
 | `$/Ama.Enterprise.P2p/Models/Transports/UdpPeerEndpoint.cs` | Represents a UDP network address endpoint. |
 | `$/Ama.Enterprise.P2p/Models/Transports/UdpTransportOptions.cs` | Configuration options explicitly bound for configuring active UDP datagram connectivity. Implemented IEquatable to comply with the standard bounding. |
+| `$/Ama.Enterprise.P2p/README.md` | Primary introduction documentation explaining the core architecture, capabilities, getting started guide, and configuration options reflecting .NET Keyed DI bindings. |
 | `$/Ama.Enterprise.P2p/Services/Algorithms/GossipAlgorithm.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Algorithms/PushPullGossipAlgorithm.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/ApplicationPayloadDispatcher.cs` | Composite orchestrator dispatching to abstract domain observers. |
