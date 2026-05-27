@@ -1,9 +1,12 @@
 name: Publish Preview to NuGet
 
+# on:
+#   push:
+#     branches:
+#       - master
+
 on:
-  push:
-    branches:
-      - master
+  workflow_dispatch:
 
 permissions:
   contents: read
