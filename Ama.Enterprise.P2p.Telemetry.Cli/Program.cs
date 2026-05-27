@@ -6,25 +6,29 @@ using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.Telemetry.Extensions;
+using Ama.Enterprise.P2p.Telemetry.Models;
 using Ama.Enterprise.P2p.Telemetry.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Spectre.Console;
+using Spectre.Console.Rendering;
 using System;
 using System.Collections.Generic;
-using System.Data;
 using System.IO;
 using System.Linq;
 using System.Net.NetworkInformation;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Terminal.Gui;
 
 internal sealed class Program
 {
     private static readonly List<string> CachedPeerList = new() { "All" };
-    private static string SelectedPeerId = "All";
+    private static int SelectedPeerIndex = 0;
+    private static bool HideAdmin = true;
+    private static string StatusMessage = "Running normally.";
+    private static int MetricsScrollOffset = 0;
 
     public static async Task Main(string[] args)
     {
@@ -87,7 +91,6 @@ internal sealed class Program
         {
             e.Cancel = true;
             cts.Cancel();
-            Application.RequestStop();
         };
 
         try
@@ -101,131 +104,94 @@ internal sealed class Program
             var metricsAggregator = provider.GetRequiredService<IClusterMetricsAggregator>();
             var peerRegistry = provider.GetRequiredService<IPeerRegistry>();
 
-            Application.Init();
-            var top = Application.Top;
+            AnsiConsole.Clear();
 
-            var window = new Window("P2P Cluster Telemetry Dashboard ('admin' mesh)")
-            {
-                X = 0,
-                Y = 1, // Shifted down to accommodate the MenuBar
-                Width = Dim.Fill(),
-                Height = Dim.Fill()
-            };
+            var mainLayout = new Layout("Main")
+                .SplitRows(
+                    new Layout("Header").Size(3),
+                    new Layout("Content")
+                );
 
-            var peersFrame = new FrameView("Active Peers (0)")
-            {
-                X = 0,
-                Y = 0,
-                Width = Dim.Percent(25),
-                Height = Dim.Fill()
-            };
+            mainLayout["Content"].SplitColumns(
+                new Layout("Left").Ratio(1),
+                new Layout("Right").Ratio(7)
+            );
 
-            var peersListView = new ListView(CachedPeerList)
-            {
-                X = 0,
-                Y = 0,
-                Width = Dim.Fill(),
-                Height = Dim.Fill()
-            };
-
-            // Track selection persistently bypassing list resets bridging UI selections natively
-            peersListView.SelectedItemChanged += (e) =>
-            {
-                if (e.Item >= 0 && e.Item < CachedPeerList.Count)
+            await AnsiConsole.Live(mainLayout)
+                .AutoClear(false)
+                .Overflow(VerticalOverflow.Ellipsis)
+                .Cropping(VerticalOverflowCropping.Bottom)
+                .StartAsync(async ctx =>
                 {
-                    SelectedPeerId = CachedPeerList[e.Item];
-                }
-            };
+                    var lastUpdate = DateTime.MinValue;
 
-            peersFrame.Add(peersListView);
-
-            var metricsFrame = new FrameView("Cluster Metrics Aggregation")
-            {
-                X = Pos.Right(peersFrame),
-                Y = 0,
-                Width = Dim.Fill(),
-                Height = Dim.Fill()
-            };
-
-            var hideTelemetryMeshCheckbox = new CheckBox("Hide Telemetry Mesh ('admin') Metrics")
-            {
-                X = 0,
-                Y = 0,
-                Checked = true
-            };
-
-            var dataTable = new DataTable();
-            dataTable.Columns.Add("Metric", typeof(string));
-            dataTable.Columns.Add("Type", typeof(string));
-            dataTable.Columns.Add("Sum", typeof(string));
-            dataTable.Columns.Add("Min", typeof(string));
-            dataTable.Columns.Add("Max", typeof(string));
-            dataTable.Columns.Add("Rate/Sec", typeof(string));
-            dataTable.Columns.Add("Rate/Min", typeof(string));
-
-            var tableView = new TableView()
-            {
-                X = 0,
-                Y = Pos.Bottom(hideTelemetryMeshCheckbox),
-                Width = Dim.Fill(),
-                Height = Dim.Fill(),
-                Table = dataTable,
-                FullRowSelect = true
-            };
-            
-            metricsFrame.Add(hideTelemetryMeshCheckbox, tableView);
-            window.Add(peersFrame, metricsFrame);
-
-            var menu = new MenuBar(new MenuBarItem[] {
-                new MenuBarItem("_File", new MenuItem [] {
-                    new MenuItem("_Export to Markdown", "Exports current metrics to a local file", () => 
+                    while (!cts.Token.IsCancellationRequested)
                     {
-                        _ = ExportToMarkdownAsync(aggregator, metricsAggregator, peerRegistry, hideTelemetryMeshCheckbox.Checked, cts.Token);
-                    }),
-                    new MenuItem("_Quit", "Closes the application", () => {
-                        cts.Cancel();
-                        Application.RequestStop();
-                    })
-                })
-            });
+                        var forceUpdate = false;
 
-            top.Add(menu, window);
+                        // Non-blocking input loop explicitly avoiding overlapping UI bounds
+                        if (Console.KeyAvailable)
+                        {
+                            var keyInfo = Console.ReadKey(intercept: true);
+                            switch (keyInfo.Key)
+                            {
+                                case ConsoleKey.Q:
+                                    cts.Cancel();
+                                    break;
+                                case ConsoleKey.H:
+                                    HideAdmin = !HideAdmin;
+                                    MetricsScrollOffset = 0;
+                                    forceUpdate = true;
+                                    break;
+                                case ConsoleKey.UpArrow:
+                                    if (SelectedPeerIndex > 0) SelectedPeerIndex--;
+                                    MetricsScrollOffset = 0;
+                                    forceUpdate = true;
+                                    break;
+                                case ConsoleKey.DownArrow:
+                                    if (SelectedPeerIndex < CachedPeerList.Count - 1) SelectedPeerIndex++;
+                                    MetricsScrollOffset = 0;
+                                    forceUpdate = true;
+                                    break;
+                                case ConsoleKey.PageUp:
+                                    MetricsScrollOffset -= 10;
+                                    forceUpdate = true;
+                                    break;
+                                case ConsoleKey.PageDown:
+                                    MetricsScrollOffset += 10;
+                                    forceUpdate = true;
+                                    break;
+                                case ConsoleKey.Home:
+                                    MetricsScrollOffset = 0;
+                                    forceUpdate = true;
+                                    break;
+                                case ConsoleKey.End:
+                                    MetricsScrollOffset = int.MaxValue; // Safely clamped in the render function
+                                    forceUpdate = true;
+                                    break;
+                                case ConsoleKey.E:
+                                    await ExportToMarkdownAsync(aggregator, metricsAggregator, peerRegistry, HideAdmin, cts.Token).ConfigureAwait(false);
+                                    forceUpdate = true;
+                                    break;
+                            }
+                        }
 
-            // Ensure CTRL+Q, CTRL+C or ESC exits the Terminal.Gui loop cleanly
-            top.KeyPress += (e) =>
-            {
-                if (e.KeyEvent.Key == (Key.Q | Key.CtrlMask) ||
-                    e.KeyEvent.Key == (Key.C | Key.CtrlMask) ||
-                    e.KeyEvent.Key == Key.Esc)
-                {
-                    cts.Cancel();
-                    Application.RequestStop();
-                    e.Handled = true;
-                }
-            };
+                        if (forceUpdate || DateTime.UtcNow - lastUpdate > TimeSpan.FromSeconds(1))
+                        {
+                            await UpdateDataAsync(aggregator, metricsAggregator, peerRegistry, mainLayout, cts.Token).ConfigureAwait(false);
+                            ctx.Refresh();
+                            lastUpdate = DateTime.UtcNow;
+                        }
 
-            _ = Task.Run(async () =>
-            {
-                while (!cts.Token.IsCancellationRequested)
-                {
-                    try
-                    {
-                        await Task.Delay(1000, cts.Token).ConfigureAwait(false);
-                        await UpdateDataAsync(aggregator, metricsAggregator, peerRegistry, dataTable, peersListView, window, peersFrame, tableView, hideTelemetryMeshCheckbox, cts.Token).ConfigureAwait(false);
+                        // Short delay to keep the input loop highly responsive natively
+                        await Task.Delay(50, cts.Token).ConfigureAwait(false);
                     }
-                    catch (OperationCanceledException)
-                    {
-                        break;
-                    }
-                }
-            }, cts.Token);
-
-            Application.Run();
-            Application.Shutdown();
+                }).ConfigureAwait(false);
         }
+        catch (TaskCanceledException) { }
         finally
         {
-            Console.WriteLine("Shutting down Telemetry CLI...");
+            AnsiConsole.MarkupLine("[bold yellow]Shutting down Telemetry CLI...[/]");
 
             foreach (var service in hostedServices)
             {
@@ -238,25 +204,24 @@ internal sealed class Program
         ITelemetryAggregator aggregator,
         IClusterMetricsAggregator metricsAggregator,
         IPeerRegistry peerRegistry,
-        DataTable dataTable,
-        ListView peersListView,
-        Window window,
-        FrameView peersFrame,
-        TableView tableView,
-        CheckBox hideTelemetryMeshCheckbox,
+        Layout layout,
         CancellationToken cancellationToken)
     {
         // 1. Fetch valid, connected active peers explicitly mapping bounds preventing phantom nodes evaluation natively
         var activePeers = await peerRegistry.GetPeersByStatusAsync("admin", PeerStatus.Active, cancellationToken).ConfigureAwait(false);
         var activePeerIds = activePeers.Select(p => p.Id.Value).ToHashSet();
-        
+
         var rawMetrics = aggregator.GetAllNodeMetrics().ToList();
-        
+
         // 2. Delegate internal historic mathematical projections explicitly to centralized domain limits
         metricsAggregator.ProcessPayloads(rawMetrics);
 
-        // Capture current selected peer ID explicitly preventing thread overlaps
-        var activeSelection = SelectedPeerId;
+        // Sanitize selection natively
+        if (SelectedPeerIndex >= CachedPeerList.Count)
+        {
+            SelectedPeerIndex = CachedPeerList.Count - 1;
+        }
+        var activeSelection = CachedPeerList[SelectedPeerIndex];
 
         // Map subset evaluating global vs distinct target peers strictly enforcing active topology mappings isolated purely for UI evaluation
         var targetNodeIds = activeSelection == "All"
@@ -267,87 +232,177 @@ internal sealed class Program
         var clusterAggregations = metricsAggregator.AggregateClusterMetrics(targetNodeIds);
         var trackedNodeIds = metricsAggregator.GetTrackedNodeIds();
 
-        Application.MainLoop.Invoke(() =>
+        // Evaluate generic bounds tracking "All" element alongside strictly active dynamic peer evaluations seamlessly
+        var updatedPeerList = new List<string> { "All" };
+        updatedPeerList.AddRange(trackedNodeIds.Where(k => activePeerIds.Contains(k)).Select(k => k.ToString("N")[..8]).OrderBy(k => k));
+
+        bool listChanged = CachedPeerList.Count != updatedPeerList.Count || !CachedPeerList.SequenceEqual(updatedPeerList);
+
+        if (listChanged)
         {
-            // Evaluate generic bounds tracking "All" element alongside strictly active dynamic peer evaluations seamlessly
-            var updatedPeerList = new List<string> { "All" };
-            updatedPeerList.AddRange(trackedNodeIds.Where(k => activePeerIds.Contains(k)).Select(k => k.ToString("N")[..8]).OrderBy(k => k));
+            CachedPeerList.Clear();
+            CachedPeerList.AddRange(updatedPeerList);
 
-            bool listChanged = CachedPeerList.Count != updatedPeerList.Count || !CachedPeerList.SequenceEqual(updatedPeerList);
-
-            if (listChanged)
+            var targetIndex = CachedPeerList.IndexOf(activeSelection);
+            if (targetIndex >= 0)
             {
-                CachedPeerList.Clear();
-                CachedPeerList.AddRange(updatedPeerList);
-                peersListView.SetSource(CachedPeerList);
-
-                // Reapply mapped bounds tracking natively preserving item focus strictly
-                var targetIndex = CachedPeerList.IndexOf(activeSelection);
-                if (targetIndex >= 0)
-                {
-                    peersListView.SelectedItem = targetIndex;
-                }
-                else
-                {
-                    peersListView.SelectedItem = 0;
-                    SelectedPeerId = "All";
-                    activeSelection = "All";
-                }
+                SelectedPeerIndex = targetIndex;
             }
-
-            var activeStateCount = trackedNodeIds.Count(k => activePeerIds.Contains(k));
-            peersFrame.Title = $"Active Peers ({activeStateCount})";
-            window.Title = $"P2P Cluster Telemetry Dashboard ('admin' mesh) - Connections: {activeStateCount} | View: {activeSelection}";
-
-            dataTable.Rows.Clear();
-
-            bool hideAdmin = hideTelemetryMeshCheckbox.Checked;
-            var visibleAggregations = clusterAggregations.AsEnumerable();
-
-            if (hideAdmin)
+            else
             {
-                visibleAggregations = visibleAggregations.Where(agg =>
-                    !agg.Tags.Any(t => t.Key.Equals("mesh_id", StringComparison.OrdinalIgnoreCase) && 
-                                       t.Value.Equals("admin", StringComparison.OrdinalIgnoreCase)));
+                SelectedPeerIndex = 0;
+                activeSelection = "All";
             }
+        }
 
-            foreach (var agg in visibleAggregations.OrderBy(m => m.Name))
+        var activeStateCount = trackedNodeIds.Count(k => activePeerIds.Contains(k));
+        var headerText = $"[bold yellow]Shortcuts:[/] [green]Q[/] Quit | [green]E[/] Export | [green]H[/] Toggle Admin ({(HideAdmin ? "On" : "Off")}) | [green]↑/↓[/] Select Peer | [green]PgUp/PgDn[/] Scroll Metrics\n[bold blue]Status:[/] {StatusMessage}";
+
+        layout["Header"].Update(
+            new Panel(new Markup(headerText))
+                .Expand()
+                .Border(BoxBorder.Rounded)
+        );
+
+        layout["Left"].Update(
+            new Panel(RenderPeersList(activeStateCount))
+                .Header($"Active Peers ({activeStateCount})")
+                .Expand()
+                .Border(BoxBorder.Rounded)
+        );
+
+        layout["Right"].Update(
+            new Panel(RenderMetricsTable(clusterAggregations, HideAdmin))
+                .Header($"Metrics View: {activeSelection}")
+                .Expand()
+                .Border(BoxBorder.Rounded)
+        );
+    }
+
+    private static IRenderable RenderPeersList(int activeStateCount)
+    {
+        var grid = new Grid();
+        grid.AddColumn(new GridColumn().NoWrap());
+
+        for (int i = 0; i < CachedPeerList.Count; i++)
+        {
+            var peer = CachedPeerList[i];
+            if (i == SelectedPeerIndex)
             {
-                dataTable.Rows.Add(
-                    agg.Name,
-                    agg.Type,
-                    FormatNumber(agg.Sum),
-                    FormatNumber(agg.Min),
-                    FormatNumber(agg.Max),
-                    FormatNumber(agg.RatePerSecond),
-                    FormatNumber(agg.RatePerMinute)
-                );
+                grid.AddRow(new Markup($"[bold green]> {peer}[/]"));
+            }
+            else
+            {
+                grid.AddRow(new Markup($"  {peer}"));
+            }
+        }
 
-                // Add a distinct indented row for each tag individually using a tree layout mapping explicitly
-                if (agg.Tags.Count > 0)
+        return grid;
+    }
+
+    private static IRenderable RenderMetricsTable(IEnumerable<ClusterMetricAggregation> aggregations, bool hideAdmin)
+    {
+        var table = new Table()
+            .Expand()
+            .Border(TableBorder.Minimal)
+            .AddColumn("[bold]Metric[/]")
+            .AddColumn("[bold]Type[/]")
+            .AddColumn(new TableColumn("[bold]Sum[/]").RightAligned())
+            .AddColumn(new TableColumn("[bold]Min[/]").RightAligned())
+            .AddColumn(new TableColumn("[bold]Max[/]").RightAligned())
+            .AddColumn(new TableColumn("[bold]Rate/Sec[/]").RightAligned())
+            .AddColumn(new TableColumn("[bold]Rate/Min[/]").RightAligned());
+
+        var visibleAggregations = aggregations;
+
+        if (hideAdmin)
+        {
+            visibleAggregations = visibleAggregations.Where(agg =>
+                !agg.Tags.Any(t => t.Key.Equals("mesh_id", StringComparison.OrdinalIgnoreCase) && 
+                                   t.Value.Equals("admin", StringComparison.OrdinalIgnoreCase)));
+        }
+
+        // Flatten all generated visual bounds natively tracking generic mapping outputs
+        var allRows = new List<string[]>();
+
+        foreach (var agg in visibleAggregations.OrderBy(m => m.Name))
+        {
+            allRows.Add(new[]
+            {
+                $"[bold white]{Markup.Escape(agg.Name)}[/]",
+                Markup.Escape(agg.Type),
+                FormatNumber(agg.Sum),
+                FormatNumber(agg.Min),
+                FormatNumber(agg.Max),
+                FormatNumber(agg.RatePerSecond),
+                FormatNumber(agg.RatePerMinute)
+            });
+
+            if (agg.Tags.Count > 0)
+            {
+                var tagsList = agg.Tags.ToList();
+                for (int i = 0; i < tagsList.Count; i++)
                 {
-                    var tagsList = agg.Tags.ToList();
-                    for (int i = 0; i < tagsList.Count; i++)
+                    var tag = tagsList[i];
+                    var prefix = i == tagsList.Count - 1 ? "  └─ " : "  ├─ ";
+
+                    allRows.Add(new[]
                     {
-                        var tag = tagsList[i];
-                        var prefix = i == tagsList.Count - 1 ? "  └─ " : "  ├─ ";
-                        
-                        dataTable.Rows.Add(
-                            $"{prefix}{tag.Key}={tag.Value}",
-                            string.Empty,
-                            string.Empty,
-                            string.Empty,
-                            string.Empty,
-                            string.Empty,
-                            string.Empty
-                        );
-                    }
+                        $"[grey]{prefix}{Markup.Escape(tag.Key)}={Markup.Escape(tag.Value)}[/]",
+                        string.Empty,
+                        string.Empty,
+                        string.Empty,
+                        string.Empty,
+                        string.Empty,
+                        string.Empty
+                    });
                 }
             }
+        }
 
-            tableView.Update();
-            tableView.SetNeedsDisplay();
-        });
+        // Calculate generic viewport constraints based on runtime terminal scale organically
+        var windowHeight = 24;
+        try
+        {
+            windowHeight = Console.WindowHeight;
+        }
+        catch
+        {
+            // Fallback for headless environments explicitly ignoring constraints
+        }
+
+        var maxVisibleRows = Math.Max(5, windowHeight - 14);
+
+        // Safely bound and clamp scroll vectors naturally resolving distinct page projections
+        if (allRows.Count <= maxVisibleRows)
+        {
+            MetricsScrollOffset = 0;
+        }
+        else if (MetricsScrollOffset > allRows.Count - maxVisibleRows)
+        {
+            MetricsScrollOffset = allRows.Count - maxVisibleRows;
+        }
+
+        if (MetricsScrollOffset < 0) 
+        {
+            MetricsScrollOffset = 0;
+        }
+
+        var pagedRows = allRows.Skip(MetricsScrollOffset).Take(maxVisibleRows).ToList();
+
+        foreach (var row in pagedRows)
+        {
+            table.AddRow(row);
+        }
+
+        if (allRows.Count > maxVisibleRows)
+        {
+            var startDisplay = MetricsScrollOffset + 1;
+            var endDisplay = MetricsScrollOffset + pagedRows.Count;
+            table.Caption($"[grey]Showing rows {startDisplay}-{endDisplay} of {allRows.Count}. Use PgUp/PgDn to scroll.[/]");
+        }
+
+        return table;
     }
 
     private static async Task ExportToMarkdownAsync(
@@ -361,11 +416,11 @@ internal sealed class Program
         {
             var activePeers = await peerRegistry.GetPeersByStatusAsync("admin", PeerStatus.Active, cancellationToken).ConfigureAwait(false);
             var activePeerIds = activePeers.Select(p => p.Id.Value).ToHashSet();
-            
+
             var rawMetrics = aggregator.GetAllNodeMetrics().ToList();
             metricsAggregator.ProcessPayloads(rawMetrics);
 
-            var activeSelection = SelectedPeerId;
+            var activeSelection = CachedPeerList[SelectedPeerIndex];
             var targetNodeIds = activeSelection == "All"
                 ? activePeerIds
                 : activePeerIds.Where(id => id.ToString("N").StartsWith(activeSelection)).ToHashSet();
@@ -399,17 +454,11 @@ internal sealed class Program
 
             await File.WriteAllTextAsync(filePath, sb.ToString(), cancellationToken).ConfigureAwait(false);
 
-            Application.MainLoop.Invoke(() =>
-            {
-                MessageBox.Query("Export Successful", $"Telemetry exported successfully to:\n{filePath}", "OK");
-            });
+            StatusMessage = $"[bold green]Exported successfully to {fileName}[/]";
         }
         catch (Exception ex)
         {
-            Application.MainLoop.Invoke(() =>
-            {
-                MessageBox.ErrorQuery("Export Failed", $"An error occurred during export:\n{ex.Message}", "OK");
-            });
+            StatusMessage = $"[bold red]Export failed: {ex.Message}[/]";
         }
     }
 
@@ -444,17 +493,17 @@ internal sealed class Program
         {
             return (value / 1_000_000_000_000D).ToString("0.##") + "T";
         }
-        
+
         if (absValue >= 1_000_000_000)
         {
             return (value / 1_000_000_000D).ToString("0.##") + "B";
         }
-        
+
         if (absValue >= 1_000_000)
         {
             return (value / 1_000_000D).ToString("0.##") + "M";
         }
-        
+
         if (absValue >= 1_000)
         {
             return (value / 1_000D).ToString("0.##") + "K";

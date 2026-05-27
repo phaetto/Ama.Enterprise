@@ -39,7 +39,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-	  <PackageReference Include="Terminal.Gui" Version="1.19.0" />
+	  <PackageReference Include="Spectre.Console" Version="0.55.2" />
 	</ItemGroup>
 
 	<ItemGroup>
