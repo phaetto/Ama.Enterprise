@@ -11,6 +11,9 @@ using Ama.CRDT.Models.Aot;
 [CrdtAotType(typeof(FeatureFlagState))]
 [CrdtAotType(typeof(IDictionary<string, FeatureFlag>))]
 [CrdtAotType(typeof(Dictionary<string, FeatureFlag>))]
+[CrdtAotType(typeof(FeatureFlagMetadata))]
+[CrdtAotType(typeof(FeatureFlagAudit))]
+[CrdtAotType(typeof(FeatureFlagOwnership))]
 public sealed partial class FeatureFlagsCrdtAotContext : CrdtAotContext
 {
 }

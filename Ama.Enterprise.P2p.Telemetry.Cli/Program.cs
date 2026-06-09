@@ -40,9 +40,6 @@ internal sealed class Program
             builder.ClearProviders();
         });
 
-        // Set up the centralized telemetry aggregator explicitly targeting the "admin" mesh
-        services.AddP2pTelemetryAggregator("admin");
-
         // Use random ports so the CLI doesn't conflict with any active host application nodes
         var httpPort = GetNextAvailablePort(9000);
         var handshakePort = GetNextAvailablePort(httpPort + 1);
@@ -61,6 +58,7 @@ internal sealed class Program
 
         // Map identically configured "admin" network boundaries to join the telemetry cluster natively
         services
+            .AddP2pTelemetryAggregator("admin")
             .AddP2pMesh("admin")
             .AddTcpTransport(options =>
             {

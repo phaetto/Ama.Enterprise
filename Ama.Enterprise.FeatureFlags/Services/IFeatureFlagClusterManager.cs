@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Ama.Enterprise.FeatureFlags.Models;
 
 /// <summary>
-/// Domain wrapper interfacing explicitly with generic distributed state elements to govern application feature toggles natively.
+/// Domain wrapper interfacing explicitly with generic distributed state elements to govern application feature toggles.
 /// </summary>
 public interface IFeatureFlagClusterManager
 {
@@ -22,12 +22,18 @@ public interface IFeatureFlagClusterManager
     IReadOnlyDictionary<string, FeatureFlag> GetFlags();
 
     /// <summary>
-    /// Upserts a distributed feature toggle explicitly into the replicated log tracking state convergence.
+    /// Upserts a distributed feature toggle into the replicated log tracking state convergence.
     /// </summary>
-    Task SetFlagAsync(string name, bool isEnabled, CancellationToken cancellationToken = default);
+    Task SetFlagAsync(
+        string name, 
+        bool isEnabled, 
+        string? modifiedBy = null,
+        FeatureFlagMetadata? metadata = null,
+        FeatureFlagOwnership? ownership = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Deletes a feature toggle and marks tombstoned intentions across anti-entropy exchanges natively.
+    /// Deletes a feature toggle and marks tombstoned intentions across anti-entropy exchanges.
     /// </summary>
     Task RemoveFlagAsync(string name, CancellationToken cancellationToken = default);
 }

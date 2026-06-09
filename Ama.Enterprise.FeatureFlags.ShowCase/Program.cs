@@ -152,7 +152,7 @@ public static class Program
                         case "set":
                             if (parts.Length >= 3 && bool.TryParse(parts[2], out var isEnabled))
                             {
-                                await clusterManager.SetFlagAsync(parts[1], isEnabled, cts.Token).ConfigureAwait(false);
+                                await clusterManager.SetFlagAsync(parts[1], isEnabled, cancellationToken: cts.Token).ConfigureAwait(false);
                             }
                             else
                             {

@@ -99,7 +99,13 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager, IDis
     }
 
     /// <inheritdoc />
-    public async Task SetFlagAsync(string name, bool isEnabled, CancellationToken cancellationToken = default)
+    public async Task SetFlagAsync(
+        string name, 
+        bool isEnabled, 
+        string? modifiedBy = null,
+        FeatureFlagMetadata? metadata = null,
+        FeatureFlagOwnership? ownership = null,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -107,7 +113,17 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager, IDis
         }
 
         var docManager = GetRequiredDocument();
-        var flag = new FeatureFlag(name, isEnabled);
+        var now = DateTimeOffset.UtcNow;
+
+        // Preserve existing metadata, ownership, and creation date if they are not explicitly updated during an upsert
+        var hasExisting = docManager.Document.Data.Flags.TryGetValue(name, out var existingFlag);
+        var createdAt = hasExisting ? existingFlag.Audit.CreatedAt : now;
+
+        var audit = new FeatureFlagAudit(modifiedBy, createdAt, now);
+        var actualMetadata = metadata ?? (hasExisting ? existingFlag.Metadata : default);
+        var actualOwnership = ownership ?? (hasExisting ? existingFlag.Ownership : default);
+
+        var flag = new FeatureFlag(name, isEnabled, actualMetadata, audit, actualOwnership);
         
         var operation = patcher.GenerateOperation(docManager.Document, x => x.Flags, new MapSetIntent(name, flag));
         var patch = new CrdtPatch(new[] { operation });
