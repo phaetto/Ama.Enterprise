@@ -116,7 +116,7 @@ public sealed class MessagePackSerializerIntegrationTests
     }
 
     [Fact]
-    public void SerializeDeserialize_PolymorphicContainer_CorrectlyRestoresDerivedTypesNatively()
+    public void SerializeDeserialize_PolymorphicContainer_RestoresDerivedTypes()
     {
         // Arrange
         var model = new PolymorphicContainer(
@@ -217,7 +217,7 @@ public sealed class MessagePackSerializerIntegrationTests
     public void SerializeDeserialize_LargeBinaryPayload_ReturnsEqualInstance()
     {
         // Arrange
-        var largeArray = new byte[1024 * 512]; // 512KB to test bulk native conversion bypassing limits
+        var largeArray = new byte[1024 * 512]; // 512KB to test bulk conversion bypassing limits
         new Random(42).NextBytes(largeArray);
 
         var model = new ComplexCollectionModel(
@@ -474,7 +474,7 @@ public sealed class MessagePackSerializerIntegrationTests
     }
     
     [Fact]
-    public void SerializeDeserialize_NullValues_HandledCorrectlyAvoidingErrors()
+    public void SerializeDeserialize_NullValues_HandledAvoidingErrors()
     {
         // Act
         var bytes = crdtSerializer.SerializeToBytes<DeepNestedModel>(null!);

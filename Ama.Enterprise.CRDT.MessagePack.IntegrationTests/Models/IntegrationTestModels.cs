@@ -3,10 +3,12 @@ namespace Ama.Enterprise.CRDT.MessagePack.UnitTests.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Text.Json.Serialization;
+using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
-/// A strict value-type structure ensuring robust baseline formatting for AOT mappings.
+/// A strict value-type structure ensuring baseline formatting for AOT mappings.
 /// </summary>
 public readonly record struct SimpleValueModel(
     int Id,
@@ -18,7 +20,7 @@ public readonly record struct SimpleValueModel(
 );
 
 /// <summary>
-/// A strictly bound data model encompassing multi-level collections mapped through explicit standard interfaces.
+/// A strictly bound data model encompassing multi-level collections mapped through standard interfaces.
 /// </summary>
 public sealed record ComplexCollectionModel(
     IReadOnlyList<string> Tags,
@@ -64,7 +66,7 @@ public sealed record ComplexCollectionModel(
 }
 
 /// <summary>
-/// Deeply nested domain constraint ensuring complex objects cascade inherently natively without failing depth limits.
+/// Deeply nested domain constraint ensuring complex objects cascade without failing depth limits.
 /// </summary>
 public sealed record DeepNestedModel(
     Guid GroupId,
@@ -99,7 +101,7 @@ public sealed record DerivedA(string BaseProperty, int PropA) : BasePolymorphicM
 public sealed record DerivedB(string BaseProperty, string PropB) : BasePolymorphicModel(BaseProperty);
 
 /// <summary>
-/// A structure carrying polymorphic baseline elements confirming native STJ derived serialization correctly transfers bounds dynamically.
+/// A structure carrying polymorphic baseline elements confirming STJ derived serialization transfers bounds dynamically.
 /// </summary>
 public sealed record PolymorphicContainer(
     IList<BasePolymorphicModel> Elements
@@ -134,7 +136,7 @@ public enum TestStatus
 }
 
 /// <summary>
-/// Model validating extreme boundaries seamlessly interacting across AOT bounds.
+/// Model validating extreme boundaries interacting across AOT bounds.
 /// </summary>
 public sealed record BoundaryValuesModel(
     int MinInt,
@@ -171,7 +173,7 @@ public sealed record BoundaryValuesModel(
 }
 
 /// <summary>
-/// Model securing standard isolated distinct enumerations inherently.
+/// Model securing standard isolated distinct enumerations.
 /// </summary>
 public sealed record SetModel(
     ISet<string> UniqueTags
@@ -190,7 +192,7 @@ public sealed record SetModel(
 }
 
 /// <summary>
-/// Multi-level map structure securing explicit polymorphism securely explicitly mapped inherently natively.
+/// Multi-level map structure mapping explicit polymorphism.
 /// </summary>
 public sealed record ComplexPolymorphicModel(
     IDictionary<string, BasePolymorphicModel> PolyMap
@@ -218,7 +220,7 @@ public sealed record ComplexPolymorphicModel(
 }
 
 /// <summary>
-/// AOT friendly data structure identifying distinct multidimensional metrics mapping attributes safely.
+/// AOT friendly data structure identifying distinct multidimensional metrics mapping attributes.
 /// </summary>
 public readonly record struct TestMetricTagDto(string Key, string Value) : IEquatable<TestMetricTagDto>
 {
@@ -237,7 +239,7 @@ public readonly record struct TestMetricTagDto(string Key, string Value) : IEqua
 }
 
 /// <summary>
-/// Immutable payload holding flattened telemetry captures strictly ensuring AOT constraints natively decoupled from reflection SDK parameters.
+/// Immutable payload holding flattened telemetry captures ensuring AOT constraints decoupled from reflection SDK parameters.
 /// </summary>
 public sealed record TestMetricSnapshotDto : IEquatable<TestMetricSnapshotDto>
 {
@@ -252,7 +254,7 @@ public sealed record TestMetricSnapshotDto : IEquatable<TestMetricSnapshotDto>
     public string Type { get; init; } = string.Empty;
 
     /// <summary>
-    /// Total aggregated sum or explicit absolute gauge evaluating measured attributes natively.
+    /// Total aggregated sum or explicit absolute gauge evaluating measured attributes.
     /// </summary>
     public long Value { get; init; }
 
@@ -310,7 +312,7 @@ public sealed record TestMetricSnapshotDto : IEquatable<TestMetricSnapshotDto>
 }
 
 /// <summary>
-/// Top-level network payload transmission encapsulating uniquely active node configurations bounding periodic explicitly wrapped metric topologies.
+/// Top-level network payload transmission encapsulating active node configurations bounding periodic wrapped metric topologies.
 /// </summary>
 public sealed record TestTelemetryPayloadDto : IEquatable<TestTelemetryPayloadDto>
 {
@@ -320,12 +322,12 @@ public sealed record TestTelemetryPayloadDto : IEquatable<TestTelemetryPayloadDt
     public Guid NodeId { get; init; }
 
     /// <summary>
-    /// Time sequence bounding exactly when explicit telemetry configurations captured runtime values natively.
+    /// Time sequence bounding exactly when explicit telemetry configurations captured runtime values.
     /// </summary>
     public DateTimeOffset Timestamp { get; init; }
 
     /// <summary>
-    /// Active measured snapshots capturing specific decoupled metrics natively.
+    /// Active measured snapshots capturing specific decoupled metrics.
     /// </summary>
     public IReadOnlyList<TestMetricSnapshotDto> Metrics { get; init; } = Array.Empty<TestMetricSnapshotDto>();
 
@@ -375,7 +377,7 @@ public sealed record TestTelemetryPayloadDto : IEquatable<TestTelemetryPayloadDt
 }
 
 /// <summary>
-/// Validates robust handling of explicitly nullable primitive types correctly correctly mapped in AOT schemas.
+/// Validates handling of explicitly nullable primitive types mapped in AOT schemas.
 /// </summary>
 public sealed record NullableTypesModel(
     int? OptionalInt,
@@ -405,7 +407,7 @@ public sealed record NullableTypesModel(
 }
 
 /// <summary>
-/// A model incorporating advanced specific primitive types requiring precise STJ/MessagePack integrations natively.
+/// A model incorporating specific primitive types requiring precise STJ/MessagePack integrations.
 /// </summary>
 public sealed record AdvancedPrimitivesModel(
     TimeSpan Duration,
@@ -436,7 +438,7 @@ public enum TestPermissions
 }
 
 /// <summary>
-/// Validates correct mapping and storage of explicit bitwise enum flags natively.
+/// Validates mapping and storage of explicit bitwise enum flags.
 /// </summary>
 public sealed record FlagsEnumModel(TestPermissions Permissions) : IEquatable<FlagsEnumModel>
 {
@@ -450,7 +452,7 @@ public sealed record FlagsEnumModel(TestPermissions Permissions) : IEquatable<Fl
 }
 
 /// <summary>
-/// Verifies multi-dimensional structures avoiding generic recursion depth bounds gracefully.
+/// Verifies multi-dimensional structures avoiding generic recursion depth bounds.
 /// </summary>
 public sealed record JaggedArrayModel(
     IList<byte[]> DataChunks,
@@ -494,7 +496,7 @@ public sealed record JaggedArrayModel(
 }
 
 /// <summary>
-/// Confirms that non-string dictionary keys (like ints or Guids) explicitly map reliably across AOT bounds.
+/// Confirms that non-string dictionary keys (like ints or Guids) explicitly map across AOT bounds.
 /// </summary>
 public sealed record NonStringKeyDictionaryModel(
     IDictionary<int, string> IntKeys,
@@ -534,7 +536,7 @@ public sealed record NonStringKeyDictionaryModel(
 }
 
 /// <summary>
-/// Simulates a byte-backed enum to test explicit underlying primitive code generation bypassing AOT runtime reflection faults natively.
+/// Simulates a byte-backed enum to test explicit underlying primitive code generation bypassing AOT runtime reflection faults.
 /// </summary>
 public enum SimulatedGossipMessageType : byte
 {
@@ -545,7 +547,7 @@ public enum SimulatedGossipMessageType : byte
 }
 
 /// <summary>
-/// Data structure simulating a core messaging layer requiring isolated enum definitions flawlessly serialized natively.
+/// Data structure simulating a core messaging layer requiring isolated enum definitions serialized.
 /// </summary>
 public sealed record SimulatedGossipMessage(
     Guid MessageId,
@@ -562,7 +564,52 @@ public sealed record SimulatedGossipMessage(
 }
 
 /// <summary>
-/// Decoupled AOT Source Generation bounds intentionally explicitly triggering MessagePack mappings cleanly via strict Standard System.Text.Json metadata context boundaries natively.
+/// A simulated V1 DTO explicitly implementing the Tolerant Reader payload bounds 
+/// bridging forward-compatible deserialization traces.
+/// </summary>
+public sealed class TolerantReaderPayload : IExtensibleDistributedPayload
+{
+    [JsonPropertyOrder(1)]
+    public int Id { get; set; }
+    
+    [JsonPropertyOrder(2)]
+    public string Name { get; set; } = string.Empty;
+
+    /// <inheritdoc />
+    [JsonExtensionData]
+    public IDictionary<string, JsonElement>? JsonExtensionData { get; set; }
+
+    /// <inheritdoc />
+    public IList<ReadOnlyMemory<byte>>? BinaryExtensionData { get; set; }
+}
+
+/// <summary>
+/// A simulated V2 DTO explicitly proving forward and backward compatibility mappings.
+/// </summary>
+public sealed class TolerantReaderPayloadV2 : IExtensibleDistributedPayload
+{
+    [JsonPropertyOrder(1)]
+    public int Id { get; set; }
+    
+    [JsonPropertyOrder(2)]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyOrder(3)]
+    public int FutureIntField { get; set; }
+
+    [JsonPropertyOrder(4)]
+    public string FutureStringField { get; set; } = string.Empty;
+
+    /// <inheritdoc />
+    [JsonExtensionData]
+    public IDictionary<string, JsonElement>? JsonExtensionData { get; set; }
+
+    /// <inheritdoc />
+    public IList<ReadOnlyMemory<byte>>? BinaryExtensionData { get; set; }
+}
+
+/// <summary>
+/// AOT Source Generation bounds intentionally explicit triggering MessagePack mappings via Standard System.Text.Json metadata context boundaries.
 /// </summary>
 [JsonSerializable(typeof(SimpleValueModel))]
 [JsonSerializable(typeof(ComplexCollectionModel))]
@@ -586,6 +633,8 @@ public sealed record SimulatedGossipMessage(
 [JsonSerializable(typeof(NonStringKeyDictionaryModel))]
 [JsonSerializable(typeof(SimulatedGossipMessageType))]
 [JsonSerializable(typeof(SimulatedGossipMessage))]
+[JsonSerializable(typeof(TolerantReaderPayload))]
+[JsonSerializable(typeof(TolerantReaderPayloadV2))]
 public partial class MessagePackIntegrationTestContext : JsonSerializerContext
 {
 }

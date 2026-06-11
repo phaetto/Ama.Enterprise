@@ -100,7 +100,7 @@ public class TestClass
     {
         var test = new CSharpAnalyzerTest<ThreadSleepUsageAnalyzer, DefaultVerifier>
         {
-            ReferenceAssemblies = ReferenceAssemblies.Net.Net100
+            ReferenceAssemblies = ReferenceAssemblies.Net.Net80
         };
 
         return test;

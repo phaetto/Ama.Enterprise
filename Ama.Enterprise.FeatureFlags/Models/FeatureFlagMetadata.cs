@@ -1,7 +1,4 @@
 namespace Ama.Enterprise.FeatureFlags.Models;
-
-using System;
-
 /// <summary>
 /// Custom metadata structure encapsulating enterprise multi-tenancy and product domain boundaries.
 /// </summary>

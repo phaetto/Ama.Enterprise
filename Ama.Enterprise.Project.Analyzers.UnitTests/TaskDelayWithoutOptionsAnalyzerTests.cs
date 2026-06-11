@@ -132,7 +132,7 @@ public class ConfigOptions
         var test = new CSharpAnalyzerTest<TaskDelayWithoutOptionsAnalyzer, DefaultVerifier>
         {
             TestCode = source,
-            ReferenceAssemblies = ReferenceAssemblies.Net.Net100
+            ReferenceAssemblies = ReferenceAssemblies.Net.Net80
         };
 
         return test;

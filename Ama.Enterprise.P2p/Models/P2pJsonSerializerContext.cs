@@ -1,10 +1,11 @@
 namespace Ama.Enterprise.P2p.Models;
 
-using System.Text.Json.Serialization;
 using Ama.Enterprise.P2p.Models.Algorithms;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Discovery;
 using Ama.Enterprise.P2p.Models.Transports;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 /// <summary>
 /// AOT-friendly JSON context for P2P models.
@@ -19,6 +20,7 @@ using Ama.Enterprise.P2p.Models.Transports;
 [JsonSerializable(typeof(TcpTransportOptions))]
 [JsonSerializable(typeof(UdpTransportOptions))]
 [JsonSerializable(typeof(UdpDiscoveryMessage))]
+[JsonSerializable(typeof(IDictionary<string, JsonElement>))]
 public partial class P2pJsonSerializerContext : JsonSerializerContext
 {
 }
