@@ -56,6 +56,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         {
             opt.CheckpointIntervalSeconds = 30;
             opt.AntiEntropyIntervalSeconds = 15;
+            opt.ActiveSyncEnabled = true;
         });
 
         services.AddDistributedCrdtReplica(replicaId);
@@ -106,7 +107,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
         var scope = scopeManager.GetOrCreateScope("ReplicaA");
         var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcher = scope.ServiceProvider.GetRequiredService<ICrdtPatcher>();
+        var patcher = scope.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
         var syncService = scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
         var journalManager = scope.ServiceProvider.GetRequiredService<IJournalManager>();
         var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
@@ -120,7 +121,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         // Apply a mapped patch using the Patcher saving to the active journal.
         // This ensures the operation is structurally valid, preventing the applicator from rejecting it as "Unapplied"
         var intent = new MapSetIntent("testKey", "Updated");
-        var op = patcher.GenerateOperation(docA.Document, x => x.DataMap, intent);
+        var op = await patcher.GenerateOperationAsync(docA.Document, x => x.DataMap, intent, CancellationToken.None);
         
         await docA.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
 
@@ -146,7 +147,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
         var scope = scopeManager.GetOrCreateScope("ReplicaA");
         var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcher = scope.ServiceProvider.GetRequiredService<ICrdtPatcher>();
+        var patcher = scope.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
         var storage = scope.ServiceProvider.GetRequiredService<IDistributedCrdtStorage>();
         var syncService = scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
         var journalManager = scope.ServiceProvider.GetRequiredService<IJournalManager>();
@@ -160,7 +161,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         // Apply a mapped patch using the Patcher explicitly
         var intent = new MapSetIntent("testKey", "Updated");
-        var op = patcher.GenerateOperation(docA.Document, x => x.DataMap, intent);
+        var op = await patcher.GenerateOperationAsync(docA.Document, x => x.DataMap, intent, CancellationToken.None);
         
         await docA.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
 
@@ -181,7 +182,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     }
 
     [IntegrationFact]
-    public async Task MergeSnapshot_ShouldOverrideLocalState_AndMergeGlobalVersionVector()
+    public async Task MergeSnapshot_ShouldCalculateDiffPatch_AndBroadcastIntentions()
     {
         // Arrange
         var sp = BuildNode("ReplicaA");
@@ -189,29 +190,67 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
         var scope = scopeManager.GetOrCreateScope("ReplicaA");
         var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var metadataManager = scope.ServiceProvider.GetRequiredService<ICrdtMetadataManager>();
+        var patcher = scope.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var docA = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
+
+        // Add some local state using native explicit pathing to ensure the patcher correctly diffs differences natively.
+        var localIntent = new MapSetIntent("LocalKey", "LocalValue");
+        var localOp = await patcher.GenerateOperationAsync(docA.Document, x => x.DataMap, localIntent, CancellationToken.None);
+        await docA.ApplyPatchAsync(new CrdtPatch(new[] { localOp }), CancellationToken.None);
+
+        // Build simulated remote snapshot payload dropping the local key and adding a remote key cleanly
+        var remoteState = new JournalTestState { Id = "journal-doc" };
+        remoteState.DataMap["RemoteKey"] = "RemoteValue";
         
-        // Materialize fallback structural bounds
-        docA.Document.Data.DataMap["testKey"] = "Materialized Snapshot State";
-
+        var remoteMetadata = metadataManager.Initialize(remoteState);
+        var remoteDoc = new CrdtDocument<JournalTestState>(remoteState, remoteMetadata);
+        
         var globalDvv = new DottedVersionVector();
-        globalDvv.Versions["ReplicaB"] = 5;
+        globalDvv.Versions["ReplicaB"] = 15;
 
-        var snapshotBytes = serializer.SerializeToBytes(docA.Document);
+        var snapshotBytes = serializer.SerializeToBytes(remoteDoc);
 
-        // Act - Overwrite underlying local dependencies
+        CrdtPatch? broadcastedPatch = null;
+        var tcs = new TaskCompletionSource<CrdtPatch>();
+        
+        // Asynchronous multi-threaded lock-free orchestrator safely capturing distinct emitted diff intent natively.
+        docA.PatchGenerated += (s, p) => 
+        {
+            broadcastedPatch = p;
+            tcs.TrySetResult(p);
+        };
+
+        // Act
         await docA.MergeSnapshotAsync(snapshotBytes, globalDvv, CancellationToken.None);
 
-        // Assert
-        docA.Document.Data.DataMap["testKey"].ShouldBe("Materialized Snapshot State");
+        // Wait for the asynchronous distinct queue mechanism to calculate and securely broadcast intents cleanly
+        await Task.WhenAny(tcs.Task, Task.Delay(2000));
 
+        // Assert
+        broadcastedPatch.ShouldNotBeNull();
+        broadcastedPatch.Value.Operations.ShouldNotBeEmpty();
+
+        // The diff generator should emit a Delete/Remove intent for "LocalKey" and an Upsert/Set intent for "RemoteKey" resolving missing operations efficiently.
+        var ops = broadcastedPatch.Value.Operations;
+
+#pragma warning disable CS8602 // Dereference of a possibly null reference.
+#pragma warning disable CS8605 // Unboxing a possibly null value.
+        ops.Any(o => ((KeyValuePair<object, object>)o.Value).Key.ToString().Contains("LocalKey") && o.Type == OperationType.Remove).ShouldBeTrue();
+        ops.Any(o => ((KeyValuePair<object, object>)o.Value).Key.ToString().Contains("RemoteKey") && o.Type == OperationType.Upsert).ShouldBeTrue();
+#pragma warning restore CS8605 // Unboxing a possibly null value.
+#pragma warning restore CS8602 // Dereference of a possibly null reference.
+
+        docA.Document.Data.DataMap.ShouldNotContainKey("LocalKey");
+        docA.Document.Data.DataMap.ShouldContainKeyAndValue("RemoteKey", "RemoteValue");
+        
         var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
-        replicaContext.GlobalVersionVector.Versions["ReplicaB"].ShouldBe(5);
+        replicaContext.GlobalVersionVector.Versions["ReplicaB"].ShouldBe(15);
     }
 
     [IntegrationFact]
@@ -228,7 +267,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var scopeManager1 = sp1.GetRequiredService<DistributedCrdtScopeManager>();
         var scope1 = scopeManager1.GetOrCreateScope("Replica1");
         var orchestrator1 = scope1.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcher1 = scope1.ServiceProvider.GetRequiredService<ICrdtPatcher>();
+        var patcher1 = scope1.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
 
         // Orchestrator initialization creates the empty registry.
         await orchestrator1.InitializeAsync(CancellationToken.None);
@@ -241,10 +280,10 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         
         // Generate multiple operations safely using the Patcher to explicitly map true logical clock values natively
         var intent1 = new MapSetIntent("key1", "ReplayedData1");
-        var op1 = patcher1.GenerateOperation(doc1.Document, x => x.DataMap, intent1);
+        var op1 = await patcher1.GenerateOperationAsync(doc1.Document, x => x.DataMap, intent1, CancellationToken.None);
 
         var intent2 = new MapSetIntent("key2", "ReplayedData2");
-        var op2 = patcher1.GenerateOperation(doc1.Document, x => x.DataMap, intent2);
+        var op2 = await patcher1.GenerateOperationAsync(doc1.Document, x => x.DataMap, intent2, CancellationToken.None);
 
         // Apply patches correctly invoking the decorators natively explicit writing structurally valid WAL entries.
         await doc1.ApplyPatchAsync(new CrdtPatch(new[] { op1, op2 }), CancellationToken.None);
@@ -296,7 +335,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
         var scope = scopeManager.GetOrCreateScope("Replica1");
         var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcher = scope.ServiceProvider.GetRequiredService<ICrdtPatcher>();
+        var patcher = scope.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("trim-test-doc", "journal-doc", CancellationToken.None);
@@ -308,7 +347,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         for (int i = 0; i < 10; i++)
         {
             var intent = new MapSetIntent($"key{i}", $"value{i}");
-            var op = patcher.GenerateOperation(doc.Document, x => x.DataMap, intent);
+            var op = await patcher.GenerateOperationAsync(doc.Document, x => x.DataMap, intent, CancellationToken.None);
             await doc.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
         }
 

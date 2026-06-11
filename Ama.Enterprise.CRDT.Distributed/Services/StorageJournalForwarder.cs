@@ -21,8 +21,6 @@ using Microsoft.Extensions.Options;
 /// </summary>
 internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposable
 {
-    private static readonly TimeSpan BackpressureWaitInterval = TimeSpan.FromMilliseconds(50);
-
     private readonly IDistributedCrdtStorage storage;
     private readonly IOptions<DistributedCrdtOptions> options;
     private readonly IServiceProvider serviceProvider;
@@ -106,7 +104,7 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
 
     private void TrackAndTriggerTrim(int count)
     {
-        var threshold = options.Value.JournalHardCeilingTrimThreshold;
+        var threshold = options.Value.JournalTrimThreshold;
         if (threshold <= 0) return;
 
         var newCount = Interlocked.Add(ref estimatedJournalCount, count);
@@ -201,6 +199,6 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         
         aggressiveTrimsCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
 
-        logger.LogWarning("[{ReplicaId}] Journal dynamically crossed real-time threshold ({Threshold}). Reactively executed immediate aggressive trim explicitly offloading constraints to snapshots.", replicaContext.ReplicaId, options.Value.JournalHardCeilingTrimThreshold);
+        logger.LogWarning("[{ReplicaId}] Journal dynamically crossed real-time threshold ({Threshold}). Reactively executed immediate aggressive trim explicitly offloading constraints to snapshots.", replicaContext.ReplicaId, options.Value.JournalTrimThreshold);
     }
 }

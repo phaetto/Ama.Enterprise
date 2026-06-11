@@ -24,7 +24,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 {
     private readonly IServiceProvider serviceProvider;
     private readonly IDistributedCrdtStorage storage;
-    private readonly ICrdtPatcher patcher;
+    private readonly IAsyncCrdtPatcher patcher;
     private readonly ILogger<CrdtDocumentOrchestrator> logger;
     private readonly ConcurrentDictionary<string, IDistributedCrdtDocument> activeDocuments = new(StringComparer.Ordinal);
     
@@ -56,7 +56,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     public CrdtDocumentOrchestrator(
         IServiceProvider serviceProvider,
         IDistributedCrdtStorage storage,
-        ICrdtPatcher patcher,
+        IAsyncCrdtPatcher patcher,
         ILogger<CrdtDocumentOrchestrator> logger,
         IMeterFactory? meterFactory = null)
     {
@@ -119,15 +119,6 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                             break;
                         case OrchestratorCommandType.DeleteDocument:
                             await ProcessDeleteDocumentInternalAsync(cmd).ConfigureAwait(false);
-                            break;
-                        case OrchestratorCommandType.DispatchAntiEntropyState:
-                            await ProcessDispatchAntiEntropyStateInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
-                            break;
-                        case OrchestratorCommandType.ProvideSnapshot:
-                            await ProcessProvideSnapshotInternalAsync(cmd).ConfigureAwait(false);
-                            break;
-                        case OrchestratorCommandType.BroadcastPatch:
-                            await ProcessBroadcastPatchInternalAsync(cmd).ConfigureAwait(false);
                             break;
                     }
 
@@ -192,7 +183,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     {
         if (sender is IDistributedCrdtDocument doc)
         {
-            _ = BroadcastPatchAsync(doc.DocumentId, patch, CancellationToken.None);
+            // Bypasses the channel using Task.Run ensuring instant execution and preventing blocking the single-reader document loop.
+            _ = Task.Run(() => BroadcastPatchAsync(doc.DocumentId, patch, CancellationToken.None));
         }
     }
 
@@ -276,6 +268,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         catch (Exception ex)
         {
             logger.LogError(ex, "An error occurred synchronizing dynamic P2P orchestrator matrices.");
+            throw;
         }
     }
 
@@ -318,7 +311,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     private async Task ProcessCreateDocumentInternalAsync(PooledOrchestratorCommand cmd)
     {
         var intent = new MapSetIntent(cmd.DocumentId!, new CrdtRegistryEntry(cmd.DocumentId!, cmd.TypeAlias!, false));
-        var operation = patcher.GenerateOperation(Registry.Document, x => x.Documents, intent);
+        var operation = await patcher.GenerateOperationAsync(Registry.Document, x => x.Documents, intent, cmd.CancellationToken).ConfigureAwait(false);
         var patch = new CrdtPatch(new[] { operation });
         
         await Registry.ApplyPatchAsync(patch, cmd.CancellationToken).ConfigureAwait(false);
@@ -348,7 +341,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         if (Registry.Document.Data.Documents.TryGetValue(cmd.DocumentId!, out var existing))
         {
             var intent = new MapSetIntent(cmd.DocumentId!, existing with { IsDeleted = true });
-            var operation = patcher.GenerateOperation(Registry.Document, x => x.Documents, intent);
+            var operation = await patcher.GenerateOperationAsync(Registry.Document, x => x.Documents, intent, cmd.CancellationToken).ConfigureAwait(false);
             var patch = new CrdtPatch(new[] { operation });
             
             await Registry.ApplyPatchAsync(patch, cmd.CancellationToken).ConfigureAwait(false);
@@ -357,38 +350,17 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
     public async Task ProvideSnapshotAsync(string documentId, string targetReplicaId, PeerId targetPeerId, CancellationToken cancellationToken = default)
     {
-        var cmd = GetCommand();
-        cmd.Type = OrchestratorCommandType.ProvideSnapshot;
-        cmd.DocumentId = documentId;
-        cmd.TargetReplicaId = targetReplicaId;
-        cmd.TargetPeerId = targetPeerId;
-        cmd.CancellationToken = cancellationToken;
-
-        commandChannel.Writer.TryWrite(cmd);
-        commandsEnqueuedCounter.Add(1);
-        try
+        if (!activeDocuments.TryGetValue(documentId, out var doc) && Registry.DocumentId != documentId)
         {
-            await cmd.ExecuteAsync().ConfigureAwait(false);
-        }
-        finally
-        {
-            ReturnCommand(cmd);
-        }
-    }
-
-    private async Task ProcessProvideSnapshotInternalAsync(PooledOrchestratorCommand cmd)
-    {
-        if (!activeDocuments.TryGetValue(cmd.DocumentId!, out var doc) && Registry.DocumentId != cmd.DocumentId)
-        {
-            logger.LogWarning("Requested snapshot for unknown document {DocumentId}.", cmd.DocumentId);
+            logger.LogWarning("Requested snapshot for unknown document {DocumentId}.", documentId);
             return;
         }
 
-        var targetDoc = cmd.DocumentId == Registry.DocumentId ? Registry : doc;
+        var targetDoc = documentId == Registry.DocumentId ? Registry : doc;
 
         try
         {
-            var snapshotResult = await targetDoc!.GetSnapshotDataAsync(cmd.CancellationToken).ConfigureAwait(false);
+            var snapshotResult = await targetDoc!.GetSnapshotDataAsync(cancellationToken).ConfigureAwait(false);
             
             var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
             var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
@@ -397,42 +369,22 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             var resMsg = new CrdtSnapshotMessage(replicaContext.ReplicaId, snapshotResult.SnapshotData, snapshotResult.GlobalState);
             var payload = serializer.SerializeToBytes(resMsg);
 
-            var wrapper = new CrdtMessageWrapper(cmd.DocumentId!, "CrdtSnapshot", payload);
+            var wrapper = new CrdtMessageWrapper(documentId, "CrdtSnapshot", payload);
             var finalBytes = serializer.SerializeToBytes(wrapper);
 
-            await directSender.SendDirectAsync(cmd.TargetPeerId!.Value, finalBytes, cmd.CancellationToken).ConfigureAwait(false); 
+            await directSender.SendDirectAsync(targetPeerId, finalBytes, cancellationToken).ConfigureAwait(false); 
             
-            snapshotsDispatchedCounter.Add(1, new KeyValuePair<string, object?>("document_id", cmd.DocumentId));
-            snapshotBytesDispatchedCounter.Add(finalBytes.Length, new KeyValuePair<string, object?>("document_id", cmd.DocumentId));
-            logger.LogInformation("Dispatched targeted complete document snapshot fallback payload for document {DocumentId} to peer {PeerId}.", cmd.DocumentId, cmd.TargetPeerId.Value.Value);
+            snapshotsDispatchedCounter.Add(1, new KeyValuePair<string, object?>("document_id", documentId));
+            snapshotBytesDispatchedCounter.Add(finalBytes.Length, new KeyValuePair<string, object?>("document_id", documentId));
+            logger.LogInformation("Dispatched targeted complete document snapshot fallback payload for document {DocumentId} to peer {PeerId}.", documentId, targetPeerId.Value);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to dispatch snapshot fallback payload for document {DocumentId}.", cmd.DocumentId);
+            logger.LogError(ex, "Failed to dispatch snapshot fallback payload for document {DocumentId}.", documentId);
         }
     }
 
     public async Task BroadcastPatchAsync(string documentId, CrdtPatch patch, CancellationToken cancellationToken = default)
-    {
-        var cmd = GetCommand();
-        cmd.Type = OrchestratorCommandType.BroadcastPatch;
-        cmd.DocumentId = documentId;
-        cmd.Patch = patch;
-        cmd.CancellationToken = cancellationToken;
-
-        commandChannel.Writer.TryWrite(cmd);
-        commandsEnqueuedCounter.Add(1);
-        try
-        {
-            await cmd.ExecuteAsync().ConfigureAwait(false);
-        }
-        finally
-        {
-            ReturnCommand(cmd);
-        }
-    }
-
-    private async Task ProcessBroadcastPatchInternalAsync(PooledOrchestratorCommand cmd)
     {
         try
         {
@@ -440,41 +392,23 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
             var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
 
-            var patchMsg = new CrdtPatchMessage(replicaContext.ReplicaId, cmd.Patch!.Value);
+            var patchMsg = new CrdtPatchMessage(replicaContext.ReplicaId, patch);
             var payload = serializer.SerializeToBytes(patchMsg);
             
-            var wrapper = new CrdtMessageWrapper(cmd.DocumentId!, "CrdtPatch", payload);
+            var wrapper = new CrdtMessageWrapper(documentId, "CrdtPatch", payload);
             var finalBytes = serializer.SerializeToBytes(wrapper);
 
-            broadcastBytesCounter.Add(finalBytes.Length, new KeyValuePair<string, object?>("document_id", cmd.DocumentId));
+            broadcastBytesCounter.Add(finalBytes.Length, new KeyValuePair<string, object?>("document_id", documentId));
 
-            await p2pProtocol.BroadcastAsync(finalBytes, cmd.CancellationToken).ConfigureAwait(false);
+            await p2pProtocol.BroadcastAsync(finalBytes, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to broadcast active sync patch for document {DocumentId}.", cmd.DocumentId);
+            logger.LogError(ex, "Failed to broadcast active sync patch for document {DocumentId}.", documentId);
         }
     }
 
     public async Task DispatchAntiEntropyStateAsync(CancellationToken cancellationToken = default)
-    {
-        var cmd = GetCommand();
-        cmd.Type = OrchestratorCommandType.DispatchAntiEntropyState;
-        cmd.CancellationToken = cancellationToken;
-
-        commandChannel.Writer.TryWrite(cmd);
-        commandsEnqueuedCounter.Add(1);
-        try
-        {
-            await cmd.ExecuteAsync().ConfigureAwait(false);
-        }
-        finally
-        {
-            ReturnCommand(cmd);
-        }
-    }
-
-    private async Task ProcessDispatchAntiEntropyStateInternalAsync(CancellationToken cancellationToken)
     {
         try
         {

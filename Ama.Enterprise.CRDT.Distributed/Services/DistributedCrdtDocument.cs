@@ -23,6 +23,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 {
     private readonly ReplicaContext replicaContext;
     private readonly IAsyncCrdtApplicator applicator;
+    private readonly IAsyncCrdtPatcher patcher;
     private readonly ICrdtMetadataManager metadataManager;
     private readonly ICrdtSerializer serializer;
     private readonly IDistributedCrdtStorage storage;
@@ -70,6 +71,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         TState initialState,
         ReplicaContext replicaContext,
         IAsyncCrdtApplicator applicator,
+        IAsyncCrdtPatcher patcher,
         ICrdtMetadataManager metadataManager,
         IOptions<DistributedCrdtOptions> options,
         ICrdtSerializer serializer,
@@ -84,6 +86,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         this.replicaContext = replicaContext ?? throw new ArgumentNullException(nameof(replicaContext));
         this.applicator = applicator ?? throw new ArgumentNullException(nameof(applicator));
+        this.patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
         this.metadataManager = metadataManager ?? throw new ArgumentNullException(nameof(metadataManager));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
@@ -158,7 +161,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                             ProcessGetSnapshotDataInternal(cmd);
                             break;
                         case DocumentCommandType.MergeSnapshot:
-                            ProcessMergeSnapshotInternal(cmd);
+                            await ProcessMergeSnapshotInternalAsync(cmd).ConfigureAwait(false);
                             break;
                         case DocumentCommandType.Checkpoint:
                             await ProcessCheckpointInternalAsync(cmd).ConfigureAwait(false);
@@ -230,6 +233,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to load initial state for document {DocumentId} from persistent storage.", DocumentId);
+            throw;
         }
     }
 
@@ -388,15 +392,22 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
     }
 
-    private void ProcessMergeSnapshotInternal(PooledDocumentCommand<TState> cmd)
+    private async Task ProcessMergeSnapshotInternalAsync(PooledDocumentCommand<TState> cmd)
     {
         try
         {
             var snapshotDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(cmd.SnapshotData!);
 
+            CrdtDocument<TState> currentDoc;
+            lock (syncRoot) { currentDoc = Document; }
+
+            var patch = await patcher.GeneratePatchAsync(currentDoc, snapshotDoc.Data, cmd.CancellationToken).ConfigureAwait(false);
+
+            var result = await applicator.ApplyPatchAsync(currentDoc, patch, cmd.CancellationToken).ConfigureAwait(false);
+
             lock (syncRoot)
             {
-                Document = snapshotDoc;
+                Document = result.Document;
                 isDirty = true;
             }
 
@@ -407,11 +418,18 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
             snapshotsMergedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
             StateChanged?.Invoke(this, EventArgs.Empty);
+
+            if (activeSyncEnabled && patch.Operations != null && patch.Operations.Count > 0)
+            {
+                PatchGenerated?.Invoke(this, patch);
+            }
+
             logger.LogInformation("Successfully merged global state snapshot for document {DocumentId}.", DocumentId);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to process snapshot merger for document {DocumentId}.", DocumentId);
+            throw;
         }
     }
 

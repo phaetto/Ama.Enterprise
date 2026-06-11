@@ -201,12 +201,13 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             
             using var command = writeConnection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "INSERT OR IGNORE INTO Journal (Id, DocumentId, ReplicaId, GlobalClock, Payload) VALUES (@Id, @DocId, @RepId, @Clock, @Payload)";
+            command.CommandText = "INSERT OR IGNORE INTO Journal (Id, DocumentId, ReplicaId, GlobalClock, InsertedAt, Payload) VALUES (@Id, @DocId, @RepId, @Clock, @InsertedAt, @Payload)";
 
             var pId = command.CreateParameter(); pId.ParameterName = "@Id"; command.Parameters.Add(pId);
             var pDoc = command.CreateParameter(); pDoc.ParameterName = "@DocId"; command.Parameters.Add(pDoc);
             var pRep = command.CreateParameter(); pRep.ParameterName = "@RepId"; command.Parameters.Add(pRep);
             var pClock = command.CreateParameter(); pClock.ParameterName = "@Clock"; command.Parameters.Add(pClock);
+            var pInsertedAt = command.CreateParameter(); pInsertedAt.ParameterName = "@InsertedAt"; command.Parameters.Add(pInsertedAt);
             var pPayload = command.CreateParameter(); pPayload.ParameterName = "@Payload"; command.Parameters.Add(pPayload);
 
             foreach (var op in operationsList)
@@ -216,6 +217,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
                 pDoc.Value = documentId;
                 pRep.Value = op.ReplicaId;
                 pClock.Value = op.GlobalClock;
+                pInsertedAt.Value = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                 pPayload.Value = serializer.SerializeToBytes(journaled);
                 
                 command.ExecuteNonQuery();
@@ -246,12 +248,13 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             
             using var command = writeConnection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "INSERT OR IGNORE INTO Journal (Id, DocumentId, ReplicaId, GlobalClock, Payload) VALUES (@Id, @DocId, @RepId, @Clock, @Payload)";
+            command.CommandText = "INSERT OR IGNORE INTO Journal (Id, DocumentId, ReplicaId, GlobalClock, InsertedAt, Payload) VALUES (@Id, @DocId, @RepId, @Clock, @InsertedAt, @Payload)";
 
             var pId = command.CreateParameter(); pId.ParameterName = "@Id"; command.Parameters.Add(pId);
             var pDoc = command.CreateParameter(); pDoc.ParameterName = "@DocId"; command.Parameters.Add(pDoc);
             var pRep = command.CreateParameter(); pRep.ParameterName = "@RepId"; command.Parameters.Add(pRep);
             var pClock = command.CreateParameter(); pClock.ParameterName = "@Clock"; command.Parameters.Add(pClock);
+            var pInsertedAt = command.CreateParameter(); pInsertedAt.ParameterName = "@InsertedAt"; command.Parameters.Add(pInsertedAt);
             var pPayload = command.CreateParameter(); pPayload.ParameterName = "@Payload"; command.Parameters.Add(pPayload);
 
             foreach (var op in operationsList)
@@ -261,6 +264,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
                 pDoc.Value = documentId;
                 pRep.Value = op.ReplicaId;
                 pClock.Value = op.GlobalClock;
+                pInsertedAt.Value = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                 pPayload.Value = serializer.SerializeToBytes(journaled);
                 
                 await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -382,7 +386,9 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         }
     }
 
-    public void Trim(IReadOnlyDictionary<string, long> gmvv)
+    public void Trim(IReadOnlyDictionary<string, long> gmvv) => Trim(gmvv, null);
+
+    public void Trim(IReadOnlyDictionary<string, long> gmvv, DateTimeOffset? retainBufferTime)
     {
         ArgumentNullException.ThrowIfNull(gmvv);
         if (gmvv.Count == 0) return;
@@ -396,6 +402,15 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             command.Transaction = transaction;
             command.CommandText = "DELETE FROM Journal WHERE ReplicaId = @RepId AND GlobalClock <= @MaxClock";
             
+            if (retainBufferTime.HasValue)
+            {
+                command.CommandText += " AND InsertedAt < @RetainTime";
+                var pTime = command.CreateParameter(); 
+                pTime.ParameterName = "@RetainTime"; 
+                pTime.Value = retainBufferTime.Value.ToUnixTimeMilliseconds();
+                command.Parameters.Add(pTime);
+            }
+
             var pRepId = command.CreateParameter(); pRepId.ParameterName = "@RepId"; command.Parameters.Add(pRepId);
             var pMax = command.CreateParameter(); pMax.ParameterName = "@MaxClock"; command.Parameters.Add(pMax);
 
@@ -418,7 +433,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         }
     }
 
-    public async Task TrimAsync(IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default)
+    public Task TrimAsync(IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default)
+        => TrimAsync(globalMinimumVersionVector, null, cancellationToken);
+
+    public async Task TrimAsync(IReadOnlyDictionary<string, long> globalMinimumVersionVector, DateTimeOffset? retainBufferTime, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(globalMinimumVersionVector);
         if (globalMinimumVersionVector.Count == 0) return;
@@ -432,6 +450,15 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             command.Transaction = transaction;
             command.CommandText = "DELETE FROM Journal WHERE ReplicaId = @RepId AND GlobalClock <= @MaxClock";
             
+            if (retainBufferTime.HasValue)
+            {
+                command.CommandText += " AND InsertedAt < @RetainTime";
+                var pTime = command.CreateParameter(); 
+                pTime.ParameterName = "@RetainTime"; 
+                pTime.Value = retainBufferTime.Value.ToUnixTimeMilliseconds();
+                command.Parameters.Add(pTime);
+            }
+
             var pRepId = command.CreateParameter(); pRepId.ParameterName = "@RepId"; command.Parameters.Add(pRepId);
             var pMax = command.CreateParameter(); pMax.ParameterName = "@MaxClock"; command.Parameters.Add(pMax);
 
@@ -485,6 +512,23 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
                 CREATE INDEX IF NOT EXISTS IDX_Journal_Replica_Clock ON Journal(ReplicaId, GlobalClock);
             ";
             command.ExecuteNonQuery();
+
+            // Safely migrate mapping bounds appending InsertedAt tracking explicitly for temporal delays gracefully
+            using var checkCmd = connection.CreateCommand();
+            checkCmd.CommandText = "PRAGMA table_info(Journal);";
+            using var reader = checkCmd.ExecuteReader();
+            bool hasInsertedAt = false;
+            while(reader.Read())
+            {
+                if (reader["name"].ToString() == "InsertedAt") hasInsertedAt = true;
+            }
+
+            if (!hasInsertedAt)
+            {
+                using var alterCmd = connection.CreateCommand();
+                alterCmd.CommandText = "ALTER TABLE Journal ADD COLUMN InsertedAt INTEGER NOT NULL DEFAULT 0;";
+                alterCmd.ExecuteNonQuery();
+            }
         }
         catch (Exception ex)
         {

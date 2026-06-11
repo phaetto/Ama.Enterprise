@@ -45,34 +45,6 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         public Dictionary<string, string> DataMap { get; set; } = new(StringComparer.Ordinal);
     }
 
-    private IServiceProvider BuildNode(string replicaId, Action<IServiceCollection>? configureExtra = null)
-    {
-        var services = new ServiceCollection();
-        services.AddLogging();
-
-        services.AddDistributedCrdtCore(opt =>
-        {
-            opt.ActiveSyncEnabled = false;
-        });
-
-        services.AddDistributedCrdtReplica(replicaId);
-
-        services.AddCrdt()
-                .AddCrdtAotContext(new AntiEntropyStateSyncTestAotContext())
-                .AddCrdtJsonTypeInfoResolver(AntiEntropyStateSyncTestJsonContext.Default);
-
-        services.AddDistributedDocumentType<SyncTestState>("sync-doc-1");
-        services.AddDistributedDocumentType<SyncTestState>("sync-doc-2");
-        services.AddDistributedCrdtP2p(TestMeshId, replicaId);
-
-        services.AddSingleton(Mock.Of<IP2pAlgorithm>());
-        services.AddSingleton(Mock.Of<IDirectMessageSender>());
-
-        configureExtra?.Invoke(services);
-
-        return services.BuildServiceProvider();
-    }
-
     [IntegrationFact]
     public async Task ProcessStateSyncAsync_ShouldRetrieveMissingOpsOnce_AndBroadcastPerDocument()
     {
@@ -90,7 +62,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
         var scope = scopeManager.GetOrCreateScope("Replica1");
         var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcher = scope.ServiceProvider.GetRequiredService<ICrdtPatcher>();
+        var patcher = scope.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         
@@ -102,10 +74,10 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         var doc2 = orchestrator.GetDocument<SyncTestState>("sync-doc-2")!;
 
         var intent1 = new MapSetIntent("testKey", "Val1");
-        var op1 = patcher.GenerateOperation(doc1.Document, x => x.DataMap, intent1);
+        var op1 = await patcher.GenerateOperationAsync(doc1.Document, x => x.DataMap, intent1, CancellationToken.None);
 
         var intent2 = new MapSetIntent("testKey", "Val2");
-        var op2 = patcher.GenerateOperation(doc2.Document, x => x.DataMap, intent2);
+        var op2 = await patcher.GenerateOperationAsync(doc2.Document, x => x.DataMap, intent2, CancellationToken.None);
 
         await doc1.ApplyPatchAsync(new CrdtPatch(new[] { op1 }), CancellationToken.None);
         await doc2.ApplyPatchAsync(new CrdtPatch(new[] { op2 }), CancellationToken.None);
@@ -136,5 +108,33 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         broadcastedDocIds.ShouldContain("sync-doc-1");
         broadcastedDocIds.ShouldContain("sync-doc-2");
         broadcastedDocIds.ShouldContain(orchestrator.Registry.DocumentId);
+    }
+
+    private IServiceProvider BuildNode(string replicaId, Action<IServiceCollection>? configureExtra = null)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        services.AddDistributedCrdtCore(opt =>
+        {
+            opt.ActiveSyncEnabled = false;
+        });
+
+        services.AddDistributedCrdtReplica(replicaId);
+
+        services.AddCrdt()
+                .AddCrdtAotContext(new AntiEntropyStateSyncTestAotContext())
+                .AddCrdtJsonTypeInfoResolver(AntiEntropyStateSyncTestJsonContext.Default);
+
+        services.AddDistributedDocumentType<SyncTestState>("sync-doc-1");
+        services.AddDistributedDocumentType<SyncTestState>("sync-doc-2");
+        services.AddDistributedCrdtP2p(TestMeshId, replicaId);
+
+        services.AddSingleton(Mock.Of<IP2pAlgorithm>());
+        services.AddSingleton(Mock.Of<IDirectMessageSender>());
+
+        configureExtra?.Invoke(services);
+
+        return services.BuildServiceProvider();
     }
 }

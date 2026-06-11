@@ -30,6 +30,12 @@ internal sealed class Program
     private static string StatusMessage = "Running normally.";
     private static int MetricsScrollOffset = 0;
 
+    // Shared thread-safe state ensuring decoupled UI bounds natively explicitly
+    private static readonly object _stateLock = new object();
+    private static HashSet<Guid> _latestActivePeerIds = new();
+    private static IReadOnlyCollection<ClusterMetricAggregation> _latestAggregations = Array.Empty<ClusterMetricAggregation>();
+    private static IReadOnlyCollection<Guid> _latestTrackedNodeIds = Array.Empty<Guid>();
+
     public static async Task Main(string[] args)
     {
         var services = new ServiceCollection();
@@ -102,6 +108,51 @@ internal sealed class Program
             var metricsAggregator = provider.GetRequiredService<IClusterMetricsAggregator>();
             var peerRegistry = provider.GetRequiredService<IPeerRegistry>();
 
+            // Distinct background processor explicitly detaching ALL networking, async locking, and mathematics from the Spectre UI frame natively
+            _ = Task.Run(async () =>
+            {
+                while (!cts.Token.IsCancellationRequested)
+                {
+                    try
+                    {
+                        var activePeers = await peerRegistry.GetPeersByStatusAsync("admin", PeerStatus.Active, cts.Token).ConfigureAwait(false);
+                        var activePeerIds = activePeers.Select(p => p.Id.Value).ToHashSet();
+
+                        var rawMetrics = aggregator.GetAllNodeMetrics().ToList();
+                        metricsAggregator.ProcessPayloads(rawMetrics);
+
+                        string activeSelection;
+                        lock (_stateLock)
+                        {
+                            activeSelection = CachedPeerList.Count > 0 && SelectedPeerIndex < CachedPeerList.Count 
+                                ? CachedPeerList[SelectedPeerIndex] 
+                                : "All";
+                        }
+
+                        var targetNodeIds = activeSelection == "All"
+                            ? activePeerIds
+                            : activePeerIds.Where(id => id.ToString("N").StartsWith(activeSelection)).ToHashSet();
+
+                        var clusterAggregations = metricsAggregator.AggregateClusterMetrics(targetNodeIds).ToList();
+                        var trackedNodeIds = metricsAggregator.GetTrackedNodeIds().ToList();
+
+                        lock (_stateLock)
+                        {
+                            _latestActivePeerIds = activePeerIds;
+                            _latestAggregations = clusterAggregations;
+                            _latestTrackedNodeIds = trackedNodeIds;
+                        }
+                    }
+                    catch (OperationCanceledException) { }
+                    catch (Exception ex)
+                    {
+                        StatusMessage = $"[bold red]Background error: {Markup.Escape(ex.Message)}[/]";
+                    }
+
+                    await Task.Delay(1000, cts.Token).ConfigureAwait(false);
+                }
+            }, cts.Token);
+
             AnsiConsole.Clear();
 
             var mainLayout = new Layout("Main")
@@ -127,8 +178,8 @@ internal sealed class Program
                     {
                         var forceUpdate = false;
 
-                        // Non-blocking input loop explicitly avoiding overlapping UI bounds
-                        if (Console.KeyAvailable)
+                        // Drain the entire input queue explicitly preventing lag from queued input events
+                        while (Console.KeyAvailable)
                         {
                             var keyInfo = Console.ReadKey(intercept: true);
                             switch (keyInfo.Key)
@@ -168,20 +219,32 @@ internal sealed class Program
                                     forceUpdate = true;
                                     break;
                                 case ConsoleKey.E:
-                                    await ExportToMarkdownAsync(aggregator, metricsAggregator, peerRegistry, HideAdmin, cts.Token).ConfigureAwait(false);
+                                    await ExportToMarkdownAsync(HideAdmin, cts.Token).ConfigureAwait(false);
                                     forceUpdate = true;
                                     break;
                             }
                         }
 
-                        if (forceUpdate || DateTime.UtcNow - lastUpdate > TimeSpan.FromSeconds(1))
+                        if (cts.Token.IsCancellationRequested)
                         {
-                            await UpdateDataAsync(aggregator, metricsAggregator, peerRegistry, mainLayout, cts.Token).ConfigureAwait(false);
-                            ctx.Refresh();
-                            lastUpdate = DateTime.UtcNow;
+                            break;
                         }
 
-                        // Short delay to keep the input loop highly responsive natively
+                        var timeElapsed = DateTime.UtcNow - lastUpdate > TimeSpan.FromSeconds(1);
+
+                        // Only evaluate string allocations and Spectre mutations if structurally required distinctly
+                        if (forceUpdate || timeElapsed)
+                        {
+                            UpdateLayout(mainLayout);
+                            ctx.Refresh();
+                            
+                            if (timeElapsed)
+                            {
+                                lastUpdate = DateTime.UtcNow;
+                            }
+                        }
+
+                        // Short delay keeping the strictly decoupled UI loop highly responsive natively
                         await Task.Delay(50, cts.Token).ConfigureAwait(false);
                     }
                 }).ConfigureAwait(false);
@@ -198,37 +261,25 @@ internal sealed class Program
         }
     }
 
-    private static async Task UpdateDataAsync(
-        ITelemetryAggregator aggregator,
-        IClusterMetricsAggregator metricsAggregator,
-        IPeerRegistry peerRegistry,
-        Layout layout,
-        CancellationToken cancellationToken)
+    private static void UpdateLayout(Layout layout)
     {
-        // 1. Fetch valid, connected active peers explicitly mapping bounds preventing phantom nodes evaluation natively
-        var activePeers = await peerRegistry.GetPeersByStatusAsync("admin", PeerStatus.Active, cancellationToken).ConfigureAwait(false);
-        var activePeerIds = activePeers.Select(p => p.Id.Value).ToHashSet();
+        HashSet<Guid> activePeerIds;
+        IReadOnlyCollection<ClusterMetricAggregation> clusterAggregations;
+        IReadOnlyCollection<Guid> trackedNodeIds;
 
-        var rawMetrics = aggregator.GetAllNodeMetrics().ToList();
-
-        // 2. Delegate internal historic mathematical projections explicitly to centralized domain limits
-        metricsAggregator.ProcessPayloads(rawMetrics);
+        lock (_stateLock)
+        {
+            activePeerIds = _latestActivePeerIds;
+            clusterAggregations = _latestAggregations;
+            trackedNodeIds = _latestTrackedNodeIds;
+        }
 
         // Sanitize selection natively
         if (SelectedPeerIndex >= CachedPeerList.Count)
         {
-            SelectedPeerIndex = CachedPeerList.Count - 1;
+            SelectedPeerIndex = Math.Max(0, CachedPeerList.Count - 1);
         }
         var activeSelection = CachedPeerList[SelectedPeerIndex];
-
-        // Map subset evaluating global vs distinct target peers strictly enforcing active topology mappings isolated purely for UI evaluation
-        var targetNodeIds = activeSelection == "All"
-            ? activePeerIds
-            : activePeerIds.Where(id => id.ToString("N").StartsWith(activeSelection)).ToHashSet();
-
-        // Project and compute local/global cluster aggregations (Sum, Max, Min, Per Second, Per Minute)
-        var clusterAggregations = metricsAggregator.AggregateClusterMetrics(targetNodeIds);
-        var trackedNodeIds = metricsAggregator.GetTrackedNodeIds();
 
         // Evaluate generic bounds tracking "All" element alongside strictly active dynamic peer evaluations seamlessly
         var updatedPeerList = new List<string> { "All" };
@@ -298,6 +349,25 @@ internal sealed class Program
         return grid;
     }
 
+    private readonly record struct MetricRenderRowDto(
+        ClusterMetricAggregation Aggregation,
+        bool IsTagRow,
+        string TagKey,
+        string TagValue,
+        bool IsLastTag) : IEquatable<MetricRenderRowDto>
+    {
+        public bool Equals(MetricRenderRowDto other)
+        {
+            return EqualityComparer<ClusterMetricAggregation>.Default.Equals(Aggregation, other.Aggregation) &&
+                   IsTagRow == other.IsTagRow &&
+                   TagKey == other.TagKey &&
+                   TagValue == other.TagValue &&
+                   IsLastTag == other.IsLastTag;
+        }
+
+        public override int GetHashCode() => HashCode.Combine(Aggregation, IsTagRow, TagKey, TagValue, IsLastTag);
+    }
+
     private static IRenderable RenderMetricsTable(IEnumerable<ClusterMetricAggregation> aggregations, bool hideAdmin)
     {
         var table = new Table()
@@ -320,40 +390,19 @@ internal sealed class Program
                                    t.Value.Equals("admin", StringComparison.OrdinalIgnoreCase)));
         }
 
-        // Flatten all generated visual bounds natively tracking generic mapping outputs
-        var allRows = new List<string[]>();
+        // Flatten all generated visual bounds structurally avoiding massive string format allocations natively
+        var flattened = new List<MetricRenderRowDto>();
 
         foreach (var agg in visibleAggregations.OrderBy(m => m.Name))
         {
-            allRows.Add(new[]
-            {
-                $"[bold white]{Markup.Escape(agg.Name)}[/]",
-                Markup.Escape(agg.Type),
-                FormatNumber(agg.Sum),
-                FormatNumber(agg.Min),
-                FormatNumber(agg.Max),
-                FormatNumber(agg.RatePerSecond),
-                FormatNumber(agg.RatePerMinute)
-            });
+            flattened.Add(new MetricRenderRowDto(agg, false, string.Empty, string.Empty, false));
 
             if (agg.Tags.Count > 0)
             {
                 var tagsList = agg.Tags.ToList();
                 for (int i = 0; i < tagsList.Count; i++)
                 {
-                    var tag = tagsList[i];
-                    var prefix = i == tagsList.Count - 1 ? "  └─ " : "  ├─ ";
-
-                    allRows.Add(new[]
-                    {
-                        $"[grey]{prefix}{Markup.Escape(tag.Key)}={Markup.Escape(tag.Value)}[/]",
-                        string.Empty,
-                        string.Empty,
-                        string.Empty,
-                        string.Empty,
-                        string.Empty,
-                        string.Empty
-                    });
+                    flattened.Add(new MetricRenderRowDto(agg, true, tagsList[i].Key, tagsList[i].Value, i == tagsList.Count - 1));
                 }
             }
         }
@@ -372,13 +421,13 @@ internal sealed class Program
         var maxVisibleRows = Math.Max(5, windowHeight - 14);
 
         // Safely bound and clamp scroll vectors naturally resolving distinct page projections
-        if (allRows.Count <= maxVisibleRows)
+        if (flattened.Count <= maxVisibleRows)
         {
             MetricsScrollOffset = 0;
         }
-        else if (MetricsScrollOffset > allRows.Count - maxVisibleRows)
+        else if (MetricsScrollOffset > flattened.Count - maxVisibleRows)
         {
-            MetricsScrollOffset = allRows.Count - maxVisibleRows;
+            MetricsScrollOffset = flattened.Count - maxVisibleRows;
         }
 
         if (MetricsScrollOffset < 0) 
@@ -386,44 +435,60 @@ internal sealed class Program
             MetricsScrollOffset = 0;
         }
 
-        var pagedRows = allRows.Skip(MetricsScrollOffset).Take(maxVisibleRows).ToList();
+        var pagedRows = flattened.Skip(MetricsScrollOffset).Take(maxVisibleRows).ToList();
 
+        // Perform active string format allocations distinctly targeting explicitly rendered nodes strictly freeing O(N) loop bounds cleanly
         foreach (var row in pagedRows)
         {
-            table.AddRow(row);
+            if (!row.IsTagRow)
+            {
+                table.AddRow(
+                    $"[bold white]{Markup.Escape(row.Aggregation.Name)}[/]",
+                    Markup.Escape(row.Aggregation.Type),
+                    FormatNumber(row.Aggregation.Sum),
+                    FormatNumber(row.Aggregation.Min),
+                    FormatNumber(row.Aggregation.Max),
+                    FormatNumber(row.Aggregation.RatePerSecond),
+                    FormatNumber(row.Aggregation.RatePerMinute)
+                );
+            }
+            else
+            {
+                var prefix = row.IsLastTag ? "  └─ " : "  ├─ ";
+                table.AddRow(
+                    $"[grey]{prefix}{Markup.Escape(row.TagKey)}={Markup.Escape(row.TagValue)}[/]",
+                    string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty
+                );
+            }
         }
 
-        if (allRows.Count > maxVisibleRows)
+        if (flattened.Count > maxVisibleRows)
         {
             var startDisplay = MetricsScrollOffset + 1;
             var endDisplay = MetricsScrollOffset + pagedRows.Count;
-            table.Caption($"[grey]Showing rows {startDisplay}-{endDisplay} of {allRows.Count}. Use PgUp/PgDn to scroll.[/]");
+            table.Caption($"[grey]Showing rows {startDisplay}-{endDisplay} of {flattened.Count}. Use PgUp/PgDn to scroll.[/]");
         }
 
         return table;
     }
 
-    private static async Task ExportToMarkdownAsync(
-        ITelemetryAggregator aggregator,
-        IClusterMetricsAggregator metricsAggregator,
-        IPeerRegistry peerRegistry,
-        bool hideAdmin,
-        CancellationToken cancellationToken)
+    private static async Task ExportToMarkdownAsync(bool hideAdmin, CancellationToken cancellationToken)
     {
         try
         {
-            var activePeers = await peerRegistry.GetPeersByStatusAsync("admin", PeerStatus.Active, cancellationToken).ConfigureAwait(false);
-            var activePeerIds = activePeers.Select(p => p.Id.Value).ToHashSet();
+            HashSet<Guid> activePeerIds;
+            IReadOnlyCollection<ClusterMetricAggregation> clusterAggregations;
 
-            var rawMetrics = aggregator.GetAllNodeMetrics().ToList();
-            metricsAggregator.ProcessPayloads(rawMetrics);
+            lock (_stateLock)
+            {
+                activePeerIds = _latestActivePeerIds;
+                clusterAggregations = _latestAggregations;
+            }
 
-            var activeSelection = CachedPeerList[SelectedPeerIndex];
+            var activeSelection = CachedPeerList.Count > SelectedPeerIndex ? CachedPeerList[SelectedPeerIndex] : "All";
             var targetNodeIds = activeSelection == "All"
                 ? activePeerIds
                 : activePeerIds.Where(id => id.ToString("N").StartsWith(activeSelection)).ToHashSet();
-
-            var clusterAggregations = metricsAggregator.AggregateClusterMetrics(targetNodeIds);
 
             var visibleAggregations = clusterAggregations.AsEnumerable();
 

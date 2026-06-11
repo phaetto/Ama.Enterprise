@@ -19,7 +19,7 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager, IDis
     private const string GlobalDocumentId = "feature-flags-singleton";
 
     private readonly ICrdtDocumentOrchestrator orchestrator;
-    private readonly ICrdtPatcher patcher;
+    private readonly IAsyncCrdtPatcher patcher;
     private readonly object syncRoot = new();
 
     private IDistributedCrdtDocument<FeatureFlagState>? globalDocument;
@@ -29,7 +29,7 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager, IDis
 
     public FeatureFlagClusterManager(
         ICrdtDocumentOrchestrator orchestrator,
-        ICrdtPatcher patcher)
+        IAsyncCrdtPatcher patcher)
     {
         this.orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         this.patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
@@ -37,49 +37,6 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager, IDis
         this.orchestrator.DocumentsChanged += OnOrchestratorDocumentsChanged;
         
         TryAttachDocument();
-    }
-
-    private void OnOrchestratorDocumentsChanged(object? sender, EventArgs e)
-    {
-        if (TryAttachDocument())
-        {
-            StateChanged?.Invoke(this, EventArgs.Empty);
-        }
-    }
-
-    private bool TryAttachDocument()
-    {
-        lock (syncRoot)
-        {
-            if (globalDocument != null)
-            {
-                return false;
-            }
-
-            globalDocument = orchestrator.GetDocument<FeatureFlagState>(GlobalDocumentId);
-
-            if (globalDocument != null)
-            {
-                globalDocument.StateChanged += (sender, args) => StateChanged?.Invoke(this, args);
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private IDistributedCrdtDocument<FeatureFlagState> GetRequiredDocument()
-    {
-        TryAttachDocument();
-        
-        lock (syncRoot)
-        {
-            if (globalDocument == null)
-            {
-                throw new InvalidOperationException("The global feature flag document has not been initialized yet by the application bootstrapper.");
-            }
-            return globalDocument;
-        }
     }
 
     /// <inheritdoc />
@@ -125,7 +82,7 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager, IDis
 
         var flag = new FeatureFlag(name, isEnabled, actualMetadata, audit, actualOwnership);
         
-        var operation = patcher.GenerateOperation(docManager.Document, x => x.Flags, new MapSetIntent(name, flag));
+        var operation = await patcher.GenerateOperationAsync(docManager.Document, x => x.Flags, new MapSetIntent(name, flag), cancellationToken).ConfigureAwait(false);
         var patch = new CrdtPatch(new[] { operation });
 
         await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
@@ -140,7 +97,7 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager, IDis
         }
 
         var docManager = GetRequiredDocument();
-        var operation = patcher.GenerateOperation(docManager.Document, x => x.Flags, new MapRemoveIntent(name));
+        var operation = await patcher.GenerateOperationAsync(docManager.Document, x => x.Flags, new MapRemoveIntent(name), cancellationToken).ConfigureAwait(false);
         var patch = new CrdtPatch(new[] { operation });
 
         await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
@@ -149,5 +106,48 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager, IDis
     public void Dispose()
     {
         orchestrator.DocumentsChanged -= OnOrchestratorDocumentsChanged;
+    }
+
+    private void OnOrchestratorDocumentsChanged(object? sender, EventArgs e)
+    {
+        if (TryAttachDocument())
+        {
+            StateChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private bool TryAttachDocument()
+    {
+        lock (syncRoot)
+        {
+            if (globalDocument != null)
+            {
+                return false;
+            }
+
+            globalDocument = orchestrator.GetDocument<FeatureFlagState>(GlobalDocumentId);
+
+            if (globalDocument != null)
+            {
+                globalDocument.StateChanged += (sender, args) => StateChanged?.Invoke(this, args);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private IDistributedCrdtDocument<FeatureFlagState> GetRequiredDocument()
+    {
+        TryAttachDocument();
+        
+        lock (syncRoot)
+        {
+            if (globalDocument == null)
+            {
+                throw new InvalidOperationException("The global feature flag document has not been initialized yet by the application bootstrapper.");
+            }
+            return globalDocument;
+        }
     }
 }

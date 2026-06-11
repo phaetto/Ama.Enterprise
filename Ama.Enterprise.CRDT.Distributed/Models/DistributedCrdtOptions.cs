@@ -41,15 +41,9 @@ public sealed class DistributedCrdtOptions
     /// Gets or sets the threshold limit for the total number of operations kept in the background journal.
     /// When this limit is exceeded, an aggressive trim is forced utilizing the local version vector,
     /// seamlessly offloading lagging peer synchronization entirely to fallback Snapshot mechanisms.
-    /// Defaults to 1000. Set to 0 to disable forced limits (relying strictly on safe GMVV trims).
+    /// Defaults to 5000. Set to 0 to disable forced limits (relying strictly on safe GMVV trims).
     /// </summary>
-    public int JournalTrimThreshold { get; set; } = 1000;
-
-    /// <summary>
-    /// Gets or sets the hard ceiling threshold for the journal size.
-    /// When the active journal count exceeds this limit, journal will trim aggresively in place.
-    /// </summary>
-    public int JournalHardCeilingTrimThreshold { get; set; } = 5000;
+    public int JournalTrimThreshold { get; set; } = 5000;
 
     /// <summary>
     /// Gets or sets the Time-To-Live (TTL) in seconds for CRDT metadata compaction.

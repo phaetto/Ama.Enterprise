@@ -18,7 +18,7 @@ using Ama.Enterprise.P2p.WebRTC.Models;
 public sealed class CrdtSignalingManager : ICrdtSignalingManager, IDisposable
 {
     private readonly ICrdtDocumentOrchestrator orchestrator;
-    private readonly ICrdtPatcher patcher;
+    private readonly IAsyncCrdtPatcher patcher;
     private readonly object syncRoot = new();
     private bool disposed;
 
@@ -32,13 +32,122 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager, IDisposable
     /// <param name="patcher">The patcher facilitating local state mutations.</param>
     public CrdtSignalingManager(
         ICrdtDocumentOrchestrator orchestrator,
-        ICrdtPatcher patcher)
+        IAsyncCrdtPatcher patcher)
     {
         this.orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         this.patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
 
         this.orchestrator.DocumentsChanged += OnOrchestratorChanged;
         SubscribeToActiveDocuments();
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, WebRtcInvitationOffer> GetOffers(string? documentId = null)
+    {
+        lock (syncRoot)
+        {
+            var doc = orchestrator.GetDocument<CrdtSignalingState>(ResolveDocumentId(documentId));
+            return doc != null 
+                ? new ReadOnlyDictionary<string, WebRtcInvitationOffer>(doc.Document.Data.Offers) 
+                : new ReadOnlyDictionary<string, WebRtcInvitationOffer>(new Dictionary<string, WebRtcInvitationOffer>());
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, WebRtcInvitationAnswer> GetAnswers(string? documentId = null)
+    {
+        lock (syncRoot)
+        {
+            var doc = orchestrator.GetDocument<CrdtSignalingState>(ResolveDocumentId(documentId));
+            return doc != null 
+                ? new ReadOnlyDictionary<string, WebRtcInvitationAnswer>(doc.Document.Data.Answers) 
+                : new ReadOnlyDictionary<string, WebRtcInvitationAnswer>(new Dictionary<string, WebRtcInvitationAnswer>());
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task SetOfferAsync(WebRtcInvitationOffer offer, string? documentId = null, CancellationToken cancellationToken = default)
+    {
+        var docId = ResolveDocumentId(documentId);
+        var doc = await GetOrCreateDocumentAsync(docId, cancellationToken).ConfigureAwait(false);
+        if (doc != null)
+        {
+            var key = offer.ConnectionId.ToString();
+            var operation = await patcher.GenerateOperationAsync(doc.Document, x => x.Offers, new MapSetIntent(key, offer), cancellationToken).ConfigureAwait(false);
+            var patch = new CrdtPatch(new[] { operation });
+
+            await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+            
+            // Instantly push this specific change across the network bypassing typical background intervals
+            await orchestrator.BroadcastPatchAsync(docId, patch, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task RemoveOfferAsync(Guid connectionId, string? documentId = null, CancellationToken cancellationToken = default)
+    {
+        var docId = ResolveDocumentId(documentId);
+        var doc = orchestrator.GetDocument<CrdtSignalingState>(docId);
+        if (doc != null)
+        {
+            var key = connectionId.ToString();
+            var operation = await patcher.GenerateOperationAsync(doc.Document, x => x.Offers, new MapRemoveIntent(key), cancellationToken).ConfigureAwait(false);
+            var patch = new CrdtPatch(new[] { operation });
+
+            await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+            await orchestrator.BroadcastPatchAsync(docId, patch, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task SetAnswerAsync(WebRtcInvitationAnswer answer, string? documentId = null, CancellationToken cancellationToken = default)
+    {
+        var docId = ResolveDocumentId(documentId);
+        var doc = await GetOrCreateDocumentAsync(docId, cancellationToken).ConfigureAwait(false);
+        if (doc != null)
+        {
+            var key = answer.ConnectionId.ToString();
+            var operation = await patcher.GenerateOperationAsync(doc.Document, x => x.Answers, new MapSetIntent(key, answer), cancellationToken).ConfigureAwait(false);
+            var patch = new CrdtPatch(new[] { operation });
+
+            await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+            
+            // Instantly push this specific change across the network bypassing typical background intervals
+            await orchestrator.BroadcastPatchAsync(docId, patch, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task RemoveAnswerAsync(Guid connectionId, string? documentId = null, CancellationToken cancellationToken = default)
+    {
+        var docId = ResolveDocumentId(documentId);
+        var doc = orchestrator.GetDocument<CrdtSignalingState>(docId);
+        if (doc != null)
+        {
+            var key = connectionId.ToString();
+            var operation = await patcher.GenerateOperationAsync(doc.Document, x => x.Answers, new MapRemoveIntent(key), cancellationToken).ConfigureAwait(false);
+            var patch = new CrdtPatch(new[] { operation });
+
+            await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+            await orchestrator.BroadcastPatchAsync(docId, patch, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (disposed) return;
+        disposed = true;
+
+        orchestrator.DocumentsChanged -= OnOrchestratorChanged;
+        var docs = orchestrator.GetActiveDocuments();
+        foreach (var d in docs)
+        {
+            if (d is IDistributedCrdtDocument<CrdtSignalingState> typedDoc)
+            {
+                typedDoc.StateChanged -= OnDocumentStateChanged;
+            }
+        }
     }
 
     private void OnOrchestratorChanged(object? sender, EventArgs e)
@@ -83,114 +192,5 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager, IDisposable
 
         await orchestrator.CreateDocumentAsync(documentId, Constants.SignalingDocumentTypeAlias, cancellationToken).ConfigureAwait(false);
         return orchestrator.GetDocument<CrdtSignalingState>(documentId);
-    }
-
-    /// <inheritdoc />
-    public IReadOnlyDictionary<string, WebRtcInvitationOffer> GetOffers(string? documentId = null)
-    {
-        lock (syncRoot)
-        {
-            var doc = orchestrator.GetDocument<CrdtSignalingState>(ResolveDocumentId(documentId));
-            return doc != null 
-                ? new ReadOnlyDictionary<string, WebRtcInvitationOffer>(doc.Document.Data.Offers) 
-                : new ReadOnlyDictionary<string, WebRtcInvitationOffer>(new Dictionary<string, WebRtcInvitationOffer>());
-        }
-    }
-
-    /// <inheritdoc />
-    public IReadOnlyDictionary<string, WebRtcInvitationAnswer> GetAnswers(string? documentId = null)
-    {
-        lock (syncRoot)
-        {
-            var doc = orchestrator.GetDocument<CrdtSignalingState>(ResolveDocumentId(documentId));
-            return doc != null 
-                ? new ReadOnlyDictionary<string, WebRtcInvitationAnswer>(doc.Document.Data.Answers) 
-                : new ReadOnlyDictionary<string, WebRtcInvitationAnswer>(new Dictionary<string, WebRtcInvitationAnswer>());
-        }
-    }
-
-    /// <inheritdoc />
-    public async Task SetOfferAsync(WebRtcInvitationOffer offer, string? documentId = null, CancellationToken cancellationToken = default)
-    {
-        var docId = ResolveDocumentId(documentId);
-        var doc = await GetOrCreateDocumentAsync(docId, cancellationToken).ConfigureAwait(false);
-        if (doc != null)
-        {
-            var key = offer.ConnectionId.ToString();
-            var operation = patcher.GenerateOperation(doc.Document, x => x.Offers, new MapSetIntent(key, offer));
-            var patch = new CrdtPatch(new[] { operation });
-
-            await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
-            
-            // Instantly push this specific change across the network bypassing typical background intervals
-            await orchestrator.BroadcastPatchAsync(docId, patch, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    /// <inheritdoc />
-    public async Task RemoveOfferAsync(Guid connectionId, string? documentId = null, CancellationToken cancellationToken = default)
-    {
-        var docId = ResolveDocumentId(documentId);
-        var doc = orchestrator.GetDocument<CrdtSignalingState>(docId);
-        if (doc != null)
-        {
-            var key = connectionId.ToString();
-            var operation = patcher.GenerateOperation(doc.Document, x => x.Offers, new MapRemoveIntent(key));
-            var patch = new CrdtPatch(new[] { operation });
-
-            await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
-            await orchestrator.BroadcastPatchAsync(docId, patch, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    /// <inheritdoc />
-    public async Task SetAnswerAsync(WebRtcInvitationAnswer answer, string? documentId = null, CancellationToken cancellationToken = default)
-    {
-        var docId = ResolveDocumentId(documentId);
-        var doc = await GetOrCreateDocumentAsync(docId, cancellationToken).ConfigureAwait(false);
-        if (doc != null)
-        {
-            var key = answer.ConnectionId.ToString();
-            var operation = patcher.GenerateOperation(doc.Document, x => x.Answers, new MapSetIntent(key, answer));
-            var patch = new CrdtPatch(new[] { operation });
-
-            await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
-            
-            // Instantly push this specific change across the network bypassing typical background intervals
-            await orchestrator.BroadcastPatchAsync(docId, patch, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    /// <inheritdoc />
-    public async Task RemoveAnswerAsync(Guid connectionId, string? documentId = null, CancellationToken cancellationToken = default)
-    {
-        var docId = ResolveDocumentId(documentId);
-        var doc = orchestrator.GetDocument<CrdtSignalingState>(docId);
-        if (doc != null)
-        {
-            var key = connectionId.ToString();
-            var operation = patcher.GenerateOperation(doc.Document, x => x.Answers, new MapRemoveIntent(key));
-            var patch = new CrdtPatch(new[] { operation });
-
-            await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
-            await orchestrator.BroadcastPatchAsync(docId, patch, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    /// <inheritdoc />
-    public void Dispose()
-    {
-        if (disposed) return;
-        disposed = true;
-
-        orchestrator.DocumentsChanged -= OnOrchestratorChanged;
-        var docs = orchestrator.GetActiveDocuments();
-        foreach (var d in docs)
-        {
-            if (d is IDistributedCrdtDocument<CrdtSignalingState> typedDoc)
-            {
-                typedDoc.StateChanged -= OnDocumentStateChanged;
-            }
-        }
     }
 }

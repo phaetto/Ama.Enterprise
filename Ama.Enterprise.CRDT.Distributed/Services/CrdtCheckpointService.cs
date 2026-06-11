@@ -123,13 +123,17 @@ public sealed class CrdtCheckpointService : BackgroundService
                         journalCount = await scope.Storage.GetJournalCountAsync(stoppingToken).ConfigureAwait(false);
                     }
 
-                    if (options.Value.JournalTrimThreshold > 0 && journalCount >= options.Value.JournalTrimThreshold)
+                    bool trimThresholdExceeded = options.Value.JournalTrimThreshold > 0 && journalCount >= options.Value.JournalTrimThreshold;
+
+                    if (trimThresholdExceeded)
                     {
-                        // Force an aggressive journal trim dropping all acknowledged local operations
-                        // and inherently offloading synchronization for lagging peers over to efficient full snapshot mechanisms.
-                        await scope.Storage.TrimAsync(safelyPersistedDvv.Versions.ToDictionary(), stoppingToken).ConfigureAwait(false);
-                        trimmedJournalsCounter.Add(1, tag);
-                        logger.LogWarning("[{ReplicaId}] Journal size ({Count}) exceeded threshold ({Threshold}). Forced an aggressive journal trim relying on fallback snapshot synchronization.", scope.ReplicaId, journalCount, options.Value.JournalTrimThreshold);
+                        // Force a journal trim up to the local safely persisted DVV, intentionally dropping lagging peers to fallback snapshots
+                        if (safelyPersistedDvv.Versions.Count > 0)
+                        {
+                            await scope.Storage.TrimAsync(safelyPersistedDvv.Versions.ToDictionary(), stoppingToken).ConfigureAwait(false);
+                            trimmedJournalsCounter.Add(1, tag);
+                            logger.LogWarning("[{ReplicaId}] Journal size ({Count}) exceeded threshold ({Threshold}). Forced an aggressive journal trim up to the local logical bounds.", scope.ReplicaId, journalCount, options.Value.JournalTrimThreshold);
+                        }
                     }
                     else
                     {
@@ -145,7 +149,7 @@ public sealed class CrdtCheckpointService : BackgroundService
 
                             if (gmvv.Count > 0)
                             {
-                                await scope.Storage.TrimAsync(gmvv, stoppingToken).ConfigureAwait(false);
+                                await scope.Storage.TrimAsync(gmvv.ToDictionary(), stoppingToken).ConfigureAwait(false);
                                 trimmedJournalsCounter.Add(1, tag);
                                 logger.LogTrace("[{ReplicaId}] Executed background journal trim matching Global Minimum Version Vector bounds.", scope.ReplicaId);
                             }

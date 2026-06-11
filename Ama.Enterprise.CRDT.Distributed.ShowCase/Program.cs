@@ -60,11 +60,10 @@ public static class Program
         {
             options.ActiveSyncEnabled = true;
             options.PeerEvictionTtlSeconds = 0;
-            options.CheckpointIntervalSeconds = 30;
             options.AntiEntropyInitialDelaySeconds = 2;
-            options.AntiEntropyIntervalSeconds = 5;
-            options.JournalHardCeilingTrimThreshold = 1000;
-            options.JournalTrimThreshold = 300;
+            options.AntiEntropyIntervalSeconds = 15;
+            options.CheckpointIntervalSeconds = 120;
+            options.JournalTrimThreshold = 15000;
         });
 
         services.AddDistributedCrdtReplica(replicaId);
@@ -106,6 +105,7 @@ public static class Program
             {
                 options.ListenPort = currentPort;
                 options.ListenHost = "127.0.0.1";
+                options.MaxMessageSize = 100 * 1024 * 1024;
             })
             .AddUdpPeerDiscovery(options =>
             {
@@ -123,37 +123,37 @@ public static class Program
                 options.HeartbeatInterval = TimeSpan.FromSeconds(5);
             });
 
-        services
-            .AddP2pTelemetryForwarder(options =>
-            {
-                options.TargetMeshId = "admin";
-                options.FlushInterval = TimeSpan.FromSeconds(1);
-                options.IncludedMeterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    string.Empty // Get ALL
-                };
-            })
-            .AddP2pMesh("admin")
-            .AddTcpTransport(options =>
-            {
-                options.ListenPort = currentAdminPort;
-                options.ListenHost = "127.0.0.1";
-            })
-            .AddUdpPeerDiscovery(options =>
-            {
-                options.MulticastAddress = "239.255.0.3";
-                options.MulticastPort = 8036;
-                options.DiscoveryInterval = TimeSpan.FromSeconds(1);
-                options.DiscoveryTimeout = TimeSpan.FromSeconds(1);
-            })
-            .AddUdpPeerHandshake(options =>
-            {
-                options.ListenPort = currentAdminHandshakePort;
-            })
-            .ConfigureFailureDetector(options =>
-            {
-                options.HeartbeatInterval = TimeSpan.FromSeconds(5);
-            });
+        //services
+        //    .AddP2pTelemetryForwarder(options =>
+        //    {
+        //        options.TargetMeshId = "admin";
+        //        options.FlushInterval = TimeSpan.FromSeconds(1);
+        //        options.IncludedMeterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        //        {
+        //            string.Empty // Get ALL
+        //        };
+        //    })
+        //    .AddP2pMesh("admin")
+        //    .AddTcpTransport(options =>
+        //    {
+        //        options.ListenPort = currentAdminPort;
+        //        options.ListenHost = "127.0.0.1";
+        //    })
+        //    .AddUdpPeerDiscovery(options =>
+        //    {
+        //        options.MulticastAddress = "239.255.0.3";
+        //        options.MulticastPort = 8036;
+        //        options.DiscoveryInterval = TimeSpan.FromSeconds(1);
+        //        options.DiscoveryTimeout = TimeSpan.FromSeconds(1);
+        //    })
+        //    .AddUdpPeerHandshake(options =>
+        //    {
+        //        options.ListenPort = currentAdminHandshakePort;
+        //    })
+        //    .ConfigureFailureDetector(options =>
+        //    {
+        //        options.HeartbeatInterval = TimeSpan.FromSeconds(5);
+        //    });
 
         await using var provider = services.BuildServiceProvider();
         var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("ShowCase");

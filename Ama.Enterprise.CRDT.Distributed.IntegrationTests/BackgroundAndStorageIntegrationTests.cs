@@ -166,6 +166,13 @@ public sealed class BackgroundAndStorageIntegrationTests
         await orchestrator.CreateDocumentAsync("storage-doc", "storage-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
+        // Explicitly start underlying hosted services tracking Active Sync pipelines dynamically.
+        var hostedServices = sp.GetServices<IHostedService>().ToList();
+        foreach (var svc in hostedServices)
+        {
+            await svc.StartAsync(CancellationToken.None);
+        }
+
         var docManager = orchestrator.GetDocument<StorageTestState>("storage-doc")!;
         
         // Prepare a valid empty patch
@@ -178,6 +185,15 @@ public sealed class BackgroundAndStorageIntegrationTests
         var populatedPatch = new CrdtPatch(new[] { op1 });
 
         await docManager.ApplyPatchAsync(populatedPatch, CancellationToken.None);
+
+        // Allow background thread channels sufficient time to ingest intentions and propagate multi-mesh broadcasts natively safely.
+        await Task.Delay(1000);
+
+        // Stop services cleanly
+        foreach (var svc in hostedServices)
+        {
+            await svc.StopAsync(CancellationToken.None);
+        }
 
         // Now verify it broadcasted
         mockP2p.Verify(p => p.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
