@@ -33,7 +33,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="Ama.CRDT" Version="4.0.0" />
-		<PackageReference Include="MessagePack" Version="3.1.6" />
+		<PackageReference Include="MessagePack" Version="3.1.7" />
 	</ItemGroup>
 
 	<ItemGroup>
