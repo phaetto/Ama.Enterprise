@@ -30,7 +30,7 @@ internal sealed class FeatureFlagBootstrapper(
                 var scope = scopeManager.GetOrCreateScope(reg.ReplicaId);
 
                 // Eagerly inject the global feature flags singleton into the document orchestrator pool for this isolated scope
-                await scope.Orchestrator.CreateDocumentAsync("feature-flags-singleton", "feature-flag", cancellationToken).ConfigureAwait(false);
+                await scope.Orchestrator.CreateDocumentAsync("ama-enterprise-feature-flags-singleton", "feature-flag", cancellationToken).ConfigureAwait(false);
                 
                 // Explicitly force map synchronization here at the bootstrapper edge initializing structures before host routing begins.
                 await scope.Orchestrator.SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);

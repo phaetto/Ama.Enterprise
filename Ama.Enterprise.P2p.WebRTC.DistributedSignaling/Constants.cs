@@ -8,7 +8,7 @@ public static class Constants
     /// <summary>
     /// The default global document identifier for the WebRTC signaling drop-box registry.
     /// </summary>
-    public const string DefaultSignalingDocumentId = "webrtc-signaling-hub";
+    public const string DefaultSignalingDocumentId = "ama-enterprise-webrtc-signaling-hub";
 
     /// <summary>
     /// The underlying CRDT document type alias mapped across the mesh network.

@@ -6,6 +6,7 @@ using Ama.Enterprise.P2p.WebRTC.DistributedSignaling.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using System;
+using System.Net.Http;
 
 /// <summary>
 /// Dependency injection extensions for bootstrapping the CRDT-backed WebRTC signaling hub.
@@ -19,7 +20,7 @@ public static class ServiceCollectionExtensions
     /// <returns>The updated service collection.</returns>
     public static IServiceCollection AddWebRtcDistributedSignaling(this IServiceCollection services)
     {
-        if (services == null) throw new ArgumentNullException(nameof(services));
+        ArgumentNullException.ThrowIfNull(services);
 
         // Register the typed document model in the CRDT dependency map
         services.AddDistributedDocumentType<CrdtSignalingState>(Constants.SignalingDocumentTypeAlias);
@@ -27,6 +28,26 @@ public static class ServiceCollectionExtensions
         // Map the singleton manager handling explicit out-of-band Drop-Box evaluations
         services.TryAddSingleton<ICrdtSignalingManager, CrdtSignalingManager>();
 
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the distributed WebRTC signaling HTTP client for developers to interact with the decentralized topology externally avoiding structural dependencies.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configureClient">Action to configure the underlying HTTP client, such as setting the base address bound to active nodes.</param>
+    /// <returns>The updated service collection.</returns>
+    public static IServiceCollection AddWebRtcDistributedSignalingClient(this IServiceCollection services, Action<HttpClient> configureClient)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configureClient);
+
+        // Register the named HttpClient configuration
+        services.AddHttpClient(nameof(IWebRtcDistributedSignalingClient), configureClient);
+        
+        // Register the client wrapper utilizing IHttpClientFactory as a Singleton natively
+        services.TryAddSingleton<IWebRtcDistributedSignalingClient, WebRtcDistributedSignalingClient>();
+        
         return services;
     }
 }

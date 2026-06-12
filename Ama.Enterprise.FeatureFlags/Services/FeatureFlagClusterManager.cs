@@ -16,7 +16,7 @@ using Ama.Enterprise.FeatureFlags.Models;
 /// </summary>
 public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager, IDisposable
 {
-    private const string GlobalDocumentId = "feature-flags-singleton";
+    private const string GlobalDocumentId = "ama-enterprise-feature-flags-singleton";
 
     private readonly ICrdtDocumentOrchestrator orchestrator;
     private readonly IAsyncCrdtPatcher patcher;

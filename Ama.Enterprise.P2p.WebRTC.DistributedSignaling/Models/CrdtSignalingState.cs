@@ -6,7 +6,7 @@ using Ama.Enterprise.P2p.WebRTC.Models;
 
 /// <summary>
 /// Root CRDT document model representing the WebRTC out-of-band signaling state.
-/// Acts as an in-memory drop-box for SDP Offers and Answers.
+/// Acts as an in-memory drop-box for SDP Offers, Answers, and active Join Intents.
 /// </summary>
 public sealed class CrdtSignalingState
 {
@@ -16,14 +16,20 @@ public sealed class CrdtSignalingState
     public string Id { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets the mapped sequence tracking active participant presence (Join Intents).
+    /// Keyed by PeerId as string, with the value tracking the UTC timestamp of intent creation.
+    /// </summary>
+    public Dictionary<string, long> JoinIntents { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// Gets or sets the mapped sequence tracking active SDP offers awaiting answers.
-    /// Keyed by ConnectionId as string.
+    /// Keyed dynamically by `{TargetPeerId}:{OffererPeerId}`.
     /// </summary>
     public Dictionary<string, WebRtcInvitationOffer> Offers { get; set; } = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Gets or sets the mapped sequence tracking active SDP answers awaiting collection by the offerer.
-    /// Keyed by ConnectionId as string.
+    /// Keyed dynamically by `{OffererPeerId}:{AnswererPeerId}`.
     /// </summary>
     public Dictionary<string, WebRtcInvitationAnswer> Answers { get; set; } = new(StringComparer.Ordinal);
 }

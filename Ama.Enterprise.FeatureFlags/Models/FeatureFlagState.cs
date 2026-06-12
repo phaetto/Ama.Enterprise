@@ -13,7 +13,7 @@ public sealed class FeatureFlagState : IEquatable<FeatureFlagState>
     /// <summary>
     /// Gets or sets the document identifier tracking singleton bounds across instances.
     /// </summary>
-    public string Id { get; set; } = "feature-flags-singleton";
+    public string Id { get; set; } = "ama-enterprise-feature-flags-singleton";
 
     /// <summary>
     /// A map of feature flags where the key is the flag name.

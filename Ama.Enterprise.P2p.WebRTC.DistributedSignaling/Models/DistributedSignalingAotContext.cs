@@ -1,5 +1,6 @@
 namespace Ama.Enterprise.P2p.WebRTC.DistributedSignaling.Models;
 
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 /// <summary>
@@ -10,6 +11,7 @@ using System.Text.Json.Serialization;
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     GenerationMode = JsonSourceGenerationMode.Default)]
 [JsonSerializable(typeof(CrdtSignalingState))]
+[JsonSerializable(typeof(Dictionary<string, long>))]
 internal partial class DistributedSignalingAotContext : JsonSerializerContext
 {
 }
