@@ -112,7 +112,6 @@ public sealed class WebRtcDistributedSignalingClient : IWebRtcDistributedSignali
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
         ArgumentException.ThrowIfNullOrWhiteSpace(routingKey);
-        ArgumentNullException.ThrowIfNull(offer);
         ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
 
         var url = BuildUrl(meshId, "offers", documentId, routingKey);
@@ -144,7 +143,6 @@ public sealed class WebRtcDistributedSignalingClient : IWebRtcDistributedSignali
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
         ArgumentException.ThrowIfNullOrWhiteSpace(routingKey);
-        ArgumentNullException.ThrowIfNull(answer);
         ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
 
         var url = BuildUrl(meshId, "answers", documentId, routingKey);

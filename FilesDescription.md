@@ -146,6 +146,7 @@
 | `$/Ama.Enterprise.P2p.AspNetCore/Services/Discovery/AspNetCorePeerHandshaker.cs` | Handles isolated ASP.NET Core Phase 2 HTTP discovery. |
 | `$/Ama.Enterprise.P2p.AspNetCore/Services/HttpInboundDispatcher.cs` | Thread-safe generic centralized HTTP orchestrator extracting mapped inbound pipelines. Consolidated from removed Http.Core package. |
 | `$/Ama.Enterprise.P2p.AspNetCore/Services/IHttpInboundDispatcher.cs` | Contract decoupling generic abstract HTTP routing frameworks. Consolidated from removed Http.Core package. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/CertificateNetworkIntegrationTests.cs` | Integration tests verifying network connectivity and drop routines mapping dynamically evaluated certificate authentication boundaries safely resolving decentralized topological rules. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/Handlers/TestMessageHandler.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/Models/TestNode.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/P2pAdvancedIntegrationTests.cs` | No description provided. |
@@ -249,6 +250,7 @@
 | `$/Ama.Enterprise.P2p.WebRTC/Services/WebRtcTransportListener.cs` | WebRTC specific listener registering asynchronous bindings targeting decentralized peer streams. Integrated metrics monitoring tracking inbound payloads and message volumes. |
 | `$/Ama.Enterprise.P2p/Ama.Enterprise.P2p.csproj` | Updated the NuGet description representing the core generic peer-to-peer mechanisms while extending metadata tag values to include 'networking'. |
 | `$/Ama.Enterprise.P2p/Constants.cs` | Global constants for the P2P module, including protocol versions and payload size limits. |
+| `$/Ama.Enterprise.P2p/Extensions/CertificateAuthenticatorServiceCollectionExtensions.cs` | Extension methods configuring the explicit dependency injection mapping for certificate-based peer authentication. |
 | `$/Ama.Enterprise.P2p/Extensions/DnsDiscoveryServiceCollectionExtensions.cs` | Extension methods for registering DNS-based active peer discovery components isolated via Keyed dependencies to specific mesh profiles. |
 | `$/Ama.Enterprise.P2p/Extensions/IP2pMeshBuilder.cs` | Interface for building and configuring specific Keyed DI mesh profiles. |
 | `$/Ama.Enterprise.P2p/Extensions/P2pMeshBuilder.cs` | Implementation of `IP2pMeshBuilder` handling multi-mesh dependency injection tracking. |
@@ -259,6 +261,7 @@
 | `$/Ama.Enterprise.P2p/Models/Algorithms/GossipMessageType.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Algorithms/GossipOptions.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Algorithms/PushPullGossipOptions.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Models/Core/CertificateAuthenticatorOptions.cs` | Configuration options for validating peer certificates during P2P authentication. |
 | `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
 | `$/Ama.Enterprise.P2p/Models/Core/IExtensibleDistributedPayload.cs` | Defines an interface to support the Tolerant Reader pattern, capturing unknown JSON and MessagePack elements to maintain forward compatibility across decentralized network versions without data loss. |
 | `$/Ama.Enterprise.P2p/Models/Core/IMeshMessage.cs` | Added required standardized `SenderId` bounding origin payloads decoupled traversing generic algorithms. |
@@ -282,6 +285,7 @@
 | `$/Ama.Enterprise.P2p/Services/Algorithms/GossipAlgorithm.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Algorithms/PushPullGossipAlgorithm.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/ApplicationPayloadDispatcher.cs` | Composite orchestrator dispatching to abstract domain observers. |
+| `$/Ama.Enterprise.P2p/Services/Core/CertificatePeerAuthenticator.cs` | Implementation of IPeerAuthenticator that validates X.509 certificates resolving invalid network requests. |
 | `$/Ama.Enterprise.P2p/Services/Core/DirectMessageSender.cs` | Implements localized targeted point-to-point generic delivery fetching active peering bindings avoiding overarching network broadcast storms. |
 | `$/Ama.Enterprise.P2p/Services/Core/IApplicationPayloadDispatcher.cs` | Dispatches targeted application payloads. |
 | `$/Ama.Enterprise.P2p/Services/Core/IApplicationPayloadHandler.cs` | Defines a domain-level consumer decoupling underlying distribution protocols. |
