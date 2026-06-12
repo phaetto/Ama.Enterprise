@@ -16,7 +16,6 @@ using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.UnitTests.Attributes;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Moq;
 using Shouldly;
@@ -165,11 +164,7 @@ public class EvictionEdgeCasesIntegrationTests
     public async Task EdgeCase4_SnapshotMerge_PreservesPendingLocalEdits()
     {
         // Arrange
-        var mockSerializer = new Mock<ICrdtSerializer>();
-        var sp = BuildNode("NodeA", services =>
-        {
-            services.Replace(ServiceDescriptor.Singleton(mockSerializer.Object));
-        });
+        var sp = BuildNode("NodeA");
         
         await StartNodeAsync(sp);
 
@@ -181,6 +176,7 @@ public class EvictionEdgeCasesIntegrationTests
 
         var docManager = orchestrator.GetDocument<TestState>("test-doc")!;
         var metadataManager = scope.ServiceProvider.GetRequiredService<ICrdtMetadataManager>();
+        var serializer = scope.ServiceProvider.GetRequiredService<ICrdtSerializer>();
         
         // Local node has pending unsynced edits
         docManager.Document.Data.Data = "Local Pending Edit";
@@ -188,11 +184,11 @@ public class EvictionEdgeCasesIntegrationTests
         var metadata = metadataManager.Initialize(new TestState());
         var snapshotDoc = new CrdtDocument<TestState>(new TestState { Id = "test-doc", Data = "Cluster Snapshot Data" }, metadata);
         
-        mockSerializer.Setup(s => s.DeserializeFromBytes<CrdtDocument<TestState>>(It.IsAny<byte[]>()))
-            .Returns(snapshotDoc);
+        // Utilize the real resolved AOT serializer context resolving real structured JSON boundaries correctly
+        var snapshotData = serializer.SerializeToBytes(snapshotDoc);
             
         // Act - Receive a snapshot message because we fell behind the journal bounds
-        await docManager.MergeSnapshotAsync(new byte[] { 1, 2, 3 }, new DottedVersionVector(), CancellationToken.None);
+        await docManager.MergeSnapshotAsync(snapshotData, new DottedVersionVector(), CancellationToken.None);
         
         // Assert - The snapshot merge intentionally preserves pending local edits safely
         docManager.Document.Data.Data.ShouldBe("Local Pending Edit");

@@ -1,6 +1,5 @@
 namespace Ama.Enterprise.P2p.WebRTC.AspNetCore.Models;
 
-using System;
 using Ama.Enterprise.P2p.AspNetCore.Models;
 
 /// <summary>
