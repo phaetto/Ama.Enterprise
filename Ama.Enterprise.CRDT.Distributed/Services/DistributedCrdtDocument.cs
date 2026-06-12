@@ -401,11 +401,11 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             CrdtDocument<TState> currentDoc;
             lock (syncRoot) { currentDoc = Document; }
 
-            // Evaluate local edits against the incoming snapshot truth base.
-            // Generates operations representing local changes which are then applied to the snapshot.
-            var patch = await patcher.GeneratePatchAsync(snapshotDoc, currentDoc.Data, cmd.CancellationToken).ConfigureAwait(false);
+            // Evaluate the differences needed to transform the current local state into the incoming snapshot state.
+            // This computes operations that represent missing cluster data and removes invalidated local branches.
+            var patch = await patcher.GeneratePatchAsync(currentDoc, snapshotDoc.Data, cmd.CancellationToken).ConfigureAwait(false);
 
-            var result = await applicator.ApplyPatchAsync(snapshotDoc, patch, cmd.CancellationToken).ConfigureAwait(false);
+            var result = await applicator.ApplyPatchAsync(currentDoc, patch, cmd.CancellationToken).ConfigureAwait(false);
 
             lock (syncRoot)
             {

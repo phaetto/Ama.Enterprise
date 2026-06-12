@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.Telemetry.Services;
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
@@ -197,7 +198,12 @@ public sealed class TelemetryForwarderService : BackgroundService
             Metrics = snapshots
         };
 
-        var payloadBytes = serializer.SerializeToBytes(payload);
+        var rawBytes = serializer.SerializeToBytes(payload);
+        
+        // Prepend the 4-byte MagicHeader outside of the MessagePack boundary to prevent exceptions
+        var payloadBytes = new byte[rawBytes.Length + 4];
+        BinaryPrimitives.WriteInt32LittleEndian(payloadBytes.AsSpan(), TelemetryPayloadDto.MagicHeader);
+        rawBytes.AsSpan().CopyTo(payloadBytes.AsSpan(4));
 
         logger.LogDebug("Evaluating {Count} telemetry snapshot boundaries broadcasting isolated metrics natively.", snapshots.Count);
 

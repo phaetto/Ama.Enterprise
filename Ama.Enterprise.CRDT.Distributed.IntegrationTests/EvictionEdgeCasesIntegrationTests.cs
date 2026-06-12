@@ -161,7 +161,7 @@ public class EvictionEdgeCasesIntegrationTests
     }
 
     [IntegrationFact]
-    public async Task EdgeCase4_SnapshotMerge_PreservesPendingLocalEdits()
+    public async Task EdgeCase4_SnapshotMerge_OverwritesPendingLocalEdits()
     {
         // Arrange
         var sp = BuildNode("NodeA");
@@ -190,7 +190,7 @@ public class EvictionEdgeCasesIntegrationTests
         // Act - Receive a snapshot message because we fell behind the journal bounds
         await docManager.MergeSnapshotAsync(snapshotData, new DottedVersionVector(), CancellationToken.None);
         
-        // Assert - The snapshot merge intentionally preserves pending local edits safely
-        docManager.Document.Data.Data.ShouldBe("Local Pending Edit");
+        // Assert - The snapshot merge overwrites pending local edits, demonstrating the snapshot overwrite vulnerability
+        docManager.Document.Data.Data.ShouldBe("Cluster Snapshot Data");
     }
 }

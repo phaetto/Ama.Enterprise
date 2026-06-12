@@ -9,6 +9,12 @@ using System.Collections.Generic;
 public sealed record TelemetryPayloadDto : IEquatable<TelemetryPayloadDto>
 {
     /// <summary>
+    /// Unique magic header prefix used to identify telemetry payloads over the network bypassing deserialization exceptions.
+    /// Hexadecimal equivalent of ASCII "TELE" (0x454C4554).
+    /// </summary>
+    public const int MagicHeader = 0x454C4554;
+
+    /// <summary>
     /// Globally distinct network identity originating generic metric clusters internally.
     /// </summary>
     public Guid NodeId { get; init; }

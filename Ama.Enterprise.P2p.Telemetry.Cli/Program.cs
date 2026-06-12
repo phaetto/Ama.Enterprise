@@ -11,33 +11,47 @@ using Ama.Enterprise.P2p.Telemetry.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Spectre.Console;
-using Spectre.Console.Rendering;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Net.NetworkInformation;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Terminal.Gui.App;
+using Terminal.Gui.ViewBase;
+using Terminal.Gui.Views;
 
 internal sealed class Program
 {
-    private static readonly List<string> CachedPeerList = new() { "All" };
-    private static int SelectedPeerIndex = 0;
-    private static bool HideAdmin = true;
-    private static string StatusMessage = "Running normally.";
-    private static int MetricsScrollOffset = 0;
+    private static int selectedPeerIndex = 0;
+    private static string currentSelection = "All";
+    private static bool hideAdmin = true;
+    private static string statusMessage = "Running normally.";
 
-    // Shared thread-safe state ensuring decoupled UI bounds natively explicitly
-    private static readonly object _stateLock = new object();
-    private static HashSet<Guid> _latestActivePeerIds = new();
-    private static IReadOnlyCollection<ClusterMetricAggregation> _latestAggregations = Array.Empty<ClusterMetricAggregation>();
-    private static IReadOnlyCollection<Guid> _latestTrackedNodeIds = Array.Empty<Guid>();
+    // Shared thread-safe state ensuring decoupled UI bounds
+    private static readonly object stateLock = new object();
+    private static HashSet<Guid> latestActivePeerIds = new();
+    private static IReadOnlyCollection<ClusterMetricAggregation> latestAggregations = Array.Empty<ClusterMetricAggregation>();
+    private static IReadOnlyCollection<Guid> latestTrackedNodeIds = Array.Empty<Guid>();
+
+    private static IList<string> peersList = new List<string>();
+    private static IList<string> metricsList = new List<string>();
+
+    // UI Controls
+    private static ListView? peersListView;
+    private static ListView? metricsListView;
+    private static FrameView? leftFrame;
+    private static FrameView? rightFrame;
+    private static Label? statusLabel;
+    private static Label? headerLabel;
 
     public static async Task Main(string[] args)
     {
+        ArgumentNullException.ThrowIfNull(args);
+
         var services = new ServiceCollection();
 
         // Suppress logging to avoid overwriting our in-place console UI
@@ -62,7 +76,7 @@ internal sealed class Program
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IClusterMetricsAggregator, ClusterMetricsAggregator>();
 
-        // Map identically configured "admin" network boundaries to join the telemetry cluster natively
+        // Map identically configured "admin" network boundaries to join the telemetry cluster
         services
             .AddP2pTelemetryAggregator("admin")
             .AddP2pMesh("admin")
@@ -73,7 +87,7 @@ internal sealed class Program
             })
             .AddUdpPeerDiscovery(options =>
             {
-                options.MulticastAddress = "239.255.0.3"; // Explicitly matches the ShowCase "admin" telemetry mesh bounds
+                options.MulticastAddress = "239.255.0.3"; // Matches the ShowCase "admin" telemetry mesh bounds
                 options.MulticastPort = 8036;
                 options.DiscoveryInterval = TimeSpan.FromSeconds(1);
                 options.DiscoveryTimeout = TimeSpan.FromSeconds(1);
@@ -95,6 +109,7 @@ internal sealed class Program
         {
             e.Cancel = true;
             cts.Cancel();
+            Application.Invoke(() => Application.RequestStop());
         };
 
         try
@@ -108,7 +123,9 @@ internal sealed class Program
             var metricsAggregator = provider.GetRequiredService<IClusterMetricsAggregator>();
             var peerRegistry = provider.GetRequiredService<IPeerRegistry>();
 
-            // Distinct background processor explicitly detaching ALL networking, async locking, and mathematics from the Spectre UI frame natively
+            peersList.Add("All");
+
+            // Distinct background processor detaching networking, locking, and mathematics from the UI thread
             _ = Task.Run(async () =>
             {
                 while (!cts.Token.IsCancellationRequested)
@@ -121,13 +138,7 @@ internal sealed class Program
                         var rawMetrics = aggregator.GetAllNodeMetrics().ToList();
                         metricsAggregator.ProcessPayloads(rawMetrics);
 
-                        string activeSelection;
-                        lock (_stateLock)
-                        {
-                            activeSelection = CachedPeerList.Count > 0 && SelectedPeerIndex < CachedPeerList.Count 
-                                ? CachedPeerList[SelectedPeerIndex] 
-                                : "All";
-                        }
+                        string activeSelection = currentSelection;
 
                         var targetNodeIds = activeSelection == "All"
                             ? activePeerIds
@@ -136,123 +147,129 @@ internal sealed class Program
                         var clusterAggregations = metricsAggregator.AggregateClusterMetrics(targetNodeIds).ToList();
                         var trackedNodeIds = metricsAggregator.GetTrackedNodeIds().ToList();
 
-                        lock (_stateLock)
+                        lock (stateLock)
                         {
-                            _latestActivePeerIds = activePeerIds;
-                            _latestAggregations = clusterAggregations;
-                            _latestTrackedNodeIds = trackedNodeIds;
+                            latestActivePeerIds = activePeerIds;
+                            latestAggregations = clusterAggregations;
+                            latestTrackedNodeIds = trackedNodeIds;
                         }
+
+                        // Shift heavy UI string building to the background thread avoiding UI stuttering
+                        bool hideAdminLocal = hideAdmin;
+                        
+                        var updatedPeerList = new List<string> { "All" };
+                        updatedPeerList.AddRange(trackedNodeIds.Where(k => activePeerIds.Contains(k)).Select(k => k.ToString("N")[..8]).OrderBy(k => k));
+
+                        var metricsSource = BuildMetricsList(clusterAggregations, hideAdminLocal);
+
+                        Application.Invoke(() => {
+                            UpdateUI(updatedPeerList, metricsSource, hideAdminLocal);
+                        });
                     }
                     catch (OperationCanceledException) { }
                     catch (Exception ex)
                     {
-                        StatusMessage = $"[bold red]Background error: {Markup.Escape(ex.Message)}[/]";
+                        statusMessage = $"Background error: {ex.Message}";
                     }
 
-                    await Task.Delay(1000, cts.Token).ConfigureAwait(false);
+                    await Task.Delay(500, cts.Token).ConfigureAwait(false);
                 }
             }, cts.Token);
 
-            AnsiConsole.Clear();
+            Application.Init();
+            
+            var top = new Window { 
+                Title = "Telemetry CLI", 
+                Width = Dim.Fill(), 
+                Height = Dim.Fill() 
+            };
 
-            var mainLayout = new Layout("Main")
-                .SplitRows(
-                    new Layout("Header").Size(3),
-                    new Layout("Content")
-                );
+            var headerFrame = new FrameView {
+                Title = "Status",
+                X = 0, 
+                Y = 0, 
+                Width = Dim.Fill(), 
+                Height = 4
+            };
+            
+            headerLabel = new Label {
+                Text = "Shortcuts: Q Quit | E Export | H Toggle Admin | Tab Switch Panel",
+                X = 0, 
+                Y = 0, 
+                Width = Dim.Fill(), 
+                Height = 1
+            };
+            
+            statusLabel = new Label {
+                Text = "Status: " + statusMessage,
+                X = 0, 
+                Y = 1, 
+                Width = Dim.Fill(), 
+                Height = 1
+            };
+            
+            headerFrame.Add(headerLabel, statusLabel);
 
-            mainLayout["Content"].SplitColumns(
-                new Layout("Left").Ratio(1),
-                new Layout("Right").Ratio(7)
-            );
+            leftFrame = new FrameView {
+                Title = "Active Peers (0)",
+                X = 0, 
+                Y = Pos.Bottom(headerFrame), 
+                Width = Dim.Percent(25), 
+                Height = Dim.Fill()
+            };
+            
+            peersListView = new ListView {
+                X = 0, 
+                Y = 0, 
+                Width = Dim.Fill(), 
+                Height = Dim.Fill()
+            };
+            peersListView.SetSource(new ObservableCollection<string>(peersList));
+            leftFrame.Add(peersListView);
 
-            await AnsiConsole.Live(mainLayout)
-                .AutoClear(false)
-                .Overflow(VerticalOverflow.Ellipsis)
-                .Cropping(VerticalOverflowCropping.Bottom)
-                .StartAsync(async ctx =>
-                {
-                    var lastUpdate = DateTime.MinValue;
+            rightFrame = new FrameView {
+                Title = "Metrics View: All",
+                X = Pos.Right(leftFrame), 
+                Y = Pos.Bottom(headerFrame), 
+                Width = Dim.Fill(), 
+                Height = Dim.Fill()
+            };
+            
+            metricsListView = new ListView {
+                X = 0, 
+                Y = 0, 
+                Width = Dim.Fill(), 
+                Height = Dim.Fill()
+            };
+            metricsListView.SetSource(new ObservableCollection<string>(metricsList));
+            rightFrame.Add(metricsListView);
 
-                    while (!cts.Token.IsCancellationRequested)
-                    {
-                        var forceUpdate = false;
+            top.Add(headerFrame, leftFrame, rightFrame);
 
-                        // Drain the entire input queue explicitly preventing lag from queued input events
-                        while (Console.KeyAvailable)
-                        {
-                            var keyInfo = Console.ReadKey(intercept: true);
-                            switch (keyInfo.Key)
-                            {
-                                case ConsoleKey.Q:
-                                    cts.Cancel();
-                                    break;
-                                case ConsoleKey.H:
-                                    HideAdmin = !HideAdmin;
-                                    MetricsScrollOffset = 0;
-                                    forceUpdate = true;
-                                    break;
-                                case ConsoleKey.UpArrow:
-                                    if (SelectedPeerIndex > 0) SelectedPeerIndex--;
-                                    MetricsScrollOffset = 0;
-                                    forceUpdate = true;
-                                    break;
-                                case ConsoleKey.DownArrow:
-                                    if (SelectedPeerIndex < CachedPeerList.Count - 1) SelectedPeerIndex++;
-                                    MetricsScrollOffset = 0;
-                                    forceUpdate = true;
-                                    break;
-                                case ConsoleKey.PageUp:
-                                    MetricsScrollOffset -= 10;
-                                    forceUpdate = true;
-                                    break;
-                                case ConsoleKey.PageDown:
-                                    MetricsScrollOffset += 10;
-                                    forceUpdate = true;
-                                    break;
-                                case ConsoleKey.Home:
-                                    MetricsScrollOffset = 0;
-                                    forceUpdate = true;
-                                    break;
-                                case ConsoleKey.End:
-                                    MetricsScrollOffset = int.MaxValue; // Safely clamped in the render function
-                                    forceUpdate = true;
-                                    break;
-                                case ConsoleKey.E:
-                                    await ExportToMarkdownAsync(HideAdmin, cts.Token).ConfigureAwait(false);
-                                    forceUpdate = true;
-                                    break;
-                            }
-                        }
+            top.KeyDown += (sender, e) => {
+                var keyStr = e.ToString()?.ToUpperInvariant() ?? "";
+                
+                if (keyStr == "Q" || keyStr == "SHIFT+Q") {
+                    cts.Cancel();
+                    Application.RequestStop();
+                    e.Handled = true;
+                } else if (keyStr == "H" || keyStr == "SHIFT+H") {
+                    hideAdmin = !hideAdmin;
+                    // Will update automatically on the next background tick avoiding UI thread blocks
+                    e.Handled = true;
+                } else if (keyStr == "E" || keyStr == "SHIFT+E") {
+                    _ = ExportToMarkdownAsync(hideAdmin, cts.Token);
+                    e.Handled = true;
+                }
+            };
 
-                        if (cts.Token.IsCancellationRequested)
-                        {
-                            break;
-                        }
-
-                        var timeElapsed = DateTime.UtcNow - lastUpdate > TimeSpan.FromSeconds(1);
-
-                        // Only evaluate string allocations and Spectre mutations if structurally required distinctly
-                        if (forceUpdate || timeElapsed)
-                        {
-                            UpdateLayout(mainLayout);
-                            ctx.Refresh();
-                            
-                            if (timeElapsed)
-                            {
-                                lastUpdate = DateTime.UtcNow;
-                            }
-                        }
-
-                        // Short delay keeping the strictly decoupled UI loop highly responsive natively
-                        await Task.Delay(50, cts.Token).ConfigureAwait(false);
-                    }
-                }).ConfigureAwait(false);
+            Application.Run(top);
+            Application.Shutdown();
         }
         catch (TaskCanceledException) { }
         finally
         {
-            AnsiConsole.MarkupLine("[bold yellow]Shutting down Telemetry CLI...[/]");
+            Console.WriteLine("Shutting down Telemetry CLI...");
 
             foreach (var service in hostedServices)
             {
@@ -261,238 +278,173 @@ internal sealed class Program
         }
     }
 
-    private static void UpdateLayout(Layout layout)
+    private static void UpdateUI(IList<string> updatedPeerList, IList<string> metricsSource, bool hideAdminLocal)
     {
-        HashSet<Guid> activePeerIds;
-        IReadOnlyCollection<ClusterMetricAggregation> clusterAggregations;
-        IReadOnlyCollection<Guid> trackedNodeIds;
+        ArgumentNullException.ThrowIfNull(updatedPeerList);
+        ArgumentNullException.ThrowIfNull(metricsSource);
 
-        lock (_stateLock)
+        if (statusLabel != null)
         {
-            activePeerIds = _latestActivePeerIds;
-            clusterAggregations = _latestAggregations;
-            trackedNodeIds = _latestTrackedNodeIds;
+            statusLabel.Text = "Status: " + statusMessage;
         }
 
-        // Sanitize selection natively
-        if (SelectedPeerIndex >= CachedPeerList.Count)
+        if (peersListView != null)
         {
-            SelectedPeerIndex = Math.Max(0, CachedPeerList.Count - 1);
+            // Extracted value verifying nullable bounds evaluating int
+            var currentSelectedItem = peersListView.SelectedItem;
+            if (currentSelectedItem.HasValue && currentSelectedItem.Value >= 0 && currentSelectedItem.Value < peersList.Count)
+            {
+                selectedPeerIndex = currentSelectedItem.Value;
+            }
         }
-        var activeSelection = CachedPeerList[SelectedPeerIndex];
 
-        // Evaluate generic bounds tracking "All" element alongside strictly active dynamic peer evaluations seamlessly
-        var updatedPeerList = new List<string> { "All" };
-        updatedPeerList.AddRange(trackedNodeIds.Where(k => activePeerIds.Contains(k)).Select(k => k.ToString("N")[..8]).OrderBy(k => k));
+        if (selectedPeerIndex >= peersList.Count && peersList.Count > 0)
+        {
+            selectedPeerIndex = Math.Max(0, peersList.Count - 1);
+        }
+        
+        var activeSelection = peersList.Count > 0 && selectedPeerIndex >= 0 ? peersList[selectedPeerIndex] : "All";
+        currentSelection = activeSelection;
 
-        bool listChanged = CachedPeerList.Count != updatedPeerList.Count || !CachedPeerList.SequenceEqual(updatedPeerList);
+        bool listChanged = peersList.Count != updatedPeerList.Count || !peersList.SequenceEqual(updatedPeerList);
 
         if (listChanged)
         {
-            CachedPeerList.Clear();
-            CachedPeerList.AddRange(updatedPeerList);
-
-            var targetIndex = CachedPeerList.IndexOf(activeSelection);
+            peersList = updatedPeerList;
+            
+            var targetIndex = peersList.IndexOf(activeSelection);
             if (targetIndex >= 0)
             {
-                SelectedPeerIndex = targetIndex;
+                selectedPeerIndex = targetIndex;
             }
             else
             {
-                SelectedPeerIndex = 0;
+                selectedPeerIndex = 0;
                 activeSelection = "All";
+                currentSelection = activeSelection;
             }
-        }
 
-        var activeStateCount = trackedNodeIds.Count(k => activePeerIds.Contains(k));
-        var headerText = $"[bold yellow]Shortcuts:[/] [green]Q[/] Quit | [green]E[/] Export | [green]H[/] Toggle Admin ({(HideAdmin ? "On" : "Off")}) | [green]↑/↓[/] Select Peer | [green]PgUp/PgDn[/] Scroll Metrics\n[bold blue]Status:[/] {StatusMessage}";
-
-        layout["Header"].Update(
-            new Panel(new Markup(headerText))
-                .Expand()
-                .Border(BoxBorder.Rounded)
-        );
-
-        layout["Left"].Update(
-            new Panel(RenderPeersList(activeStateCount))
-                .Header($"Active Peers ({activeStateCount})")
-                .Expand()
-                .Border(BoxBorder.Rounded)
-        );
-
-        layout["Right"].Update(
-            new Panel(RenderMetricsTable(clusterAggregations, HideAdmin))
-                .Header($"Metrics View: {activeSelection}")
-                .Expand()
-                .Border(BoxBorder.Rounded)
-        );
-    }
-
-    private static IRenderable RenderPeersList(int activeStateCount)
-    {
-        var grid = new Grid();
-        grid.AddColumn(new GridColumn().NoWrap());
-
-        for (int i = 0; i < CachedPeerList.Count; i++)
-        {
-            var peer = CachedPeerList[i];
-            if (i == SelectedPeerIndex)
+            if (peersListView != null)
             {
-                grid.AddRow(new Markup($"[bold green]> {peer}[/]"));
-            }
-            else
-            {
-                grid.AddRow(new Markup($"  {peer}"));
+                // Replaces the source atomically bypassing layout events caused by ObservableCollection
+                peersListView.SetSource(new ObservableCollection<string>(peersList));
+                if (selectedPeerIndex >= 0 && selectedPeerIndex < peersList.Count)
+                {
+                    peersListView.SelectedItem = selectedPeerIndex;
+                }
+                
+                peersListView.SetNeedsDraw();
             }
         }
 
-        return grid;
-    }
+        var activeStateCount = Math.Max(0, updatedPeerList.Count - 1);
+        
+        if (leftFrame != null)
+            leftFrame.Title = $"Active Peers ({activeStateCount})";
+            
+        if (rightFrame != null)
+            rightFrame.Title = $"Metrics View: {activeSelection} " + (hideAdminLocal ? "(Admin Hidden)" : "(Admin Shown)");
 
-    private readonly record struct MetricRenderRowDto(
-        ClusterMetricAggregation Aggregation,
-        bool IsTagRow,
-        string TagKey,
-        string TagValue,
-        bool IsLastTag) : IEquatable<MetricRenderRowDto>
-    {
-        public bool Equals(MetricRenderRowDto other)
+        if (metricsListView != null)
         {
-            return EqualityComparer<ClusterMetricAggregation>.Default.Equals(Aggregation, other.Aggregation) &&
-                   IsTagRow == other.IsTagRow &&
-                   TagKey == other.TagKey &&
-                   TagValue == other.TagValue &&
-                   IsLastTag == other.IsLastTag;
+            bool metricsChanged = metricsList.Count != metricsSource.Count || !metricsList.SequenceEqual(metricsSource);
+            
+            if (metricsChanged)
+            {
+                metricsList = metricsSource;
+                
+                // Track scrolling positions preserving UI layout across atomic source assignments
+                var selectedItem = metricsListView.SelectedItem;
+                
+                // Atomic List updates avoid rendering calculation per added element maximizing frame rates
+                metricsListView.SetSource(new ObservableCollection<string>(metricsList));
+                
+                if (selectedItem.HasValue && selectedItem.Value < metricsList.Count)
+                {
+                    metricsListView.SelectedItem = selectedItem.Value;
+                }
+                    
+                metricsListView.SetNeedsDraw();
+            }
         }
-
-        public override int GetHashCode() => HashCode.Combine(Aggregation, IsTagRow, TagKey, TagValue, IsLastTag);
     }
 
-    private static IRenderable RenderMetricsTable(IEnumerable<ClusterMetricAggregation> aggregations, bool hideAdmin)
+    private static IList<string> BuildMetricsList(IEnumerable<ClusterMetricAggregation> aggregations, bool adminHidden)
     {
-        var table = new Table()
-            .Expand()
-            .Border(TableBorder.Minimal)
-            .AddColumn("[bold]Metric[/]")
-            .AddColumn("[bold]Type[/]")
-            .AddColumn(new TableColumn("[bold]Sum[/]").RightAligned())
-            .AddColumn(new TableColumn("[bold]Min[/]").RightAligned())
-            .AddColumn(new TableColumn("[bold]Max[/]").RightAligned())
-            .AddColumn(new TableColumn("[bold]Rate/Sec[/]").RightAligned())
-            .AddColumn(new TableColumn("[bold]Rate/Min[/]").RightAligned());
+        ArgumentNullException.ThrowIfNull(aggregations);
+
+        var list = new List<string>
+        {
+            string.Format("{0,-35} | {1,-10} | {2,12} | {3,12} | {4,12} | {5,12} | {6,12}",
+                "Metric", "Type", "Sum", "Min", "Max", "Rate/Sec", "Rate/Min"),
+            new string('-', 125)
+        };
 
         var visibleAggregations = aggregations;
 
-        if (hideAdmin)
+        if (adminHidden)
         {
             visibleAggregations = visibleAggregations.Where(agg =>
                 !agg.Tags.Any(t => t.Key.Equals("mesh_id", StringComparison.OrdinalIgnoreCase) && 
                                    t.Value.Equals("admin", StringComparison.OrdinalIgnoreCase)));
         }
 
-        // Flatten all generated visual bounds structurally avoiding massive string format allocations natively
-        var flattened = new List<MetricRenderRowDto>();
-
         foreach (var agg in visibleAggregations.OrderBy(m => m.Name))
         {
-            flattened.Add(new MetricRenderRowDto(agg, false, string.Empty, string.Empty, false));
+            list.Add(string.Format("{0,-35} | {1,-10} | {2,12} | {3,12} | {4,12} | {5,12} | {6,12}",
+                Truncate(agg.Name, 35),
+                Truncate(agg.Type, 10),
+                FormatNumber(agg.Sum),
+                FormatNumber(agg.Min),
+                FormatNumber(agg.Max),
+                FormatNumber(agg.RatePerSecond),
+                FormatNumber(agg.RatePerMinute)));
 
             if (agg.Tags.Count > 0)
             {
                 var tagsList = agg.Tags.ToList();
                 for (int i = 0; i < tagsList.Count; i++)
                 {
-                    flattened.Add(new MetricRenderRowDto(agg, true, tagsList[i].Key, tagsList[i].Value, i == tagsList.Count - 1));
+                    var prefix = (i == tagsList.Count - 1) ? "  └─ " : "  ├─ ";
+                    var tagText = $"{prefix}{tagsList[i].Key}={tagsList[i].Value}";
+                    list.Add(tagText);
                 }
             }
         }
 
-        // Calculate generic viewport constraints based on runtime terminal scale organically
-        var windowHeight = 24;
-        try
-        {
-            windowHeight = Console.WindowHeight;
-        }
-        catch
-        {
-            // Fallback for headless environments explicitly ignoring constraints
-        }
-
-        var maxVisibleRows = Math.Max(5, windowHeight - 14);
-
-        // Safely bound and clamp scroll vectors naturally resolving distinct page projections
-        if (flattened.Count <= maxVisibleRows)
-        {
-            MetricsScrollOffset = 0;
-        }
-        else if (MetricsScrollOffset > flattened.Count - maxVisibleRows)
-        {
-            MetricsScrollOffset = flattened.Count - maxVisibleRows;
-        }
-
-        if (MetricsScrollOffset < 0) 
-        {
-            MetricsScrollOffset = 0;
-        }
-
-        var pagedRows = flattened.Skip(MetricsScrollOffset).Take(maxVisibleRows).ToList();
-
-        // Perform active string format allocations distinctly targeting explicitly rendered nodes strictly freeing O(N) loop bounds cleanly
-        foreach (var row in pagedRows)
-        {
-            if (!row.IsTagRow)
-            {
-                table.AddRow(
-                    $"[bold white]{Markup.Escape(row.Aggregation.Name)}[/]",
-                    Markup.Escape(row.Aggregation.Type),
-                    FormatNumber(row.Aggregation.Sum),
-                    FormatNumber(row.Aggregation.Min),
-                    FormatNumber(row.Aggregation.Max),
-                    FormatNumber(row.Aggregation.RatePerSecond),
-                    FormatNumber(row.Aggregation.RatePerMinute)
-                );
-            }
-            else
-            {
-                var prefix = row.IsLastTag ? "  └─ " : "  ├─ ";
-                table.AddRow(
-                    $"[grey]{prefix}{Markup.Escape(row.TagKey)}={Markup.Escape(row.TagValue)}[/]",
-                    string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty
-                );
-            }
-        }
-
-        if (flattened.Count > maxVisibleRows)
-        {
-            var startDisplay = MetricsScrollOffset + 1;
-            var endDisplay = MetricsScrollOffset + pagedRows.Count;
-            table.Caption($"[grey]Showing rows {startDisplay}-{endDisplay} of {flattened.Count}. Use PgUp/PgDn to scroll.[/]");
-        }
-
-        return table;
+        return list;
     }
 
-    private static async Task ExportToMarkdownAsync(bool hideAdmin, CancellationToken cancellationToken)
+    private static string Truncate(string value, int maxChars)
     {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+        if (maxChars <= 3) return value;
+        return value.Length <= maxChars ? value : value.Substring(0, maxChars - 3) + "...";
+    }
+
+    private static async Task ExportToMarkdownAsync(bool adminHidden, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
         try
         {
             HashSet<Guid> activePeerIds;
             IReadOnlyCollection<ClusterMetricAggregation> clusterAggregations;
 
-            lock (_stateLock)
+            lock (stateLock)
             {
-                activePeerIds = _latestActivePeerIds;
-                clusterAggregations = _latestAggregations;
+                activePeerIds = latestActivePeerIds;
+                clusterAggregations = latestAggregations;
             }
 
-            var activeSelection = CachedPeerList.Count > SelectedPeerIndex ? CachedPeerList[SelectedPeerIndex] : "All";
+            var activeSelection = currentSelection;
             var targetNodeIds = activeSelection == "All"
                 ? activePeerIds
                 : activePeerIds.Where(id => id.ToString("N").StartsWith(activeSelection)).ToHashSet();
 
             var visibleAggregations = clusterAggregations.AsEnumerable();
 
-            if (hideAdmin)
+            if (adminHidden)
             {
                 visibleAggregations = visibleAggregations.Where(agg =>
                     !agg.Tags.Any(t => t.Key.Equals("mesh_id", StringComparison.OrdinalIgnoreCase) && 
@@ -517,16 +469,21 @@ internal sealed class Program
 
             await File.WriteAllTextAsync(filePath, sb.ToString(), cancellationToken).ConfigureAwait(false);
 
-            StatusMessage = $"[bold green]Exported successfully to {fileName}[/]";
+            statusMessage = $"Exported successfully to {fileName}";
         }
         catch (Exception ex)
         {
-            StatusMessage = $"[bold red]Export failed: {ex.Message}[/]";
+            statusMessage = $"Export failed: {ex.Message}";
         }
     }
 
     private static int GetNextAvailablePort(int startingPort)
     {
+        if (startingPort < 0 || startingPort > 65535)
+        {
+            startingPort = 9000;
+        }
+
         var ipGlobalProperties = IPGlobalProperties.GetIPGlobalProperties();
 
         var activeTcpPorts = ipGlobalProperties.GetActiveTcpListeners().Select(l => l.Port);
@@ -535,7 +492,7 @@ internal sealed class Program
         var activePorts = activeTcpPorts.Concat(activeUdpPorts).ToHashSet();
 
         var port = startingPort;
-        while (activePorts.Contains(port))
+        while (activePorts.Contains(port) && port < 65535)
         {
             port++;
         }

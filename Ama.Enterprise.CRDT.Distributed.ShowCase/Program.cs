@@ -18,6 +18,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Ama.Enterprise.Licensing.Extensions;
+using Ama.Enterprise.P2p.Telemetry.Extensions;
 
 /// <summary>
 /// Entry point for demonstrating Multiple Distributed CRDTs orchestrated via a global registry.
@@ -122,37 +123,37 @@ public static class Program
                 options.HeartbeatInterval = TimeSpan.FromSeconds(5);
             });
 
-        //services
-        //    .AddP2pTelemetryForwarder(options =>
-        //    {
-        //        options.TargetMeshId = "admin";
-        //        options.FlushInterval = TimeSpan.FromSeconds(1);
-        //        options.IncludedMeterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        //        {
-        //            string.Empty // Get ALL
-        //        };
-        //    })
-        //    .AddP2pMesh("admin")
-        //    .AddTcpTransport(options =>
-        //    {
-        //        options.ListenPort = currentAdminPort;
-        //        options.ListenHost = "127.0.0.1";
-        //    })
-        //    .AddUdpPeerDiscovery(options =>
-        //    {
-        //        options.MulticastAddress = "239.255.0.3";
-        //        options.MulticastPort = 8036;
-        //        options.DiscoveryInterval = TimeSpan.FromSeconds(1);
-        //        options.DiscoveryTimeout = TimeSpan.FromSeconds(1);
-        //    })
-        //    .AddUdpPeerHandshake(options =>
-        //    {
-        //        options.ListenPort = currentAdminHandshakePort;
-        //    })
-        //    .ConfigureFailureDetector(options =>
-        //    {
-        //        options.HeartbeatInterval = TimeSpan.FromSeconds(5);
-        //    });
+        services
+            .AddP2pTelemetryForwarder(options =>
+            {
+                options.TargetMeshId = "admin";
+                options.FlushInterval = TimeSpan.FromSeconds(1);
+                options.IncludedMeterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    string.Empty // Get ALL
+                };
+            })
+            .AddP2pMesh("admin")
+            .AddTcpTransport(options =>
+            {
+                options.ListenPort = currentAdminPort;
+                options.ListenHost = "127.0.0.1";
+            })
+            .AddUdpPeerDiscovery(options =>
+            {
+                options.MulticastAddress = "239.255.0.3";
+                options.MulticastPort = 8036;
+                options.DiscoveryInterval = TimeSpan.FromSeconds(1);
+                options.DiscoveryTimeout = TimeSpan.FromSeconds(1);
+            })
+            .AddUdpPeerHandshake(options =>
+            {
+                options.ListenPort = currentAdminHandshakePort;
+            })
+            .ConfigureFailureDetector(options =>
+            {
+                options.HeartbeatInterval = TimeSpan.FromSeconds(5);
+            });
 
         await using var provider = services.BuildServiceProvider();
         var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("ShowCase");

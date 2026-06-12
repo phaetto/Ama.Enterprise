@@ -179,8 +179,8 @@
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttClientManager.cs` | Updated to isolate topic subscriptions and client connection IDs by injecting the `meshId`, preventing cross-mesh broker collisions. |
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransport.cs` | Outbound mapping evaluating decoupled MQTT client managers. Refactored input validations. |
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransportListener.cs` | Inbound listener registering standard network hooks bound to mapped multi-mesh brokers. |
-| `$/Ama.Enterprise.P2p.Telemetry.Cli/Ama.Enterprise.P2p.Telemetry.Cli.csproj` | Explicitly configured `<PackageReadmeFile>` directive and included the solution-level README.md file structurally for accurate NuGet packaging metrics. |
-| `$/Ama.Enterprise.P2p.Telemetry.Cli/Program.cs` | Decoupled the live Spectre UI pipeline resolving severe ThreadPool starvation stalling issues under heavy cluster loads by instituting a lock-free `DashboardState` mechanism distinct from `async/await` network boundaries, alongside pre-allocating network worker pool thresholds ensuring .NET IOCP latency. |
+| `$/Ama.Enterprise.P2p.Telemetry.Cli/Ama.Enterprise.P2p.Telemetry.Cli.csproj` | Explicitly configured `<PackageReadmeFile>` directive and swapped `Spectre.Console` dependency securely tracking `Terminal.Gui` maintaining pure generic UI mappings and AOT capability bounds natively. |
+| `$/Ama.Enterprise.P2p.Telemetry.Cli/Program.cs` | Refactored internal architecture replacing `Spectre.Console` bounds with `Terminal.Gui` structural mappings. Addressed UI framerate stuttering by shifting string building and data sorting to background threads avoiding blocking UI capabilities, while standardizing single-assignment `IList<string>` data sources circumventing layout recalculation storms present in `ObservableCollection`. Enforced standard coding practices removing prefixed fields, introducing null guard checks, and utilizing interfaces. |
 | `$/Ama.Enterprise.P2p.Telemetry.IntegrationTests/Ama.Enterprise.P2p.Telemetry.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.Telemetry.IntegrationTests/Services/TelemetryNetworkIntegrationTests.cs` | Updated to test custom meter boundaries by asserting on custom metric scopes configurations. |
 | `$/Ama.Enterprise.P2p.Telemetry.UnitTests/Ama.Enterprise.P2p.Telemetry.UnitTests.csproj` | Unit tests project for validating P2P telemetry aggregations and metric extrapolation behaviors tracking .NET 10 time boundaries. |
@@ -193,13 +193,13 @@
 | `$/Ama.Enterprise.P2p.Telemetry/Models/MetricTagDto.cs` | AOT friendly structure representing a metric dimension tracking generic mappings. |
 | `$/Ama.Enterprise.P2p.Telemetry/Models/TelemetryJsonContext.cs` | AOT generic bindings resolving metric serialization evaluating pure DTO constraints. |
 | `$/Ama.Enterprise.P2p.Telemetry/Models/TelemetryOptions.cs` | Updated to expose tracking configuration enabling generic meter dimension scopes via an `IEquatable` bounds implementation. |
-| `$/Ama.Enterprise.P2p.Telemetry/Models/TelemetryPayloadDto.cs` | DTO defining top-level network transmission payloads wrapping internally batched generic metrics mapping AOT configurations. |
+| `$/Ama.Enterprise.P2p.Telemetry/Models/TelemetryPayloadDto.cs` | Appended `MagicHeader` constant enabling fast-path binary stream identification prior to entering deserialization pipelines. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/ClusterMetricsAggregator.cs` | Thread-safe service responsible for computing rates, deltas, and multi-node aggregations over mapped telemetry boundaries. Fixed histogram and counter aggregation logic enforcing structural delta classifications, eliminating jumping sums and errant negative throughput derivatives. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/IClusterMetricsAggregator.cs` | Contract for aggregating cluster-wide telemetry metrics across active nodes tracking mathematical trends. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/ITelemetryAggregator.cs` | Interface for centrally aggregating and retrieving in-memory telemetry network states. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryAggregator.cs` | Thread-safe in-memory aggregator holding the latest telemetry network metrics. |
-| `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryForwarderService.cs` | Replaced hardcoded telemetry matching metrics with configurable scopes mapping user boundaries. |
-| `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryPayloadHandler.cs` | Application payload handler dedicated to processing incoming telemetry network payloads and routing them into the centralized aggregator. |
+| `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryForwarderService.cs` | Prepended the fixed `MagicHeader` bytes to outgoing metric broadcasts ensuring compatibility with the fast-path telemetry boundary evaluation mechanism. |
+| `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryPayloadHandler.cs` | Implemented binary header slicing, evaluating payloads for explicit magic bytes and dropping unknown streams immediately, bypassing heavy `MessagePackSerializationException` CPU spikes natively. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryPushAlgorithm.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.UnitTests/Ama.Enterprise.P2p.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.P2p.UnitTests/Services/Core/InMemoryPeerRegistryTests.cs` | No description provided. |

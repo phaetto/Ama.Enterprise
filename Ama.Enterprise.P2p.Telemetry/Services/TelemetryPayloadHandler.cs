@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.Telemetry.Services;
 
 using System;
+using System.Buffers.Binary;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
@@ -35,14 +36,23 @@ public sealed class TelemetryPayloadHandler : IApplicationPayloadHandler
     /// <inheritdoc />
     public Task HandlePayloadAsync(string meshId, PeerId senderId, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
-        if (payload.IsEmpty)
+        if (payload.Length < 4)
         {
             return Task.CompletedTask;
         }
 
+        var header = BinaryPrimitives.ReadInt32LittleEndian(payload.Span);
+        if (header != TelemetryPayloadDto.MagicHeader)
+        {
+            // Drop it instantly without throwing exceptions, payload belongs to another domain sharing the mesh
+            return Task.CompletedTask;
+        }
+
+        var payloadData = payload.Slice(4);
+
         try
         {
-            var dto = serializer.DeserializeFromBytes<TelemetryPayloadDto>(payload.ToArray());
+            var dto = serializer.DeserializeFromBytes<TelemetryPayloadDto>(payloadData.ToArray());
             
             if (dto != null && dto.NodeId != Guid.Empty)
             {
@@ -52,7 +62,6 @@ public sealed class TelemetryPayloadHandler : IApplicationPayloadHandler
         }
         catch (Exception ex)
         {
-            // Ignoring errors since payloads might belong to other application domains sharing the generic mesh
             logger.LogTrace(ex, "Payload could not be parsed as explicit telemetry structures.");
         }
 
