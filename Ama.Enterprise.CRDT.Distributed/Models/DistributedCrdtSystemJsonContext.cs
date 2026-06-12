@@ -11,6 +11,8 @@ using Ama.CRDT.Models;
 [JsonSerializable(typeof(CrdtRegistryState))]
 [JsonSerializable(typeof(Dictionary<string, CrdtRegistryEntry>))]
 [JsonSerializable(typeof(CrdtDocument<CrdtRegistryState>))]
+[JsonSerializable(typeof(ClusterStateSnapshotDto))]
+[JsonSerializable(typeof(ClusterPeerStateDto))]
 public sealed partial class DistributedCrdtSystemJsonContext : JsonSerializerContext
 {
 }

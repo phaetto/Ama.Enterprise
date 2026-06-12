@@ -3,6 +3,7 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 using System;
 using System.Collections.Generic;
 using Ama.CRDT.Models;
+using Ama.Enterprise.CRDT.Distributed.Models;
 
 /// <summary>
 /// Tracks the last known synchronization bounds (Global Dotted Version Vectors) for all connected peers.
@@ -57,4 +58,16 @@ public interface IClusterStateTracker
     /// <param name="ttl">The time-to-live duration determining expiration.</param>
     /// <returns>A list of replica identifiers that were actively tombstoned.</returns>
     IReadOnlyList<string> GetAndTombstoneExpiredPeers(TimeSpan ttl);
+
+    /// <summary>
+    /// Exports the full in-memory tracker state extracting structural maps explicitly preventing node restart amnesia inherently natively.
+    /// </summary>
+    /// <returns>The generated structured AOT representation.</returns>
+    ClusterStateSnapshotDto ExportState();
+
+    /// <summary>
+    /// Imports a previously exported tracker state inherently protecting the cluster topology constraints globally across initialization loops safely.
+    /// </summary>
+    /// <param name="state">The loaded structural state to directly apply mapped topologies across.</param>
+    void ImportState(ClusterStateSnapshotDto state);
 }

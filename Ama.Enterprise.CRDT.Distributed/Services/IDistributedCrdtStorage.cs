@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
 using Ama.CRDT.Services.Journaling;
+using Ama.Enterprise.CRDT.Distributed.Models;
 
 /// <summary>
 /// Defines a unified persistence and journaling mechanism for distributed CRDT documents.
@@ -28,6 +29,23 @@ public interface IDistributedCrdtStorage : ICrdtOperationJournal
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous save operation.</returns>
     Task SaveGlobalVersionVectorAsync(string replicaId, DottedVersionVector globalVersionVector, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Loads the overarching cluster states topology matrix effectively preventing split-brain restart node amnesia natively.
+    /// </summary>
+    /// <param name="replicaId">The local node active replica identifier securely bounding the local isolated environment boundaries.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The dynamically mapped states resolving active boundaries naturally.</returns>
+    Task<ClusterStateSnapshotDto?> LoadClusterStateAsync(string replicaId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Safely persists the complex tracker topology states actively bypassing multi-node synchronization deadlocks and zombie constraints securely gracefully.
+    /// </summary>
+    /// <param name="replicaId">The local node active replica identifier.</param>
+    /// <param name="state">The structural data explicitly bypassing logic bounds capturing tracked node matrices safely.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>An asynchronous task tracking storage operations securely.</returns>
+    Task SaveClusterStateAsync(string replicaId, ClusterStateSnapshotDto state, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Loads the stored CRDT document state including its Dotted Version Vectors and metadata.

@@ -13,6 +13,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Ama.CRDT.Models;
 using Ama.CRDT.Services.Serialization;
+using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.TableStorage.Models;
 
@@ -23,6 +24,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 {
     private const string GlobalDvvPartitionKey = "GlobalDVV";
     private const string DocumentStatePartitionKey = "DocumentState";
+    private const string ClusterStatePartitionKey = "ClusterState";
     private const string JournalPartitionPrefix = "Journal_";
 
     private readonly TableServiceClient tableServiceClient;
@@ -147,6 +149,70 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         catch (Exception ex)
         {
             this.logger.LogError(ex, "Failed to save global DVV.");
+        }
+    }
+
+    public async Task<ClusterStateSnapshotDto?> LoadClusterStateAsync(string replicaId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
+
+        try
+        {
+            var response = await this.tableClient.GetEntityAsync<CrdtTableEntity>(ClusterStatePartitionKey, replicaId, cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (response?.Value != null)
+            {
+                var tags = new KeyValuePair<string, object?>[] { new("type", "cluster_state") };
+                this.operationsReadCounter.Add(1, tags);
+
+                var payload = response.Value.GetPayload();
+                if (payload != null)
+                {
+                    this.payloadBytesHistogram.Record(payload.Length, tags);
+                }
+
+                return this.serializer.DeserializeFromBytes<ClusterStateSnapshotDto>(payload);
+            }
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404)
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            this.logger.LogError(ex, "Failed to actively fetch the cluster state tracking parameters explicitly matching remote node matrices natively.");
+        }
+
+        return null;
+    }
+
+    public async Task SaveClusterStateAsync(string replicaId, ClusterStateSnapshotDto state, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
+        ArgumentNullException.ThrowIfNull(state);
+
+        try
+        {
+            var tags = new KeyValuePair<string, object?>[] { new("type", "cluster_state") };
+            this.operationsWriteCounter.Add(1, tags);
+
+            var payload = this.serializer.SerializeToBytes(state);
+            if (payload != null)
+            {
+                this.payloadBytesHistogram.Record(payload.Length, tags);
+            }
+
+            var entity = new CrdtTableEntity
+            {
+                PartitionKey = ClusterStatePartitionKey,
+                RowKey = replicaId
+            };
+            entity.SetPayload(payload);
+
+            await this.tableClient.UpsertEntityAsync(entity, TableUpdateMode.Replace, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            this.logger.LogError(ex, "Failed to actively preserve and structure complex tracking parameters inherently avoiding topology amnesia globally safely.");
         }
     }
 
@@ -401,7 +467,10 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
                 }
 
                 var op = this.serializer.DeserializeFromBytes<JournaledOperation>(payload);
-                yield return op;
+                if (op != null)
+                {
+                    yield return op;
+                }
             }
         }
     }
@@ -448,7 +517,10 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
             }
 
             var op = this.serializer.DeserializeFromBytes<JournaledOperation>(payload);
-            yield return op;
+            if (op != null)
+            {
+                yield return op;
+            }
         }
     }
 

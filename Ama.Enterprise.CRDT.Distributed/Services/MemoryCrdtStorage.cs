@@ -8,6 +8,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
+using Ama.Enterprise.CRDT.Distributed.Models;
 
 /// <summary>
 /// Thread-safe in-memory unified storage and journal for CRDT operations.
@@ -152,6 +153,12 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
 
     /// <inheritdoc />
     public Task SaveGlobalVersionVectorAsync(string replicaId, DottedVersionVector globalVersionVector, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    /// <inheritdoc />
+    public Task<ClusterStateSnapshotDto?> LoadClusterStateAsync(string replicaId, CancellationToken cancellationToken = default) => Task.FromResult<ClusterStateSnapshotDto?>(null);
+
+    /// <inheritdoc />
+    public Task SaveClusterStateAsync(string replicaId, ClusterStateSnapshotDto state, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
     /// <inheritdoc />
     public Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new() => Task.FromResult<CrdtDocument<TState>?>(null);

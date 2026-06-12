@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Ama.CRDT.Models;
 using Ama.CRDT.Services;
 using Ama.CRDT.Services.Serialization;
+using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
@@ -181,6 +182,60 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to save global DVV to SQLite");
+        }
+        finally
+        {
+            writeLock.Release();
+        }
+    }
+
+    public async Task<ClusterStateSnapshotDto?> LoadClusterStateAsync(string replicaId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(replicaId)) throw new ArgumentException("Value cannot be null or empty.", nameof(replicaId));
+
+        try
+        {
+            using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT Payload FROM ClusterState WHERE ReplicaId = @RepId";
+            AddParameter(command, "@RepId", replicaId);
+
+            var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+            if (result is byte[] bytes)
+            {
+                return serializer.DeserializeFromBytes<ClusterStateSnapshotDto>(bytes);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to load explicit overarching cluster states structurally resolving amnesia limits safely natively.");
+        }
+
+        return null;
+    }
+
+    public async Task SaveClusterStateAsync(string replicaId, ClusterStateSnapshotDto state, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(replicaId)) throw new ArgumentException("Value cannot be null or empty.", nameof(replicaId));
+        ArgumentNullException.ThrowIfNull(state);
+
+        var bytes = serializer.SerializeToBytes(state);
+
+        await writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var command = writeConnection.CreateCommand();
+            command.CommandText = "INSERT OR REPLACE INTO ClusterState (ReplicaId, Payload) VALUES (@RepId, @Payload)";
+            AddParameter(command, "@RepId", replicaId);
+            AddParameter(command, "@Payload", bytes);
+            
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to explicitly persist complete cluster map matrices preventing zombie edge cases seamlessly natively.");
         }
         finally
         {
@@ -499,6 +554,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
                     Payload BLOB NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS GlobalDvv (
+                    ReplicaId TEXT PRIMARY KEY,
+                    Payload BLOB NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS ClusterState (
                     ReplicaId TEXT PRIMARY KEY,
                     Payload BLOB NOT NULL
                 );

@@ -76,11 +76,19 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
                     logger.LogInformation("Successfully re-initialized in-place CRDT global Dotted Version Vector for replica {ReplicaId}.", replicaContext.ReplicaId);
                 }
 
-                // 2. Initialize orchestrator limits natively bounding internal registry architectures
+                // 2. Load globally preserved tracking matrices restoring isolated tracking states securely
+                var savedClusterState = await globalStorage.LoadClusterStateAsync(replicaContext.ReplicaId, cancellationToken).ConfigureAwait(false);
+                if (savedClusterState != null)
+                {
+                    scope.ClusterTracker.ImportState(savedClusterState);
+                    logger.LogInformation("Successfully re-initialized in-place cluster tracking state matrix for replica {ReplicaId}.", replicaContext.ReplicaId);
+                }
+
+                // 3. Initialize orchestrator limits natively bounding internal registry architectures
                 var orchestrator = scope.Orchestrator;
                 await orchestrator.InitializeAsync(cancellationToken).ConfigureAwait(false);
 
-                // 3. Replay uncheckpointed WAL boundaries seamlessly projecting generic recovery logic directly
+                // 4. Replay uncheckpointed WAL boundaries seamlessly projecting generic recovery logic directly
                 IDictionary<string, List<CrdtOperation>> operationsByDoc = new Dictionary<string, List<CrdtOperation>>();
                 
                 await foreach (var jOp in globalStorage.GetAllJournaledOperationsAsync(cancellationToken).ConfigureAwait(false))

@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Diagnostics.Metrics;
 using System.Linq;
 using Ama.CRDT.Models;
+using Ama.Enterprise.CRDT.Distributed.Models;
 
 /// <summary>
 /// Singleton thread-safe implementation capturing localized maps representing overarching remote state matrix limits.
@@ -152,6 +153,72 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
         }
 
         return expiredReplicas;
+    }
+
+    /// <inheritdoc />
+    public ClusterStateSnapshotDto ExportState()
+    {
+        lock (syncRoot)
+        {
+            var dto = new ClusterStateSnapshotDto();
+
+            foreach (var kvp in networkIdToReplicaId)
+            {
+                dto.NetworkIdToReplicaId[kvp.Key] = kvp.Value;
+            }
+
+            foreach (var kvp in tombstonedReplicas)
+            {
+                dto.TombstonedReplicas.Add(kvp);
+            }
+
+            foreach (var kvp in peerStates)
+            {
+                var safeStateVersions = kvp.Value.State.Versions.ToDictionary(v => v.Key, v => v.Value);
+                var safeStateDots = kvp.Value.State.Dots?.ToDictionary(d => d.Key, d => (ISet<long>)new HashSet<long>(d.Value)) 
+                                    ?? new Dictionary<string, ISet<long>>();
+
+                dto.PeerStates[kvp.Key] = new ClusterPeerStateDto
+                {
+                    State = new DottedVersionVector(safeStateVersions, safeStateDots),
+                    LastSeen = kvp.Value.LastSeen
+                };
+            }
+
+            return dto;
+        }
+    }
+
+    /// <inheritdoc />
+    public void ImportState(ClusterStateSnapshotDto state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+
+        lock (syncRoot)
+        {
+            networkIdToReplicaId.Clear();
+            foreach (var kvp in state.NetworkIdToReplicaId)
+            {
+                networkIdToReplicaId[kvp.Key] = kvp.Value;
+            }
+
+            tombstonedReplicas.Clear();
+            foreach (var replicaId in state.TombstonedReplicas)
+            {
+                tombstonedReplicas.Add(replicaId);
+            }
+
+            peerStates.Clear();
+            foreach (var kvp in state.PeerStates)
+            {
+                var safeStateVersions = kvp.Value.State.Versions.ToDictionary(v => v.Key, v => v.Value);
+                var safeStateDots = kvp.Value.State.Dots?.ToDictionary(d => d.Key, d => (ISet<long>)new HashSet<long>(d.Value));
+
+                peerStates[kvp.Key] = new PeerStateEntry(
+                    new DottedVersionVector(safeStateVersions, safeStateDots),
+                    kvp.Value.LastSeen);
+            }
+        }
     }
 
     public void Dispose()

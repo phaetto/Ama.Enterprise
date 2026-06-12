@@ -117,6 +117,9 @@ public sealed class CrdtCheckpointService : BackgroundService
 
                     await scope.Storage.SaveGlobalVersionVectorAsync(scope.ReplicaId, safelyPersistedDvv, stoppingToken).ConfigureAwait(false);
 
+                    var exportedClusterState = scope.ClusterTracker.ExportState();
+                    await scope.Storage.SaveClusterStateAsync(scope.ReplicaId, exportedClusterState, stoppingToken).ConfigureAwait(false);
+
                     long journalCount = 0;
                     if (options.Value.JournalTrimThreshold > 0)
                     {
