@@ -1,7 +1,9 @@
 namespace Ama.Enterprise.P2p.WebRTC.AspNetCore.Extensions;
 
 using System;
+using System.Diagnostics.Metrics;
 using Ama.CRDT.Services.Serialization;
+using Ama.Enterprise.Licensing.Services;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.WebRTC.AspNetCore.Models;
@@ -46,13 +48,17 @@ public static class ServiceCollectionExtensions
             var invitationService = sp.GetRequiredKeyedService<IWebRtcInvitationService>(builder.MeshId);
             var serializer = sp.GetRequiredService<ICrdtSerializer>();
             var logger = sp.GetRequiredService<ILogger<WebRtcSignalingServer>>();
+            var certLoader = sp.GetService<ICertificateLoader>();
+            var meterFactory = sp.GetService<IMeterFactory>();
 
             return new WebRtcSignalingServer(
                 builder.MeshId,
                 optionsMonitor,
                 invitationService,
                 serializer,
-                logger);
+                logger,
+                certLoader,
+                meterFactory);
         });
 
         return builder;
@@ -71,7 +77,6 @@ public static class ServiceCollectionExtensions
             return builder;
         }
 
-        builder.Services.AddHttpClient();
         builder.Services.TryAddSingleton<IWebRtcSignalingClient, WebRtcSignalingClient>();
 
         builder.Services.AddKeyedSingleton<IWebRtcHttpPeerDiscovery>(builder.MeshId, (sp, key) =>

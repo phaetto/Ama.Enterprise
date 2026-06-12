@@ -45,4 +45,29 @@ public sealed record AspNetCoreTransportOptions
     /// Gets or sets the localized network port bound implicitly for inbound traffic when evaluating Standalone topologies natively.
     /// </summary>
     public int StandaloneListenPort { get; set; } = 8080;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the Standalone hosting mode should bind using HTTPS.
+    /// </summary>
+    public bool UseHttpsStandalone { get; set; } = false;
+
+    /// <summary>
+    /// Gets or sets the file path to the X.509 certificate used for Standalone HTTPS bindings.
+    /// </summary>
+    public string? CertificateFilePath { get; set; }
+
+    /// <summary>
+    /// Gets or sets the password for the certificate file if it is encrypted.
+    /// </summary>
+    public string? CertificatePassword { get; set; }
+
+    /// <summary>
+    /// Gets or sets the certificate thumbprint to load from the local Certificate Store for HTTPS bindings.
+    /// </summary>
+    public string? CertificateThumbprint { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether outbound HTTP requests should ignore SSL validation errors (e.g., self-signed certificates).
+    /// </summary>
+    public bool IgnoreOutboundSslErrors { get; set; } = false;
 }

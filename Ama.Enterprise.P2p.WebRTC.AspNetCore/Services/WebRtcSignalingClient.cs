@@ -19,7 +19,7 @@ public sealed class WebRtcSignalingClient : IWebRtcSignalingClient, IDisposable
 {
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<WebRtcSignalingClient> logger;
-    private readonly WebRtcSignalingOptions options;
+    private readonly IOptionsMonitor<WebRtcSignalingOptions> optionsMonitor;
 
     private readonly Meter meter;
     private readonly Counter<long> requestsCounter;
@@ -29,16 +29,16 @@ public sealed class WebRtcSignalingClient : IWebRtcSignalingClient, IDisposable
     public WebRtcSignalingClient(
         ICrdtSerializer serializer,
         ILogger<WebRtcSignalingClient> logger,
-        IOptions<WebRtcSignalingOptions> options,
+        IOptionsMonitor<WebRtcSignalingOptions> optionsMonitor,
         IMeterFactory? meterFactory = null)
     {
         ArgumentNullException.ThrowIfNull(serializer);
         ArgumentNullException.ThrowIfNull(logger);
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(optionsMonitor);
 
         this.serializer = serializer;
         this.logger = logger;
-        this.options = options.Value;
+        this.optionsMonitor = optionsMonitor;
 
         this.meter = meterFactory?.Create("Ama.Enterprise.P2p.WebRtcSignalingClient") ?? new Meter("Ama.Enterprise.P2p.WebRtcSignalingClient");
         this.requestsCounter = this.meter.CreateCounter<long>(
@@ -61,12 +61,18 @@ public sealed class WebRtcSignalingClient : IWebRtcSignalingClient, IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
         ArgumentNullException.ThrowIfNull(answerFactory);
 
-        var actualPathPrefix = string.IsNullOrWhiteSpace(pathPrefix) ? this.options.PathPrefix : pathPrefix;
+        var options = optionsMonitor.Get(meshId);
+        var actualPathPrefix = string.IsNullOrWhiteSpace(pathPrefix) ? options.PathPrefix : pathPrefix;
         var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId), new("transport", "websocket") };
         var wsUri = BuildWebSocketUri(peerUri, actualPathPrefix, meshId);
         
         using var webSocket = new ClientWebSocket();
         
+        if (options.IgnoreOutboundSslErrors)
+        {
+            webSocket.Options.RemoteCertificateValidationCallback = (sender, certificate, chain, sslPolicyErrors) => true;
+        }
+
         try
         {
             await webSocket.ConnectAsync(wsUri, cancellationToken).ConfigureAwait(false);

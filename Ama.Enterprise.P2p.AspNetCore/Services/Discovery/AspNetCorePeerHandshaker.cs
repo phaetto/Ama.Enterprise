@@ -7,9 +7,11 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
+using Ama.Enterprise.Licensing.Services;
 using Ama.Enterprise.P2p.AspNetCore.Models;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
@@ -32,6 +34,7 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
     private readonly IHttpClientFactory httpClientFactory;
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<AspNetCorePeerHandshaker> logger;
+    private readonly ICertificateLoader? certificateLoader;
 
     private readonly Meter meter;
     private readonly Counter<long> handshakesSentCounter;
@@ -51,7 +54,8 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
         IHttpClientFactory httpClientFactory,
         ICrdtSerializer serializer,
         ILogger<AspNetCorePeerHandshaker> logger,
-        IMeterFactory? meterFactory = null)
+        IMeterFactory? meterFactory = null,
+        ICertificateLoader? certificateLoader = null)
     {
         ArgumentNullException.ThrowIfNull(meshId);
         ArgumentNullException.ThrowIfNull(optionsMonitor);
@@ -68,6 +72,7 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
         this.httpClientFactory = httpClientFactory;
         this.serializer = serializer;
         this.logger = logger;
+        this.certificateLoader = certificateLoader;
 
         this.meter = meterFactory?.Create("Ama.Enterprise.P2p.AspNetCorePeerHandshaker") ?? new Meter("Ama.Enterprise.P2p.AspNetCorePeerHandshaker");
         this.handshakesSentCounter = this.meter.CreateCounter<long>(
@@ -96,22 +101,33 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
                 {
                     webBuilder.UseKestrel(serverOptions =>
                     {
+                        X509Certificate2? cert = null;
+                        if (options.UseHttpsStandalone)
+                        {
+                            cert = LoadCertificate(options.CertificateFilePath, options.CertificatePassword, options.CertificateThumbprint);
+                        }
+
+                        Action<Microsoft.AspNetCore.Server.Kestrel.Core.ListenOptions> configureListen = listenOptions =>
+                        {
+                            if (options.UseHttpsStandalone && cert != null) listenOptions.UseHttps(cert);
+                        };
+
                         if (string.IsNullOrWhiteSpace(options.StandaloneListenHost) || options.StandaloneListenHost == "+" || options.StandaloneListenHost == "0.0.0.0")
                         {
-                            serverOptions.ListenAnyIP(options.StandaloneListenPort);
+                            serverOptions.ListenAnyIP(options.StandaloneListenPort, configureListen);
                         }
                         else if (options.StandaloneListenHost.Equals("localhost", StringComparison.OrdinalIgnoreCase))
                         {
-                            serverOptions.ListenLocalhost(options.StandaloneListenPort);
+                            serverOptions.ListenLocalhost(options.StandaloneListenPort, configureListen);
                         }
                         else if (IPAddress.TryParse(options.StandaloneListenHost, out var ipAddress))
                         {
-                            serverOptions.Listen(ipAddress, options.StandaloneListenPort);
+                            serverOptions.Listen(ipAddress, options.StandaloneListenPort, configureListen);
                         }
                         else
                         {
                             logger.LogWarning("[{MeshId}] Invalid Kestrel ListenHost '{Host}', falling back to Any IP.", meshId, options.StandaloneListenHost);
-                            serverOptions.ListenAnyIP(options.StandaloneListenPort);
+                            serverOptions.ListenAnyIP(options.StandaloneListenPort, configureListen);
                         }
                     });
                     
@@ -161,7 +177,7 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
         ArgumentNullException.ThrowIfNull(endpoint);
 
         var options = optionsMonitor.Get(meshId);
-        var client = httpClientFactory.CreateClient("P2pAspNetCoreHandshaker");
+        var client = httpClientFactory.CreateClient($"{meshId}_P2pAspNetCoreHandshaker");
         
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(options.HandshakeTimeout);
@@ -172,7 +188,8 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
             if (!basePath.StartsWith("/", StringComparison.Ordinal)) basePath = "/" + basePath;
             var path = $"{basePath}/{meshId}";
 
-            var uri = new Uri($"http://{endpoint.Address}:{endpoint.Port}{path}");
+            var scheme = options.UseHttps ? "https" : "http";
+            var uri = new Uri($"{scheme}://{endpoint.Address}:{endpoint.Port}{path}");
             
             var requestBytes = serializer.SerializeToBytes(localNode);
             using var content = new ByteArrayContent(requestBytes);
@@ -238,6 +255,30 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
             logger.LogTrace(ex, "[{MeshId}] Failed to process inbound ASP.NET Core explicitly routed handshake request robustly.", meshId);
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
         }
+    }
+
+    private X509Certificate2? LoadCertificate(string? path, string? password, string? thumbprint)
+    {
+        if (certificateLoader == null)
+        {
+            logger.LogWarning("[{MeshId}] ICertificateLoader is not registered. Cannot configure HTTPS.", meshId);
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(thumbprint))
+        {
+            var cert = certificateLoader.LoadFromStore(thumbprint);
+            if (cert != null) return cert;
+        }
+
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            var cert = certificateLoader.LoadFromFile(path, password);
+            if (cert != null) return cert;
+        }
+
+        logger.LogWarning("[{MeshId}] Failed to resolve valid X509 certificate configurations for HTTPS binding.", meshId);
+        return null;
     }
 
     /// <inheritdoc />

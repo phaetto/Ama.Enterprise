@@ -1,8 +1,10 @@
 namespace Ama.Enterprise.P2p.AspNetCore.Services;
 
 using System;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.Enterprise.Licensing.Services;
 using Ama.Enterprise.P2p.AspNetCore.Extensions;
 using Ama.Enterprise.P2p.AspNetCore.Models;
 using Ama.Enterprise.P2p.Models.Core;
@@ -22,6 +24,7 @@ public sealed class AspNetCoreTransportListener : ITransportListener, IDisposabl
     private readonly IOptionsMonitor<AspNetCoreTransportOptions> optionsMonitor;
     private readonly IHttpInboundDispatcher dispatcher;
     private readonly ILogger<AspNetCoreTransportListener> logger;
+    private readonly ICertificateLoader? certificateLoader;
 
     private WebApplication? app;
 
@@ -32,7 +35,8 @@ public sealed class AspNetCoreTransportListener : ITransportListener, IDisposabl
         string meshId,
         IOptionsMonitor<AspNetCoreTransportOptions> optionsMonitor,
         IHttpInboundDispatcher dispatcher,
-        ILogger<AspNetCoreTransportListener> logger)
+        ILogger<AspNetCoreTransportListener> logger,
+        ICertificateLoader? certificateLoader = null)
     {
         ArgumentNullException.ThrowIfNull(meshId);
         ArgumentNullException.ThrowIfNull(optionsMonitor);
@@ -43,6 +47,7 @@ public sealed class AspNetCoreTransportListener : ITransportListener, IDisposabl
         this.optionsMonitor = optionsMonitor;
         this.dispatcher = dispatcher;
         this.logger = logger;
+        this.certificateLoader = certificateLoader;
     }
 
     /// <inheritdoc />
@@ -58,10 +63,42 @@ public sealed class AspNetCoreTransportListener : ITransportListener, IDisposabl
             var builder = WebApplication.CreateSlimBuilder();
             builder.Logging.ClearProviders();
 
+            X509Certificate2? cert = null;
+            if (options.UseHttpsStandalone)
+            {
+                cert = LoadCertificate(options.CertificateFilePath, options.CertificatePassword, options.CertificateThumbprint);
+            }
+
             var host = string.IsNullOrWhiteSpace(options.StandaloneListenHost) ? "+" : options.StandaloneListenHost;
-            var listenUrl = $"http://{host}:{options.StandaloneListenPort}";
-            
-            builder.WebHost.UseUrls(listenUrl);
+            var scheme = options.UseHttpsStandalone && cert != null ? "https" : "http";
+            var listenUrl = $"{scheme}://{host}:{options.StandaloneListenPort}";
+
+            builder.WebHost.ConfigureKestrel(serverOptions =>
+            {
+                Action<Microsoft.AspNetCore.Server.Kestrel.Core.ListenOptions> configureListen = listenOptions =>
+                {
+                    if (options.UseHttpsStandalone && cert != null) listenOptions.UseHttps(cert);
+                };
+
+                if (host == "+" || host == "0.0.0.0")
+                {
+                    serverOptions.ListenAnyIP(options.StandaloneListenPort, configureListen);
+                }
+                else if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+                {
+                    serverOptions.ListenLocalhost(options.StandaloneListenPort, configureListen);
+                }
+                else if (System.Net.IPAddress.TryParse(host, out var ipAddress))
+                {
+                    serverOptions.Listen(ipAddress, options.StandaloneListenPort, configureListen);
+                }
+                else
+                {
+                    logger.LogWarning("[{MeshId}] Invalid Kestrel ListenHost '{Host}', falling back to Any IP.", meshId, host);
+                    serverOptions.ListenAnyIP(options.StandaloneListenPort, configureListen);
+                }
+            });
+
             builder.Services.AddSingleton(dispatcher);
 
             app = builder.Build();
@@ -111,6 +148,30 @@ public sealed class AspNetCoreTransportListener : ITransportListener, IDisposabl
         }
         
         logger.LogInformation("[{MeshId}] ASP.NET Core listener bridge explicitly detached standard bounds.", meshId);
+    }
+
+    private X509Certificate2? LoadCertificate(string? path, string? password, string? thumbprint)
+    {
+        if (certificateLoader == null)
+        {
+            logger.LogWarning("[{MeshId}] ICertificateLoader is not registered. Cannot configure HTTPS.", meshId);
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(thumbprint))
+        {
+            var cert = certificateLoader.LoadFromStore(thumbprint);
+            if (cert != null) return cert;
+        }
+
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            var cert = certificateLoader.LoadFromFile(path, password);
+            if (cert != null) return cert;
+        }
+
+        logger.LogWarning("[{MeshId}] Failed to resolve valid X509 certificate configurations for HTTPS binding.", meshId);
+        return null;
     }
 
     /// <inheritdoc />

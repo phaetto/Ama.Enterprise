@@ -2,8 +2,11 @@ namespace Ama.Enterprise.P2p.AspNetCore.IntegrationTests.Services;
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Extensions;
@@ -75,6 +78,56 @@ public sealed class AspNetCorePeerHandshakeIntegrationTests : IClassFixture<Netw
         aspEndpoint.Port.ShouldBe(portB);
 
         testOutputHelper.WriteLine("Direct handshake completed successfully.");
+    }
+
+    [IntegrationFact]
+    public async Task AspNetCorePeerHandshaker_DirectHandshake_Https_Succeeds()
+    {
+        var (certPath, certPass) = GenerateTestCertificate();
+        try
+        {
+            // Arrange
+            var meshId = $"aspnetcore-direct-https-{Guid.NewGuid():N}";
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+            var peerAId = new PeerId(Guid.NewGuid());
+            var peerBId = new PeerId(Guid.NewGuid());
+
+            var portA = resourceManager.GetNextPort();
+            var portB = resourceManager.GetNextPort();
+
+            testOutputHelper.WriteLine("Initializing Nodes for Direct ASP.NET Core Standalone HTTPS Handshake...");
+            await using var nodeA = CreateTestNode(meshId, peerAId, portA, null, 0, true, certPath, certPass);
+            await using var nodeB = CreateTestNode(meshId, peerBId, portB, null, 0, true, certPath, certPass);
+
+            // Act
+            testOutputHelper.WriteLine("Starting ASP.NET Core Handshaker background services...");
+            await nodeA.StartAsync(cts.Token);
+            await nodeB.StartAsync(cts.Token);
+
+            // Give web servers a moment to bind and start listening
+            await Task.Delay(TimeSpan.FromMilliseconds(500), cts.Token);
+
+            testOutputHelper.WriteLine($"Node A firing manual HTTPS HandshakeAsync to Node B...");
+            
+            var localNodeA = new PeerNode(peerAId, new AspNetCorePeerEndpoint("127.0.0.1", portA));
+            var endpointB = new IPEndPoint(IPAddress.Parse("127.0.0.1"), portB);
+            var discoveredNode = await nodeA.Handshaker.HandshakeAsync(localNodeA, endpointB, cts.Token);
+
+            // Assert
+            discoveredNode.ShouldNotBeNull("Handshake failed to return a valid PeerNode over HTTPS.");
+            discoveredNode.Value.Id.ShouldBe(peerBId);
+            discoveredNode.Value.Endpoint.ShouldBeOfType<AspNetCorePeerEndpoint>();
+
+            var aspEndpoint = (AspNetCorePeerEndpoint)discoveredNode.Value.Endpoint;
+            aspEndpoint.Port.ShouldBe(portB);
+
+            testOutputHelper.WriteLine("Direct HTTPS handshake completed successfully.");
+        }
+        finally
+        {
+            if (File.Exists(certPath)) File.Delete(certPath);
+        }
     }
 
     [IntegrationFact]
@@ -345,7 +398,7 @@ public sealed class AspNetCorePeerHandshakeIntegrationTests : IClassFixture<Netw
         mesh2Discovered.ShouldBeTrue("Nodes failed to discover each other on implicitly separated Mesh 2 securely.");
     }
 
-    private AspNetCoreTestNode CreateTestNode(string meshId, PeerId peerId, int listenPort, string? multicastGroup, int multicastPort)
+    private AspNetCoreTestNode CreateTestNode(string meshId, PeerId peerId, int listenPort, string? multicastGroup, int multicastPort, bool useHttps = false, string? certPath = null, string? certPass = null)
     {
         var services = new ServiceCollection();
 
@@ -378,6 +431,11 @@ public sealed class AspNetCorePeerHandshakeIntegrationTests : IClassFixture<Netw
             options.StandaloneListenPort = listenPort;
             options.AdvertisedHandshakePort = listenPort;
             options.HandshakeTimeout = TimeSpan.FromSeconds(10);
+            options.UseHttps = useHttps;
+            options.UseHttpsStandalone = useHttps;
+            options.IgnoreOutboundSslErrors = useHttps;
+            options.CertificateFilePath = certPath;
+            options.CertificatePassword = certPass;
         });
 
         if (!string.IsNullOrEmpty(multicastGroup))
@@ -510,6 +568,23 @@ public sealed class AspNetCorePeerHandshakeIntegrationTests : IClassFixture<Netw
             peerId,
             provider.GetRequiredService<IPeerRegistry>()
         );
+    }
+
+    private static (string Path, string Password) GenerateTestCertificate()
+    {
+        var password = Guid.NewGuid().ToString("N");
+        using var rsa = RSA.Create(2048);
+        var req = new CertificateRequest(
+            "CN=127.0.0.1",
+            rsa,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1);
+
+        using var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        var pfxBytes = cert.Export(X509ContentType.Pfx, password);
+        var path = Path.GetTempFileName() + ".pfx";
+        File.WriteAllBytes(path, pfxBytes);
+        return (path, password);
     }
 
     private sealed record AspNetCoreTestNode(

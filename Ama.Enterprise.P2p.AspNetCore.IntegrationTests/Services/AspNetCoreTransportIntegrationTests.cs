@@ -1,9 +1,12 @@
 namespace Ama.Enterprise.P2p.AspNetCore.IntegrationTests.Services;
 
 using System;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Extensions;
@@ -91,6 +94,66 @@ public sealed class AspNetCoreTransportIntegrationTests(ITestOutputHelper testOu
 
         await nodeB.Listener.StopListeningAsync(cts.Token);
         testOutputHelper.WriteLine("Test finished.");
+    }
+
+    [IntegrationFact]
+    public async Task AspNetCoreTransport_EndToEndMessageExchange_Https_Succeeds()
+    {
+        var (certPath, certPass) = GenerateTestCertificate();
+        try
+        {
+            // Arrange
+            var meshId = "aspnetcore-mesh-e2e-https";
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            
+            var peerAId = new PeerId(Guid.NewGuid());
+            var peerBId = new PeerId(Guid.NewGuid());
+
+            var portA = resourceManager.GetNextPort();
+            var portB = resourceManager.GetNextPort();
+
+            var payloadBytes = System.Text.Encoding.UTF8.GetBytes("Hello AspNetCore HTTPS World");
+            var messageToSend = new GossipMessage(meshId, Guid.NewGuid(), peerAId, 10, payloadBytes);
+
+            testOutputHelper.WriteLine($"Initializing HTTPS DI Nodes on ports {portA} and {portB}...");
+            await using var nodeA = CreateTestNode(meshId, peerAId, portA, true, certPath, certPass);
+            await using var nodeB = CreateTestNode(meshId, peerBId, portB, true, certPath, certPass);
+
+            var messageCompletionSource = new TaskCompletionSource<GossipMessage>();
+
+            await nodeB.Listener.StartListeningAsync(msg =>
+            {
+                if (msg is GossipMessage gossipMsg)
+                {
+                    testOutputHelper.WriteLine("Message received by HTTPS Listener B.");
+                    messageCompletionSource.TrySetResult(gossipMsg);
+                }
+                return Task.CompletedTask;
+            }, cts.Token);
+
+            // Give Standalone web server a moment to bind and listen
+            await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
+
+            var endpointB = new AspNetCorePeerEndpoint("127.0.0.1", portB); 
+            
+            // Act - Send
+            testOutputHelper.WriteLine("Sending HTTPS message from Transport A...");
+            await nodeA.Transport.SendAsync(endpointB, messageToSend, cts.Token);
+
+            // Assert
+            testOutputHelper.WriteLine("Awaiting message handle block...");
+            var receivedMessage = await messageCompletionSource.Task.WaitAsync(TimeSpan.FromSeconds(15), cts.Token);
+            
+            var receivedText = System.Text.Encoding.UTF8.GetString(receivedMessage.Payload.ToArray());
+            receivedText.ShouldBe("Hello AspNetCore HTTPS World");
+
+            await nodeB.Listener.StopListeningAsync(cts.Token);
+            testOutputHelper.WriteLine("HTTPS Test finished.");
+        }
+        finally
+        {
+            if (File.Exists(certPath)) File.Delete(certPath);
+        }
     }
 
     [IntegrationFact]
@@ -253,7 +316,7 @@ public sealed class AspNetCoreTransportIntegrationTests(ITestOutputHelper testOu
         await Should.NotThrowAsync(() => nodeA.Transport.SendAsync(dummyEndpoint, message, CancellationToken.None));
     }
 
-    private AspNetCoreTestNode CreateTestNode(string meshId, PeerId peerId, int listenPort)
+    private AspNetCoreTestNode CreateTestNode(string meshId, PeerId peerId, int listenPort, bool useHttps = false, string? certPath = null, string? certPass = null)
     {
         var services = new ServiceCollection();
 
@@ -283,6 +346,11 @@ public sealed class AspNetCoreTransportIntegrationTests(ITestOutputHelper testOu
                 options.AdvertisedHost = "127.0.0.1";
                 options.AdvertisedPort = listenPort;
                 options.PathPrefix = "/test/p2p/messages/";
+                options.UseHttps = useHttps;
+                options.UseHttpsStandalone = useHttps;
+                options.IgnoreOutboundSslErrors = useHttps;
+                options.CertificateFilePath = certPath;
+                options.CertificatePassword = certPass;
             });
 
         var provider = services.BuildServiceProvider();
@@ -335,6 +403,23 @@ public sealed class AspNetCoreTransportIntegrationTests(ITestOutputHelper testOu
         app.MapP2pMeshEndpoints("/test/p2p/messages");
 
         return app;
+    }
+
+    private static (string Path, string Password) GenerateTestCertificate()
+    {
+        var password = Guid.NewGuid().ToString("N");
+        using var rsa = RSA.Create(2048);
+        var req = new CertificateRequest(
+            "CN=127.0.0.1",
+            rsa,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1);
+
+        using var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        var pfxBytes = cert.Export(X509ContentType.Pfx, password);
+        var path = Path.GetTempFileName() + ".pfx";
+        File.WriteAllBytes(path, pfxBytes);
+        return (path, password);
     }
 
     private sealed record AspNetCoreTestNode(

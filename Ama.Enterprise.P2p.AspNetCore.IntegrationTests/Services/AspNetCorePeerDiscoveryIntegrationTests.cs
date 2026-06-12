@@ -1,8 +1,11 @@
 namespace Ama.Enterprise.P2p.AspNetCore.IntegrationTests.Services;
 
 using System;
+using System.IO;
 using System.Linq;
 using System.Net;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Extensions;
@@ -99,6 +102,79 @@ public sealed class AspNetCorePeerDiscoveryIntegrationTests : IClassFixture<Netw
     }
 
     [IntegrationFact]
+    public async Task AspNetCorePeerDiscovery_StandaloneMode_Https_DiscoversAndRegistersPeer_Successfully()
+    {
+        var (certPath, certPass) = GenerateTestCertificate();
+        try
+        {
+            // Arrange
+            var meshId = $"asp-disc-std-https-{Guid.NewGuid():N}";
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+
+            var peerAId = new PeerId(Guid.NewGuid());
+            var peerBId = new PeerId(Guid.NewGuid());
+
+            var portAHandshake = resourceManager.GetNextPort();
+            var portBHandshake = resourceManager.GetNextPort();
+            var portADiscovery = resourceManager.GetNextPort();
+            var portBDiscovery = resourceManager.GetNextPort();
+
+            var discoveryUrlForA = $"https://127.0.0.1:{portBDiscovery}/ama-enterprise/p2p-discovery/{meshId}";
+            var discoveryUrlForB = $"https://127.0.0.1:{portADiscovery}/ama-enterprise/p2p-discovery/{meshId}";
+
+            using var topologySemaphore = new SemaphoreSlim(0);
+            Action onTopologyChanged = () => 
+            {
+                try { topologySemaphore.Release(); } catch { }
+            };
+
+            testOutputHelper.WriteLine("Initializing Nodes for Standalone ASP.NET Core HTTPS Discovery...");
+            await using var nodeA = CreateStandaloneNode(meshId, peerAId, portAHandshake, portADiscovery, discoveryUrlForA, onTopologyChanged, true, certPath, certPass);
+            await using var nodeB = CreateStandaloneNode(meshId, peerBId, portBHandshake, portBDiscovery, discoveryUrlForB, onTopologyChanged, true, certPath, certPass);
+
+            // Act
+            testOutputHelper.WriteLine("Starting P2P infrastructure spanning Standalone ASP.NET Core HTTPS bounds...");
+            await nodeA.StartAsync(cts.Token);
+            await nodeB.StartAsync(cts.Token);
+
+            // Assert
+            testOutputHelper.WriteLine("Waiting for isolated HTTPS polling and subsequent Phase 2 handshakes to complete natively...");
+            
+            bool discovered = false;
+            var timeoutTime = DateTime.UtcNow.AddSeconds(30);
+
+            while (DateTime.UtcNow < timeoutTime && !cts.Token.IsCancellationRequested)
+            {
+                var peersA = await nodeA.Registry.GetAllPeersAsync(meshId, cts.Token);
+                var peersB = await nodeB.Registry.GetAllPeersAsync(meshId, cts.Token);
+
+                var aDiscoveredB = peersA.FirstOrDefault(p => p.Id.Equals(peerBId));
+                var bDiscoveredA = peersB.FirstOrDefault(p => p.Id.Equals(peerAId));
+
+                if (aDiscoveredB.Endpoint is not null && bDiscoveredA.Endpoint is not null)
+                {
+                    aDiscoveredB.Endpoint.ShouldBeOfType<AspNetCorePeerEndpoint>();
+                    bDiscoveredA.Endpoint.ShouldBeOfType<AspNetCorePeerEndpoint>();
+
+                    var bEndpoint = (AspNetCorePeerEndpoint)aDiscoveredB.Endpoint;
+                    bEndpoint.Port.ShouldBe(portBHandshake);
+
+                    discovered = true;
+                    break;
+                }
+
+                await topologySemaphore.WaitAsync(TimeSpan.FromMilliseconds(500), cts.Token);
+            }
+
+            discovered.ShouldBeTrue("Nodes failed to discover each other via Standalone ASP.NET Core HTTPS polling explicitly mapping topologies securely.");
+        }
+        finally
+        {
+            if (File.Exists(certPath)) File.Delete(certPath);
+        }
+    }
+
+    [IntegrationFact]
     public async Task AspNetCorePeerDiscovery_IntegratedMode_DiscoversAndRegistersPeer_Successfully()
     {
         // Arrange
@@ -166,7 +242,7 @@ public sealed class AspNetCorePeerDiscoveryIntegrationTests : IClassFixture<Netw
 
     
 
-    private AspNetCoreTestNode CreateStandaloneNode(string meshId, PeerId peerId, int handshakePort, int discoveryPort, string? discoveryUrl, Action onTopologyChanged)
+    private AspNetCoreTestNode CreateStandaloneNode(string meshId, PeerId peerId, int handshakePort, int discoveryPort, string? discoveryUrl, Action onTopologyChanged, bool useHttps = false, string? certPath = null, string? certPass = null)
     {
         var services = new ServiceCollection();
 
@@ -200,6 +276,11 @@ public sealed class AspNetCorePeerDiscoveryIntegrationTests : IClassFixture<Netw
             options.StandaloneListenPort = handshakePort;
             options.AdvertisedHandshakePort = handshakePort;
             options.HandshakeTimeout = TimeSpan.FromSeconds(10);
+            options.UseHttps = useHttps;
+            options.UseHttpsStandalone = useHttps;
+            options.IgnoreOutboundSslErrors = useHttps;
+            options.CertificateFilePath = certPath;
+            options.CertificatePassword = certPass;
         })
         .AddAspNetCorePeerDiscovery(options =>
         {
@@ -209,6 +290,10 @@ public sealed class AspNetCorePeerDiscoveryIntegrationTests : IClassFixture<Netw
             options.DiscoveryUrl = discoveryUrl ?? string.Empty;
             options.DiscoveryInterval = TimeSpan.FromSeconds(2);
             options.DiscoveryTimeout = TimeSpan.FromSeconds(5);
+            options.UseHttpsStandalone = useHttps;
+            options.IgnoreOutboundSslErrors = useHttps;
+            options.CertificateFilePath = certPath;
+            options.CertificatePassword = certPass;
         });
 
         var provider = services.BuildServiceProvider();
@@ -269,6 +354,23 @@ public sealed class AspNetCorePeerDiscoveryIntegrationTests : IClassFixture<Netw
         app.MapP2pMeshDiscovery("/test-discovery");
 
         return app;
+    }
+
+    private static (string Path, string Password) GenerateTestCertificate()
+    {
+        var password = Guid.NewGuid().ToString("N");
+        using var rsa = RSA.Create(2048);
+        var req = new CertificateRequest(
+            "CN=127.0.0.1",
+            rsa,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1);
+
+        using var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        var pfxBytes = cert.Export(X509ContentType.Pfx, password);
+        var path = Path.GetTempFileName() + ".pfx";
+        File.WriteAllBytes(path, pfxBytes);
+        return (path, password);
     }
 
     private sealed record AspNetCoreTestNode(

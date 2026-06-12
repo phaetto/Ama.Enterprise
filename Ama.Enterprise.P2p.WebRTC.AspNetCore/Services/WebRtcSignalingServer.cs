@@ -5,9 +5,11 @@ using System.Collections.Generic;
 using System.Diagnostics.Metrics;
 using System.Net;
 using System.Net.WebSockets;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
+using Ama.Enterprise.Licensing.Services;
 using Ama.Enterprise.P2p.AspNetCore.Models;
 using Ama.Enterprise.P2p.WebRTC.AspNetCore.Models;
 using Ama.Enterprise.P2p.WebRTC.Models;
@@ -15,6 +17,7 @@ using Ama.Enterprise.P2p.WebRTC.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -29,6 +32,7 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
     private readonly IWebRtcInvitationService invitationService;
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<WebRtcSignalingServer> logger;
+    private readonly ICertificateLoader? certificateLoader;
 
     private readonly Meter meter;
     private readonly Counter<long> requestsReceivedCounter;
@@ -44,6 +48,7 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
         IWebRtcInvitationService invitationService,
         ICrdtSerializer serializer,
         ILogger<WebRtcSignalingServer> logger,
+        ICertificateLoader? certificateLoader = null,
         IMeterFactory? meterFactory = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
@@ -57,6 +62,7 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
         this.invitationService = invitationService;
         this.serializer = serializer;
         this.logger = logger;
+        this.certificateLoader = certificateLoader;
 
         this.meter = meterFactory?.Create("Ama.Enterprise.P2p.WebRtcSignalingServer") ?? new Meter("Ama.Enterprise.P2p.WebRtcSignalingServer");
         this.requestsReceivedCounter = this.meter.CreateCounter<long>(
@@ -85,22 +91,37 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
                 {
                     webBuilder.UseKestrel(serverOptions =>
                     {
+                        Action<ListenOptions> configureListenOptions = listenOptions =>
+                        {
+                            if (options.UseHttpsStandalone)
+                            {
+                                listenOptions.UseHttps(httpsOptions =>
+                                {
+                                    var cert = LoadCertificate(options);
+                                    if (cert is not null)
+                                    {
+                                        httpsOptions.ServerCertificate = cert;
+                                    }
+                                });
+                            }
+                        };
+
                         if (string.IsNullOrWhiteSpace(options.StandaloneListenHost) || options.StandaloneListenHost == "+" || options.StandaloneListenHost == "0.0.0.0")
                         {
-                            serverOptions.ListenAnyIP(options.StandaloneListenPort);
+                            serverOptions.ListenAnyIP(options.StandaloneListenPort, configureListenOptions);
                         }
                         else if (options.StandaloneListenHost.Equals("localhost", StringComparison.OrdinalIgnoreCase))
                         {
-                            serverOptions.ListenLocalhost(options.StandaloneListenPort);
+                            serverOptions.ListenLocalhost(options.StandaloneListenPort, configureListenOptions);
                         }
                         else if (IPAddress.TryParse(options.StandaloneListenHost, out var ipAddress))
                         {
-                            serverOptions.Listen(ipAddress, options.StandaloneListenPort);
+                            serverOptions.Listen(ipAddress, options.StandaloneListenPort, configureListenOptions);
                         }
                         else
                         {
                             logger.LogWarning("[{MeshId}] Invalid Kestrel ListenHost '{Host}', falling back to Any IP explicitly.", meshId, options.StandaloneListenHost);
-                            serverOptions.ListenAnyIP(options.StandaloneListenPort);
+                            serverOptions.ListenAnyIP(options.StandaloneListenPort, configureListenOptions);
                         }
                     });
 
@@ -232,5 +253,29 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
         webHost?.Dispose();
         meter.Dispose();
         isDisposed = true;
+    }
+
+    private X509Certificate2? LoadCertificate(WebRtcSignalingOptions options)
+    {
+        if (certificateLoader == null)
+        {
+            logger.LogWarning("[{MeshId}] ICertificateLoader is not registered. Cannot configure HTTPS explicitly.", meshId);
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.CertificateThumbprint))
+        {
+            var cert = certificateLoader.LoadFromStore(options.CertificateThumbprint);
+            if (cert != null) return cert;
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.CertificateFilePath))
+        {
+            var cert = certificateLoader.LoadFromFile(options.CertificateFilePath, options.CertificatePassword);
+            if (cert != null) return cert;
+        }
+
+        logger.LogWarning("[{MeshId}] Failed to resolve valid X509 certificate configurations explicitly for HTTPS binding.", meshId);
+        return null;
     }
 }

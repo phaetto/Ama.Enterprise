@@ -59,6 +59,8 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        services.TryAddSingleton<ICertificateLoader, CertificateLoader>();
+        
         services.Configure<LicenseOptions>(options =>
         {
             options.DeclaredLicenseType = DeclaredLicenseType.OpenSource;
@@ -94,6 +96,8 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configureOptions);
 
+        services.TryAddSingleton<ICertificateLoader, CertificateLoader>();
+        
         services.Configure<LicenseOptions>(options =>
         {
             configureOptions(options);

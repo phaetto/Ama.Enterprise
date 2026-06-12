@@ -1,10 +1,14 @@
 namespace Ama.Enterprise.P2p.WebRTC.AspNetCore.IntegrationTests.Services;
 
 using System;
+using System.IO;
 using System.Net;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Extensions;
+using Ama.Enterprise.Licensing.Services;
 using Ama.Enterprise.P2p.AspNetCore.Models;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.Models.Core;
@@ -58,6 +62,41 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
     }
 
     [IntegrationFact]
+    public async Task WebRtcSignalingClient_StandaloneMode_Https_NegotiateOffer_Succeeds()
+    {
+        // Arrange
+        var meshId = "sig-mesh-req-https";
+        var portA = resourceManager.GetNextPort();
+        var portB = resourceManager.GetNextPort();
+        var certInfo = GenerateTempCertificate();
+
+        try
+        {
+            await using var nodeA = await CreateStandaloneTestNodeAsync(meshId, new PeerId(Guid.NewGuid()), portA, true, certInfo.Path, certInfo.Password);
+            await using var nodeB = await CreateStandaloneTestNodeAsync(meshId, new PeerId(Guid.NewGuid()), portB, true, certInfo.Path, certInfo.Password);
+
+            var uriB = new Uri($"https://127.0.0.1:{portB}");
+
+            // Act
+            testOutputHelper.WriteLine("Node A requesting SDP negotiation over HTTPS (WSS) natively from Standalone Node B...");
+            var connectionId = await nodeA.Client.NegotiateOfferAsync(uriB, meshId, null, async (remoteOffer, ct) =>
+            {
+                testOutputHelper.WriteLine("Node A dynamically answering remote SDP offer over WSS...");
+                var localAnswer = await nodeA.InvitationService.AcceptInvitationAsync(remoteOffer.SdpOffer, ct).ConfigureAwait(false);
+                return new WebRtcInvitationAnswer(remoteOffer.ConnectionId, localAnswer.SdpAnswer);
+            }, CancellationToken.None);
+            
+            // Assert
+            connectionId.ShouldNotBeNullOrWhiteSpace();
+            testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange securely negotiated explicitly over Secure WebSockets (WSS).");
+        }
+        finally
+        {
+            CleanupTempCertificate(certInfo.Path);
+        }
+    }
+
+    [IntegrationFact]
     public async Task WebRtcSignalingClient_IntegratedMode_NegotiateOffer_Succeeds()
     {
         // Arrange
@@ -82,6 +121,41 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
         // Assert
         connectionId.ShouldNotBeNullOrWhiteSpace();
         testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange finalized across integrated WS endpoints.");
+    }
+
+    [IntegrationFact]
+    public async Task WebRtcSignalingClient_IntegratedMode_Https_NegotiateOffer_Succeeds()
+    {
+        // Arrange
+        var meshId = "sig-mesh-integ-req-https";
+        var portA = resourceManager.GetNextPort();
+        var portB = resourceManager.GetNextPort();
+        var certInfo = GenerateTempCertificate();
+
+        try
+        {
+            await using var nodeA = await CreateIntegratedTestNodeAsync(meshId, new PeerId(Guid.NewGuid()), portA, true, certInfo.Path, certInfo.Password);
+            await using var nodeB = await CreateIntegratedTestNodeAsync(meshId, new PeerId(Guid.NewGuid()), portB, true, certInfo.Path, certInfo.Password);
+
+            var uriB = new Uri($"https://127.0.0.1:{portB}");
+
+            // Act
+            testOutputHelper.WriteLine("Node A requesting SDP negotiation over HTTPS (WSS) natively from Integrated Node B...");
+            var connectionId = await nodeA.Client.NegotiateOfferAsync(uriB, meshId, null, async (remoteOffer, ct) =>
+            {
+                testOutputHelper.WriteLine("Node A dynamically answering remote SDP offer over WSS...");
+                var localAnswer = await nodeA.InvitationService.AcceptInvitationAsync(remoteOffer.SdpOffer, ct).ConfigureAwait(false);
+                return new WebRtcInvitationAnswer(remoteOffer.ConnectionId, localAnswer.SdpAnswer);
+            }, CancellationToken.None);
+            
+            // Assert
+            connectionId.ShouldNotBeNullOrWhiteSpace();
+            testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange securely finalized across integrated WSS endpoints.");
+        }
+        finally
+        {
+            CleanupTempCertificate(certInfo.Path);
+        }
     }
 
     [IntegrationFact]
@@ -131,6 +205,36 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
     }
 
     [IntegrationFact]
+    public async Task WebRtcHttpPeerDiscovery_StandaloneMode_Https_DiscoversAndConnects_Succeeds()
+    {
+        // Arrange
+        var meshId = "sig-mesh-discovery-https";
+        var portA = resourceManager.GetNextPort();
+        var portB = resourceManager.GetNextPort();
+        var certInfo = GenerateTempCertificate();
+
+        try
+        {
+            await using var nodeA = await CreateStandaloneTestNodeAsync(meshId, new PeerId(Guid.NewGuid()), portA, true, certInfo.Path, certInfo.Password);
+            await using var nodeB = await CreateStandaloneTestNodeAsync(meshId, new PeerId(Guid.NewGuid()), portB, true, certInfo.Path, certInfo.Password);
+
+            var uriB = new Uri($"https://127.0.0.1:{portB}");
+
+            // Act
+            testOutputHelper.WriteLine("Node A running explicit HTTPS discovery securely connecting to Standalone Node B natively...");
+            var result = await nodeA.Discovery.DiscoverPeerAsync(uriB, null, CancellationToken.None);
+
+            // Assert
+            result.ShouldBeTrue();
+            testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange automated explicitly using the WSS discovery service.");
+        }
+        finally
+        {
+            CleanupTempCertificate(certInfo.Path);
+        }
+    }
+
+    [IntegrationFact]
     public async Task WebRtcHttpPeerDiscovery_IntegratedMode_DiscoversAndConnects_Succeeds()
     {
         // Arrange
@@ -150,6 +254,36 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
         // Assert
         result.ShouldBeTrue();
         testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange automated explicitly using the WS discovery service across integrated endpoints.");
+    }
+
+    [IntegrationFact]
+    public async Task WebRtcHttpPeerDiscovery_IntegratedMode_Https_DiscoversAndConnects_Succeeds()
+    {
+        // Arrange
+        var meshId = "sig-mesh-discovery-integ-https";
+        var portA = resourceManager.GetNextPort();
+        var portB = resourceManager.GetNextPort();
+        var certInfo = GenerateTempCertificate();
+
+        try
+        {
+            await using var nodeA = await CreateIntegratedTestNodeAsync(meshId, new PeerId(Guid.NewGuid()), portA, true, certInfo.Path, certInfo.Password);
+            await using var nodeB = await CreateIntegratedTestNodeAsync(meshId, new PeerId(Guid.NewGuid()), portB, true, certInfo.Path, certInfo.Password);
+
+            var uriB = new Uri($"https://127.0.0.1:{portB}");
+
+            // Act
+            testOutputHelper.WriteLine("Node A running explicit HTTPS discovery securely connecting to Integrated Node B natively...");
+            var result = await nodeA.Discovery.DiscoverPeerAsync(uriB, null, CancellationToken.None);
+
+            // Assert
+            result.ShouldBeTrue();
+            testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange automated explicitly using the WSS discovery service across integrated secure endpoints.");
+        }
+        finally
+        {
+            CleanupTempCertificate(certInfo.Path);
+        }
     }
 
     [IntegrationFact]
@@ -173,7 +307,7 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
         testOutputHelper.WriteLine("Client suppressed the connection failure natively returning false.");
     }
 
-    private async Task<WebRtcSignalingStandaloneTestNode> CreateStandaloneTestNodeAsync(string meshId, PeerId peerId, int port)
+    private async Task<WebRtcSignalingStandaloneTestNode> CreateStandaloneTestNodeAsync(string meshId, PeerId peerId, int port, bool useHttps = false, string? certPath = null, string? certPassword = null)
     {
         var services = new ServiceCollection();
 
@@ -186,6 +320,7 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
         });
         
         services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
+        services.AddSingleton<ICertificateLoader, CertificateLoader>();
 
         services.Configure<P2pNodeOptions>(meshId, options =>
         {
@@ -203,6 +338,10 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
                 options.HostingMode = AspNetCoreHostingMode.Standalone;
                 options.StandaloneListenHost = "127.0.0.1";
                 options.StandaloneListenPort = port;
+                options.UseHttpsStandalone = useHttps;
+                options.CertificateFilePath = certPath;
+                options.CertificatePassword = certPassword;
+                options.IgnoreOutboundSslErrors = true;
             })
             .AddWebRtcHttpPeerDiscovery();
 
@@ -241,7 +380,7 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
         );
     }
 
-    private async Task<WebRtcSignalingIntegratedTestNode> CreateIntegratedTestNodeAsync(string meshId, PeerId peerId, int port)
+    private async Task<WebRtcSignalingIntegratedTestNode> CreateIntegratedTestNodeAsync(string meshId, PeerId peerId, int port, bool useHttps = false, string? certPath = null, string? certPassword = null)
     {
         var builder = WebApplication.CreateBuilder();
 
@@ -250,6 +389,7 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
 
         builder.Services.AddCrdt();
         builder.Services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
+        builder.Services.AddSingleton<ICertificateLoader, CertificateLoader>();
 
         builder.Services.Configure<P2pNodeOptions>(meshId, options =>
         {
@@ -265,12 +405,23 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
             .AddAspNetCoreWebRtcSignaling(options =>
             {
                 options.HostingMode = AspNetCoreHostingMode.Integrated;
+                options.IgnoreOutboundSslErrors = true;
             })
             .AddWebRtcHttpPeerDiscovery();
 
         builder.WebHost.ConfigureKestrel(options =>
         {
-            options.Listen(IPAddress.Parse("127.0.0.1"), port);
+            if (useHttps && !string.IsNullOrWhiteSpace(certPath))
+            {
+                options.Listen(IPAddress.Parse("127.0.0.1"), port, listenOptions =>
+                {
+                    listenOptions.UseHttps(certPath, certPassword);
+                });
+            }
+            else
+            {
+                options.Listen(IPAddress.Parse("127.0.0.1"), port);
+            }
         });
 
         var app = builder.Build();
@@ -288,6 +439,34 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
         var discovery = app.Services.GetRequiredKeyedService<IWebRtcHttpPeerDiscovery>(meshId);
 
         return new WebRtcSignalingIntegratedTestNode(app, peerId, client, invitationService, discovery);
+    }
+
+    private static (string Path, string Password) GenerateTempCertificate()
+    {
+        using var rsa = RSA.Create(2048);
+        var req = new CertificateRequest("CN=127.0.0.1", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+
+        var sanBuilder = new SubjectAlternativeNameBuilder();
+        sanBuilder.AddIpAddress(IPAddress.Parse("127.0.0.1"));
+        sanBuilder.AddDnsName("localhost");
+        req.CertificateExtensions.Add(sanBuilder.Build());
+
+        req.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, false));
+        
+        var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".pfx");
+        var password = "test_password";
+        
+        File.WriteAllBytes(path, cert.Export(X509ContentType.Pfx, password));
+        return (path, password);
+    }
+
+    private static void CleanupTempCertificate(string path)
+    {
+        if (File.Exists(path))
+        {
+            try { File.Delete(path); } catch { /* Ignore cleanup errors in testing loops explicitly */ }
+        }
     }
 
     private sealed record WebRtcSignalingStandaloneTestNode(

@@ -2,7 +2,9 @@ namespace Ama.Enterprise.P2p.AspNetCore.Extensions;
 
 using System;
 using System.Net.Http;
+using System.Diagnostics.Metrics;
 using Ama.CRDT.Services.Serialization;
+using Ama.Enterprise.Licensing.Services;
 using Ama.Enterprise.P2p.AspNetCore.Models;
 using Ama.Enterprise.P2p.AspNetCore.Services.Discovery;
 using Ama.Enterprise.P2p.Extensions;
@@ -11,7 +13,6 @@ using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Diagnostics.Metrics;
 
 /// <summary>
 /// Extension methods for registering ASP.NET Core peer discovery and handshaker components decoupled routing meshes natively.
@@ -42,7 +43,20 @@ public static class AspNetCoreDiscoveryServiceCollectionExtensions
 
         ServiceCollectionExtensions.TryAddAspNetCoreSerialization(builder.Services);
 
-        builder.Services.AddHttpClient("P2pAspNetCoreHandshaker");
+        builder.Services.AddHttpClient($"{builder.MeshId}_P2pAspNetCoreHandshaker")
+            .ConfigurePrimaryHttpMessageHandler(sp =>
+            {
+                var handler = new HttpClientHandler();
+                var optionsMonitor = sp.GetRequiredService<IOptionsMonitor<AspNetCoreHandshakeOptions>>();
+                var options = optionsMonitor.Get(builder.MeshId);
+                
+                if (options.IgnoreOutboundSslErrors)
+                {
+                    handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+                }
+                
+                return handler;
+            });
 
         builder.Services.AddKeyedSingleton<IPeerHandshaker>(builder.MeshId, (sp, key) =>
             new AspNetCorePeerHandshaker(
@@ -53,7 +67,8 @@ public static class AspNetCoreDiscoveryServiceCollectionExtensions
                 sp.GetRequiredService<IHttpClientFactory>(),
                 sp.GetRequiredService<ICrdtSerializer>(),
                 sp.GetRequiredService<ILogger<AspNetCorePeerHandshaker>>(),
-                sp.GetService<IMeterFactory>()));
+                sp.GetService<IMeterFactory>(),
+                sp.GetService<ICertificateLoader>()));
 
         return builder;
     }
@@ -82,7 +97,20 @@ public static class AspNetCoreDiscoveryServiceCollectionExtensions
 
         ServiceCollectionExtensions.TryAddAspNetCoreSerialization(builder.Services);
 
-        builder.Services.AddHttpClient("P2pAspNetCoreDiscovery");
+        builder.Services.AddHttpClient($"{builder.MeshId}_P2pAspNetCoreDiscovery")
+            .ConfigurePrimaryHttpMessageHandler(sp =>
+            {
+                var handler = new HttpClientHandler();
+                var optionsMonitor = sp.GetRequiredService<IOptionsMonitor<AspNetCoreDiscoveryOptions>>();
+                var options = optionsMonitor.Get(builder.MeshId);
+                
+                if (options.IgnoreOutboundSslErrors)
+                {
+                    handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+                }
+                
+                return handler;
+            });
 
         builder.Services.AddKeyedSingleton<IPeerDiscovery>(builder.MeshId, (sp, key) =>
             new AspNetCorePeerDiscovery(
@@ -95,7 +123,8 @@ public static class AspNetCoreDiscoveryServiceCollectionExtensions
                 sp.GetRequiredKeyedService<IPeerAuthenticator>(key),
                 sp.GetRequiredKeyedService<IFailureDetector>(key),
                 sp.GetRequiredService<ILogger<AspNetCorePeerDiscovery>>(),
-                sp.GetService<IMeterFactory>()));
+                sp.GetService<IMeterFactory>(),
+                sp.GetService<ICertificateLoader>()));
 
         return builder;
     }

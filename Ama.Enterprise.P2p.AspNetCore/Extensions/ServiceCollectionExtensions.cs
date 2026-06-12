@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Ama.CRDT.Extensions;
 using Ama.CRDT.Services.Serialization;
+using Ama.Enterprise.Licensing.Services;
 using Ama.Enterprise.P2p.AspNetCore.Models;
 using Ama.Enterprise.P2p.AspNetCore.Services;
 using Ama.Enterprise.P2p.Extensions;
@@ -89,7 +90,20 @@ public static class ServiceCollectionExtensions
         // Map unified Core HTTP dispatcher mechanisms globally across explicit isolated meshes safely natively.
         builder.Services.AddP2pHttpCore();
 
-        builder.Services.AddHttpClient("P2pAspNetCoreTransport");
+        builder.Services.AddHttpClient($"{builder.MeshId}_P2pAspNetCoreTransport")
+            .ConfigurePrimaryHttpMessageHandler(sp =>
+            {
+                var handler = new HttpClientHandler();
+                var optionsMonitor = sp.GetRequiredService<IOptionsMonitor<AspNetCoreTransportOptions>>();
+                var options = optionsMonitor.Get(builder.MeshId);
+                
+                if (options.IgnoreOutboundSslErrors)
+                {
+                    handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+                }
+                
+                return handler;
+            });
 
         builder.Services.AddKeyedSingleton<PeerEndpoint>(builder.MeshId, (sp, key) =>
         {
@@ -111,7 +125,8 @@ public static class ServiceCollectionExtensions
                 (string)key!,
                 sp.GetRequiredService<IOptionsMonitor<AspNetCoreTransportOptions>>(),
                 sp.GetRequiredService<IHttpInboundDispatcher>(),
-                sp.GetRequiredService<ILogger<AspNetCoreTransportListener>>()));
+                sp.GetRequiredService<ILogger<AspNetCoreTransportListener>>(),
+                sp.GetService<ICertificateLoader>()));
 
         return builder;
     }

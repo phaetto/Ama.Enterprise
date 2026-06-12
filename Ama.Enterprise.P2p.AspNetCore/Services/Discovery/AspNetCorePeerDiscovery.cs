@@ -7,9 +7,11 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
+using Ama.Enterprise.Licensing.Services;
 using Ama.Enterprise.P2p.AspNetCore.Models;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
@@ -34,6 +36,7 @@ public sealed class AspNetCorePeerDiscovery : IPeerDiscovery, IDisposable
     private readonly IPeerAuthenticator authenticator;
     private readonly IFailureDetector failureDetector;
     private readonly ILogger<AspNetCorePeerDiscovery> logger;
+    private readonly ICertificateLoader? certificateLoader;
 
     private readonly Meter meter;
     private readonly Counter<long> discoveryRequestsSentCounter;
@@ -56,7 +59,8 @@ public sealed class AspNetCorePeerDiscovery : IPeerDiscovery, IDisposable
         IPeerAuthenticator authenticator,
         IFailureDetector failureDetector,
         ILogger<AspNetCorePeerDiscovery> logger,
-        IMeterFactory? meterFactory = null)
+        IMeterFactory? meterFactory = null,
+        ICertificateLoader? certificateLoader = null)
     {
         ArgumentNullException.ThrowIfNull(meshId);
         ArgumentNullException.ThrowIfNull(optionsMonitor);
@@ -77,6 +81,7 @@ public sealed class AspNetCorePeerDiscovery : IPeerDiscovery, IDisposable
         this.authenticator = authenticator;
         this.failureDetector = failureDetector;
         this.logger = logger;
+        this.certificateLoader = certificateLoader;
 
         this.meter = meterFactory?.Create("Ama.Enterprise.P2p.AspNetCorePeerDiscovery") ?? new Meter("Ama.Enterprise.P2p.AspNetCorePeerDiscovery");
         this.discoveryRequestsSentCounter = this.meter.CreateCounter<long>("p2p.discovery.aspnetcore.requests_sent", "requests", "Total ASP.NET Core discovery requests sent");
@@ -100,22 +105,33 @@ public sealed class AspNetCorePeerDiscovery : IPeerDiscovery, IDisposable
                 {
                     webBuilder.UseKestrel(serverOptions =>
                     {
+                        X509Certificate2? cert = null;
+                        if (options.UseHttpsStandalone)
+                        {
+                            cert = LoadCertificate(options.CertificateFilePath, options.CertificatePassword, options.CertificateThumbprint);
+                        }
+
+                        Action<Microsoft.AspNetCore.Server.Kestrel.Core.ListenOptions> configureListen = listenOptions =>
+                        {
+                            if (options.UseHttpsStandalone && cert != null) listenOptions.UseHttps(cert);
+                        };
+
                         if (string.IsNullOrWhiteSpace(options.StandaloneListenHost) || options.StandaloneListenHost == "+" || options.StandaloneListenHost == "0.0.0.0")
                         {
-                            serverOptions.ListenAnyIP(options.StandaloneListenPort);
+                            serverOptions.ListenAnyIP(options.StandaloneListenPort, configureListen);
                         }
                         else if (options.StandaloneListenHost.Equals("localhost", StringComparison.OrdinalIgnoreCase))
                         {
-                            serverOptions.ListenLocalhost(options.StandaloneListenPort);
+                            serverOptions.ListenLocalhost(options.StandaloneListenPort, configureListen);
                         }
                         else if (IPAddress.TryParse(options.StandaloneListenHost, out var ipAddress))
                         {
-                            serverOptions.Listen(ipAddress, options.StandaloneListenPort);
+                            serverOptions.Listen(ipAddress, options.StandaloneListenPort, configureListen);
                         }
                         else
                         {
                             logger.LogWarning("[{MeshId}] Invalid Kestrel ListenHost '{Host}', falling back to Any IP.", meshId, options.StandaloneListenHost);
-                            serverOptions.ListenAnyIP(options.StandaloneListenPort);
+                            serverOptions.ListenAnyIP(options.StandaloneListenPort, configureListen);
                         }
                     });
                     
@@ -179,7 +195,7 @@ public sealed class AspNetCorePeerDiscovery : IPeerDiscovery, IDisposable
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
         var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), localEndpoint);
 
-        var client = httpClientFactory.CreateClient("P2pAspNetCoreDiscovery");
+        var client = httpClientFactory.CreateClient($"{meshId}_P2pAspNetCoreDiscovery");
         var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -269,6 +285,30 @@ public sealed class AspNetCorePeerDiscovery : IPeerDiscovery, IDisposable
             logger.LogTrace(ex, "[{MeshId}] Failed to process inbound ASP.NET Core explicitly routed discovery request robustly.", meshId);
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
         }
+    }
+
+    private X509Certificate2? LoadCertificate(string? path, string? password, string? thumbprint)
+    {
+        if (certificateLoader == null)
+        {
+            logger.LogWarning("[{MeshId}] ICertificateLoader is not registered. Cannot configure HTTPS.", meshId);
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(thumbprint))
+        {
+            var cert = certificateLoader.LoadFromStore(thumbprint);
+            if (cert != null) return cert;
+        }
+
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            var cert = certificateLoader.LoadFromFile(path, password);
+            if (cert != null) return cert;
+        }
+
+        logger.LogWarning("[{MeshId}] Failed to resolve valid X509 certificate configurations for HTTPS binding.", meshId);
+        return null;
     }
 
     /// <inheritdoc />
