@@ -1,9 +1,0 @@
-- Add testing with reflection got get all models and make sure they are serializable
-- Add testing for AOT & and AOT serializable (I am not sure if we need different for AOT)
-
-Create a test harness that you can step manually:
-- Use a manager to create/remove/edit CRDTs
-- Step: Send to another node
-- Step: Background processes tick (anti-entropy, checkpoint, eviction, etc)
-
-Users should be able to make their own scenarios without a P2P underlying network

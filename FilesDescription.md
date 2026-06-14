@@ -5,8 +5,6 @@
 | `$/.github/workflows/publish-nuget-manual.yml` | Removed `Ama.Enterprise.P2p.Telemetry.Cli` from manual packing and automated pre-release cleanup arrays to halt its distribution temporarily. |
 | `$/.github/workflows/publish-nuget.yml` | Reverted deployment steps for `Ama.Enterprise.P2p.Telemetry.Cli` removing it from active publication pipelines. |
 | `$/.gitignore` | No description provided. |
-| `$/Ama.Enterprise.CRDT.Analyzers.UnitTests/Ama.Enterprise.CRDT.Analyzers.UnitTests.csproj` | No description provided. |
-| `$/Ama.Enterprise.CRDT.Analyzers/Ama.Enterprise.CRDT.Analyzers.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/Ama.Enterprise.CRDT.Distributed.IntegrationTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/AntiEntropyStateSyncIntegrationTests.cs` | Replaced synchronous `ICrdtPatcher` usage with the asynchronous `IAsyncCrdtPatcher` to reflect updated internal patching pipelines supporting background thread delegation. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/BackgroundAndStorageIntegrationTests.cs` | Handled breaking DI changes by invoking `IApplicationPayloadHandler` avoiding obsolete generic envelopes during manual fallback sync testing. |
@@ -35,7 +33,6 @@
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Models/CrdtTableEntity.cs` | Azure Table Storage entity model incorporating property chunking to persist payloads up to ~960KB. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Models/TableStorageCrdtOptions.cs` | Configuration structure holding Azure Table Storage endpoints and table bindings. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Services/TableStorageDistributedCrdtStorage.cs` | Integrated generic table storage explicitly tracking partition bounds avoiding active restart topology amnesia natively. |
-| `$/Ama.Enterprise.CRDT.Distributed.UnitTests/Ama.Enterprise.CRDT.Distributed.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
 | `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | Extension methods for bootstrapping CRDT dependencies. Updated to add dynamic ThresholdCompactionPolicyFactory resolutions utilizing `CompactionTtlSeconds`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/ClusterStateSnapshotDto.cs` | DTO structure explicitly capturing the in-memory state of the cluster tracker tracking overarching metrics safely preventing split-brain restart amnesia natively. |
@@ -94,12 +91,10 @@
 | `$/Ama.Enterprise.CRDT.MessagePack/Formatters/CrdtPolymorphicMessagePackFormatter.cs` | Robust fallback polymorphic converter intercepting binary payload encoding/decoding mapping directly to `CrdtTypeRegistry` string bounds avoiding complex reflection. |
 | `$/Ama.Enterprise.CRDT.MessagePack/Formatters/CrdtPolymorphicMessagePackRegistry.cs` | Centralized registry caching typed AOT polymorphic serialization delegates for MessagePack. |
 | `$/Ama.Enterprise.CRDT.MessagePack/MessagePackCrdtSerializer.cs` | Implementation wrapping `ICrdtSerializer` targeting Native AOT structured MessagePack arrays and abstract Base64 fallbacks for string constraints. |
-| `$/Ama.Enterprise.CRDT.Testing/Ama.Enterprise.CRDT.Testing.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
-| `$/Ama.Enterprise.CRDT.Testing/todo.txt` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Ama.Enterprise.FeatureFlags.IntegrationTests.csproj` | No description provided. |
+| `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Services/FeatureFlagDomainIntegrationTests.cs` | Integration tests verifying the single-node lifecycle, domain logic preservation, and CRDT bootstrapping capabilities of the Feature Flags module natively avoiding network sockets. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj` | Showcase console application project displaying P2P feature flags integration, AOT readiness, and UDP cluster discovery. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Updated application entry point substituting obsolete dummy declarations resolving Open Source configurations targeting mapped DI bindings. |
-| `$/Ama.Enterprise.FeatureFlags.UnitTests/Ama.Enterprise.FeatureFlags.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
 | `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | Refactored `AddFeatureFlags` signature enforcing `replicaId` tracking and configuring underlying singleton bounds across mesh architectures. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlag.cs` | Data structure representing a single feature flag. Updated to embed specific enterprise metadata, audit trails, and ownership structures. |
@@ -228,7 +223,6 @@
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Extensions/ServiceCollectionExtensions.cs` | Added WebRTC Distributed Signaling HTTP client capabilities for programmatic cluster integration configuring native IHttpClientFactory dependencies. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Models/CrdtSignalingState.cs` | Root CRDT document model representing the WebRTC out-of-band signaling state drop-box updating definitions reflecting dynamic target tracking properties matching presence scopes. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Models/DistributedSignalingAotContext.cs` | AOT JSON context tracking base dictionary capabilities bounding timestamp configurations enforcing execution without complex reflection payloads. |
-| `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Models/DistributedSignalingHttpAotContext.cs` | AOT JSON context for the WebRTC CRDT distributed signaling HTTP endpoints ensuring targeted logic evaluation limits on structured HTTP data bypassing runtime penalties natively. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Services/CrdtSignalingManager.cs` | Modified structural bounds enforcing mapped targeted dynamic keys handling specific intent behaviors across public logic pipelines natively. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Services/ICrdtSignalingManager.cs` | Contract managing the WebRTC out-of-band signaling drop-box updated tracking target presence mapping dictionary evaluation constraints. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Services/IWebRtcDistributedSignalingClient.cs` | Defines a client invoking WebRTC out-of-band signaling API boundaries updating target identifiers decoupling connections mapped to remote node constraints natively. |

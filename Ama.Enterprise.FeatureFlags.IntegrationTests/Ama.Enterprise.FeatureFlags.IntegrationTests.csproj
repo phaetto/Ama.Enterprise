@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Ama.Enterprise.FeatureFlags\Ama.Enterprise.FeatureFlags.csproj" />
+    <ProjectReference Include="..\Ama.Enterprise.UnitTests\Ama.Enterprise.UnitTests.csproj" />
   </ItemGroup>
 
   <ItemGroup>

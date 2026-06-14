@@ -1,7 +1,5 @@
 <Solution>
   <Folder Name="/Analyzers/">
-    <Project Path="Ama.Enterprise.CRDT.Analyzers.UnitTests/Ama.Enterprise.CRDT.Analyzers.UnitTests.csproj" Id="2cacdc77-25d8-4390-8d29-7f3da41092b3" />
-    <Project Path="Ama.Enterprise.CRDT.Analyzers/Ama.Enterprise.CRDT.Analyzers.csproj" Id="ca718036-9dd1-42b1-a53a-158a6336f699" />
     <Project Path="Ama.Enterprise.CRDT.MessagePack.Analyzers.UnitTests/Ama.Enterprise.CRDT.MessagePack.Analyzers.UnitTests.csproj" />
     <Project Path="Ama.Enterprise.CRDT.MessagePack.Analyzers/Ama.Enterprise.CRDT.MessagePack.Analyzers.csproj" />
     <Project Path="Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj" />
@@ -12,9 +10,7 @@
     <Project Path="Ama.Enterprise.P2p.Telemetry.Cli/Ama.Enterprise.P2p.Telemetry.Cli.csproj" Id="df33b23a-daf7-4648-b6f0-24b4001792b6" />
   </Folder>
   <Folder Name="/Products/">
-    <Project Path="Ama.Enterprise.CRDT.Testing/Ama.Enterprise.CRDT.Testing.csproj" Id="e30d8fc4-45a1-447c-bfb3-64761c771cb4" />
     <Project Path="Ama.Enterprise.FeatureFlags.IntegrationTests/Ama.Enterprise.FeatureFlags.IntegrationTests.csproj" Id="da1f1950-e20a-435a-9bbb-63d942458072" />
-    <Project Path="Ama.Enterprise.FeatureFlags.UnitTests/Ama.Enterprise.FeatureFlags.UnitTests.csproj" Id="d74539b1-a59f-40bc-81d1-e33de4e85be7" />
     <Project Path="Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj" Id="f29896b4-f84b-45fb-8742-3496884d770e" />
     <Project Path="Ama.Enterprise.P2p.Telemetry.IntegrationTests/Ama.Enterprise.P2p.Telemetry.IntegrationTests.csproj" Id="c24eaa7a-4b42-434d-aa9e-30abf4a4e40f" />
     <Project Path="Ama.Enterprise.P2p.Telemetry.UnitTests/Ama.Enterprise.P2p.Telemetry.UnitTests.csproj" />
@@ -39,7 +35,6 @@
   </Folder>
   <Project Path="Ama.Enterprise.CRDT.Distributed.IntegrationTests/Ama.Enterprise.CRDT.Distributed.IntegrationTests.csproj" Id="723052c7-e569-4f76-a331-cb2c00551502" />
   <Project Path="Ama.Enterprise.CRDT.Distributed.TableStorage/Ama.Enterprise.CRDT.Distributed.TableStorage.csproj" Id="b760640c-c398-4458-a771-53ea772b31d2" />
-  <Project Path="Ama.Enterprise.CRDT.Distributed.UnitTests/Ama.Enterprise.CRDT.Distributed.UnitTests.csproj" Id="2048c2a6-0842-4d57-a42e-94919ded6fa4" />
   <Project Path="Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj" Id="2fe2382f-1652-48b6-b2e4-6f07cb4214dc" />
   <Project Path="Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Ama.Enterprise.CRDT.MessagePack.IntegrationTests.csproj" Id="27b90f1f-2e28-44b5-8349-0eb61a2ab490" />
   <Project Path="Ama.Enterprise.CRDT.MessagePack.UnitTests/Ama.Enterprise.CRDT.MessagePack.UnitTests.csproj" Id="d5cffb87-ecff-47cd-b060-28f635451996" />

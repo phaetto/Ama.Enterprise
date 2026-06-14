@@ -95,8 +95,8 @@ public static class Program
         var hostedServices = provider.GetServices<IHostedService>().ToList();
 
         // Resolve the scoped structural boundaries targeting explicit ReplicaId to extract isolated generic scopes safely
-        var scopeManager = provider.GetRequiredService<DistributedCrdtScopeManager>();
-        var crdtScope = scopeManager.GetOrCreateScope(replicaId);
+        var scopeFactory = provider.GetRequiredService<DistributedCrdtScopeManager>();
+        var crdtScope = scopeFactory.GetOrCreateScope(replicaId);
         
         // Resolve the cluster manager natively via the transparent forwarder implicitly mapped to the internal state scope
         var clusterManager = crdtScope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
