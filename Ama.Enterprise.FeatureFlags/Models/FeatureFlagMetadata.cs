@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.FeatureFlags.Models;
+
 /// <summary>
-/// Custom metadata structure encapsulating enterprise multi-tenancy and product domain boundaries.
+/// Metadata structure encapsulating enterprise multi-tenancy and product domain data.
 /// </summary>
 public readonly record struct FeatureFlagMetadata(
     string? ProductId,

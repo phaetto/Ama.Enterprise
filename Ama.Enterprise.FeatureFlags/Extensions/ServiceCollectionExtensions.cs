@@ -8,13 +8,12 @@ using Ama.Enterprise.FeatureFlags.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
-/// Extensions for registering feature flags CRDT components leveraging the distributed CRDT core.
+/// Extensions for registering feature flags components.
 /// </summary>
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Adds the complete, plug-and-play feature flags system to the service collection.
-    /// P2P network transports, CRDT topologies, and distributed scopes must be registered by the application independently.
+    /// Adds the feature flags system to the service collection.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <returns>The updated service collection.</returns>
@@ -27,15 +26,15 @@ public static class ServiceCollectionExtensions
                 .AddCrdtJsonTypeInfoResolver(FeatureFlagsJsonContext.Default)
                 .AddCrdtAotContext<FeatureFlagsCrdtAotContext>();
 
-        services.AddCrdtSerializableType<FeatureFlag>("feature-flag");
+        services.AddCrdtSerializableType<FeatureFlag>(Constants.FeatureFlagDocumentType);
 
-        // Map domain generic types inside the centralized document pool securely via explicitly inherited constraints
-        services.AddDistributedDocumentType<FeatureFlagState>("feature-flag");
+        // Map domain types inside the centralized document pool
+        services.AddDistributedDocumentType<FeatureFlagState>(Constants.FeatureFlagDocumentType);
 
-        // Register the business logic domain wrapper scoped exactly to the CRDT hierarchy via transparent forwarder natively
+        // Register the business logic domain wrapper scoped to the CRDT hierarchy
         services.AddDistributedCrdtService<IFeatureFlagClusterManager, FeatureFlagClusterManager>();
 
-        // Register the background initialization service to securely build the global scope natively
+        // Register the background initialization service to build the global scope
         services.AddHostedService<FeatureFlagBootstrapper>();
 
         return services;

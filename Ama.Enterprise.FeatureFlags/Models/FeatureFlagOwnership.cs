@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.FeatureFlags.Models;
+
 /// <summary>
-/// Ownership details bounding structural domain responsibility and internal team contact routing.
+/// Ownership details specifying team contact routing for a feature flag.
 /// </summary>
 public readonly record struct FeatureFlagOwnership(
     string? Owner,

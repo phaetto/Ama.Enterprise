@@ -96,18 +96,19 @@
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj` | Showcase console application project displaying P2P feature flags integration, AOT readiness, and UDP cluster discovery. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Updated application entry point substituting obsolete dummy declarations resolving Open Source configurations targeting mapped DI bindings. |
 | `$/Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
-| `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | Refactored `AddFeatureFlags` signature enforcing `replicaId` tracking and configuring underlying singleton bounds across mesh architectures. |
-| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlag.cs` | Data structure representing a single feature flag. Updated to embed specific enterprise metadata, audit trails, and ownership structures. |
-| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagAudit.cs` | Audit trace structure tracking temporal modifications and user bounds for a specific feature flag. |
-| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagMetadata.cs` | Custom metadata structure encapsulating enterprise multi-tenancy and product domain boundaries. |
+| `$/Ama.Enterprise.FeatureFlags/Constants.cs` | Global constants for the Feature Flags module, defining common identifiers and document types. |
+| `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | Extensions for registering feature flags components and background synchronization bootstrappers. |
+| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlag.cs` | Represents a single enterprise feature flag in the system incorporating audit and ownership structures. |
+| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagAudit.cs` | Audit trace structure tracking temporal modifications for a specific feature flag. |
+| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagMetadata.cs` | Metadata structure encapsulating enterprise multi-tenancy and product domain boundaries. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagOptions.cs` | Configuration structure for feature flags. Removed hardcoded network abstractions, delegating topology management to the host. |
-| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagOwnership.cs` | Ownership details bounding structural domain responsibility and internal team contact routing. |
-| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagState.cs` | Inherits `IDistributedCrdtState` and maps generic constraints bridging properties. |
-| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsCrdtAotContext.cs` | AOT context for the feature flags models. |
-| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsJsonContext.cs` | AOT context for the feature flags models. Appended generic bounds integrating nested JSON bounds. |
-| `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagBootstrapper.cs` | Refactored bootstrapping sequence evaluating multi-replica structural scopes overriding obsolete provider limits. |
-| `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagClusterManager.cs` | Migrated generic CRDT patch generation utilizing `IAsyncCrdtPatcher` to avoid synchronization locks and moved utility helper queries beneath implementations. |
-| `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagClusterManager.cs` | Interface for the feature flag cluster manager. Updated upsert endpoints handling optional overrides targeting metadata tracking scopes. |
+| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagOwnership.cs` | Ownership details specifying team contact routing for a feature flag. |
+| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagState.cs` | The root state dictionary representing active and tombstoned feature flags. |
+| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsCrdtAotContext.cs` | AOT reflection context for the Feature Flags CRDT models. |
+| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsJsonContext.cs` | AOT-friendly JSON context for Feature Flags serialization. |
+| `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagBootstrapper.cs` | Background service initializing the singleton feature flags state across replica scopes. |
+| `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagClusterManager.cs` | Implementation of the feature flag cluster manager interfacing with the orchestrator patching intent. |
+| `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagClusterManager.cs` | Interface for managing distributed feature toggles, evaluating state modifications and observing remote updates. |
 | `$/Ama.Enterprise.Licensing.UnitTests/Ama.Enterprise.Licensing.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.Licensing.UnitTests/Services/CertificateLoaderTests.cs` | Unit tests verifying certificate loading capabilities from multiple inputs evaluating null constraints and cryptographic formats. |
 | `$/Ama.Enterprise.Licensing.UnitTests/Services/HonorLicenseManagerTests.cs` | Evaluates generic honor checks mapping cryptography bounds. Updated to mock the internal property setter resolving internal bounds utilizing reflection circumventing the updated internal set boundaries. |

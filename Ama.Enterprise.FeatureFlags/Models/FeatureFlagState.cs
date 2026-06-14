@@ -11,9 +11,9 @@ using Ama.CRDT.Attributes.Strategies;
 public sealed class FeatureFlagState : IEquatable<FeatureFlagState>
 {
     /// <summary>
-    /// Gets or sets the document identifier tracking singleton bounds across instances.
+    /// Gets or sets the document identifier.
     /// </summary>
-    public string Id { get; set; } = "ama-enterprise-feature-flags-singleton";
+    public string Id { get; set; } = Constants.GlobalDocumentId;
 
     /// <summary>
     /// A map of feature flags where the key is the flag name.

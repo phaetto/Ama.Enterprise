@@ -3,7 +3,7 @@ namespace Ama.Enterprise.FeatureFlags.Models;
 using System;
 
 /// <summary>
-/// Audit trace structure tracking temporal modifications and explicit user bounds for a specific feature flag.
+/// Audit trace structure tracking temporal modifications for a specific feature flag.
 /// </summary>
 public readonly record struct FeatureFlagAudit(
     string? LastModifiedBy,

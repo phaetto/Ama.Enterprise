@@ -10,7 +10,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Background service eagerly bootstrapping the singleton feature flags global state across isolated replica scopes.
+/// Background service initializing the singleton feature flags state across replica scopes.
 /// </summary>
 internal sealed class FeatureFlagBootstrapper(
     DistributedCrdtScopeManager scopeManager,
@@ -29,16 +29,16 @@ internal sealed class FeatureFlagBootstrapper(
             {
                 var scope = scopeManager.GetOrCreateScope(reg.ReplicaId);
 
-                // Eagerly inject the global feature flags singleton into the document orchestrator pool for this isolated scope
-                await scope.Orchestrator.CreateDocumentAsync("ama-enterprise-feature-flags-singleton", "feature-flag", cancellationToken).ConfigureAwait(false);
+                // Inject the global feature flags singleton into the document orchestrator pool for this scope
+                await scope.Orchestrator.CreateDocumentAsync(Constants.GlobalDocumentId, Constants.FeatureFlagDocumentType, cancellationToken).ConfigureAwait(false);
                 
-                // Explicitly force map synchronization here at the bootstrapper edge initializing structures before host routing begins.
+                // Force map synchronization initializing structures before host routing begins.
                 await scope.Orchestrator.SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to bootstrap global feature flag document during initialization natively.");
+            logger.LogError(ex, "Failed to bootstrap global feature flag document during initialization.");
         }
     }
 

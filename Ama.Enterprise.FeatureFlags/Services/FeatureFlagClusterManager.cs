@@ -12,12 +12,10 @@ using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.FeatureFlags.Models;
 
 /// <summary>
-/// Implementation of the cluster manager logic interacting tightly with the internal typed distributed pipeline.
+/// Implementation of the feature flag cluster manager.
 /// </summary>
 public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager, IDisposable
 {
-    private const string GlobalDocumentId = "ama-enterprise-feature-flags-singleton";
-
     private readonly ICrdtDocumentOrchestrator orchestrator;
     private readonly IAsyncCrdtPatcher patcher;
     private readonly object syncRoot = new();
@@ -125,7 +123,7 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager, IDis
                 return false;
             }
 
-            globalDocument = orchestrator.GetDocument<FeatureFlagState>(GlobalDocumentId);
+            globalDocument = orchestrator.GetDocument<FeatureFlagState>(Constants.GlobalDocumentId);
 
             if (globalDocument != null)
             {
