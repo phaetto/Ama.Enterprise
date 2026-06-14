@@ -3,6 +3,7 @@ namespace Ama.Enterprise.P2p.WebRTC.DistributedSignaling.Extensions;
 using System;
 using System.IO;
 using Ama.CRDT.Services.Serialization;
+using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.P2p.WebRTC.DistributedSignaling.Services;
 using Ama.Enterprise.P2p.WebRTC.Models;
 using Microsoft.AspNetCore.Builder;
@@ -26,22 +27,25 @@ public static class EndpointRouteBuilderExtensions
         ArgumentNullException.ThrowIfNull(endpoints);
 
         var basePath = routePrefix.TrimEnd('/');
-        var intentsPattern = $"{basePath}/{{meshId}}/intents";
-        var offersPattern = $"{basePath}/{{meshId}}/offers";
-        var answersPattern = $"{basePath}/{{meshId}}/answers";
+        var intentsPattern = $"{basePath}/{{replicaId}}/intents";
+        var offersPattern = $"{basePath}/{{replicaId}}/offers";
+        var answersPattern = $"{basePath}/{{replicaId}}/answers";
 
         endpoints.MapGet(intentsPattern, new RequestDelegate(async context =>
         {
-            var meshId = context.GetRouteValue("meshId")?.ToString();
+            var replicaId = context.GetRouteValue("replicaId")?.ToString();
             var documentId = context.Request.Query["documentId"].ToString();
 
-            if (string.IsNullOrWhiteSpace(meshId) || string.IsNullOrWhiteSpace(documentId))
+            if (string.IsNullOrWhiteSpace(replicaId) || string.IsNullOrWhiteSpace(documentId))
             {
                 context.Response.StatusCode = StatusCodes.Status400BadRequest;
                 return;
             }
 
-            var manager = context.RequestServices.GetRequiredService<ICrdtSignalingManager>();
+            var scopeManager = context.RequestServices.GetRequiredService<DistributedCrdtScopeManager>();
+            var scope = scopeManager.GetOrCreateScope(replicaId);
+            
+            var manager = scope.ServiceProvider.GetRequiredService<ICrdtSignalingManager>();
             var serializer = context.RequestServices.GetRequiredService<ICrdtSerializer>();
             
             var intents = manager.GetJoinIntents(documentId);
@@ -53,50 +57,58 @@ public static class EndpointRouteBuilderExtensions
 
         endpoints.MapPost($"{intentsPattern}/{{peerId:guid}}", new RequestDelegate(async context =>
         {
-            var meshId = context.GetRouteValue("meshId")?.ToString();
+            var replicaId = context.GetRouteValue("replicaId")?.ToString();
             var peerIdStr = context.GetRouteValue("peerId")?.ToString();
             var documentId = context.Request.Query["documentId"].ToString();
 
-            if (string.IsNullOrWhiteSpace(meshId) || string.IsNullOrWhiteSpace(documentId) || !Guid.TryParse(peerIdStr, out var peerId))
+            if (string.IsNullOrWhiteSpace(replicaId) || string.IsNullOrWhiteSpace(documentId) || !Guid.TryParse(peerIdStr, out var peerId))
             {
                 context.Response.StatusCode = StatusCodes.Status400BadRequest;
                 return;
             }
 
-            var manager = context.RequestServices.GetRequiredService<ICrdtSignalingManager>();
+            var scopeManager = context.RequestServices.GetRequiredService<DistributedCrdtScopeManager>();
+            var scope = scopeManager.GetOrCreateScope(replicaId);
+            var manager = scope.ServiceProvider.GetRequiredService<ICrdtSignalingManager>();
+
             await manager.SetJoinIntentAsync(peerId, documentId, context.RequestAborted).ConfigureAwait(false);
             context.Response.StatusCode = StatusCodes.Status202Accepted;
         }));
 
         endpoints.MapDelete($"{intentsPattern}/{{peerId:guid}}", new RequestDelegate(async context =>
         {
-            var meshId = context.GetRouteValue("meshId")?.ToString();
+            var replicaId = context.GetRouteValue("replicaId")?.ToString();
             var peerIdStr = context.GetRouteValue("peerId")?.ToString();
             var documentId = context.Request.Query["documentId"].ToString();
 
-            if (string.IsNullOrWhiteSpace(meshId) || string.IsNullOrWhiteSpace(documentId) || !Guid.TryParse(peerIdStr, out var peerId))
+            if (string.IsNullOrWhiteSpace(replicaId) || string.IsNullOrWhiteSpace(documentId) || !Guid.TryParse(peerIdStr, out var peerId))
             {
                 context.Response.StatusCode = StatusCodes.Status400BadRequest;
                 return;
             }
 
-            var manager = context.RequestServices.GetRequiredService<ICrdtSignalingManager>();
+            var scopeManager = context.RequestServices.GetRequiredService<DistributedCrdtScopeManager>();
+            var scope = scopeManager.GetOrCreateScope(replicaId);
+            var manager = scope.ServiceProvider.GetRequiredService<ICrdtSignalingManager>();
+
             await manager.RemoveJoinIntentAsync(peerId, documentId, context.RequestAborted).ConfigureAwait(false);
             context.Response.StatusCode = StatusCodes.Status204NoContent;
         }));
 
         endpoints.MapGet(offersPattern, new RequestDelegate(async context =>
         {
-            var meshId = context.GetRouteValue("meshId")?.ToString();
+            var replicaId = context.GetRouteValue("replicaId")?.ToString();
             var documentId = context.Request.Query["documentId"].ToString();
 
-            if (string.IsNullOrWhiteSpace(meshId) || string.IsNullOrWhiteSpace(documentId))
+            if (string.IsNullOrWhiteSpace(replicaId) || string.IsNullOrWhiteSpace(documentId))
             {
                 context.Response.StatusCode = StatusCodes.Status400BadRequest;
                 return;
             }
 
-            var manager = context.RequestServices.GetRequiredService<ICrdtSignalingManager>();
+            var scopeManager = context.RequestServices.GetRequiredService<DistributedCrdtScopeManager>();
+            var scope = scopeManager.GetOrCreateScope(replicaId);
+            var manager = scope.ServiceProvider.GetRequiredService<ICrdtSignalingManager>();
             var serializer = context.RequestServices.GetRequiredService<ICrdtSerializer>();
             
             var offers = manager.GetOffers(documentId);
@@ -108,17 +120,19 @@ public static class EndpointRouteBuilderExtensions
 
         endpoints.MapPost(offersPattern, new RequestDelegate(async context =>
         {
-            var meshId = context.GetRouteValue("meshId")?.ToString();
+            var replicaId = context.GetRouteValue("replicaId")?.ToString();
             var documentId = context.Request.Query["documentId"].ToString();
             var routingKey = context.Request.Query["routingKey"].ToString();
 
-            if (string.IsNullOrWhiteSpace(meshId) || string.IsNullOrWhiteSpace(documentId) || string.IsNullOrWhiteSpace(routingKey))
+            if (string.IsNullOrWhiteSpace(replicaId) || string.IsNullOrWhiteSpace(documentId) || string.IsNullOrWhiteSpace(routingKey))
             {
                 context.Response.StatusCode = StatusCodes.Status400BadRequest;
                 return;
             }
 
-            var manager = context.RequestServices.GetRequiredService<ICrdtSignalingManager>();
+            var scopeManager = context.RequestServices.GetRequiredService<DistributedCrdtScopeManager>();
+            var scope = scopeManager.GetOrCreateScope(replicaId);
+            var manager = scope.ServiceProvider.GetRequiredService<ICrdtSignalingManager>();
             var serializer = context.RequestServices.GetRequiredService<ICrdtSerializer>();
 
             using var ms = new MemoryStream();
@@ -144,17 +158,19 @@ public static class EndpointRouteBuilderExtensions
 
         endpoints.MapDelete($"{offersPattern}/{{routingKey}}", new RequestDelegate(async context =>
         {
-            var meshId = context.GetRouteValue("meshId")?.ToString();
+            var replicaId = context.GetRouteValue("replicaId")?.ToString();
             var routingKey = context.GetRouteValue("routingKey")?.ToString();
             var documentId = context.Request.Query["documentId"].ToString();
 
-            if (string.IsNullOrWhiteSpace(meshId) || string.IsNullOrWhiteSpace(documentId) || string.IsNullOrWhiteSpace(routingKey))
+            if (string.IsNullOrWhiteSpace(replicaId) || string.IsNullOrWhiteSpace(documentId) || string.IsNullOrWhiteSpace(routingKey))
             {
                 context.Response.StatusCode = StatusCodes.Status400BadRequest;
                 return;
             }
 
-            var manager = context.RequestServices.GetRequiredService<ICrdtSignalingManager>();
+            var scopeManager = context.RequestServices.GetRequiredService<DistributedCrdtScopeManager>();
+            var scope = scopeManager.GetOrCreateScope(replicaId);
+            var manager = scope.ServiceProvider.GetRequiredService<ICrdtSignalingManager>();
 
             await manager.RemoveOfferAsync(routingKey, documentId, context.RequestAborted).ConfigureAwait(false);
             context.Response.StatusCode = StatusCodes.Status204NoContent;
@@ -162,16 +178,18 @@ public static class EndpointRouteBuilderExtensions
 
         endpoints.MapGet(answersPattern, new RequestDelegate(async context =>
         {
-            var meshId = context.GetRouteValue("meshId")?.ToString();
+            var replicaId = context.GetRouteValue("replicaId")?.ToString();
             var documentId = context.Request.Query["documentId"].ToString();
 
-            if (string.IsNullOrWhiteSpace(meshId) || string.IsNullOrWhiteSpace(documentId))
+            if (string.IsNullOrWhiteSpace(replicaId) || string.IsNullOrWhiteSpace(documentId))
             {
                 context.Response.StatusCode = StatusCodes.Status400BadRequest;
                 return;
             }
 
-            var manager = context.RequestServices.GetRequiredService<ICrdtSignalingManager>();
+            var scopeManager = context.RequestServices.GetRequiredService<DistributedCrdtScopeManager>();
+            var scope = scopeManager.GetOrCreateScope(replicaId);
+            var manager = scope.ServiceProvider.GetRequiredService<ICrdtSignalingManager>();
             var serializer = context.RequestServices.GetRequiredService<ICrdtSerializer>();
             
             var answers = manager.GetAnswers(documentId);
@@ -183,17 +201,19 @@ public static class EndpointRouteBuilderExtensions
 
         endpoints.MapPost(answersPattern, new RequestDelegate(async context =>
         {
-            var meshId = context.GetRouteValue("meshId")?.ToString();
+            var replicaId = context.GetRouteValue("replicaId")?.ToString();
             var documentId = context.Request.Query["documentId"].ToString();
             var routingKey = context.Request.Query["routingKey"].ToString();
 
-            if (string.IsNullOrWhiteSpace(meshId) || string.IsNullOrWhiteSpace(documentId) || string.IsNullOrWhiteSpace(routingKey))
+            if (string.IsNullOrWhiteSpace(replicaId) || string.IsNullOrWhiteSpace(documentId) || string.IsNullOrWhiteSpace(routingKey))
             {
                 context.Response.StatusCode = StatusCodes.Status400BadRequest;
                 return;
             }
 
-            var manager = context.RequestServices.GetRequiredService<ICrdtSignalingManager>();
+            var scopeManager = context.RequestServices.GetRequiredService<DistributedCrdtScopeManager>();
+            var scope = scopeManager.GetOrCreateScope(replicaId);
+            var manager = scope.ServiceProvider.GetRequiredService<ICrdtSignalingManager>();
             var serializer = context.RequestServices.GetRequiredService<ICrdtSerializer>();
 
             using var ms = new MemoryStream();
@@ -219,17 +239,19 @@ public static class EndpointRouteBuilderExtensions
 
         endpoints.MapDelete($"{answersPattern}/{{routingKey}}", new RequestDelegate(async context =>
         {
-            var meshId = context.GetRouteValue("meshId")?.ToString();
+            var replicaId = context.GetRouteValue("replicaId")?.ToString();
             var routingKey = context.GetRouteValue("routingKey")?.ToString();
             var documentId = context.Request.Query["documentId"].ToString();
 
-            if (string.IsNullOrWhiteSpace(meshId) || string.IsNullOrWhiteSpace(documentId) || string.IsNullOrWhiteSpace(routingKey))
+            if (string.IsNullOrWhiteSpace(replicaId) || string.IsNullOrWhiteSpace(documentId) || string.IsNullOrWhiteSpace(routingKey))
             {
                 context.Response.StatusCode = StatusCodes.Status400BadRequest;
                 return;
             }
 
-            var manager = context.RequestServices.GetRequiredService<ICrdtSignalingManager>();
+            var scopeManager = context.RequestServices.GetRequiredService<DistributedCrdtScopeManager>();
+            var scope = scopeManager.GetOrCreateScope(replicaId);
+            var manager = scope.ServiceProvider.GetRequiredService<ICrdtSignalingManager>();
 
             await manager.RemoveAnswerAsync(routingKey, documentId, context.RequestAborted).ConfigureAwait(false);
             context.Response.StatusCode = StatusCodes.Status204NoContent;

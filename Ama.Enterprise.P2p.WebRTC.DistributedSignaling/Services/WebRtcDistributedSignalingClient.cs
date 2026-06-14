@@ -30,12 +30,12 @@ public sealed class WebRtcDistributedSignalingClient : IWebRtcDistributedSignali
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyDictionary<string, long>> GetJoinIntentsAsync(string meshId, string documentId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyDictionary<string, long>> GetJoinIntentsAsync(string replicaId, string documentId, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(replicaId);
         ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
 
-        var url = BuildUrl(meshId, "intents", documentId);
+        var url = BuildUrl(replicaId, "intents", documentId);
         using var httpClient = httpClientFactory.CreateClient(nameof(IWebRtcDistributedSignalingClient));
         using var response = await httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
@@ -48,36 +48,36 @@ public sealed class WebRtcDistributedSignalingClient : IWebRtcDistributedSignali
     }
 
     /// <inheritdoc />
-    public async Task SetJoinIntentAsync(string meshId, Guid peerId, string documentId, CancellationToken cancellationToken = default)
+    public async Task SetJoinIntentAsync(string replicaId, Guid peerId, string documentId, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(replicaId);
         ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
 
-        var url = BuildUrl(meshId, $"intents/{peerId}", documentId);
+        var url = BuildUrl(replicaId, $"intents/{peerId}", documentId);
         using var httpClient = httpClientFactory.CreateClient(nameof(IWebRtcDistributedSignalingClient));
         using var response = await httpClient.PostAsync(url, null, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
     }
 
     /// <inheritdoc />
-    public async Task RemoveJoinIntentAsync(string meshId, Guid peerId, string documentId, CancellationToken cancellationToken = default)
+    public async Task RemoveJoinIntentAsync(string replicaId, Guid peerId, string documentId, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(replicaId);
         ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
 
-        var url = BuildUrl(meshId, $"intents/{peerId}", documentId);
+        var url = BuildUrl(replicaId, $"intents/{peerId}", documentId);
         using var httpClient = httpClientFactory.CreateClient(nameof(IWebRtcDistributedSignalingClient));
         using var response = await httpClient.DeleteAsync(url, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyDictionary<string, WebRtcInvitationOffer>> GetOffersAsync(string meshId, string documentId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyDictionary<string, WebRtcInvitationOffer>> GetOffersAsync(string replicaId, string documentId, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(replicaId);
         ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
 
-        var url = BuildUrl(meshId, "offers", documentId);
+        var url = BuildUrl(replicaId, "offers", documentId);
         using var httpClient = httpClientFactory.CreateClient(nameof(IWebRtcDistributedSignalingClient));
         using var response = await httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
@@ -90,12 +90,12 @@ public sealed class WebRtcDistributedSignalingClient : IWebRtcDistributedSignali
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyDictionary<string, WebRtcInvitationAnswer>> GetAnswersAsync(string meshId, string documentId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyDictionary<string, WebRtcInvitationAnswer>> GetAnswersAsync(string replicaId, string documentId, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(replicaId);
         ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
 
-        var url = BuildUrl(meshId, "answers", documentId);
+        var url = BuildUrl(replicaId, "answers", documentId);
         using var httpClient = httpClientFactory.CreateClient(nameof(IWebRtcDistributedSignalingClient));
         using var response = await httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
@@ -108,13 +108,13 @@ public sealed class WebRtcDistributedSignalingClient : IWebRtcDistributedSignali
     }
 
     /// <inheritdoc />
-    public async Task SetOfferAsync(string meshId, string routingKey, WebRtcInvitationOffer offer, string documentId, CancellationToken cancellationToken = default)
+    public async Task SetOfferAsync(string replicaId, string routingKey, WebRtcInvitationOffer offer, string documentId, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(replicaId);
         ArgumentException.ThrowIfNullOrWhiteSpace(routingKey);
         ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
 
-        var url = BuildUrl(meshId, "offers", documentId, routingKey);
+        var url = BuildUrl(replicaId, "offers", documentId, routingKey);
         var bytes = serializer.SerializeToBytes(offer);
         
         using var content = new ByteArrayContent(bytes);
@@ -126,26 +126,26 @@ public sealed class WebRtcDistributedSignalingClient : IWebRtcDistributedSignali
     }
 
     /// <inheritdoc />
-    public async Task RemoveOfferAsync(string meshId, string routingKey, string documentId, CancellationToken cancellationToken = default)
+    public async Task RemoveOfferAsync(string replicaId, string routingKey, string documentId, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(replicaId);
         ArgumentException.ThrowIfNullOrWhiteSpace(routingKey);
         ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
 
-        var url = BuildUrl(meshId, $"offers/{Uri.EscapeDataString(routingKey)}", documentId);
+        var url = BuildUrl(replicaId, $"offers/{Uri.EscapeDataString(routingKey)}", documentId);
         using var httpClient = httpClientFactory.CreateClient(nameof(IWebRtcDistributedSignalingClient));
         using var response = await httpClient.DeleteAsync(url, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
     }
 
     /// <inheritdoc />
-    public async Task SetAnswerAsync(string meshId, string routingKey, WebRtcInvitationAnswer answer, string documentId, CancellationToken cancellationToken = default)
+    public async Task SetAnswerAsync(string replicaId, string routingKey, WebRtcInvitationAnswer answer, string documentId, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(replicaId);
         ArgumentException.ThrowIfNullOrWhiteSpace(routingKey);
         ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
 
-        var url = BuildUrl(meshId, "answers", documentId, routingKey);
+        var url = BuildUrl(replicaId, "answers", documentId, routingKey);
         var bytes = serializer.SerializeToBytes(answer);
         
         using var content = new ByteArrayContent(bytes);
@@ -157,21 +157,21 @@ public sealed class WebRtcDistributedSignalingClient : IWebRtcDistributedSignali
     }
 
     /// <inheritdoc />
-    public async Task RemoveAnswerAsync(string meshId, string routingKey, string documentId, CancellationToken cancellationToken = default)
+    public async Task RemoveAnswerAsync(string replicaId, string routingKey, string documentId, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(replicaId);
         ArgumentException.ThrowIfNullOrWhiteSpace(routingKey);
         ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
 
-        var url = BuildUrl(meshId, $"answers/{Uri.EscapeDataString(routingKey)}", documentId);
+        var url = BuildUrl(replicaId, $"answers/{Uri.EscapeDataString(routingKey)}", documentId);
         using var httpClient = httpClientFactory.CreateClient(nameof(IWebRtcDistributedSignalingClient));
         using var response = await httpClient.DeleteAsync(url, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
     }
 
-    private static string BuildUrl(string meshId, string path, string documentId, string? routingKey = null)
+    private static string BuildUrl(string replicaId, string path, string documentId, string? routingKey = null)
     {
-        var url = $"{BaseRoutePrefix}/{Uri.EscapeDataString(meshId)}/{path}?documentId={Uri.EscapeDataString(documentId)}";
+        var url = $"{BaseRoutePrefix}/{Uri.EscapeDataString(replicaId)}/{path}?documentId={Uri.EscapeDataString(documentId)}";
         if (!string.IsNullOrWhiteSpace(routingKey))
         {
             url += $"&routingKey={Uri.EscapeDataString(routingKey)}";

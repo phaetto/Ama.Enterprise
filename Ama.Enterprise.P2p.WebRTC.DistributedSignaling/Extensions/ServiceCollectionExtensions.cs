@@ -1,8 +1,10 @@
 namespace Ama.Enterprise.P2p.WebRTC.DistributedSignaling.Extensions;
 
+using Ama.CRDT.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.P2p.WebRTC.DistributedSignaling.Models;
 using Ama.Enterprise.P2p.WebRTC.DistributedSignaling.Services;
+using Ama.Enterprise.P2p.WebRTC.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using System;
@@ -22,11 +24,14 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        // Map AOT bindings for CRDT reflection and JSON resolution
+        services.AddSharedSerializationBindings();
+
         // Register the typed document model in the CRDT dependency map
         services.AddDistributedDocumentType<CrdtSignalingState>(Constants.SignalingDocumentTypeAlias);
         
-        // Map the singleton manager handling explicit out-of-band Drop-Box evaluations
-        services.TryAddSingleton<ICrdtSignalingManager, CrdtSignalingManager>();
+        // Register the specific domain logic manager scoped directly to the CRDT hierarchy bounds
+        services.AddDistributedCrdtService<ICrdtSignalingManager, CrdtSignalingManager>();
 
         return services;
     }
@@ -42,12 +47,27 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configureClient);
 
+        // Map AOT bindings for CRDT reflection and JSON resolution required by the client models
+        services.AddSharedSerializationBindings();
+
         // Register the named HttpClient configuration
         services.AddHttpClient(nameof(IWebRtcDistributedSignalingClient), configureClient);
         
         // Register the client wrapper utilizing IHttpClientFactory as a Singleton natively
         services.TryAddSingleton<IWebRtcDistributedSignalingClient, WebRtcDistributedSignalingClient>();
         
+        return services;
+    }
+
+    private static IServiceCollection AddSharedSerializationBindings(this IServiceCollection services)
+    {
+        services.AddCrdt()
+                .AddCrdtJsonTypeInfoResolver(DistributedSignalingAotContext.Default)
+                .AddCrdtAotContext<DistributedSignalingCrdtAotContext>();
+
+        services.AddCrdtSerializableType<WebRtcInvitationOffer>("webrtc-offer");
+        services.AddCrdtSerializableType<WebRtcInvitationAnswer>("webrtc-answer");
+
         return services;
     }
 }

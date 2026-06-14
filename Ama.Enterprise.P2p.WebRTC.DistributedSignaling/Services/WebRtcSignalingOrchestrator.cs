@@ -21,7 +21,7 @@ public sealed class WebRtcSignalingOrchestrator : IWebRtcSignalingOrchestrator
     private readonly ILogger<WebRtcSignalingOrchestrator> logger;
 
     private readonly ConcurrentDictionary<string, bool> processedIntents = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, bool> publishedOffers = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Guid> publishedOffers = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, bool> processedOffers = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, bool> processedAnswers = new(StringComparer.Ordinal);
 
@@ -45,23 +45,25 @@ public sealed class WebRtcSignalingOrchestrator : IWebRtcSignalingOrchestrator
     }
 
     /// <inheritdoc />
-    public async Task PublishJoinIntentAsync(string meshId, string documentId, CancellationToken cancellationToken = default)
+    public async Task PublishJoinIntentAsync(string meshId, string replicaId, string documentId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(replicaId);
         ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
 
         var localPeerId = nodeOptions.Get(meshId).LocalPeerId;
-        await signalingClient.SetJoinIntentAsync(meshId, localPeerId, documentId, cancellationToken).ConfigureAwait(false);
-        logger.LogInformation("[{MeshId}] Published WebRTC join intent for local peer {LocalPeerId} in signaling document {DocumentId}.", meshId, localPeerId, documentId);
+        await signalingClient.SetJoinIntentAsync(replicaId, localPeerId, documentId, cancellationToken).ConfigureAwait(false);
+        logger.LogInformation("[{MeshId}] Published WebRTC join intent for local peer {LocalPeerId} in signaling document {DocumentId} against replica {ReplicaId}.", meshId, localPeerId, documentId, replicaId);
     }
 
     /// <inheritdoc />
-    public async Task ProcessJoinIntentsAsync(string meshId, string documentId, CancellationToken cancellationToken = default)
+    public async Task ProcessJoinIntentsAsync(string meshId, string replicaId, string documentId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(replicaId);
         ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
 
-        var intents = await signalingClient.GetJoinIntentsAsync(meshId, documentId, cancellationToken).ConfigureAwait(false);
+        var intents = await signalingClient.GetJoinIntentsAsync(replicaId, documentId, cancellationToken).ConfigureAwait(false);
         var localPeerId = nodeOptions.Get(meshId).LocalPeerId;
         var invitationService = serviceProvider.GetRequiredKeyedService<IWebRtcInvitationService>(meshId);
 
@@ -81,15 +83,16 @@ public sealed class WebRtcSignalingOrchestrator : IWebRtcSignalingOrchestrator
                         try
                         {
                             var offer = await invitationService.CreateInvitationAsync(cancellationToken).ConfigureAwait(false);
-                            publishedOffers.TryAdd(routingKey, true);
+                            publishedOffers[routingKey] = offer.ConnectionId;
 
-                            await signalingClient.SetOfferAsync(meshId, routingKey, offer, documentId, cancellationToken).ConfigureAwait(false);
-                            logger.LogInformation("[{MeshId}] Published WebRTC offer directed to {TargetPeerId} in signaling document {DocumentId}.", meshId, targetPeerId, documentId);
+                            await signalingClient.SetOfferAsync(replicaId, routingKey, offer, documentId, cancellationToken).ConfigureAwait(false);
+                            logger.LogInformation("[{MeshId}] Published WebRTC offer directed to {TargetPeerId} in signaling document {DocumentId} targeting replica {ReplicaId}.", meshId, targetPeerId, documentId, replicaId);
                         }
                         catch (Exception ex)
                         {
-                            logger.LogError(ex, "[{MeshId}] Failed to process join intent generating offer for peer {TargetPeerId} in signaling document {DocumentId}.", meshId, targetPeerId, documentId);
+                            logger.LogError(ex, "[{MeshId}] Failed to process join intent generating offer for peer {TargetPeerId} in signaling document {DocumentId} via replica {ReplicaId}.", meshId, targetPeerId, documentId, replicaId);
                             processedIntents.TryRemove(routingKey, out _); // Allow subsequent polling execution retry
+                            publishedOffers.TryRemove(routingKey, out _); // Clean up the orphaned mapping
                         }
                     }
                 }
@@ -98,12 +101,13 @@ public sealed class WebRtcSignalingOrchestrator : IWebRtcSignalingOrchestrator
     }
 
     /// <inheritdoc />
-    public async Task ProcessPendingOffersAsync(string meshId, string documentId, CancellationToken cancellationToken = default)
+    public async Task ProcessPendingOffersAsync(string meshId, string replicaId, string documentId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(replicaId);
         ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
 
-        var offers = await signalingClient.GetOffersAsync(meshId, documentId, cancellationToken).ConfigureAwait(false);
+        var offers = await signalingClient.GetOffersAsync(replicaId, documentId, cancellationToken).ConfigureAwait(false);
         var localPeerId = nodeOptions.Get(meshId).LocalPeerId;
         var invitationService = serviceProvider.GetRequiredKeyedService<IWebRtcInvitationService>(meshId);
         
@@ -123,16 +127,16 @@ public sealed class WebRtcSignalingOrchestrator : IWebRtcSignalingOrchestrator
                         var answerRoutingKey = $"{offererPeerIdStr}:{localPeerId}";
 
                         var answer = await invitationService.AcceptInvitationAsync(kvp.Value.SdpOffer, cancellationToken).ConfigureAwait(false);
-                        await signalingClient.SetAnswerAsync(meshId, answerRoutingKey, answer, documentId, cancellationToken).ConfigureAwait(false);
+                        await signalingClient.SetAnswerAsync(replicaId, answerRoutingKey, answer, documentId, cancellationToken).ConfigureAwait(false);
                         
-                        logger.LogInformation("[{MeshId}] Answered WebRTC offer natively targeted from {OffererPeerId} in signaling document {DocumentId}.", meshId, offererPeerIdStr, documentId);
+                        logger.LogInformation("[{MeshId}] Answered WebRTC offer natively targeted from {OffererPeerId} in signaling document {DocumentId} via replica {ReplicaId}.", meshId, offererPeerIdStr, documentId, replicaId);
 
                         // Extract and clean up the consumed offer tracking minimal remote CRDT structural constraints internally.
-                        await signalingClient.RemoveOfferAsync(meshId, routingKey, documentId, cancellationToken).ConfigureAwait(false);
+                        await signalingClient.RemoveOfferAsync(replicaId, routingKey, documentId, cancellationToken).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
-                        logger.LogError(ex, "[{MeshId}] Failed to properly process targeted mapped offer {RoutingKey} in signaling document {DocumentId}.", meshId, routingKey, documentId);
+                        logger.LogError(ex, "[{MeshId}] Failed to properly process targeted mapped offer {RoutingKey} in signaling document {DocumentId} tracking replica {ReplicaId}.", meshId, routingKey, documentId, replicaId);
                         processedOffers.TryRemove(routingKey, out _);
                     }
                 }
@@ -141,12 +145,13 @@ public sealed class WebRtcSignalingOrchestrator : IWebRtcSignalingOrchestrator
     }
 
     /// <inheritdoc />
-    public async Task ProcessPendingAnswersAsync(string meshId, string documentId, CancellationToken cancellationToken = default)
+    public async Task ProcessPendingAnswersAsync(string meshId, string replicaId, string documentId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(replicaId);
         ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
 
-        var answers = await signalingClient.GetAnswersAsync(meshId, documentId, cancellationToken).ConfigureAwait(false);
+        var answers = await signalingClient.GetAnswersAsync(replicaId, documentId, cancellationToken).ConfigureAwait(false);
         var localPeerId = nodeOptions.Get(meshId).LocalPeerId;
         var invitationService = serviceProvider.GetRequiredKeyedService<IWebRtcInvitationService>(meshId);
 
@@ -162,19 +167,19 @@ public sealed class WebRtcSignalingOrchestrator : IWebRtcSignalingOrchestrator
                 var originalOfferRoutingKey = $"{answererPeerIdStr}:{localPeerId}";
 
                 // Ensure strict boundary constraints executing exclusively against generated internally originating targeted bounds
-                if (publishedOffers.ContainsKey(originalOfferRoutingKey) && processedAnswers.TryAdd(routingKey, true))
+                if (publishedOffers.TryGetValue(originalOfferRoutingKey, out var localConnectionId) && processedAnswers.TryAdd(routingKey, true))
                 {
                     try
                     {
-                        await invitationService.FinalizeInvitationAsync(kvp.Value.ConnectionId, kvp.Value.SdpAnswer, cancellationToken).ConfigureAwait(false);
-                        logger.LogInformation("[{MeshId}] Finalized WebRTC connection targeting {AnswererPeerId} in signaling document {DocumentId}.", meshId, answererPeerIdStr, documentId);
+                        await invitationService.FinalizeInvitationAsync(localConnectionId, kvp.Value.SdpAnswer, cancellationToken).ConfigureAwait(false);
+                        logger.LogInformation("[{MeshId}] Finalized WebRTC connection targeting {AnswererPeerId} in signaling document {DocumentId} bound to replica {ReplicaId}.", meshId, answererPeerIdStr, documentId, replicaId);
 
                         // Eliminate consumed tracking dependencies optimizing state constraints across the shared drop-box bounds
-                        await signalingClient.RemoveAnswerAsync(meshId, routingKey, documentId, cancellationToken).ConfigureAwait(false);
+                        await signalingClient.RemoveAnswerAsync(replicaId, routingKey, documentId, cancellationToken).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
-                        logger.LogError(ex, "[{MeshId}] Failed to correctly finalize native connection bounds mapping answer from {AnswererPeerId} in signaling document {DocumentId}.", meshId, answererPeerIdStr, documentId);
+                        logger.LogError(ex, "[{MeshId}] Failed to correctly finalize native connection bounds mapping answer from {AnswererPeerId} in signaling document {DocumentId} via replica {ReplicaId}.", meshId, answererPeerIdStr, documentId, replicaId);
                         processedAnswers.TryRemove(routingKey, out _);
                     }
                 }
