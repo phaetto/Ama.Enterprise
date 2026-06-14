@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.CRDT.MessagePack.Analyzers.UnitTests.Architecture;
+namespace Ama.Enterprise.CRDT.MessagePack.SourceGenerators.UnitTests.Architecture;
 
 using System;
 using System.Collections.Generic;

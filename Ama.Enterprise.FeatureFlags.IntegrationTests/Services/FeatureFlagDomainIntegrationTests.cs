@@ -1,7 +1,6 @@
 namespace Ama.Enterprise.FeatureFlags.IntegrationTests.Services;
 
 using System;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.Enterprise.CRDT.Distributed.Services;
@@ -9,7 +8,7 @@ using Ama.Enterprise.FeatureFlags.Extensions;
 using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Services;
 using Ama.Enterprise.P2p.Services.Core;
-using Ama.Enterprise.UnitTests.Attributes;
+using Ama.Enterprise.Project.Tests.Common.Attributes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Moq;

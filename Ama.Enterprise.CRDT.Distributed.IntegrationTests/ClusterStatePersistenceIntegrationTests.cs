@@ -11,7 +11,7 @@ using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.P2p.Services.Core;
-using Ama.Enterprise.UnitTests.Attributes;
+using Ama.Enterprise.Project.Tests.Common.Attributes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;

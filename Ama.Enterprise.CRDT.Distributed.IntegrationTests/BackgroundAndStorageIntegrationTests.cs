@@ -19,7 +19,7 @@ using Ama.Enterprise.P2p.Models.Algorithms;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.Services.Core;
-using Ama.Enterprise.UnitTests.Attributes;
+using Ama.Enterprise.Project.Tests.Common.Attributes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;

@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.UnitTests.Networking;
+namespace Ama.Enterprise.Project.Tests.Common.Networking;
 
 using System;
 using System.Net;

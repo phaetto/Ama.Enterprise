@@ -7,9 +7,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;
-using Ama.Enterprise.UnitTests.Attributes;
-using Ama.Enterprise.UnitTests.Extensions;
-using Ama.Enterprise.UnitTests.Networking;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services;
 using Ama.Enterprise.P2p.Services.Core;
@@ -21,6 +18,9 @@ using Xunit;
 using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Models;
 using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Handlers;
+using Ama.Enterprise.Project.Tests.Common.Networking;
+using Ama.Enterprise.Project.Tests.Common.Extensions;
+using Ama.Enterprise.Project.Tests.Common.Attributes;
 
 /// <summary>
 /// Contains advanced integration tests focusing on edge cases, high concurrency, and specific network topologies.

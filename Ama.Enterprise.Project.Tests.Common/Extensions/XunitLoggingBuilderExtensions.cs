@@ -1,7 +1,7 @@
-namespace Ama.Enterprise.UnitTests.Extensions;
+namespace Ama.Enterprise.Project.Tests.Common.Extensions;
 
 using System;
-using Ama.Enterprise.UnitTests.Logging;
+using Ama.Enterprise.Project.Tests.Common.Logging;
 using Microsoft.Extensions.Logging;
 
 /// <summary>

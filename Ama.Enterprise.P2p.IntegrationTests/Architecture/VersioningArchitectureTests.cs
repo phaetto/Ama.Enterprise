@@ -5,7 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
-using Ama.Enterprise.UnitTests.Attributes;
+using Ama.Enterprise.Project.Tests.Common.Attributes;
 using Shouldly;
 using Xunit;
 

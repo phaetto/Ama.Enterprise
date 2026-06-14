@@ -37,12 +37,13 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\Ama.Enterprise.CRDT.MessagePack.Analyzers\Ama.Enterprise.CRDT.MessagePack.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+		<ProjectReference Include="..\Ama.Enterprise.CRDT.MessagePack.SourceGenerators\Ama.Enterprise.CRDT.MessagePack.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 		<ProjectReference Include="..\Ama.Enterprise.Licensing\Ama.Enterprise.Licensing.csproj" />
+		<ProjectReference Include="..\Ama.Enterprise.Project.Analyzers\Ama.Enterprise.Project.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<None Include="$(TargetDir)..\Ama.Enterprise.CRDT.MessagePack.Analyzers\bin\Release\netstandard2.0\*" pack="true" PackagePath="analyzers/dotnet/cs"></None>
+		<None Include="$(TargetDir)..\Ama.Enterprise.CRDT.MessagePack.SourceGenerators\bin\Release\netstandard2.0\*" pack="true" PackagePath="analyzers/dotnet/cs"></None>
 		<None Include="..\README.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
 

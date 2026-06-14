@@ -2,9 +2,6 @@ namespace Ama.Enterprise.P2p.IntegrationTests.Algorithms;
 
 using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;
-using Ama.Enterprise.UnitTests.Attributes;
-using Ama.Enterprise.UnitTests.Extensions;
-using Ama.Enterprise.UnitTests.Networking;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.Services.Core;
@@ -19,6 +16,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
+using Ama.Enterprise.Project.Tests.Common.Networking;
+using Ama.Enterprise.Project.Tests.Common.Extensions;
+using Ama.Enterprise.Project.Tests.Common.Attributes;
 
 /// <summary>
 /// Contains integration tests focusing on the Two-Phase UDP multicast discovery mechanism.

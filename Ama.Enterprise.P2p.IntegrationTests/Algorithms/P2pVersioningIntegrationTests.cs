@@ -5,9 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Extensions;
 using Ama.Enterprise.P2p.Extensions;
-using Ama.Enterprise.UnitTests.Attributes;
-using Ama.Enterprise.UnitTests.Extensions;
-using Ama.Enterprise.UnitTests.Networking;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services;
 using Ama.Enterprise.P2p.Services.Core;
@@ -22,6 +19,9 @@ using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Models;
 using Ama.Enterprise.P2p.IntegrationTests.Algorithms.Handlers;
 using Ama.Enterprise.P2p.Models.Algorithms;
+using Ama.Enterprise.Project.Tests.Common.Networking;
+using Ama.Enterprise.Project.Tests.Common.Extensions;
+using Ama.Enterprise.Project.Tests.Common.Attributes;
 
 /// <summary>
 /// Integration tests verifying backwards compatibility and protocol versioning constraints natively using explicit TCP topologies.

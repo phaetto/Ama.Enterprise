@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.UnitTests.Attributes;
+namespace Ama.Enterprise.Project.Tests.Common.Attributes;
 
 using Xunit;
 

@@ -10,7 +10,7 @@ using Ama.Enterprise.P2p.Models.Discovery;
 using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.Services.Discovery;
-using Ama.Enterprise.UnitTests.Attributes;
+using Ama.Enterprise.Project.Tests.Common.Attributes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;

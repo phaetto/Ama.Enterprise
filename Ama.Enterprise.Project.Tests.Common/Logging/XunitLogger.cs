@@ -1,4 +1,4 @@
-namespace Ama.Enterprise.UnitTests.Logging;
+namespace Ama.Enterprise.Project.Tests.Common.Logging;
 
 using Microsoft.Extensions.Logging;
 using System;

@@ -1,7 +1,7 @@
 <Solution>
   <Folder Name="/Analyzers/">
-    <Project Path="Ama.Enterprise.CRDT.MessagePack.Analyzers.UnitTests/Ama.Enterprise.CRDT.MessagePack.Analyzers.UnitTests.csproj" />
-    <Project Path="Ama.Enterprise.CRDT.MessagePack.Analyzers/Ama.Enterprise.CRDT.MessagePack.Analyzers.csproj" />
+    <Project Path="Ama.Enterprise.CRDT.MessagePack.SourceGenerators.UnitTests/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.UnitTests.csproj" />
+    <Project Path="Ama.Enterprise.CRDT.MessagePack.SourceGenerators/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.csproj" />
     <Project Path="Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj" />
     <Project Path="Ama.Enterprise.Project.Analyzers/Ama.Enterprise.Project.Analyzers.csproj" />
   </Folder>
@@ -31,7 +31,7 @@
     <File Path="README.md" />
   </Folder>
   <Folder Name="/Tooling/">
-    <Project Path="Ama.Enterprise.UnitTests/Ama.Enterprise.UnitTests.csproj" Id="9bf82d30-d760-4e80-976f-f0e53086c9bd" />
+    <Project Path="Ama.Enterprise.Project.Tests.Common/Ama.Enterprise.Project.Tests.Common.csproj" Id="9bf82d30-d760-4e80-976f-f0e53086c9bd" />
   </Folder>
   <Project Path="Ama.Enterprise.CRDT.Distributed.IntegrationTests/Ama.Enterprise.CRDT.Distributed.IntegrationTests.csproj" Id="723052c7-e569-4f76-a331-cb2c00551502" />
   <Project Path="Ama.Enterprise.CRDT.Distributed.TableStorage/Ama.Enterprise.CRDT.Distributed.TableStorage.csproj" Id="b760640c-c398-4458-a771-53ea772b31d2" />

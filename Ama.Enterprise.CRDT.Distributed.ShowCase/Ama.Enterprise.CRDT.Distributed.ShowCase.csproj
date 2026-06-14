@@ -20,7 +20,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\Ama.Enterprise.CRDT.MessagePack.Analyzers\Ama.Enterprise.CRDT.MessagePack.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+		<ProjectReference Include="..\Ama.Enterprise.CRDT.MessagePack.SourceGenerators\Ama.Enterprise.CRDT.MessagePack.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
 
 </Project>
