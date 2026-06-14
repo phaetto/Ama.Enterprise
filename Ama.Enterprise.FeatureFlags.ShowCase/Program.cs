@@ -1,5 +1,6 @@
 namespace Ama.Enterprise.FeatureFlags.ShowCase;
 
+using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.FeatureFlags.Extensions;
 using Ama.Enterprise.FeatureFlags.Models;
@@ -51,19 +52,27 @@ public static class Program
             builder.AddProvider(new LockedConsoleLoggerProvider());
         });
 
-        // Register licensing explicitly specifying Open Source mode natively matching explicit explicit explicit structural generic mappings structurally natively cleanly correctly correctly optimally safely
+        // Register licensing explicitly specifying Open Source mode natively matching explicit structural generic mappings
         services.ConfigureAmaOpenSourceLicense();
 
-        // 1. Add Feature Flags Product domain abstractions natively tracking internal explicit scopes mapped dynamically 
-        services.AddFeatureFlags(replicaId, options =>
+        // 1. Explicitly register the distributed CRDT topological core bounds
+        services.AddDistributedCrdtReplica(replicaId);
+        
+        services.AddDistributedCrdtCore(options =>
         {
-            options.Crdt.ActiveSyncEnabled = true;
-            options.Crdt.CheckpointIntervalSeconds = (int)TimeSpan.FromHours(1).TotalSeconds;
-            options.Crdt.AntiEntropyIntervalSeconds = 1;
-            options.Crdt.AntiEntropyInitialDelaySeconds = 1;
+            options.ActiveSyncEnabled = true;
+            options.CheckpointIntervalSeconds = (int)TimeSpan.FromHours(1).TotalSeconds;
+            options.AntiEntropyIntervalSeconds = 1;
+            options.AntiEntropyInitialDelaySeconds = 1;
         });
 
-        // 2. Wire up the generic P2P mesh network specifically configured for this feature's underlying topology
+        // 2. Delegate routing orchestrations and background services completely to the distributed core explicitly bounded
+        services.AddDistributedCrdtP2p("feature-flags-internal-mesh", replicaId);
+
+        // 3. Add Feature Flags Product domain abstractions natively tracking internal explicit scopes mapped dynamically 
+        services.AddFeatureFlags();
+
+        // 4. Wire up the generic P2P mesh network specifically configured for this feature's underlying topology
         services.AddP2pMesh("feature-flags-internal-mesh")
                 .AddGossipNetwork(options =>
                 {

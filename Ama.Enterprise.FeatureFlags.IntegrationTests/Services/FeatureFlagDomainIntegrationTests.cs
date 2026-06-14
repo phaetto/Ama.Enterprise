@@ -3,6 +3,7 @@ namespace Ama.Enterprise.FeatureFlags.IntegrationTests.Services;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.FeatureFlags.Extensions;
 using Ama.Enterprise.FeatureFlags.Models;
@@ -150,11 +151,13 @@ public sealed class FeatureFlagDomainIntegrationTests
         // Register default memory storage mapped to the distributed core explicitly guaranteeing an ephemeral domain space
         services.AddSingleton<IDistributedCrdtStorage, MemoryCrdtStorage>();
 
+        // Explicitly register the distributed CRDT topological core bounds
+        services.AddDistributedCrdtReplica("integration-replica-1");
+        services.AddDistributedCrdtCore(_ => { });
+        services.AddDistributedCrdtP2p("integration-mesh", "integration-replica-1");
+
         // Bootstrap the feature flags exactly as a real application would natively
-        services.AddFeatureFlags("integration-replica-1", opts => 
-        {
-            opts.InternalMeshId = "integration-mesh";
-        });
+        services.AddFeatureFlags();
 
         return services.BuildServiceProvider();
     }
