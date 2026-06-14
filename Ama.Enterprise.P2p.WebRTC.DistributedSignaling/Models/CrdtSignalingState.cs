@@ -2,13 +2,16 @@ namespace Ama.Enterprise.P2p.WebRTC.DistributedSignaling.Models;
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.WebRTC.Models;
 
 /// <summary>
 /// Root CRDT document model representing the WebRTC out-of-band signaling state.
 /// Acts as an in-memory drop-box for SDP Offers, Answers, and active Join Intents.
 /// </summary>
-public sealed class CrdtSignalingState
+public sealed class CrdtSignalingState : IExtensibleDistributedPayload
 {
     /// <summary>
     /// Gets or sets the explicit string identifier defining this distinct signaling hub state.
@@ -32,4 +35,12 @@ public sealed class CrdtSignalingState
     /// Keyed dynamically by `{OffererPeerId}:{AnswererPeerId}`.
     /// </summary>
     public Dictionary<string, WebRtcInvitationAnswer> Answers { get; set; } = new(StringComparer.Ordinal);
+
+    /// <inheritdoc />
+    [JsonExtensionData]
+    public IDictionary<string, JsonElement>? JsonExtensionData { get; set; }
+
+    /// <inheritdoc />
+    [JsonIgnore]
+    public IList<ReadOnlyMemory<byte>>? BinaryExtensionData { get; set; }
 }

@@ -26,5 +26,6 @@ public interface IExtensibleDistributedPayload
     /// Consumers must exclusively append new generic properties strictly to the end of their DTOs safely preventing index shifts natively.
     /// </remarks>
     /// </summary>
+    [JsonIgnore]
     IList<ReadOnlyMemory<byte>>? BinaryExtensionData { get; set; }
 }

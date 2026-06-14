@@ -1,24 +1,43 @@
 namespace Ama.Enterprise.P2p.WebRTC.Models;
 
 using System;
+using System.Collections.Generic;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
 /// DTO representing a WebRTC invitation answer.
 /// </summary>
-public readonly record struct WebRtcInvitationAnswer : IEquatable<WebRtcInvitationAnswer>
+public sealed class WebRtcInvitationAnswer : IEquatable<WebRtcInvitationAnswer>, IExtensibleDistributedPayload
 {
     /// <summary>
-    /// Gets the connection identifier.
+    /// Gets or sets the connection identifier.
     /// </summary>
-    public Guid ConnectionId { get; init; }
+    public Guid ConnectionId { get; set; }
 
     /// <summary>
-    /// Gets the SDP answer string.
+    /// Gets or sets the SDP answer string.
     /// </summary>
-    public string SdpAnswer { get; init; }
+    public string SdpAnswer { get; set; } = string.Empty;
+
+    /// <inheritdoc />
+    [JsonExtensionData]
+    public IDictionary<string, JsonElement>? JsonExtensionData { get; set; }
+
+    /// <inheritdoc />
+    [JsonIgnore]
+    public IList<ReadOnlyMemory<byte>>? BinaryExtensionData { get; set; }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="WebRtcInvitationAnswer"/> struct.
+    /// Initializes a new instance of the <see cref="WebRtcInvitationAnswer"/> class.
+    /// </summary>
+    public WebRtcInvitationAnswer()
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="WebRtcInvitationAnswer"/> class.
     /// </summary>
     /// <param name="connectionId">The associated connection ID.</param>
     /// <param name="sdpAnswer">The generated SDP answer string.</param>
@@ -29,9 +48,17 @@ public readonly record struct WebRtcInvitationAnswer : IEquatable<WebRtcInvitati
     }
 
     /// <inheritdoc />
-    public bool Equals(WebRtcInvitationAnswer other) =>
-        ConnectionId.Equals(other.ConnectionId) &&
-        string.Equals(SdpAnswer, other.SdpAnswer, StringComparison.Ordinal);
+    public bool Equals(WebRtcInvitationAnswer? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+
+        return ConnectionId.Equals(other.ConnectionId) &&
+               string.Equals(SdpAnswer, other.SdpAnswer, StringComparison.Ordinal);
+    }
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => Equals(obj as WebRtcInvitationAnswer);
 
     /// <inheritdoc />
     public override int GetHashCode() => HashCode.Combine(ConnectionId, SdpAnswer);

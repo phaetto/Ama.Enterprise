@@ -1,7 +1,9 @@
 namespace Ama.Enterprise.P2p.Models.Algorithms;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Ama.Enterprise.P2p;
 using Ama.Enterprise.P2p.Models.Core;
@@ -47,6 +49,14 @@ public sealed record GossipMessage : IMeshMessage, IEquatable<GossipMessage>
     /// Gets the underlying business payload (e.g., serialized CRDT updates).
     /// </summary>
     public ReadOnlyMemory<byte> Payload { get; init; }
+
+    /// <inheritdoc />
+    [JsonExtensionData]
+    public IDictionary<string, JsonElement>? JsonExtensionData { get; set; }
+
+    /// <inheritdoc />
+    [JsonIgnore]
+    public IList<ReadOnlyMemory<byte>>? BinaryExtensionData { get; set; }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="GossipMessage"/> class, automatically assigning the current protocol version.

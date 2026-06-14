@@ -75,13 +75,13 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtTopologyObserver.cs` | Observes network connections and hooks into the core P2P protocols. Refactored resolving `Departed` topology states with instant tombstones freeing log restrictions, while protecting `Dead` topology traces for offline synchronization. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/StorageJournalForwarder.cs` | Implemented structured backpressure routines utilizing `PeriodicTimer`. Refactored `estimatedJournalCount` deductions post-trim ensuring real-time metric representation exposing backpressure limits without instantaneous resets. |
 | `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Ama.Enterprise.CRDT.MessagePack.IntegrationTests.csproj` | Switched references to newly renamed `.SourceGenerators` and `.Tests.Common` projects correctly mapping logic. |
-| `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Models/IntegrationTestModels.cs` | Added `TolerantReaderPayload` mapping `IExtensibleDistributedPayload` limits evaluating forward compatibility constraints and ensuring AOT resolutions. |
+| `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Models/IntegrationTestModels.cs` | Updated the simulated TolerantReader payloads enforcing `[JsonIgnore]` correctly skipping MessagePack specific structures during JSON mapping executions explicitly respecting pure AOT bounds. |
 | `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Services/MessagePackSerializerIntegrationTests.cs` | Added integration tests verifying `SimulatedGossipMessageType` serializes standalone and wrapped within complex structures, validating Enum fallback generation constraints bypassing `GenericEnumFormatter<T>` limits and avoiding reflection warnings. |
 | `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Services/TolerantReaderIntegrationTests.cs` | Integration tests validating standard STJ contextual mappings and MessagePack arrays tracking tolerant reader capabilities and executing DI resolutions. |
 | `$/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.UnitTests/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.UnitTests.csproj` | Updated project reference to the renamed `Ama.Enterprise.CRDT.MessagePack.SourceGenerators` project. |
 | `$/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.UnitTests/Architecture/KnownContextsArchitectureTests.cs` | No description provided. |
 | `$/Ama.Enterprise.CRDT.MessagePack.SourceGenerators/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.csproj` | No description provided. |
-| `$/Ama.Enterprise.CRDT.MessagePack.SourceGenerators/Generators/MessagePackFormatterGenerator.cs` | No description provided. |
+| `$/Ama.Enterprise.CRDT.MessagePack.SourceGenerators/Generators/MessagePackFormatterGenerator.cs` | Updated `IPropertySymbol` LINQ filters explicitly bypassing standard `[JsonIgnore]` constraints natively for the `BinaryExtensionData` property, allowing MessagePack to securely process binary trails while preserving STJ native isolations. |
 | `$/Ama.Enterprise.CRDT.MessagePack.UnitTests/Ama.Enterprise.CRDT.MessagePack.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.MessagePack.UnitTests/Formatters/CrdtPolymorphicMessagePackFormatterTests.cs` | Unit tests for `CrdtPolymorphicMessagePackFormatter` verifying array formatting logic and unregistered polymorphic bounds throwing. |
 | `$/Ama.Enterprise.CRDT.MessagePack.UnitTests/Formatters/CrdtPolymorphicMessagePackRegistryTests.cs` | Unit tests verifying generic AOT delegate caching and resolution bounded in CrdtPolymorphicMessagePackRegistry. |
@@ -264,7 +264,7 @@
 | `$/Ama.Enterprise.P2p/Models/Algorithms/PushPullGossipOptions.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Core/CertificateAuthenticatorOptions.cs` | Configuration options for validating peer certificates during P2P authentication. |
 | `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
-| `$/Ama.Enterprise.P2p/Models/Core/IExtensibleDistributedPayload.cs` | Defines an interface to support the Tolerant Reader pattern, capturing unknown JSON and MessagePack elements to maintain forward compatibility across decentralized network versions without data loss. |
+| `$/Ama.Enterprise.P2p/Models/Core/IExtensibleDistributedPayload.cs` | Added `[JsonIgnore]` attribute to the `BinaryExtensionData` property explicitly avoiding System.Text.Json serializing empty or unmapped internal binary structures, correctly encapsulating STJ from MessagePack behaviors. |
 | `$/Ama.Enterprise.P2p/Models/Core/IMeshMessage.cs` | Added required standardized `SenderId` bounding origin payloads decoupled traversing generic algorithms. |
 | `$/Ama.Enterprise.P2p/Models/Core/P2pMeshMetadata.cs` | Metadata record registering a specific mesh identifier into the global dependency container for orchestration. |
 | `$/Ama.Enterprise.P2p/Models/Core/P2pNodeOptions.cs` | Centralized generic configuration options holding the core node identity (ID and Endpoint) for the P2P Mesh. Updated to enforce a static, process-wide global peer identifier to satisfy repeatable idempotent tracker validations. |
@@ -320,12 +320,14 @@
 | `$/Ama.Enterprise.P2p/Services/Transports/UdpTransportListener.cs` | Implements decoupled UDP inbound multiplexing tracking locally registered decentralized architectures. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/DirectSerializationUsageAnalyzerTests.cs` | Unit tests for `DirectSerializationUsageAnalyzer` to ensure diagnostics are reported for `System.Text.Json` usages and ignored for correct generic interfaces. |
+| `$/Ama.Enterprise.Project.Analyzers.UnitTests/JsonSerializableExtensiblePayloadAnalyzerTests.cs` | Unit tests evaluating diagnostic evaluation scenarios verifying correct constraints validating generic enumerations, nested custom list structures, explicit system exclusions, and strictly tracked options bounds natively avoiding validation storms. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/PropertyInfoUsageAnalyzerTests.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/SystemConvertUsageAnalyzerTests.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/TaskDelayWithoutOptionsAnalyzerTests.cs` | Unit tests evaluating diagnostic evaluation scenarios for `TaskDelayWithoutOptionsAnalyzer`. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/ThreadSleepUsageAnalyzerTests.cs` | Unit tests evaluating diagnostic evaluation scenarios for `ThreadSleepUsageAnalyzer`. |
 | `$/Ama.Enterprise.Project.Analyzers/Ama.Enterprise.Project.Analyzers.csproj` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers/DirectSerializationUsageAnalyzer.cs` | No description provided. |
+| `$/Ama.Enterprise.Project.Analyzers/JsonSerializableExtensiblePayloadAnalyzer.cs` | Roslyn diagnostic analyzer enforcing that all models injected into P2P `JsonSerializerContext` classes correctly implement the `IExtensibleDistributedPayload` interface, identifying options structures erroneously injected into AOT mapping arrays explicitly. |
 | `$/Ama.Enterprise.Project.Analyzers/PropertyInfoUsageAnalyzer.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers/SystemConvertUsageAnalyzer.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers/TaskDelayWithoutOptionsAnalyzer.cs` | Roslyn diagnostic analyzer enforcing configurable options instead of hardcoded intervals within `Task.Delay` invocations. |

@@ -2,11 +2,13 @@ namespace Ama.Enterprise.P2p.Models.Core;
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 /// <summary>
 /// Represents a known peer node in the gossip network, combining its identity and endpoint.
 /// </summary>
-public readonly record struct PeerNode : IEquatable<PeerNode>
+public record struct PeerNode : IEquatable<PeerNode>, IExtensibleDistributedPayload
 {
     /// <summary>
     /// Gets the unique identifier of the peer.
@@ -18,6 +20,14 @@ public readonly record struct PeerNode : IEquatable<PeerNode>
     /// </summary>
     public PeerEndpoint Endpoint { get; init; }
 
+    /// <inheritdoc />
+    [JsonExtensionData]
+    public IDictionary<string, JsonElement>? JsonExtensionData { get; set; }
+
+    /// <inheritdoc />
+    [JsonIgnore]
+    public IList<ReadOnlyMemory<byte>>? BinaryExtensionData { get; set; }
+
     /// <summary>
     /// Initializes a new instance of the <see cref="PeerNode"/> struct.
     /// </summary>
@@ -27,6 +37,8 @@ public readonly record struct PeerNode : IEquatable<PeerNode>
     {
         Id = id;
         Endpoint = endpoint ?? throw new ArgumentNullException(nameof(endpoint));
+        JsonExtensionData = null;
+        BinaryExtensionData = null;
     }
 
     /// <inheritdoc />

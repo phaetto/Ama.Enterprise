@@ -62,8 +62,8 @@ public sealed class FeatureFlagDomainIntegrationTests
 
         await StartAllHostedServicesAsync(provider);
 
-        var initialMetadata = new FeatureFlagMetadata("EnterpriseERP", "Tenant-XYZ");
-        var initialOwnership = new FeatureFlagOwnership("BackendTeam", "backend@ama.com");
+        var initialMetadata = new FeatureFlagMetadata { ProductId = "EnterpriseERP", TenantId = "Tenant-XYZ" };
+        var initialOwnership = new FeatureFlagOwnership { Owner = "BackendTeam", ContactInfo = "backend@ama.com" };
 
         await WaitForStateChangeAsync(manager, () => 
             manager.SetFlagAsync("BetaFeature", true, "Admin", initialMetadata, initialOwnership, CancellationToken.None));
@@ -118,12 +118,12 @@ public sealed class FeatureFlagDomainIntegrationTests
     {
         // Arrange
         var timestamp = DateTimeOffset.UtcNow;
-        var metadata = new FeatureFlagMetadata("ProductA", "TenantX");
-        var ownership = new FeatureFlagOwnership("OwnerY", "ContactZ");
-        var audit = new FeatureFlagAudit("UserA", timestamp, timestamp);
+        var metadata = new FeatureFlagMetadata { ProductId = "ProductA", TenantId = "TenantX" };
+        var ownership = new FeatureFlagOwnership { Owner = "OwnerY", ContactInfo = "ContactZ" };
+        var audit = new FeatureFlagAudit { LastModifiedBy = "UserA", CreatedAt = timestamp, UpdatedAt = timestamp };
 
-        var flag1 = new FeatureFlag("Flag1", true, metadata, audit, ownership);
-        var flag2 = new FeatureFlag("Flag1", true, metadata, audit, ownership);
+        var flag1 = new FeatureFlag { Name = "Flag1", IsEnabled = true, Metadata = metadata, Audit = audit, Ownership = ownership };
+        var flag2 = new FeatureFlag { Name = "Flag1", IsEnabled = true, Metadata = metadata, Audit = audit, Ownership = ownership };
 
         var state1 = new FeatureFlagState();
         state1.Flags.Add("Flag1", flag1);

@@ -580,6 +580,7 @@ public sealed class TolerantReaderPayload : IExtensibleDistributedPayload
     public IDictionary<string, JsonElement>? JsonExtensionData { get; set; }
 
     /// <inheritdoc />
+    [JsonIgnore]
     public IList<ReadOnlyMemory<byte>>? BinaryExtensionData { get; set; }
 }
 
@@ -605,6 +606,7 @@ public sealed class TolerantReaderPayloadV2 : IExtensibleDistributedPayload
     public IDictionary<string, JsonElement>? JsonExtensionData { get; set; }
 
     /// <inheritdoc />
+    [JsonIgnore]
     public IList<ReadOnlyMemory<byte>>? BinaryExtensionData { get; set; }
 }
 

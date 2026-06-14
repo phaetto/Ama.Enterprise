@@ -1,12 +1,15 @@
 namespace Ama.Enterprise.CRDT.Distributed.Models;
 
 using System;
+using System.Collections.Generic;
+using System.Text.Json;
 using System.Text.Json.Serialization;
+using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
 /// Represents metadata about an active or tombstoned distributed CRDT document.
 /// </summary>
-public readonly record struct CrdtRegistryEntry : IEquatable<CrdtRegistryEntry>
+public sealed record CrdtRegistryEntry : IEquatable<CrdtRegistryEntry>, IExtensibleDistributedPayload
 {
     /// <summary>
     /// Gets the unique identifier of the target document.
@@ -23,6 +26,14 @@ public readonly record struct CrdtRegistryEntry : IEquatable<CrdtRegistryEntry>
     /// </summary>
     public bool IsDeleted { get; init; }
 
+    /// <inheritdoc />
+    [JsonExtensionData]
+    public IDictionary<string, JsonElement>? JsonExtensionData { get; set; }
+
+    /// <inheritdoc />
+    [JsonIgnore]
+    public IList<ReadOnlyMemory<byte>>? BinaryExtensionData { get; set; }
+
     [JsonConstructor]
     public CrdtRegistryEntry(string documentId, string typeAlias, bool isDeleted)
     {
@@ -32,8 +43,11 @@ public readonly record struct CrdtRegistryEntry : IEquatable<CrdtRegistryEntry>
     }
 
     /// <inheritdoc />
-    public bool Equals(CrdtRegistryEntry other)
+    public bool Equals(CrdtRegistryEntry? other)
     {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        
         return IsDeleted == other.IsDeleted && 
                string.Equals(DocumentId, other.DocumentId, StringComparison.Ordinal) && 
                string.Equals(TypeAlias, other.TypeAlias, StringComparison.Ordinal);

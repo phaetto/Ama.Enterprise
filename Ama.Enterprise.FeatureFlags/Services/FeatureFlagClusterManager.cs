@@ -74,11 +74,24 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager, IDis
         var hasExisting = docManager.Document.Data.Flags.TryGetValue(name, out var existingFlag);
         var createdAt = hasExisting ? existingFlag.Audit.CreatedAt : now;
 
-        var audit = new FeatureFlagAudit(modifiedBy, createdAt, now);
+        var audit = new FeatureFlagAudit
+        {
+            LastModifiedBy = modifiedBy,
+            CreatedAt = createdAt,
+            UpdatedAt = now
+        };
+        
         var actualMetadata = metadata ?? (hasExisting ? existingFlag.Metadata : default);
         var actualOwnership = ownership ?? (hasExisting ? existingFlag.Ownership : default);
 
-        var flag = new FeatureFlag(name, isEnabled, actualMetadata, audit, actualOwnership);
+        var flag = new FeatureFlag
+        {
+            Name = name,
+            IsEnabled = isEnabled,
+            Metadata = actualMetadata!,
+            Audit = audit,
+            Ownership = actualOwnership!
+        };
         
         var operation = await patcher.GenerateOperationAsync(docManager.Document, x => x.Flags, new MapSetIntent(name, flag), cancellationToken).ConfigureAwait(false);
         var patch = new CrdtPatch(new[] { operation });

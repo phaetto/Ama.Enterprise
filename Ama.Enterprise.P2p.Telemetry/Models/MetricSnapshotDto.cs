@@ -2,11 +2,14 @@ namespace Ama.Enterprise.P2p.Telemetry.Models;
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
 /// Immutable payload holding flattened telemetry captures strictly ensuring AOT constraints natively decoupled from reflection SDK parameters.
 /// </summary>
-public sealed record MetricSnapshotDto : IEquatable<MetricSnapshotDto>
+public sealed record MetricSnapshotDto : IEquatable<MetricSnapshotDto>, IExtensibleDistributedPayload
 {
     /// <summary>
     /// Name representing the distinct mapped instrument constraint.
@@ -27,6 +30,14 @@ public sealed record MetricSnapshotDto : IEquatable<MetricSnapshotDto>
     /// List defining exact metadata properties filtering explicitly evaluated metric scopes.
     /// </summary>
     public IReadOnlyList<MetricTagDto> Tags { get; init; } = Array.Empty<MetricTagDto>();
+
+    /// <inheritdoc />
+    [JsonExtensionData]
+    public IDictionary<string, JsonElement>? JsonExtensionData { get; set; }
+
+    /// <inheritdoc />
+    [JsonIgnore]
+    public IList<ReadOnlyMemory<byte>>? BinaryExtensionData { get; set; }
 
     /// <inheritdoc />
     public bool Equals(MetricSnapshotDto? other)

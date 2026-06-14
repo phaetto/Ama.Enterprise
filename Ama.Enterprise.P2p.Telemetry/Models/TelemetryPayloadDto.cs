@@ -2,11 +2,14 @@ namespace Ama.Enterprise.P2p.Telemetry.Models;
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
 /// Top-level network payload transmission encapsulating uniquely active node configurations bounding periodic explicitly wrapped metric topologies.
 /// </summary>
-public sealed record TelemetryPayloadDto : IEquatable<TelemetryPayloadDto>
+public sealed record TelemetryPayloadDto : IEquatable<TelemetryPayloadDto>, IExtensibleDistributedPayload
 {
     /// <summary>
     /// Unique magic header prefix used to identify telemetry payloads over the network bypassing deserialization exceptions.
@@ -28,6 +31,14 @@ public sealed record TelemetryPayloadDto : IEquatable<TelemetryPayloadDto>
     /// Active measured snapshots capturing specific decoupled metrics natively.
     /// </summary>
     public IReadOnlyList<MetricSnapshotDto> Metrics { get; init; } = Array.Empty<MetricSnapshotDto>();
+
+    /// <inheritdoc />
+    [JsonExtensionData]
+    public IDictionary<string, JsonElement>? JsonExtensionData { get; set; }
+
+    /// <inheritdoc />
+    [JsonIgnore]
+    public IList<ReadOnlyMemory<byte>>? BinaryExtensionData { get; set; }
 
     /// <inheritdoc />
     public bool Equals(TelemetryPayloadDto? other)

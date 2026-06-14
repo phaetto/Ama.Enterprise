@@ -3,12 +3,15 @@ namespace Ama.Enterprise.FeatureFlags.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Ama.CRDT.Attributes.Strategies;
+using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
 /// The root state for the feature flags.
 /// </summary>
-public sealed class FeatureFlagState : IEquatable<FeatureFlagState>
+public sealed class FeatureFlagState : IEquatable<FeatureFlagState>, IExtensibleDistributedPayload
 {
     /// <summary>
     /// Gets or sets the document identifier.
@@ -20,6 +23,14 @@ public sealed class FeatureFlagState : IEquatable<FeatureFlagState>
     /// </summary>
     [CrdtOrMapStrategy]
     public IDictionary<string, FeatureFlag> Flags { get; set; } = new Dictionary<string, FeatureFlag>();
+
+    /// <inheritdoc />
+    [JsonExtensionData]
+    public IDictionary<string, JsonElement>? JsonExtensionData { get; set; }
+
+    /// <inheritdoc />
+    [JsonIgnore]
+    public IList<ReadOnlyMemory<byte>>? BinaryExtensionData { get; set; }
 
     /// <inheritdoc />
     public bool Equals(FeatureFlagState? other)

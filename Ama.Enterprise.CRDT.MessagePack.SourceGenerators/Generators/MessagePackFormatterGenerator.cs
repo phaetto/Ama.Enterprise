@@ -219,7 +219,7 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
 
                     var properties = allMembers.OfType<IPropertySymbol>()
                         .Where(p => p.DeclaredAccessibility == Accessibility.Public && !p.IsStatic)
-                        .Where(p => !p.GetAttributes().Any(a => a.AttributeClass?.Name.Contains("JsonIgnore") == true || a.AttributeClass?.Name.Contains("JsonExtensionData") == true));
+                        .Where(p => p.Name == "BinaryExtensionData" || !p.GetAttributes().Any(a => a.AttributeClass?.Name.Contains("JsonIgnore") == true || a.AttributeClass?.Name.Contains("JsonExtensionData") == true));
                     
                     foreach (var prop in properties) queue.Enqueue(prop.Type);
 
@@ -554,7 +554,7 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
         // AND NuGet/Project assembly metadata references consistently safely efficiently.
         var properties = allMembers.OfType<IPropertySymbol>()
             .Where(p => p.DeclaredAccessibility == Accessibility.Public && !p.IsStatic && p.GetMethod != null && p.SetMethod != null)
-            .Where(p => !p.GetAttributes().Any(a => a.AttributeClass?.Name.Contains("JsonIgnore") == true || a.AttributeClass?.Name.Contains("JsonExtensionData") == true))
+            .Where(p => p.Name == "BinaryExtensionData" || !p.GetAttributes().Any(a => a.AttributeClass?.Name.Contains("JsonIgnore") == true || a.AttributeClass?.Name.Contains("JsonExtensionData") == true))
             .OrderBy(p => GetTypeDepth(p.ContainingType))
             .ThenBy(p => GetPropertyOrder(p))
             .ThenBy(p => p.Name)
@@ -908,7 +908,7 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
 
         // PERFECTLY DECOUPLED ALPHABETICAL MATCHING:
         var properties = allMembers.OfType<IPropertySymbol>()
-            .Where(p => !p.GetAttributes().Any(a => a.AttributeClass?.Name.Contains("JsonIgnore") == true || a.AttributeClass?.Name.Contains("JsonExtensionData") == true))
+            .Where(p => p.Name == "BinaryExtensionData" || !p.GetAttributes().Any(a => a.AttributeClass?.Name.Contains("JsonIgnore") == true || a.AttributeClass?.Name.Contains("JsonExtensionData") == true))
             .OrderBy(p => GetTypeDepth(p.ContainingType))
             .ThenBy(p => GetPropertyOrder(p))
             .ThenBy(p => p.Name);

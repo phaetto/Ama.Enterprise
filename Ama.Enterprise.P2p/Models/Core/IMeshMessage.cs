@@ -10,7 +10,7 @@ using Ama.Enterprise.P2p.Models.Algorithms;
 /// </summary>
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type", IgnoreUnrecognizedTypeDiscriminators = true, UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
 [JsonDerivedType(typeof(GossipMessage), "gossip")]
-public interface IMeshMessage
+public interface IMeshMessage : IExtensibleDistributedPayload
 {
     /// <summary>
     /// Gets the unique identifier of the target P2P mesh network context.
