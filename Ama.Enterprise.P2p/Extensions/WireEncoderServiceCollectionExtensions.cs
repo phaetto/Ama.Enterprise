@@ -20,6 +20,21 @@ public static class WireEncoderServiceCollectionExtensions
     /// <param name="builder">The P2P mesh builder.</param>
     /// <param name="configureOptions">An action to configure the wire encoding properties.</param>
     /// <returns>The P2P mesh builder for chaining.</returns>
+    /// <remarks>
+    /// SECURITY EXPECTATIONS AND LIMITATIONS:
+    /// Enabling wire encryption here adds a "Defense in Depth" application-level AES-GCM encryption layer.
+    /// It is NOT a replacement for a comprehensive secure transport protocol.
+    /// 
+    /// - Static Keys: It utilizes a single, static shared symmetric key (AES-GCM) across the entire mesh.
+    /// - No Perfect Forward Secrecy (PFS): Because the key is static, compromise of the key allows historical payload decryption.
+    /// - No Replay Protection: It lacks cryptographic nonces or monotonic sequence numbers required to drop duplicated packets.
+    /// 
+    /// Enterprise Usage:
+    /// For enterprise-grade security, you MUST pair this with a secure transport layer such as HTTPS/mTLS or QUIC.
+    /// When combined with mTLS, the transport layer handles Replay Protection, Perfect Forward Secrecy, and Identity Binding automatically.
+    /// This custom wire encoder then serves as an additional zero-trust boundary, ensuring that payloads remain encrypted 
+    /// against infrastructure-level packet inspection or intermediate multi-hop routing intercepts.
+    /// </remarks>
     public static IP2pMeshBuilder AddWireEncoder(
         this IP2pMeshBuilder builder,
         Action<WireEncoderOptions>? configureOptions = null)

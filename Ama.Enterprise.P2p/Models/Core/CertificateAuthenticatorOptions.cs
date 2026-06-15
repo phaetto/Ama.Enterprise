@@ -3,6 +3,7 @@ namespace Ama.Enterprise.P2p.Models.Core;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography.X509Certificates;
 
 /// <summary>
 /// Configuration options for validating peer certificates during P2P authentication.
@@ -30,6 +31,12 @@ public sealed class CertificateAuthenticatorOptions : IEquatable<CertificateAuth
     /// </summary>
     public bool AllowUnknownCertificateAuthorities { get; set; } = false;
 
+    /// <summary>
+    /// Gets or sets the revocation mode used during certificate chain validation.
+    /// Defaults to Online, but can be set to NoCheck for air-gapped environments or self-signed certs.
+    /// </summary>
+    public X509RevocationMode RevocationMode { get; set; } = X509RevocationMode.Online;
+
     /// <inheritdoc />
     public bool Equals(CertificateAuthenticatorOptions? other)
     {
@@ -48,6 +55,7 @@ public sealed class CertificateAuthenticatorOptions : IEquatable<CertificateAuth
             
         return ValidateCertificateChain == other.ValidateCertificateChain &&
                AllowUnknownCertificateAuthorities == other.AllowUnknownCertificateAuthorities &&
+               RevocationMode == other.RevocationMode &&
                AllowedThumbprints.Count == other.AllowedThumbprints.Count &&
                AllowedThumbprints.All(other.AllowedThumbprints.Contains) &&
                localCertificatesEqual;
@@ -57,5 +65,5 @@ public sealed class CertificateAuthenticatorOptions : IEquatable<CertificateAuth
     public override bool Equals(object? obj) => Equals(obj as CertificateAuthenticatorOptions);
 
     /// <inheritdoc />
-    public override int GetHashCode() => HashCode.Combine(ValidateCertificateChain, AllowUnknownCertificateAuthorities, AllowedThumbprints.Count, LocalCertificateBytes?.Length ?? 0);
+    public override int GetHashCode() => HashCode.Combine(ValidateCertificateChain, AllowUnknownCertificateAuthorities, RevocationMode, AllowedThumbprints.Count, LocalCertificateBytes?.Length ?? 0);
 }

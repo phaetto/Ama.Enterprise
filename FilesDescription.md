@@ -259,12 +259,12 @@
 | `$/Ama.Enterprise.P2p/Extensions/P2pMeshRegistrationTracker.cs` | Centralized tracking mechanism guaranteeing idempotent mesh registrations evaluating identical configurations, bypassing duplicates. |
 | `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Extension methods for registering generic P2P meshes. Updated to include a default unencrypted `IMeshWireEncoder` registration out-of-the-box, applying honor-based hooks. |
 | `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Removed tightly coupled injected Handshaker Options isolating generic P2P mesh parameters decoupling configuration. |
-| `$/Ama.Enterprise.P2p/Extensions/WireEncoderServiceCollectionExtensions.cs` | Extension methods for registering structural wire encoders dynamically enabling DI hooks. |
+| `$/Ama.Enterprise.P2p/Extensions/WireEncoderServiceCollectionExtensions.cs` | Extension methods for registering structural wire encoders. Updated with explicit XML documentation warning developers about the security guarantees and transport prerequisites. |
 | `$/Ama.Enterprise.P2p/Models/Algorithms/GossipMessage.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Algorithms/GossipMessageType.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Algorithms/GossipOptions.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Algorithms/PushPullGossipOptions.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Models/Core/CertificateAuthenticatorOptions.cs` | Configuration options for validating peer certificates during P2P authentication, added property to hold local certificate bytes. |
+| `$/Ama.Enterprise.P2p/Models/Core/CertificateAuthenticatorOptions.cs` | Added `RevocationMode` property allowing configuration of X509 certificate revocation checks (e.g., NoCheck for air-gapped environments). |
 | `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
 | `$/Ama.Enterprise.P2p/Models/Core/IExtensibleDistributedPayload.cs` | Added `[JsonIgnore]` attribute to the `BinaryExtensionData` property explicitly avoiding System.Text.Json serializing empty or unmapped internal binary structures, correctly encapsulating STJ from MessagePack behaviors. |
 | `$/Ama.Enterprise.P2p/Models/Core/IMeshMessage.cs` | Added required standardized `SenderId` bounding origin payloads decoupled traversing generic algorithms. |
@@ -290,14 +290,14 @@
 | `$/Ama.Enterprise.P2p/Services/Algorithms/GossipAlgorithm.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Algorithms/PushPullGossipAlgorithm.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/ApplicationPayloadDispatcher.cs` | Composite orchestrator dispatching to abstract domain observers. |
-| `$/Ama.Enterprise.P2p/Services/Core/CertificatePeerAuthenticator.cs` | Implementation of `IPeerAuthenticator` that validates a provided X.509 certificate to filter invalid network requests, updated to return local certificate bytes from configuration options. |
+| `$/Ama.Enterprise.P2p/Services/Core/CertificatePeerAuthenticator.cs` | Updated certificate chain validation to respect the configured `RevocationMode` from options, enabling offline support. |
 | `$/Ama.Enterprise.P2p/Services/Core/DirectMessageSender.cs` | Implements localized targeted point-to-point generic delivery fetching active peering bindings avoiding overarching network broadcast storms. |
 | `$/Ama.Enterprise.P2p/Services/Core/IApplicationPayloadDispatcher.cs` | Dispatches targeted application payloads. |
 | `$/Ama.Enterprise.P2p/Services/Core/IApplicationPayloadHandler.cs` | Defines a domain-level consumer decoupling underlying distribution protocols. |
 | `$/Ama.Enterprise.P2p/Services/Core/IDirectMessageSender.cs` | Defines a targeted point-to-point payload delivery contract decoupling anti-entropy processes from gossip epidemic broadcasts honoring the Single Responsibility Principle. |
 | `$/Ama.Enterprise.P2p/Services/Core/IFailureDetector.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IInboundMessageQueue.cs` | Defines an internal queue for decoupling inbound network listeners from the protocol logic. |
-| `$/Ama.Enterprise.P2p/Services/Core/IMeshWireEncoder.cs` | Interface for encoding and decoding mesh messages, evaluating optional cryptographic data-in-transit boundaries safely. |
+| `$/Ama.Enterprise.P2p/Services/Core/IMeshWireEncoder.cs` | Interface for encoding and decoding mesh messages. Updated with explicit XML documentation clarifying security limitations and HTTPS tunneling requirements. |
 | `$/Ama.Enterprise.P2p/Services/Core/IP2pAlgorithm.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerAuthenticator.cs` | Expanded evaluating explicit outgoing local data arrays actively traversing generic topologies properly explicit natively mapped inherently. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerDiscovery.cs` | Defines mechanisms for discovering other peers. Refactored to decouple active discovery probes and internal passive listeners from local background loops. |
@@ -310,7 +310,7 @@
 | `$/Ama.Enterprise.P2p/Services/Core/ITransportRouter.cs` | Interface for routing outgoing messages to the appropriate transport based on the endpoint type. |
 | `$/Ama.Enterprise.P2p/Services/Core/InMemoryPeerRegistry.cs` | Implements an in-memory thread-safe registry tracking peering topology globally using a flat dictionary mapping. |
 | `$/Ama.Enterprise.P2p/Services/Core/InboundMessageQueue.cs` | Channel-backed implementation of the inbound message queue. |
-| `$/Ama.Enterprise.P2p/Services/Core/MeshWireEncoder.cs` | Implements the wire encoding pipeline bridging raw serialization to optional AES-GCM encryption natively. |
+| `$/Ama.Enterprise.P2p/Services/Core/MeshWireEncoder.cs` | Implements the wire encoding pipeline bridging raw serialization to optional AES-GCM encryption. Removed legacy fallback for unformatted payload and added strict unencrypted payload rejection when encryption is mandated, completely neutralizing downgrade attacks. |
 | `$/Ama.Enterprise.P2p/Services/Core/PassThroughPeerAuthenticator.cs` | Implemented required generic local array boundaries securely resolving natively mapping explicitly naturally safely explicitly smartly directly structurally. |
 | `$/Ama.Enterprise.P2p/Services/Core/RandomPeerSelector.cs` | Implementation of IPeerSelector utilizing random distribution selection. |
 | `$/Ama.Enterprise.P2p/Services/Core/TimeBasedFailureDetector.cs` | Implementation of IFailureDetector using abstract heartbeats decoupled from specific protocol options. |

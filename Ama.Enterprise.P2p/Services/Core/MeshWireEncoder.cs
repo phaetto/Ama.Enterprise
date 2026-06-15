@@ -10,6 +10,21 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Implements the wire encoding pipeline bridging raw serialization to optional encryption bounds dynamically.
 /// </summary>
+/// <remarks>
+/// SECURITY EXPECTATIONS AND LIMITATIONS:
+/// This encoder is designed strictly as a "Defense in Depth" application-level encryption layer.
+/// It is NOT a replacement for a comprehensive secure transport protocol.
+/// 
+/// - Static Keys: It utilizes a single, static shared symmetric key (AES-GCM) across the entire mesh.
+/// - No Perfect Forward Secrecy (PFS): Because the key is static, compromise of the key allows historical payload decryption.
+/// - No Replay Protection: It lacks cryptographic nonces or monotonic sequence numbers required to drop duplicated packets.
+/// 
+/// Enterprise Usage:
+/// For enterprise-grade security, this encoder MUST be tunneled over a secure transport layer such as HTTPS/mTLS or QUIC.
+/// When combined with mTLS, the transport layer handles Replay Protection, Perfect Forward Secrecy, and Identity Binding automatically.
+/// This custom wire encoder then serves as an additional zero-trust boundary, ensuring that payloads remain encrypted 
+/// against infrastructure-level packet inspection or intermediate multi-hop routing intercepts.
+/// </remarks>
 public sealed class MeshWireEncoder : IMeshWireEncoder
 {
     private readonly string meshId;
@@ -52,13 +67,13 @@ public sealed class MeshWireEncoder : IMeshWireEncoder
 
         if (string.IsNullOrWhiteSpace(options.EncryptionKeyBase64))
         {
-            throw new InvalidOperationException($"Encryption is enabled for mesh {meshId} but no EncryptionKeyBase64 is strictly configured natively.");
+            throw new InvalidOperationException($"Encryption is enabled for mesh {meshId} but no EncryptionKeyBase64 is configured.");
         }
 
         byte[] key = Convert.FromBase64String(options.EncryptionKeyBase64);
         if (key.Length != 32)
         {
-            throw new InvalidOperationException($"Encryption key for mesh {meshId} must explicitly bridge a valid 256-bit (32 bytes) Base64 string bounds.");
+            throw new InvalidOperationException($"Encryption key for mesh {meshId} must bridge a valid 256-bit (32 bytes) Base64 string bounds.");
         }
 
         var nonce = new byte[12];
@@ -91,6 +106,12 @@ public sealed class MeshWireEncoder : IMeshWireEncoder
 
         if (payload[0] == 0x00)
         {
+            if (options.IsEncryptionEnabled)
+            {
+                logger.LogWarning("[{MeshId}] Received unencrypted payload but encryption is mandated by configuration. Payload rejected.", meshId);
+                return null;
+            }
+            
             return serializer.DeserializeFromBytes<IMeshMessage>(payload.AsSpan(1).ToArray());
         }
 
@@ -130,7 +151,7 @@ public sealed class MeshWireEncoder : IMeshWireEncoder
             return serializer.DeserializeFromBytes<IMeshMessage>(plaintext);
         }
 
-        // Legacy unformatted payload fallback structurally capturing standard native formats securely ensuring seamless backward compatibility
-        return serializer.DeserializeFromBytes<IMeshMessage>(payload);
+        logger.LogWarning("[{MeshId}] Received payload with an unknown prefix byte. Payload rejected to prevent downgrade attacks.", meshId);
+        return null;
     }
 }

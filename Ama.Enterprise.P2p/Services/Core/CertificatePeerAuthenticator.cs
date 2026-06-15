@@ -99,7 +99,7 @@ public sealed class CertificatePeerAuthenticator : IPeerAuthenticator, IDisposab
             if (options.ValidateCertificateChain)
             {
                 using var chain = new X509Chain();
-                chain.ChainPolicy.RevocationMode = X509RevocationMode.Online;
+                chain.ChainPolicy.RevocationMode = options.RevocationMode;
                 
                 if (options.AllowUnknownCertificateAuthorities)
                 {
