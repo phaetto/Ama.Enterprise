@@ -1,7 +1,6 @@
 namespace Ama.Enterprise.P2p.IntegrationTests.Algorithms;
 
 using Ama.CRDT.Extensions;
-using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services;
@@ -87,8 +86,8 @@ public sealed class UdpNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
         var messageId = Guid.NewGuid();
         var gossipMessage = new GossipMessage(TestMeshId, messageId, nodeA.Id, 5, payload);
 
-        var serializer = nodeA.Provider.GetRequiredService<ICrdtSerializer>();
-        var payloadBytes = serializer.SerializeToBytes<IMeshMessage>(gossipMessage);
+        var encoder = nodeA.Provider.GetRequiredKeyedService<IMeshWireEncoder>(TestMeshId);
+        var payloadBytes = encoder.Encode(gossipMessage);
         
         using var client = new UdpClient();
 

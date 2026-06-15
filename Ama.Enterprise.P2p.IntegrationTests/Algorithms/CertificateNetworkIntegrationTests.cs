@@ -10,7 +10,6 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Extensions;
-using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.Models.Algorithms;
 using Ama.Enterprise.P2p.Models.Core;
@@ -148,8 +147,8 @@ public sealed class CertificateNetworkIntegrationTests : IClassFixture<NetworkRe
         var messageId = Guid.NewGuid();
         var gossipMessage = new GossipMessage(TestMeshId, messageId, nodeA.Id, 5, payload);
 
-        var serializer = nodeA.Provider.GetRequiredService<ICrdtSerializer>();
-        var payloadBytes = serializer.SerializeToBytes<IMeshMessage>(gossipMessage);
+        var encoder = nodeA.Provider.GetRequiredKeyedService<IMeshWireEncoder>(TestMeshId);
+        var payloadBytes = encoder.Encode(gossipMessage);
         
         var lengthBytes = new byte[4];
         BinaryPrimitives.WriteInt32LittleEndian(lengthBytes, payloadBytes.Length);
