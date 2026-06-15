@@ -10,7 +10,6 @@ using System.Linq;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
-using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.Services.Core;
@@ -22,7 +21,7 @@ using Microsoft.Extensions.Logging;
 public sealed class TcpTransport : ITransport, IDisposable
 {
     private readonly string meshId;
-    private readonly ICrdtSerializer serializer;
+    private readonly IMeshWireEncoder wireEncoder;
     private readonly IPeerRegistry peerRegistry;
     private readonly ILogger<TcpTransport> logger;
 
@@ -35,18 +34,18 @@ public sealed class TcpTransport : ITransport, IDisposable
 
     public TcpTransport(
         string meshId,
-        ICrdtSerializer serializer,
+        IMeshWireEncoder wireEncoder,
         IPeerRegistry peerRegistry,
         ILogger<TcpTransport> logger,
         IMeterFactory? meterFactory = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
-        ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentNullException.ThrowIfNull(wireEncoder);
         ArgumentNullException.ThrowIfNull(peerRegistry);
         ArgumentNullException.ThrowIfNull(logger);
 
         this.meshId = meshId;
-        this.serializer = serializer;
+        this.wireEncoder = wireEncoder;
         this.peerRegistry = peerRegistry;
         this.logger = logger;
 
@@ -114,7 +113,7 @@ public sealed class TcpTransport : ITransport, IDisposable
                 activeConnections[tcpEndpoint] = connection;
             }
 
-            var payload = serializer.SerializeToBytes(message);
+            var payload = wireEncoder.Encode(message);
             var lengthBytes = new byte[4];
             BinaryPrimitives.WriteInt32LittleEndian(lengthBytes, payload.Length);
 

@@ -94,14 +94,14 @@ public static class ServiceCollectionExtensions
             new WebRtcTransport(
                 (string)key!,
                 sp.GetRequiredKeyedService<IWebRtcConnectionManager>(key),
-                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredKeyedService<IMeshWireEncoder>(key),
                 sp.GetRequiredService<ILogger<WebRtcTransport>>()));
 
         builder.Services.AddKeyedSingleton<ITransportListener>(builder.MeshId, (sp, key) =>
             new WebRtcTransportListener(
                 (string)key!,
                 sp.GetRequiredKeyedService<IWebRtcConnectionManager>(key),
-                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredKeyedService<IMeshWireEncoder>(key),
                 sp.GetRequiredService<ILogger<WebRtcTransportListener>>()));
 
         return builder;

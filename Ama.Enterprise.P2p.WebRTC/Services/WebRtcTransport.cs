@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Diagnostics.Metrics;
 using System.Threading;
 using System.Threading.Tasks;
-using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.WebRTC.Models;
@@ -18,7 +17,7 @@ public sealed class WebRtcTransport : ITransport, IDisposable
 {
     private readonly string meshId;
     private readonly IWebRtcConnectionManager connectionManager;
-    private readonly ICrdtSerializer serializer;
+    private readonly IMeshWireEncoder wireEncoder;
     private readonly ILogger<WebRtcTransport> logger;
     
     private readonly Meter meter;
@@ -28,18 +27,18 @@ public sealed class WebRtcTransport : ITransport, IDisposable
     public WebRtcTransport(
         string meshId,
         IWebRtcConnectionManager connectionManager,
-        ICrdtSerializer serializer,
+        IMeshWireEncoder wireEncoder,
         ILogger<WebRtcTransport> logger,
         IMeterFactory? meterFactory = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
         ArgumentNullException.ThrowIfNull(connectionManager);
-        ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentNullException.ThrowIfNull(wireEncoder);
         ArgumentNullException.ThrowIfNull(logger);
 
         this.meshId = meshId;
         this.connectionManager = connectionManager;
-        this.serializer = serializer;
+        this.wireEncoder = wireEncoder;
         this.logger = logger;
 
         this.meter = meterFactory?.Create("Ama.Enterprise.P2p.WebRtcTransport") ?? new Meter("Ama.Enterprise.P2p.WebRtcTransport");
@@ -65,7 +64,7 @@ public sealed class WebRtcTransport : ITransport, IDisposable
             return Task.CompletedTask;
         }
 
-        var payload = serializer.SerializeToBytes(message);
+        var payload = wireEncoder.Encode(message);
         
         var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
         messagesSentCounter.Add(1, tags);

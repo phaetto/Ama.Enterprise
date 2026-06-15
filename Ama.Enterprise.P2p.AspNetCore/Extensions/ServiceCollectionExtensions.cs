@@ -116,7 +116,7 @@ public static class ServiceCollectionExtensions
                 (string)key!,
                 sp.GetRequiredService<IOptionsMonitor<AspNetCoreTransportOptions>>(),
                 sp.GetRequiredService<IHttpClientFactory>(),
-                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredKeyedService<IMeshWireEncoder>(key),
                 sp.GetRequiredService<IPeerRegistry>(),
                 sp.GetRequiredService<ILogger<AspNetCoreTransport>>()));
 

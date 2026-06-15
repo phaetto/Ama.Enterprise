@@ -8,7 +8,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
-using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.Services.Core;
@@ -20,7 +19,7 @@ using Microsoft.Extensions.Logging;
 public sealed class UdpTransport : ITransport, IDisposable
 {
     private readonly string meshId;
-    private readonly ICrdtSerializer serializer;
+    private readonly IMeshWireEncoder wireEncoder;
     private readonly IPeerRegistry peerRegistry;
     private readonly ILogger<UdpTransport> logger;
 
@@ -30,18 +29,18 @@ public sealed class UdpTransport : ITransport, IDisposable
 
     public UdpTransport(
         string meshId,
-        ICrdtSerializer serializer,
+        IMeshWireEncoder wireEncoder,
         IPeerRegistry peerRegistry,
         ILogger<UdpTransport> logger,
         IMeterFactory? meterFactory = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
-        ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentNullException.ThrowIfNull(wireEncoder);
         ArgumentNullException.ThrowIfNull(peerRegistry);
         ArgumentNullException.ThrowIfNull(logger);
 
         this.meshId = meshId;
-        this.serializer = serializer;
+        this.wireEncoder = wireEncoder;
         this.peerRegistry = peerRegistry;
         this.logger = logger;
 
@@ -90,7 +89,7 @@ public sealed class UdpTransport : ITransport, IDisposable
             throw new ArgumentOutOfRangeException(nameof(endpoint), "Target localized port dynamically violates bounding strictly safely.");
         }
 
-        var payload = serializer.SerializeToBytes(message);
+        var payload = wireEncoder.Encode(message);
         
         // 65507 bytes is the theoretical maximum size of a UDP datagram over standard localized internal IP structures.
         if (payload.Length > 65507)

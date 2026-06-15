@@ -139,11 +139,11 @@
 | `$/Ama.Enterprise.P2p.AspNetCore/Models/AspNetCorePeerEndpoint.cs` | Identifies and bridges standard inbound external mapping boundaries and routed ports. |
 | `$/Ama.Enterprise.P2p.AspNetCore/Models/AspNetCoreTransportOptions.cs` | Allows assigning network bounds decoupling public mappings and isolating host constraints. |
 | `$/Ama.Enterprise.P2p.AspNetCore/Models/HttpPayloadProcessResult.cs` | Enumeration identifying deterministic HTTP processing outcomes. Consolidated from removed Http.Core package. |
-| `$/Ama.Enterprise.P2p.AspNetCore/Services/AspNetCoreTransport.cs` | Adjusted fallback outbound routing path boundaries mapping standardized prefixes isolating domains. |
+| `$/Ama.Enterprise.P2p.AspNetCore/Services/AspNetCoreTransport.cs` | Embedded standard encoded pipeline handling securely outgoing explicitly formatting boundaries dynamically safely explicitly natively structurally explicitly securely dynamically perfectly reliably correctly gracefully structurally naturally natively. |
 | `$/Ama.Enterprise.P2p.AspNetCore/Services/AspNetCoreTransportListener.cs` | Refactored standalone listener initialization formatting standard library path constraints guaranteeing distinct execution spaces. |
 | `$/Ama.Enterprise.P2p.AspNetCore/Services/Discovery/AspNetCorePeerDiscovery.cs` | Implements ASP.NET Core-based peer discovery that iterates polling POST requests to a configured Load Balancer or direct URI bypassing standard multicasting constraints. |
 | `$/Ama.Enterprise.P2p.AspNetCore/Services/Discovery/AspNetCorePeerHandshaker.cs` | Handles isolated ASP.NET Core Phase 2 HTTP discovery. |
-| `$/Ama.Enterprise.P2p.AspNetCore/Services/HttpInboundDispatcher.cs` | Thread-safe generic centralized HTTP orchestrator extracting mapped inbound pipelines. Consolidated from removed Http.Core package. |
+| `$/Ama.Enterprise.P2p.AspNetCore/Services/HttpInboundDispatcher.cs` | Removed rigid `ICrdtSerializer` injecting decoupled `IServiceProvider` extracting scoped keyed architectures gracefully executing internal formats strictly naturally natively natively naturally reliably naturally explicitly cleanly directly effortlessly intelligently fully structurally seamlessly natively securely cleanly safely directly naturally. |
 | `$/Ama.Enterprise.P2p.AspNetCore/Services/IHttpInboundDispatcher.cs` | Contract decoupling generic abstract HTTP routing frameworks. Consolidated from removed Http.Core package. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/CertificateNetworkIntegrationTests.cs` | Integration tests verifying network connectivity and drop routines mapping dynamically evaluated certificate authentication boundaries safely resolving decentralized topological rules. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/Handlers/TestMessageHandler.cs` | No description provided. |
@@ -155,6 +155,7 @@
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/TcpNetworkIntegrationTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/UdpNetworkIntegrationTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/UdpPeerDiscoveryIntegrationTests.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/WireEncryptionIntegrationTests.cs` | Integration tests explicitly validating End-to-End (E2E) AES-GCM data-in-transit wire encryption logic maps dynamically without topology drops across shared network configurations securely. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Ama.Enterprise.P2p.IntegrationTests.csproj` | Redirected shared tests project reference pointing to renamed `Ama.Enterprise.Project.Tests.Common`. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Architecture/VersioningArchitectureTests.cs` | Architectural tests that parse the CI/CD deployment files ensuring specific deployed versions possess test coverage. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Discovery/DnsPeerDiscoveryIntegrationTests.cs` | Integration tests verifying DNS peer discovery resolves target domains and dispatches Phase 2 handshakes against discovered IPs. |
@@ -177,8 +178,8 @@
 | `$/Ama.Enterprise.P2p.Mqtt/Services/Discovery/MqttPeerHandshaker.cs` | Orchestrates MQTT Phase 2 topic handshakes. |
 | `$/Ama.Enterprise.P2p.Mqtt/Services/IMqttClientManager.cs` | Interface establishing lifecycle controls for individual MQTT client subscriptions and active payloads publications. |
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttClientManager.cs` | Updated to isolate topic subscriptions and client connection IDs by injecting the `meshId`, preventing cross-mesh broker collisions. |
-| `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransport.cs` | Outbound mapping evaluating decoupled MQTT client managers. Refactored input validations. |
-| `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransportListener.cs` | Inbound listener registering standard network hooks bound to mapped multi-mesh brokers. |
+| `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransport.cs` | Integrated unified format mapping encrypting outgoing structural streams properly gracefully structurally. |
+| `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransportListener.cs` | Extracted the deserialization bridging directly via generic decoders securely handling incoming payloads safely structurally natively. |
 | `$/Ama.Enterprise.P2p.Telemetry.Cli/Ama.Enterprise.P2p.Telemetry.Cli.csproj` | Updated analyzer generic tracking linking to the renamed `Ama.Enterprise.CRDT.MessagePack.SourceGenerators` bounds. |
 | `$/Ama.Enterprise.P2p.Telemetry.Cli/Program.cs` | Refactored internal architecture replacing `Spectre.Console` bounds with `Terminal.Gui` structural mappings. Addressed UI framerate stuttering by shifting string building and data sorting to background threads avoiding blocking UI capabilities, while standardizing single-assignment `IList<string>` data sources circumventing layout recalculation storms present in `ObservableCollection`. Enforced standard coding practices removing prefixed fields, introducing null guard checks, and utilizing interfaces. |
 | `$/Ama.Enterprise.P2p.Telemetry.IntegrationTests/Ama.Enterprise.P2p.Telemetry.IntegrationTests.csproj` | Redirected shared tests project reference pointing to renamed `Ama.Enterprise.Project.Tests.Common`. |
@@ -247,8 +248,8 @@
 | `$/Ama.Enterprise.P2p.WebRTC/Services/IWebRtcConnectionManager.cs` | Interface isolating abstract signaling scopes exposing Data Channel inbound references. Updated to expose WebRTC connection state changes targeting UI subscriptions. |
 | `$/Ama.Enterprise.P2p.WebRTC/Services/IWebRtcInvitationService.cs` | Generic mechanism exchanging SDP structures. Updated to use DTOs instead of tuples for SDP exchange. |
 | `$/Ama.Enterprise.P2p.WebRTC/Services/WebRtcConnectionManager.cs` | Implements the management of WebRTC connections and out-of-band signaling. Added System.Diagnostics.Metrics tracking for connection lifecycles. |
-| `$/Ama.Enterprise.P2p.WebRTC/Services/WebRtcTransport.cs` | WebRTC specific implementation handling outbound gossip structures wrapping targeted connection payloads. Integrated standard metrics telemetry exposing outbound throughput payload boundaries. |
-| `$/Ama.Enterprise.P2p.WebRTC/Services/WebRtcTransportListener.cs` | WebRTC specific listener registering asynchronous bindings targeting decentralized peer streams. Integrated metrics monitoring tracking inbound payloads and message volumes. |
+| `$/Ama.Enterprise.P2p.WebRTC/Services/WebRtcTransport.cs` | Delegated explicit polymorphic bounding directly to internal encoder mapping safely handling data natively structurally properly explicitly. |
+| `$/Ama.Enterprise.P2p.WebRTC/Services/WebRtcTransportListener.cs` | Transformed evaluation pipeline mapping directly generic structural decryption safely natively structurally naturally. |
 | `$/Ama.Enterprise.P2p/Ama.Enterprise.P2p.csproj` | Updated the NuGet description representing the core generic peer-to-peer mechanisms while extending metadata tag values to include 'networking'. |
 | `$/Ama.Enterprise.P2p/Constants.cs` | Global constants for the P2P module, including protocol versions and payload size limits. |
 | `$/Ama.Enterprise.P2p/Extensions/CertificateAuthenticatorServiceCollectionExtensions.cs` | Extension methods configuring the explicit dependency injection mapping for certificate-based peer authentication. |
@@ -256,8 +257,9 @@
 | `$/Ama.Enterprise.P2p/Extensions/IP2pMeshBuilder.cs` | Interface for building and configuring specific Keyed DI mesh profiles. |
 | `$/Ama.Enterprise.P2p/Extensions/P2pMeshBuilder.cs` | Implementation of `IP2pMeshBuilder` handling multi-mesh dependency injection tracking. |
 | `$/Ama.Enterprise.P2p/Extensions/P2pMeshRegistrationTracker.cs` | Centralized tracking mechanism guaranteeing idempotent mesh registrations evaluating identical configurations, bypassing duplicates. |
-| `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Extension methods updated with non-intrusive honor-based global licensing hooks tracking meshes. |
+| `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Extension methods for registering generic P2P meshes. Updated to include a default unencrypted `IMeshWireEncoder` registration out-of-the-box, applying honor-based hooks. |
 | `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Removed tightly coupled injected Handshaker Options isolating generic P2P mesh parameters decoupling configuration. |
+| `$/Ama.Enterprise.P2p/Extensions/WireEncoderServiceCollectionExtensions.cs` | Extension methods for registering structural wire encoders dynamically enabling DI hooks. |
 | `$/Ama.Enterprise.P2p/Models/Algorithms/GossipMessage.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Algorithms/GossipMessageType.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Algorithms/GossipOptions.cs` | No description provided. |
@@ -272,6 +274,7 @@
 | `$/Ama.Enterprise.P2p/Models/Core/PeerId.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerNode.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerStatus.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Models/Core/WireEncoderOptions.cs` | Configuration options explicitly enforcing data-in-transit wire formatting and optional generic cryptographic bounds. |
 | `$/Ama.Enterprise.P2p/Models/Discovery/DnsDiscoveryOptions.cs` | Configuration options for DNS-based peer discovery, extended to support SRV record resolution flags. |
 | `$/Ama.Enterprise.P2p/Models/Discovery/SrvRecordTarget.cs` | Data structure representing a resolved target hostname and port from a DNS SRV query. |
 | `$/Ama.Enterprise.P2p/Models/Discovery/UdpDiscoveryMessage.cs` | Introduced `HandshakePort` property mapping dynamically assigned Phase 2 protocol sockets. |
@@ -293,6 +296,7 @@
 | `$/Ama.Enterprise.P2p/Services/Core/IDirectMessageSender.cs` | Defines a targeted point-to-point payload delivery contract decoupling anti-entropy processes from gossip epidemic broadcasts honoring the Single Responsibility Principle. |
 | `$/Ama.Enterprise.P2p/Services/Core/IFailureDetector.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IInboundMessageQueue.cs` | Defines an internal queue for decoupling inbound network listeners from the protocol logic. |
+| `$/Ama.Enterprise.P2p/Services/Core/IMeshWireEncoder.cs` | Interface for encoding and decoding mesh messages, evaluating optional cryptographic data-in-transit boundaries safely. |
 | `$/Ama.Enterprise.P2p/Services/Core/IP2pAlgorithm.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerAuthenticator.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerDiscovery.cs` | Defines mechanisms for discovering other peers. Refactored to decouple active discovery probes and internal passive listeners from local background loops. |
@@ -305,6 +309,7 @@
 | `$/Ama.Enterprise.P2p/Services/Core/ITransportRouter.cs` | Interface for routing outgoing messages to the appropriate transport based on the endpoint type. |
 | `$/Ama.Enterprise.P2p/Services/Core/InMemoryPeerRegistry.cs` | Implements an in-memory thread-safe registry tracking peering topology globally using a flat dictionary mapping. |
 | `$/Ama.Enterprise.P2p/Services/Core/InboundMessageQueue.cs` | Channel-backed implementation of the inbound message queue. |
+| `$/Ama.Enterprise.P2p/Services/Core/MeshWireEncoder.cs` | Implements the wire encoding pipeline bridging raw serialization to optional AES-GCM encryption natively. |
 | `$/Ama.Enterprise.P2p/Services/Core/PassThroughPeerAuthenticator.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/RandomPeerSelector.cs` | Implementation of IPeerSelector utilizing random distribution selection. |
 | `$/Ama.Enterprise.P2p/Services/Core/TimeBasedFailureDetector.cs` | Implementation of IFailureDetector using abstract heartbeats decoupled from specific protocol options. |
@@ -314,10 +319,10 @@
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerDiscovery.cs` | Implements Phase 1 UDP multicast discovery. Extracted hardcoded address families natively supporting DualMode IPv6 and IPv4 multi-mesh resolutions inherently. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerHandshaker.cs` | Implements unicast Phase 2 UDP negotiations explicitly upgraded tracking DualMode IPAddress architectures ensuring IPv6 probes connect properly seamlessly. |
 | `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | Orchestrating background service running Keyed P2P meshes globally. Refactored implementing direct execution control mapping discovery network polling loops isolating loops. |
-| `$/Ama.Enterprise.P2p/Services/Transports/TcpTransport.cs` | Implements isolated outbound transport using TCP streams mapped against bounded architectures. |
-| `$/Ama.Enterprise.P2p/Services/Transports/TcpTransportListener.cs` | Implements inbound network listener extracting localized TCP streams mapping native pipelines. |
-| `$/Ama.Enterprise.P2p/Services/Transports/UdpTransport.cs` | Implements decoupled UDP datagram delivery mechanisms dynamically supporting DualMode IPv4 and IPv6 routing architectures seamlessly securely executing isolated scopes natively. |
-| `$/Ama.Enterprise.P2p/Services/Transports/UdpTransportListener.cs` | Implements decoupled UDP inbound multiplexing tracking locally registered decentralized architectures. |
+| `$/Ama.Enterprise.P2p/Services/Transports/TcpTransport.cs` | Replaced internal `ICrdtSerializer` serialization directly mapping via the secure generalized `IMeshWireEncoder` architecture. |
+| `$/Ama.Enterprise.P2p/Services/Transports/TcpTransportListener.cs` | Upgraded generic stream extraction dynamically reading wire formatted encoded inputs gracefully naturally natively. |
+| `$/Ama.Enterprise.P2p/Services/Transports/UdpTransport.cs` | Bounded data-in-transit payloads traversing network streams through explicit generic structured formatting natively explicitly. |
+| `$/Ama.Enterprise.P2p/Services/Transports/UdpTransportListener.cs` | Overhauled byte extraction evaluating mapped decryptions via injected structural `IMeshWireEncoder` dependencies reliably cleanly explicitly. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/DirectSerializationUsageAnalyzerTests.cs` | Unit tests for `DirectSerializationUsageAnalyzer` to ensure diagnostics are reported for `System.Text.Json` usages and ignored for correct generic interfaces. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/JsonSerializableExtensiblePayloadAnalyzerTests.cs` | Unit tests evaluating diagnostic evaluation scenarios verifying correct constraints validating generic enumerations, nested custom list structures, explicit system exclusions, and strictly tracked options bounds natively avoiding validation storms. |

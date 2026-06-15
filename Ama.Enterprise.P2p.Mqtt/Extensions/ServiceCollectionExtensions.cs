@@ -99,14 +99,14 @@ public static class ServiceCollectionExtensions
             new MqttTransport(
                 (string)key!,
                 sp.GetRequiredKeyedService<IMqttClientManager>(key),
-                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredKeyedService<IMeshWireEncoder>(key),
                 sp.GetRequiredService<ILogger<MqttTransport>>()));
 
         builder.Services.AddKeyedSingleton<ITransportListener>(builder.MeshId, (sp, key) =>
             new MqttTransportListener(
                 (string)key!,
                 sp.GetRequiredKeyedService<IMqttClientManager>(key),
-                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredKeyedService<IMeshWireEncoder>(key),
                 sp.GetRequiredService<ILogger<MqttTransportListener>>()));
 
         return builder;

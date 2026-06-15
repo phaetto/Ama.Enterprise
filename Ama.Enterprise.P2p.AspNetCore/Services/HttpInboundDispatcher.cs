@@ -7,10 +7,11 @@ using System.Diagnostics.Metrics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p;
 using Ama.Enterprise.P2p.AspNetCore.Models;
 using Ama.Enterprise.P2p.Models.Core;
+using Ama.Enterprise.P2p.Services.Core;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
@@ -18,7 +19,7 @@ using Microsoft.Extensions.Logging;
 /// </summary>
 public sealed class HttpInboundDispatcher : IHttpInboundDispatcher, IDisposable
 {
-    private readonly ICrdtSerializer serializer;
+    private readonly IServiceProvider serviceProvider;
     private readonly ILogger<HttpInboundDispatcher> logger;
     
     private readonly ConcurrentDictionary<string, Func<IMeshMessage, Task>> listeners = new(StringComparer.Ordinal);
@@ -31,11 +32,11 @@ public sealed class HttpInboundDispatcher : IHttpInboundDispatcher, IDisposable
     /// Initializes a new instance of the <see cref="HttpInboundDispatcher"/> class.
     /// </summary>
     public HttpInboundDispatcher(
-        ICrdtSerializer serializer,
+        IServiceProvider serviceProvider,
         ILogger<HttpInboundDispatcher> logger,
         IMeterFactory? meterFactory = null)
     {
-        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+        this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         this.meter = meterFactory?.Create("Ama.Enterprise.P2p.HttpInboundDispatcher") ?? new Meter("Ama.Enterprise.P2p.HttpInboundDispatcher");
@@ -102,11 +103,18 @@ public sealed class HttpInboundDispatcher : IHttpInboundDispatcher, IDisposable
             messagesReceivedCounter.Add(1, tags);
             payloadBytesHistogram.Record(payload.Length, tags);
 
-            var message = serializer.DeserializeFromBytes<IMeshMessage>(payload);
+            var wireEncoder = serviceProvider.GetKeyedService<IMeshWireEncoder>(targetMeshId);
+            if (wireEncoder is null)
+            {
+                logger.LogError("[{MeshId}] No generic wire encoder tracking architecture actively registered natively.", targetMeshId);
+                return HttpPayloadProcessResult.InternalServerError;
+            }
+
+            var message = wireEncoder.Decode(payload);
 
             if (message is null) 
             {
-                logger.LogWarning("[{MeshId}] Failed to deserialize incoming HTTP message. Invalid format.", targetMeshId);
+                logger.LogWarning("[{MeshId}] Failed to deserialize incoming HTTP message. Invalid format or decrypt failures natively.", targetMeshId);
                 return HttpPayloadProcessResult.BadRequest;
             }
 

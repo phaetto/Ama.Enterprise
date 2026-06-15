@@ -70,6 +70,13 @@ public static class ServiceCollectionExtensions
 
         services.TryAddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
 
+        services.TryAddKeyedSingleton<IMeshWireEncoder>(meshId, (sp, key) =>
+            new MeshWireEncoder(
+                (string)key!,
+                sp.GetRequiredService<IOptionsMonitor<WireEncoderOptions>>(),
+                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredService<ILogger<MeshWireEncoder>>()));
+
         services.AddKeyedSingleton<IInboundMessageQueue<IMeshMessage>>(meshId, (sp, key) =>
             new InboundMessageQueue<IMeshMessage>());
 
@@ -140,7 +147,7 @@ public static class ServiceCollectionExtensions
         builder.Services.AddKeyedSingleton<ITransport>(builder.MeshId, (sp, key) =>
             new TcpTransport(
                 (string)key!,
-                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredKeyedService<IMeshWireEncoder>(key),
                 sp.GetRequiredService<IPeerRegistry>(),
                 sp.GetRequiredService<ILogger<TcpTransport>>()));
 
@@ -148,7 +155,7 @@ public static class ServiceCollectionExtensions
             new TcpTransportListener(
                 (string)key!,
                 sp.GetRequiredService<IOptionsMonitor<TcpTransportOptions>>(),
-                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredKeyedService<IMeshWireEncoder>(key),
                 sp.GetRequiredService<ILogger<TcpTransportListener>>()));
 
         return builder;
@@ -190,7 +197,7 @@ public static class ServiceCollectionExtensions
         builder.Services.AddKeyedSingleton<ITransport>(builder.MeshId, (sp, key) =>
             new UdpTransport(
                 (string)key!,
-                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredKeyedService<IMeshWireEncoder>(key),
                 sp.GetRequiredService<IPeerRegistry>(),
                 sp.GetRequiredService<ILogger<UdpTransport>>()));
 
@@ -198,7 +205,7 @@ public static class ServiceCollectionExtensions
             new UdpTransportListener(
                 (string)key!,
                 sp.GetRequiredService<IOptionsMonitor<UdpTransportOptions>>(),
-                sp.GetRequiredService<ICrdtSerializer>(),
+                sp.GetRequiredKeyedService<IMeshWireEncoder>(key),
                 sp.GetRequiredService<ILogger<UdpTransportListener>>()));
 
         return builder;

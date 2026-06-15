@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Diagnostics.Metrics;
 using System.Threading;
 using System.Threading.Tasks;
-using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
@@ -17,7 +16,7 @@ public sealed class WebRtcTransportListener : ITransportListener, IDisposable
 {
     private readonly string meshId;
     private readonly IWebRtcConnectionManager connectionManager;
-    private readonly ICrdtSerializer serializer;
+    private readonly IMeshWireEncoder wireEncoder;
     private readonly ILogger<WebRtcTransportListener> logger;
     
     private readonly Meter meter;
@@ -29,18 +28,18 @@ public sealed class WebRtcTransportListener : ITransportListener, IDisposable
     public WebRtcTransportListener(
         string meshId,
         IWebRtcConnectionManager connectionManager,
-        ICrdtSerializer serializer,
+        IMeshWireEncoder wireEncoder,
         ILogger<WebRtcTransportListener> logger,
         IMeterFactory? meterFactory = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
         ArgumentNullException.ThrowIfNull(connectionManager);
-        ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentNullException.ThrowIfNull(wireEncoder);
         ArgumentNullException.ThrowIfNull(logger);
 
         this.meshId = meshId;
         this.connectionManager = connectionManager;
-        this.serializer = serializer;
+        this.wireEncoder = wireEncoder;
         this.logger = logger;
 
         this.meter = meterFactory?.Create("Ama.Enterprise.P2p.WebRtcTransportListener") ?? new Meter("Ama.Enterprise.P2p.WebRtcTransportListener");
@@ -86,7 +85,7 @@ public sealed class WebRtcTransportListener : ITransportListener, IDisposable
             messagesReceivedCounter.Add(1, tags);
             payloadBytesHistogram.Record(payload.Length, tags);
 
-            var message = serializer.DeserializeFromBytes<IMeshMessage>(payload);
+            var message = wireEncoder.Decode(payload);
 
             if (message is not null)
             {

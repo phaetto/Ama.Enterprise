@@ -8,7 +8,6 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
-using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p;
 using Ama.Enterprise.P2p.AspNetCore.Models;
 using Ama.Enterprise.P2p.Models.Core;
@@ -24,7 +23,7 @@ public sealed class AspNetCoreTransport : ITransport, IDisposable
     private readonly string meshId;
     private readonly IOptionsMonitor<AspNetCoreTransportOptions> optionsMonitor;
     private readonly IHttpClientFactory httpClientFactory;
-    private readonly ICrdtSerializer serializer;
+    private readonly IMeshWireEncoder wireEncoder;
     private readonly IPeerRegistry peerRegistry;
     private readonly ILogger<AspNetCoreTransport> logger;
 
@@ -39,7 +38,7 @@ public sealed class AspNetCoreTransport : ITransport, IDisposable
         string meshId,
         IOptionsMonitor<AspNetCoreTransportOptions> optionsMonitor,
         IHttpClientFactory httpClientFactory,
-        ICrdtSerializer serializer,
+        IMeshWireEncoder wireEncoder,
         IPeerRegistry peerRegistry,
         ILogger<AspNetCoreTransport> logger,
         IMeterFactory? meterFactory = null)
@@ -47,14 +46,14 @@ public sealed class AspNetCoreTransport : ITransport, IDisposable
         ArgumentNullException.ThrowIfNull(meshId);
         ArgumentNullException.ThrowIfNull(optionsMonitor);
         ArgumentNullException.ThrowIfNull(httpClientFactory);
-        ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentNullException.ThrowIfNull(wireEncoder);
         ArgumentNullException.ThrowIfNull(peerRegistry);
         ArgumentNullException.ThrowIfNull(logger);
 
         this.meshId = meshId;
         this.optionsMonitor = optionsMonitor;
         this.httpClientFactory = httpClientFactory;
-        this.serializer = serializer;
+        this.wireEncoder = wireEncoder;
         this.peerRegistry = peerRegistry;
         this.logger = logger;
 
@@ -118,7 +117,7 @@ public sealed class AspNetCoreTransport : ITransport, IDisposable
         using var client = httpClientFactory.CreateClient($"{meshId}_P2pAspNetCoreTransport");
         client.Timeout = TimeSpan.FromSeconds(5); // TODO: Add/Use to options
 
-        var payload = serializer.SerializeToBytes(message);
+        var payload = wireEncoder.Encode(message);
 
         var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
         messagesSentCounter.Add(1, tags);

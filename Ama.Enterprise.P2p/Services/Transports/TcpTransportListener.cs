@@ -10,7 +10,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
-using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Transports;
@@ -25,7 +24,7 @@ public sealed class TcpTransportListener : ITransportListener, IDisposable
 {
     private readonly string meshId;
     private readonly IOptionsMonitor<TcpTransportOptions> optionsMonitor;
-    private readonly ICrdtSerializer serializer;
+    private readonly IMeshWireEncoder wireEncoder;
     private readonly ILogger<TcpTransportListener> logger;
 
     private TcpListener? tcpListener;
@@ -39,18 +38,18 @@ public sealed class TcpTransportListener : ITransportListener, IDisposable
     public TcpTransportListener(
         string meshId,
         IOptionsMonitor<TcpTransportOptions> optionsMonitor,
-        ICrdtSerializer serializer,
+        IMeshWireEncoder wireEncoder,
         ILogger<TcpTransportListener> logger,
         IMeterFactory? meterFactory = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
         ArgumentNullException.ThrowIfNull(optionsMonitor);
-        ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentNullException.ThrowIfNull(wireEncoder);
         ArgumentNullException.ThrowIfNull(logger);
 
         this.meshId = meshId;
         this.optionsMonitor = optionsMonitor;
-        this.serializer = serializer;
+        this.wireEncoder = wireEncoder;
         this.logger = logger;
 
         this.meter = meterFactory?.Create("Ama.Enterprise.P2p.TcpTransportListener") ?? new Meter("Ama.Enterprise.P2p.TcpTransportListener");
@@ -200,7 +199,7 @@ public sealed class TcpTransportListener : ITransportListener, IDisposable
                         messagesReceivedCounter.Add(1, tags);
                         payloadBytesHistogram.Record(payloadLength, tags);
 
-                        var message = serializer.DeserializeFromBytes<IMeshMessage>(rentedBuffer.AsSpan(0, payloadLength).ToArray());
+                        var message = wireEncoder.Decode(rentedBuffer.AsSpan(0, payloadLength).ToArray());
                         
                         if (message is not null)
                         {

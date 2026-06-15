@@ -7,7 +7,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
-using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Transports;
@@ -22,7 +21,7 @@ public sealed class UdpTransportListener : ITransportListener, IDisposable
 {
     private readonly string meshId;
     private readonly IOptionsMonitor<UdpTransportOptions> optionsMonitor;
-    private readonly ICrdtSerializer serializer;
+    private readonly IMeshWireEncoder wireEncoder;
     private readonly ILogger<UdpTransportListener> logger;
 
     private UdpClient? udpClient;
@@ -36,18 +35,18 @@ public sealed class UdpTransportListener : ITransportListener, IDisposable
     public UdpTransportListener(
         string meshId,
         IOptionsMonitor<UdpTransportOptions> optionsMonitor,
-        ICrdtSerializer serializer,
+        IMeshWireEncoder wireEncoder,
         ILogger<UdpTransportListener> logger,
         IMeterFactory? meterFactory = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
         ArgumentNullException.ThrowIfNull(optionsMonitor);
-        ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentNullException.ThrowIfNull(wireEncoder);
         ArgumentNullException.ThrowIfNull(logger);
 
         this.meshId = meshId;
         this.optionsMonitor = optionsMonitor;
-        this.serializer = serializer;
+        this.wireEncoder = wireEncoder;
         this.logger = logger;
 
         this.meter = meterFactory?.Create("Ama.Enterprise.P2p.UdpTransportListener") ?? new Meter("Ama.Enterprise.P2p.UdpTransportListener");
@@ -162,7 +161,7 @@ public sealed class UdpTransportListener : ITransportListener, IDisposable
             messagesReceivedCounter.Add(1, tags);
             payloadBytesHistogram.Record(payload.Length, tags);
 
-            var message = serializer.DeserializeFromBytes<IMeshMessage>(payload);
+            var message = wireEncoder.Decode(payload);
             if (message is not null)
             {
                 if (!IsMajorVersionCompatible(message.ProtocolVersion, Constants.ProtocolVersion))

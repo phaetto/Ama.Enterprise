@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Diagnostics.Metrics;
 using System.Threading;
 using System.Threading.Tasks;
-using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
@@ -17,7 +16,7 @@ public sealed class MqttTransportListener : ITransportListener, IDisposable
 {
     private readonly string meshId;
     private readonly IMqttClientManager clientManager;
-    private readonly ICrdtSerializer serializer;
+    private readonly IMeshWireEncoder wireEncoder;
     private readonly ILogger<MqttTransportListener> logger;
     
     private readonly Meter meter;
@@ -33,18 +32,18 @@ public sealed class MqttTransportListener : ITransportListener, IDisposable
     public MqttTransportListener(
         string meshId,
         IMqttClientManager clientManager,
-        ICrdtSerializer serializer,
+        IMeshWireEncoder wireEncoder,
         ILogger<MqttTransportListener> logger,
         IMeterFactory? meterFactory = null)
     {
         ArgumentNullException.ThrowIfNull(meshId);
         ArgumentNullException.ThrowIfNull(clientManager);
-        ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentNullException.ThrowIfNull(wireEncoder);
         ArgumentNullException.ThrowIfNull(logger);
 
         this.meshId = meshId;
         this.clientManager = clientManager;
-        this.serializer = serializer;
+        this.wireEncoder = wireEncoder;
         this.logger = logger;
 
         this.meter = meterFactory?.Create("Ama.Enterprise.P2p.MqttTransportListener") ?? new Meter("Ama.Enterprise.P2p.MqttTransportListener");
@@ -95,7 +94,7 @@ public sealed class MqttTransportListener : ITransportListener, IDisposable
 
         try
         {
-            var message = serializer.DeserializeFromBytes<IMeshMessage>(payload);
+            var message = wireEncoder.Decode(payload);
 
             if (message is not null)
             {
