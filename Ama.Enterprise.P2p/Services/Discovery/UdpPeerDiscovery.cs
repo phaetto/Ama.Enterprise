@@ -82,13 +82,14 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IDisposable
         var options = discoveryOptionsMonitor.Get(meshId);
         backgroundTaskCancellationSource = new CancellationTokenSource();
 
-        var localIpEndpoint = new IPEndPoint(IPAddress.Any, options.MulticastPort);
-        listener = new UdpClient(AddressFamily.InterNetwork);
+        var multicastAddress = IPAddress.Parse(options.MulticastAddress);
+        var addressFamily = multicastAddress.AddressFamily;
+
+        var localIpEndpoint = new IPEndPoint(addressFamily == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any, options.MulticastPort);
+        listener = new UdpClient(addressFamily);
 
         listener.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
         listener.Client.Bind(localIpEndpoint);
-
-        var multicastAddress = IPAddress.Parse(options.MulticastAddress);
         listener.JoinMulticastGroup(multicastAddress);
 
         listenTask = ListenLoopAsync(backgroundTaskCancellationSource.Token);
@@ -134,9 +135,12 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IDisposable
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
         var discoveredPeers = new ConcurrentBag<PeerNode>();
 
-        using var client = new UdpClient(AddressFamily.InterNetwork);
+        var targetAddress = IPAddress.Parse(options.MulticastAddress);
+        var addressFamily = targetAddress.AddressFamily;
+
+        using var client = new UdpClient(addressFamily);
         client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-        client.Client.Bind(new IPEndPoint(IPAddress.Any, 0));
+        client.Client.Bind(new IPEndPoint(addressFamily == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any, 0));
 
         var discoveryPayload = new UdpDiscoveryMessage
         {
@@ -145,7 +149,7 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IDisposable
         };
 
         var requestBytes = serializer.SerializeToBytes(discoveryPayload);
-        var targetEndpoint = new IPEndPoint(IPAddress.Parse(options.MulticastAddress), options.MulticastPort);
+        var targetEndpoint = new IPEndPoint(targetAddress, options.MulticastPort);
 
         await client.SendAsync(requestBytes, requestBytes.Length, targetEndpoint).ConfigureAwait(false);
         multicastsSentCounter.Add(1, tags);

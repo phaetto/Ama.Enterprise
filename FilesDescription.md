@@ -311,12 +311,12 @@
 | `$/Ama.Enterprise.P2p/Services/Core/TransportRouter.cs` | Composite transport router that delegates sending messages to the correct specific transport implementation. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/DnsPeerDiscovery.cs` | Implements generic DNS peer discovery mapping SRV arrays. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/IDnsSrvResolver.cs` | Interface defining the contract for resolving DNS SRV records, allowing abstraction over third-party DNS packages. |
-| `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerDiscovery.cs` | Implements Phase 1 UDP multicast discovery. Refactored removing generic looped IHostedService bounds mapping standard Start/Stop listener structures. |
-| `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerHandshaker.cs` | Implements unicast Phase 2 UDP negotiations. |
+| `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerDiscovery.cs` | Implements Phase 1 UDP multicast discovery. Extracted hardcoded address families natively supporting DualMode IPv6 and IPv4 multi-mesh resolutions inherently. |
+| `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerHandshaker.cs` | Implements unicast Phase 2 UDP negotiations explicitly upgraded tracking DualMode IPAddress architectures ensuring IPv6 probes connect properly seamlessly. |
 | `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | Orchestrating background service running Keyed P2P meshes globally. Refactored implementing direct execution control mapping discovery network polling loops isolating loops. |
 | `$/Ama.Enterprise.P2p/Services/Transports/TcpTransport.cs` | Implements isolated outbound transport using TCP streams mapped against bounded architectures. |
 | `$/Ama.Enterprise.P2p/Services/Transports/TcpTransportListener.cs` | Implements inbound network listener extracting localized TCP streams mapping native pipelines. |
-| `$/Ama.Enterprise.P2p/Services/Transports/UdpTransport.cs` | Implements decoupled, mapped lightweight UDP datagram delivery mechanisms. |
+| `$/Ama.Enterprise.P2p/Services/Transports/UdpTransport.cs` | Implements decoupled UDP datagram delivery mechanisms dynamically supporting DualMode IPv4 and IPv6 routing architectures seamlessly securely executing isolated scopes natively. |
 | `$/Ama.Enterprise.P2p/Services/Transports/UdpTransportListener.cs` | Implements decoupled UDP inbound multiplexing tracking locally registered decentralized architectures. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/DirectSerializationUsageAnalyzerTests.cs` | Unit tests for `DirectSerializationUsageAnalyzer` to ensure diagnostics are reported for `System.Text.Json` usages and ignored for correct generic interfaces. |

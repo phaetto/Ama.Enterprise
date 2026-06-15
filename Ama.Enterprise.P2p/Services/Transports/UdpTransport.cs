@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
 using System.Linq;
+using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -100,7 +101,21 @@ public sealed class UdpTransport : ITransport, IDisposable
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(TimeSpan.FromSeconds(5)); // TODO: Add/Use to options
 
-        using var client = new UdpClient();
+        var addressFamily = AddressFamily.InterNetwork;
+        if (IPAddress.TryParse(udpEndpoint.Host, out var parsedIp))
+        {
+            addressFamily = parsedIp.AddressFamily;
+        }
+        else
+        {
+            addressFamily = AddressFamily.InterNetworkV6;
+        }
+
+        using var client = new UdpClient(addressFamily);
+        if (addressFamily == AddressFamily.InterNetworkV6)
+        {
+            client.Client.DualMode = true;
+        }
 
         try
         {

@@ -75,9 +75,10 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IDisposable
         ObjectDisposedException.ThrowIf(isDisposed, this);
         var options = optionsMonitor.Get(meshId);
 
-        listener = new UdpClient(AddressFamily.InterNetwork);
+        listener = new UdpClient(AddressFamily.InterNetworkV6);
+        listener.Client.DualMode = true;
         listener.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-        listener.Client.Bind(new IPEndPoint(IPAddress.Any, options.ListenPort));
+        listener.Client.Bind(new IPEndPoint(IPAddress.IPv6Any, options.ListenPort));
 
         backgroundTaskCancellationSource = new CancellationTokenSource();
         listenTask = ListenLoopAsync(backgroundTaskCancellationSource.Token);
@@ -115,8 +116,10 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IDisposable
         ArgumentNullException.ThrowIfNull(endpoint);
 
         var options = optionsMonitor.Get(meshId);
-        using var client = new UdpClient(AddressFamily.InterNetwork);
-        client.Client.Bind(new IPEndPoint(IPAddress.Any, 0));
+        var addressFamily = endpoint.AddressFamily;
+        
+        using var client = new UdpClient(addressFamily);
+        client.Client.Bind(new IPEndPoint(addressFamily == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any, 0));
 
         var requestBytes = serializer.SerializeToBytes(localNode);
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
