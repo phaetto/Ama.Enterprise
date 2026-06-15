@@ -255,12 +255,16 @@
 | `$/Ama.Enterprise.P2p/Constants.cs` | Global constants for the P2P module, including protocol versions and payload size limits. |
 | `$/Ama.Enterprise.P2p/Extensions/CertificateAuthenticatorServiceCollectionExtensions.cs` | Extension methods configuring the explicit dependency injection mapping for certificate-based peer authentication. |
 | `$/Ama.Enterprise.P2p/Extensions/DnsDiscoveryServiceCollectionExtensions.cs` | Extension methods for registering DNS-based active peer discovery components isolated via Keyed dependencies to specific mesh profiles. |
+| `$/Ama.Enterprise.P2p/Extensions/GossipNetworkServiceCollectionExtensions.cs` | Extension methods for registering generic Gossip algorithm components. |
 | `$/Ama.Enterprise.P2p/Extensions/IP2pMeshBuilder.cs` | Interface for building and configuring specific Keyed DI mesh profiles. |
 | `$/Ama.Enterprise.P2p/Extensions/P2pMeshBuilder.cs` | Implementation of `IP2pMeshBuilder` handling multi-mesh dependency injection tracking. |
 | `$/Ama.Enterprise.P2p/Extensions/P2pMeshRegistrationTracker.cs` | Centralized tracking mechanism guaranteeing idempotent mesh registrations evaluating identical configurations, bypassing duplicates. |
+| `$/Ama.Enterprise.P2p/Extensions/PushPullGossipNetworkServiceCollectionExtensions.cs` | Extension methods for registering generic Push-Pull Gossip algorithm components. |
 | `$/Ama.Enterprise.P2p/Extensions/QuicTransportServiceCollectionExtensions.cs` | Dedicated P2P dependency injection extensions exposing decoupled QUIC transport configurations bounded seamlessly into the existing builder architectures. |
-| `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Extension methods for registering generic P2P meshes. Updated to include a default unencrypted `IMeshWireEncoder` registration out-of-the-box, applying honor-based hooks. |
+| `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Extension methods for registering generic P2P meshes. Refactored to extract specific algorithm and transport registrations into separate distinct files. |
+| `$/Ama.Enterprise.P2p/Extensions/TcpTransportServiceCollectionExtensions.cs` | Extension methods for registering TCP transports dynamically mapped to multi-mesh pipelines. |
 | `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Removed tightly coupled injected Handshaker Options isolating generic P2P mesh parameters decoupling configuration. |
+| `$/Ama.Enterprise.P2p/Extensions/UdpTransportServiceCollectionExtensions.cs` | Extension methods for registering robust UDP datagram transports decoupled to multi-mesh pipelines. |
 | `$/Ama.Enterprise.P2p/Extensions/WireEncoderServiceCollectionExtensions.cs` | Extension methods for registering structural wire encoders. Updated with explicit XML documentation warning developers about the security guarantees and transport prerequisites. |
 | `$/Ama.Enterprise.P2p/Models/Algorithms/GossipMessage.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Algorithms/GossipMessageType.cs` | No description provided. |
