@@ -23,7 +23,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Implementation of IPeerHandshaker managing isolated ASP.NET Core HTTP probes explicitly explicitly decoupled securely without overlapping loops inherently structurally natively explicitly dynamically correctly mapping standalone loops efficiently properly distinctly completely accurately effectively intelligently safely reliably properly reliably efficiently mapping cleanly.
+/// Implementation of IPeerHandshaker managing isolated ASP.NET Core HTTP probes.
 /// </summary>
 public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
 {
@@ -153,11 +153,11 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
 
             webHost = builder.Build();
             await webHost.StartAsync(cancellationToken).ConfigureAwait(false);
-            logger.LogInformation("[{MeshId}] ASP.NET Core Standalone Peer Handshaker started explicitly listening natively on {Host}:{Port}", meshId, options.StandaloneListenHost, options.StandaloneListenPort);
+            logger.LogInformation("[{MeshId}] ASP.NET Core Standalone Peer Handshaker started listening on {Host}:{Port}", meshId, options.StandaloneListenHost, options.StandaloneListenPort);
         }
         else
         {
-            logger.LogInformation("[{MeshId}] ASP.NET Core Integrated Peer Handshaker bound implicitly. Relying on host application pipeline invoking MapP2pMeshHandshakes() safely.", meshId);
+            logger.LogInformation("[{MeshId}] ASP.NET Core Integrated Peer Handshaker bound. Relying on host application pipeline invoking MapP2pMeshHandshakes().", meshId);
         }
     }
 
@@ -209,18 +209,18 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
         }
         catch (OperationCanceledException)
         {
-            logger.LogTrace("[{MeshId}] ASP.NET Core handshake disconnected securely by timeout isolating {Target}.", meshId, endpoint);
+            logger.LogTrace("[{MeshId}] ASP.NET Core handshake disconnected by timeout for {Target}.", meshId, endpoint);
             return null;
         }
         catch (Exception ex)
         {
-            logger.LogTrace(ex, "[{MeshId}] ASP.NET Core handshake strictly aborted dispatching {Target}.", meshId, endpoint);
+            logger.LogTrace(ex, "[{MeshId}] ASP.NET Core handshake aborted for {Target}.", meshId, endpoint);
             return null;
         }
     }
 
     /// <summary>
-    /// Processes inbound HTTP requests extracting generic discovery profiles mapped actively securely globally natively.
+    /// Processes inbound HTTP requests extracting generic discovery profiles.
     /// </summary>
     /// <param name="context">The HTTP context executing decoupled standard inbound bounds.</param>
     public async Task HandleHandshakeRequestAsync(HttpContext context)
@@ -247,12 +247,12 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
             }
             else
             {
-                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                context.Response.StatusCode = StatusCodes.Status409Conflict;
             }
         }
         catch (Exception ex)
         {
-            logger.LogTrace(ex, "[{MeshId}] Failed to process inbound ASP.NET Core explicitly routed handshake request robustly.", meshId);
+            logger.LogTrace(ex, "[{MeshId}] Failed to process inbound ASP.NET Core handshake request.", meshId);
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
         }
     }
