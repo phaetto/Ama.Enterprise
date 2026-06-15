@@ -18,6 +18,7 @@ using System.Text.Json.Serialization;
 [JsonSerializable(typeof(PeerEndpoint))]
 [JsonSerializable(typeof(TcpPeerEndpoint))]
 [JsonSerializable(typeof(UdpPeerEndpoint))]
+[JsonSerializable(typeof(QuicPeerEndpoint))]
 [JsonSerializable(typeof(IDictionary<string, JsonElement>))]
 public partial class P2pJsonSerializerContext : JsonSerializerContext
 {
