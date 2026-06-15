@@ -14,6 +14,7 @@ using System.Text.Json.Serialization;
 [JsonSerializable(typeof(GossipMessage))]
 [JsonSerializable(typeof(UdpDiscoveryMessage))]
 [JsonSerializable(typeof(PeerNode))]
+[JsonSerializable(typeof(PeerHandshakePayload))]
 [JsonSerializable(typeof(PeerEndpoint))]
 [JsonSerializable(typeof(TcpPeerEndpoint))]
 [JsonSerializable(typeof(UdpPeerEndpoint))]

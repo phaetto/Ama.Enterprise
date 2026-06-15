@@ -26,6 +26,7 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IDisposable
     private readonly PeerEndpoint localEndpoint;
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<MqttPeerHandshaker> logger;
+    private readonly IPeerAuthenticator authenticator;
 
     private IMqttClient? listener;
     private CancellationTokenSource? backgroundTaskCancellationSource;
@@ -40,7 +41,8 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IDisposable
         IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
         PeerEndpoint localEndpoint,
         ICrdtSerializer serializer,
-        ILogger<MqttPeerHandshaker> logger)
+        ILogger<MqttPeerHandshaker> logger,
+        IPeerAuthenticator authenticator)
     {
         ArgumentNullException.ThrowIfNull(meshId);
         ArgumentNullException.ThrowIfNull(optionsMonitor);
@@ -48,6 +50,7 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IDisposable
         ArgumentNullException.ThrowIfNull(localEndpoint);
         ArgumentNullException.ThrowIfNull(serializer);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(authenticator);
 
         this.meshId = meshId;
         this.optionsMonitor = optionsMonitor;
@@ -55,6 +58,7 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IDisposable
         this.localEndpoint = localEndpoint;
         this.serializer = serializer;
         this.logger = logger;
+        this.authenticator = authenticator;
     }
 
     /// <inheritdoc />
@@ -106,7 +110,7 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IDisposable
     }
 
     /// <inheritdoc />
-    public async Task<PeerNode?> HandshakeAsync(PeerNode localNode, IPEndPoint endpoint, CancellationToken cancellationToken)
+    public async Task<PeerHandshakePayload?> HandshakeAsync(PeerHandshakePayload localPayload, IPEndPoint endpoint, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
         ArgumentNullException.ThrowIfNull(endpoint);
@@ -133,11 +137,11 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IDisposable
             
             await tempClient.SubscribeAsync(subscribeOptions, cancellationToken).ConfigureAwait(false);
 
-            var requestPayload = serializer.SerializeToBytes(localNode);
+            var requestPayloadBytes = serializer.SerializeToBytes(localPayload);
             var handshakeMessage = new MqttHandshakeMessage
             {
                 ReplyToTopic = replyTopic,
-                Payload = requestPayload
+                Payload = requestPayloadBytes
             };
             
             var requestBytes = serializer.SerializeToBytes(handshakeMessage);
@@ -154,7 +158,7 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IDisposable
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(options.HandshakeTimeout);
 
-            var tcs = new TaskCompletionSource<PeerNode?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var tcs = new TaskCompletionSource<PeerHandshakePayload?>(TaskCreationOptions.RunContinuationsAsynchronously);
             timeoutCts.Token.Register(() => tcs.TrySetCanceled());
 
             tempClient.ApplicationMessageReceivedAsync += e =>
@@ -162,8 +166,8 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IDisposable
                 try
                 {
                     var responseMessage = serializer.DeserializeFromBytes<MqttHandshakeMessage>(e.ApplicationMessage.Payload.ToArray());
-                    var remoteNode = serializer.DeserializeFromBytes<PeerNode>(responseMessage.Payload);
-                    tcs.TrySetResult(remoteNode);
+                    var remotePayload = serializer.DeserializeFromBytes<PeerHandshakePayload>(responseMessage.Payload);
+                    tcs.TrySetResult(remotePayload);
                 }
                 catch
                 {
@@ -245,17 +249,24 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IDisposable
         try
         {
             var requestMessage = serializer.DeserializeFromBytes<MqttHandshakeMessage>(payload.ToArray());
-            var remoteNode = serializer.DeserializeFromBytes<PeerNode>(requestMessage.Payload);
+            var remotePayload = serializer.DeserializeFromBytes<PeerHandshakePayload>(requestMessage.Payload);
 
-            if (remoteNode.Id.Value != nodeOptions.LocalPeerId && remoteNode.Id.Value != Guid.Empty && !string.IsNullOrWhiteSpace(requestMessage.ReplyToTopic))
+            if (remotePayload.Node.Id.Value != nodeOptions.LocalPeerId && remotePayload.Node.Id.Value != Guid.Empty && !string.IsNullOrWhiteSpace(requestMessage.ReplyToTopic))
             {
                 var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), localEndpoint);
-                var responsePayload = serializer.SerializeToBytes(localNode);
+                var localHandshakeData = await authenticator.GetLocalHandshakeDataAsync(CancellationToken.None).ConfigureAwait(false);
+                var responsePayloadStruct = new PeerHandshakePayload
+                {
+                    Node = localNode,
+                    HandshakeData = localHandshakeData.ToArray()
+                };
+                
+                var responsePayloadBytes = serializer.SerializeToBytes(responsePayloadStruct);
                 
                 var responseMessage = new MqttHandshakeMessage
                 {
                     ReplyToTopic = string.Empty,
-                    Payload = responsePayload
+                    Payload = responsePayloadBytes
                 };
                 
                 var responseBytes = serializer.SerializeToBytes(responseMessage);

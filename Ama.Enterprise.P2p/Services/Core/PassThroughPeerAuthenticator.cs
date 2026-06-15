@@ -32,6 +32,12 @@ public sealed class PassThroughPeerAuthenticator : IPeerAuthenticator, IDisposab
     }
 
     /// <inheritdoc />
+    public Task<ReadOnlyMemory<byte>> GetLocalHandshakeDataAsync(CancellationToken cancellationToken)
+    {
+        return Task.FromResult(ReadOnlyMemory<byte>.Empty);
+    }
+
+    /// <inheritdoc />
     public Task<bool> AuthenticateAsync(PeerNode node, ReadOnlyMemory<byte> handshakeData, CancellationToken cancellationToken)
     {
         if (node.Id.Value == Guid.Empty)

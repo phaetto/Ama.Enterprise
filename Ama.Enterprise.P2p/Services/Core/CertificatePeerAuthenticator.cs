@@ -46,6 +46,18 @@ public sealed class CertificatePeerAuthenticator : IPeerAuthenticator, IDisposab
     }
 
     /// <inheritdoc />
+    public Task<ReadOnlyMemory<byte>> GetLocalHandshakeDataAsync(CancellationToken cancellationToken)
+    {
+        var options = optionsMonitor.Get(meshId);
+        if (options.LocalCertificateBytes is { Length: > 0 } bytes)
+        {
+            return Task.FromResult<ReadOnlyMemory<byte>>(bytes);
+        }
+
+        return Task.FromResult(ReadOnlyMemory<byte>.Empty);
+    }
+
+    /// <inheritdoc />
     public Task<bool> AuthenticateAsync(PeerNode node, ReadOnlyMemory<byte> handshakeData, CancellationToken cancellationToken)
     {
         if (node.Id.Value == Guid.Empty)

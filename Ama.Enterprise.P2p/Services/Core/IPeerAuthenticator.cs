@@ -1,5 +1,8 @@
 namespace Ama.Enterprise.P2p.Services.Core;
 
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
@@ -7,6 +10,13 @@ using Ama.Enterprise.P2p.Models.Core;
 /// </summary>
 public interface IPeerAuthenticator
 {
+    /// <summary>
+    /// Retrieves the local security handshake payload explicitly mapped for outbound active handshakes natively.
+    /// </summary>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The raw memory byte slice representing the outbound credentials safely natively.</returns>
+    Task<ReadOnlyMemory<byte>> GetLocalHandshakeDataAsync(CancellationToken cancellationToken);
+
     /// <summary>
     /// Authenticates an incoming or outgoing peer connection based on handshake credentials.
     /// </summary>

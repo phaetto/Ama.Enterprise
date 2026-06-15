@@ -185,19 +185,26 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IDisposable
                             handshakeTasks.Add(Task.Run(async () =>
                             {
                                 var endpoint = new IPEndPoint(remoteIp, remotePort);
-                                var remoteNode = await handshaker.HandshakeAsync(localNode, endpoint, timeoutCts.Token).ConfigureAwait(false);
+                                var localHandshakeData = await authenticator.GetLocalHandshakeDataAsync(timeoutCts.Token).ConfigureAwait(false);
+                                var localPayload = new PeerHandshakePayload
+                                {
+                                    Node = localNode,
+                                    HandshakeData = localHandshakeData.ToArray()
+                                };
 
-                                if (!remoteNode.HasValue || remoteNode.Value.Id.Value == nodeOptions.LocalPeerId || remoteNode.Value.Id.Value == Guid.Empty)
+                                var remotePayload = await handshaker.HandshakeAsync(localPayload, endpoint, timeoutCts.Token).ConfigureAwait(false);
+
+                                if (!remotePayload.HasValue || remotePayload.Value.Node.Id.Value == nodeOptions.LocalPeerId || remotePayload.Value.Node.Id.Value == Guid.Empty)
                                 {
                                     return;
                                 }
 
-                                var isAuthenticated = await authenticator.AuthenticateAsync(remoteNode.Value, ReadOnlyMemory<byte>.Empty, timeoutCts.Token).ConfigureAwait(false);
+                                var isAuthenticated = await authenticator.AuthenticateAsync(remotePayload.Value.Node, remotePayload.Value.HandshakeData, timeoutCts.Token).ConfigureAwait(false);
 
                                 if (isAuthenticated)
                                 {
-                                    await failureDetector.RecordHeartbeatAsync(remoteNode.Value.Id, timeoutCts.Token).ConfigureAwait(false);
-                                    discoveredPeers.Add(remoteNode.Value);
+                                    await failureDetector.RecordHeartbeatAsync(remotePayload.Value.Node.Id, timeoutCts.Token).ConfigureAwait(false);
+                                    discoveredPeers.Add(remotePayload.Value.Node);
                                 }
                             }, timeoutCts.Token));
                         }
@@ -326,16 +333,23 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IDisposable
                             var endpoint = new IPEndPoint(remoteIp, message.HandshakePort);
                             var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), localEndpoint);
 
-                            var remoteNode = await handshaker.HandshakeAsync(localNode, endpoint, timeoutCts.Token).ConfigureAwait(false);
-
-                            if (remoteNode.HasValue && remoteNode.Value.Id.Value != nodeOptions.LocalPeerId && remoteNode.Value.Id.Value != Guid.Empty)
+                            var localHandshakeData = await authenticator.GetLocalHandshakeDataAsync(timeoutCts.Token).ConfigureAwait(false);
+                            var localPayload = new PeerHandshakePayload
                             {
-                                var isAuthenticated = await authenticator.AuthenticateAsync(remoteNode.Value, ReadOnlyMemory<byte>.Empty, timeoutCts.Token).ConfigureAwait(false);
+                                Node = localNode,
+                                HandshakeData = localHandshakeData.ToArray()
+                            };
+
+                            var remotePayload = await handshaker.HandshakeAsync(localPayload, endpoint, timeoutCts.Token).ConfigureAwait(false);
+
+                            if (remotePayload.HasValue && remotePayload.Value.Node.Id.Value != nodeOptions.LocalPeerId && remotePayload.Value.Node.Id.Value != Guid.Empty)
+                            {
+                                var isAuthenticated = await authenticator.AuthenticateAsync(remotePayload.Value.Node, remotePayload.Value.HandshakeData, timeoutCts.Token).ConfigureAwait(false);
 
                                 if (isAuthenticated)
                                 {
-                                    await failureDetector.RecordHeartbeatAsync(remoteNode.Value.Id, timeoutCts.Token).ConfigureAwait(false);
-                                    await peerRegistry.AddOrUpdatePeerAsync(meshId, remoteNode.Value, PeerStatus.Active, timeoutCts.Token).ConfigureAwait(false);
+                                    await failureDetector.RecordHeartbeatAsync(remotePayload.Value.Node.Id, timeoutCts.Token).ConfigureAwait(false);
+                                    await peerRegistry.AddOrUpdatePeerAsync(meshId, remotePayload.Value.Node, PeerStatus.Active, timeoutCts.Token).ConfigureAwait(false);
                                 }
                             }
                         }

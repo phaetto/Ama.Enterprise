@@ -13,7 +13,10 @@ using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -35,6 +38,10 @@ public static class Program
         }
 
         currentHandshakePort = 8080 + Random.Shared.Next(0, 1000);
+
+        // Generate or load a shared self-signed certificate for the local showcase cluster
+        using var clusterCert = GetOrCreateClusterCertificate();
+        var certBytes = clusterCert.Export(X509ContentType.Cert);
 
         var replicaId = $"node-{currentPort}";
         var services = new ServiceCollection();
@@ -95,6 +102,12 @@ public static class Program
                 .AddUdpPeerHandshake(options =>
                 {
                     options.ListenPort = currentHandshakePort;
+                })
+                .AddCertificateAuthenticator(options =>
+                {
+                    options.LocalCertificateBytes = certBytes;
+                    options.AllowedThumbprints.Add(clusterCert.Thumbprint);
+                    options.ValidateCertificateChain = false;
                 });
 
         await using var provider = services.BuildServiceProvider();
@@ -275,6 +288,27 @@ public static class Program
         {
             Console.WriteLine(message);
         }
+    }
+
+    /// <summary>
+    /// Checks for an existing local cluster certificate to ensure all spawned clones share the same valid thumbprint.
+    /// Generates a new self-signed certificate if one doesn't exist.
+    /// </summary>
+    private static X509Certificate2 GetOrCreateClusterCertificate()
+    {
+        const string certPath = "showcase-cluster.cer";
+        if (File.Exists(certPath))
+        {
+            return X509CertificateLoader.LoadCertificateFromFile(certPath);
+        }
+
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=ShowcaseCluster", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var expire = DateTimeOffset.UtcNow.AddDays(7);
+        var cert = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), expire);
+
+        File.WriteAllBytes(certPath, cert.Export(X509ContentType.Cert));
+        return cert;
     }
 
     // Custom lock-aware logger provider ensuring dependency injection traces format synchronously

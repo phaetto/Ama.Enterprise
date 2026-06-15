@@ -65,16 +65,21 @@ public sealed class AspNetCorePeerHandshakeIntegrationTests : IClassFixture<Netw
         testOutputHelper.WriteLine($"Node A firing manual HandshakeAsync to Node B explicitly unmapped as 127.0.0.1...");
         
         var localNodeA = new PeerNode(peerAId, new AspNetCorePeerEndpoint("127.0.0.1", portA));
+        var localPayloadA = new PeerHandshakePayload
+        {
+            Node = localNodeA,
+            HandshakeData = Array.Empty<byte>()
+        };
         
         var endpointB = new IPEndPoint(IPAddress.Parse("127.0.0.1"), portB);
-        var discoveredNode = await nodeA.Handshaker.HandshakeAsync(localNodeA, endpointB, cts.Token);
+        var discoveredNode = await nodeA.Handshaker.HandshakeAsync(localPayloadA, endpointB, cts.Token);
 
         // Assert
         discoveredNode.ShouldNotBeNull("Handshake failed to return a valid PeerNode.");
-        discoveredNode.Value.Id.ShouldBe(peerBId);
-        discoveredNode.Value.Endpoint.ShouldBeOfType<AspNetCorePeerEndpoint>();
+        discoveredNode.Value.Node.Id.ShouldBe(peerBId);
+        discoveredNode.Value.Node.Endpoint.ShouldBeOfType<AspNetCorePeerEndpoint>();
 
-        var aspEndpoint = (AspNetCorePeerEndpoint)discoveredNode.Value.Endpoint;
+        var aspEndpoint = (AspNetCorePeerEndpoint)discoveredNode.Value.Node.Endpoint;
         aspEndpoint.Port.ShouldBe(portB);
 
         testOutputHelper.WriteLine("Direct handshake completed successfully.");
@@ -111,15 +116,20 @@ public sealed class AspNetCorePeerHandshakeIntegrationTests : IClassFixture<Netw
             testOutputHelper.WriteLine($"Node A firing manual HTTPS HandshakeAsync to Node B...");
             
             var localNodeA = new PeerNode(peerAId, new AspNetCorePeerEndpoint("127.0.0.1", portA));
+            var localPayloadA = new PeerHandshakePayload
+            {
+                Node = localNodeA,
+                HandshakeData = Array.Empty<byte>()
+            };
             var endpointB = new IPEndPoint(IPAddress.Parse("127.0.0.1"), portB);
-            var discoveredNode = await nodeA.Handshaker.HandshakeAsync(localNodeA, endpointB, cts.Token);
+            var discoveredNode = await nodeA.Handshaker.HandshakeAsync(localPayloadA, endpointB, cts.Token);
 
             // Assert
             discoveredNode.ShouldNotBeNull("Handshake failed to return a valid PeerNode over HTTPS.");
-            discoveredNode.Value.Id.ShouldBe(peerBId);
-            discoveredNode.Value.Endpoint.ShouldBeOfType<AspNetCorePeerEndpoint>();
+            discoveredNode.Value.Node.Id.ShouldBe(peerBId);
+            discoveredNode.Value.Node.Endpoint.ShouldBeOfType<AspNetCorePeerEndpoint>();
 
-            var aspEndpoint = (AspNetCorePeerEndpoint)discoveredNode.Value.Endpoint;
+            var aspEndpoint = (AspNetCorePeerEndpoint)discoveredNode.Value.Node.Endpoint;
             aspEndpoint.Port.ShouldBe(portB);
 
             testOutputHelper.WriteLine("Direct HTTPS handshake completed successfully.");
@@ -160,16 +170,21 @@ public sealed class AspNetCorePeerHandshakeIntegrationTests : IClassFixture<Netw
         var handshakerA = appA.Services.GetRequiredKeyedService<IPeerHandshaker>(meshId);
         
         var localNodeA = new PeerNode(peerAId, new AspNetCorePeerEndpoint("127.0.0.1", portA));
+        var localPayloadA = new PeerHandshakePayload
+        {
+            Node = localNodeA,
+            HandshakeData = Array.Empty<byte>()
+        };
         
         var endpointB = new IPEndPoint(IPAddress.Parse("127.0.0.1"), portB);
-        var discoveredNode = await handshakerA.HandshakeAsync(localNodeA, endpointB, cts.Token);
+        var discoveredNode = await handshakerA.HandshakeAsync(localPayloadA, endpointB, cts.Token);
 
         // Assert
         discoveredNode.ShouldNotBeNull("Handshake failed to return a valid PeerNode.");
-        discoveredNode.Value.Id.ShouldBe(peerBId);
-        discoveredNode.Value.Endpoint.ShouldBeOfType<AspNetCorePeerEndpoint>();
+        discoveredNode.Value.Node.Id.ShouldBe(peerBId);
+        discoveredNode.Value.Node.Endpoint.ShouldBeOfType<AspNetCorePeerEndpoint>();
 
-        var aspEndpoint = (AspNetCorePeerEndpoint)discoveredNode.Value.Endpoint;
+        var aspEndpoint = (AspNetCorePeerEndpoint)discoveredNode.Value.Node.Endpoint;
         aspEndpoint.Port.ShouldBe(portB);
 
         testOutputHelper.WriteLine("Integrated mode handshake completed successfully.");

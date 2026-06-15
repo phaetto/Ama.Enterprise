@@ -104,7 +104,8 @@ public static class MqttDiscoveryServiceCollectionExtensions
                 sp.GetRequiredService<IOptionsMonitor<P2pNodeOptions>>(),
                 sp.GetRequiredKeyedService<PeerEndpoint>(key),
                 sp.GetRequiredService<ICrdtSerializer>(),
-                sp.GetRequiredService<ILogger<MqttPeerHandshaker>>()));
+                sp.GetRequiredService<ILogger<MqttPeerHandshaker>>(),
+                sp.GetRequiredKeyedService<IPeerAuthenticator>(key)));
 
         return builder;
     }

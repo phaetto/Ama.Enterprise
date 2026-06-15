@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System;
+using System.Diagnostics.Metrics;
 
 /// <summary>
 /// Extension methods for registering UDP multicast peer discovery components tied to a specific mesh profile.
@@ -49,7 +50,8 @@ public static class UdpDiscoveryServiceCollectionExtensions
                 sp.GetRequiredService<IPeerRegistry>(),
                 sp.GetRequiredService<ICrdtSerializer>(),
                 sp.GetRequiredKeyedService<IPeerAuthenticator>(key),
-                sp.GetRequiredKeyedService<IFailureDetector>(key)));
+                sp.GetRequiredKeyedService<IFailureDetector>(key),
+                sp.GetService<IMeterFactory>()));
 
         return builder;
     }
@@ -83,7 +85,9 @@ public static class UdpDiscoveryServiceCollectionExtensions
                 sp.GetRequiredService<IOptionsMonitor<P2pNodeOptions>>(),
                 sp.GetRequiredKeyedService<PeerEndpoint>(key),
                 sp.GetRequiredService<ICrdtSerializer>(),
-                sp.GetRequiredService<ILogger<UdpPeerHandshaker>>()));
+                sp.GetRequiredService<ILogger<UdpPeerHandshaker>>(),
+                sp.GetRequiredKeyedService<IPeerAuthenticator>(key),
+                sp.GetService<IMeterFactory>()));
 
         return builder;
     }

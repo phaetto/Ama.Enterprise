@@ -204,23 +204,31 @@ public sealed class DnsPeerDiscovery : IPeerDiscovery, IDisposable
             timeoutCancellationSource.CancelAfter(options.HandshakeTimeout);
 
             var endpoint = new IPEndPoint(ip, port);
-            var remoteNode = await handshaker.HandshakeAsync(localNode, endpoint, timeoutCancellationSource.Token).ConfigureAwait(false);
-
-            if (remoteNode.HasValue && remoteNode.Value.Id.Value != nodeOptions.LocalPeerId && remoteNode.Value.Id.Value != Guid.Empty)
+            
+            var localHandshakeData = await authenticator.GetLocalHandshakeDataAsync(timeoutCancellationSource.Token).ConfigureAwait(false);
+            var localPayload = new PeerHandshakePayload
             {
-                var isAuthenticated = await authenticator.AuthenticateAsync(remoteNode.Value, ReadOnlyMemory<byte>.Empty, timeoutCancellationSource.Token).ConfigureAwait(false);
+                Node = localNode,
+                HandshakeData = localHandshakeData.ToArray()
+            };
+
+            var remotePayload = await handshaker.HandshakeAsync(localPayload, endpoint, timeoutCancellationSource.Token).ConfigureAwait(false);
+
+            if (remotePayload.HasValue && remotePayload.Value.Node.Id.Value != nodeOptions.LocalPeerId && remotePayload.Value.Node.Id.Value != Guid.Empty)
+            {
+                var isAuthenticated = await authenticator.AuthenticateAsync(remotePayload.Value.Node, remotePayload.Value.HandshakeData, timeoutCancellationSource.Token).ConfigureAwait(false);
 
                 if (isAuthenticated)
                 {
-                    await failureDetector.RecordHeartbeatAsync(remoteNode.Value.Id, timeoutCancellationSource.Token).ConfigureAwait(false);
+                    await failureDetector.RecordHeartbeatAsync(remotePayload.Value.Node.Id, timeoutCancellationSource.Token).ConfigureAwait(false);
                     lock (discoveredPeers)
                     {
-                        discoveredPeers.Add(remoteNode.Value);
+                        discoveredPeers.Add(remotePayload.Value.Node);
                     }
                 }
                 else
                 {
-                    logger.LogDebug("[{MeshId}] DNS handshaked peer {PeerId} failed authentication.", meshId, remoteNode.Value.Id.Value);
+                    logger.LogDebug("[{MeshId}] DNS handshaked peer {PeerId} failed authentication.", meshId, remotePayload.Value.Node.Id.Value);
                 }
             }
         }

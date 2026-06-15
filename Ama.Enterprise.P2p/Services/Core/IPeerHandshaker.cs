@@ -30,9 +30,9 @@ public interface IPeerHandshaker
     /// <summary>
     /// Initiates an active outbound Phase 2 handshake against a strictly specified remote endpoint safely natively.
     /// </summary>
-    /// <param name="localNode">The explicit local peer identity initializing the network probe.</param>
+    /// <param name="localPayload">The explicit local peer identity alongside authentication data payload initializing the network probe.</param>
     /// <param name="endpoint">The explicitly bounded remote address target.</param>
     /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
-    /// <returns>The negotiated remote peer identity implicitly verified.</returns>
-    Task<PeerNode?> HandshakeAsync(PeerNode localNode, IPEndPoint endpoint, CancellationToken cancellationToken);
+    /// <returns>The negotiated remote peer payload implicitly verified.</returns>
+    Task<PeerHandshakePayload?> HandshakeAsync(PeerHandshakePayload localPayload, IPEndPoint endpoint, CancellationToken cancellationToken);
 }

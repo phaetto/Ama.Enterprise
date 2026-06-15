@@ -34,6 +34,7 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
     private readonly IHttpClientFactory httpClientFactory;
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<AspNetCorePeerHandshaker> logger;
+    private readonly IPeerAuthenticator authenticator;
     private readonly ICertificateLoader? certificateLoader;
 
     private readonly Meter meter;
@@ -54,6 +55,7 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
         IHttpClientFactory httpClientFactory,
         ICrdtSerializer serializer,
         ILogger<AspNetCorePeerHandshaker> logger,
+        IPeerAuthenticator authenticator,
         IMeterFactory? meterFactory = null,
         ICertificateLoader? certificateLoader = null)
     {
@@ -64,6 +66,7 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(serializer);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(authenticator);
 
         this.meshId = meshId;
         this.optionsMonitor = optionsMonitor;
@@ -72,6 +75,7 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
         this.httpClientFactory = httpClientFactory;
         this.serializer = serializer;
         this.logger = logger;
+        this.authenticator = authenticator;
         this.certificateLoader = certificateLoader;
 
         this.meter = meterFactory?.Create("Ama.Enterprise.P2p.AspNetCorePeerHandshaker") ?? new Meter("Ama.Enterprise.P2p.AspNetCorePeerHandshaker");
@@ -171,7 +175,7 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
     }
 
     /// <inheritdoc />
-    public async Task<PeerNode?> HandshakeAsync(PeerNode localNode, IPEndPoint endpoint, CancellationToken cancellationToken)
+    public async Task<PeerHandshakePayload?> HandshakeAsync(PeerHandshakePayload localPayload, IPEndPoint endpoint, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
         ArgumentNullException.ThrowIfNull(endpoint);
@@ -191,7 +195,7 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
             var scheme = options.UseHttps ? "https" : "http";
             var uri = new Uri($"{scheme}://{endpoint.Address}:{endpoint.Port}{path}");
             
-            var requestBytes = serializer.SerializeToBytes(localNode);
+            var requestBytes = serializer.SerializeToBytes(localPayload);
             using var content = new ByteArrayContent(requestBytes);
             content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
 
@@ -201,7 +205,7 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
                 var responseBytes = await response.Content.ReadAsByteArrayAsync(timeoutCts.Token).ConfigureAwait(false);
                 var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
                 handshakesSentCounter.Add(1, tags);
-                return serializer.DeserializeFromBytes<PeerNode>(responseBytes);
+                return serializer.DeserializeFromBytes<PeerHandshakePayload>(responseBytes);
             }
             
             logger.LogTrace("[{MeshId}] ASP.NET Core handshake returned status {StatusCode} routing {Target}.", meshId, response.StatusCode, uri);
@@ -233,12 +237,19 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
 
             using var ms = new MemoryStream();
             await context.Request.Body.CopyToAsync(ms).ConfigureAwait(false);
-            var remoteNode = serializer.DeserializeFromBytes<PeerNode>(ms.ToArray());
+            var remotePayload = serializer.DeserializeFromBytes<PeerHandshakePayload>(ms.ToArray());
 
-            if (remoteNode.Id.Value != nodeOptions.LocalPeerId && remoteNode.Id.Value != Guid.Empty)
+            if (remotePayload.Node.Id.Value != nodeOptions.LocalPeerId && remotePayload.Node.Id.Value != Guid.Empty)
             {
                 var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), localEndpoint);
-                var responseBytes = serializer.SerializeToBytes(localNode);
+                var localHandshakeData = await authenticator.GetLocalHandshakeDataAsync(context.RequestAborted).ConfigureAwait(false);
+                var responsePayloadStruct = new PeerHandshakePayload
+                {
+                    Node = localNode,
+                    HandshakeData = localHandshakeData.ToArray()
+                };
+                
+                var responseBytes = serializer.SerializeToBytes(responsePayloadStruct);
                 
                 context.Response.StatusCode = StatusCodes.Status200OK;
                 context.Response.ContentType = "application/octet-stream";

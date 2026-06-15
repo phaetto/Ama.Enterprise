@@ -67,6 +67,7 @@ public static class AspNetCoreDiscoveryServiceCollectionExtensions
                 sp.GetRequiredService<IHttpClientFactory>(),
                 sp.GetRequiredService<ICrdtSerializer>(),
                 sp.GetRequiredService<ILogger<AspNetCorePeerHandshaker>>(),
+                sp.GetRequiredKeyedService<IPeerAuthenticator>(key),
                 sp.GetService<IMeterFactory>(),
                 sp.GetService<ICertificateLoader>()));
 

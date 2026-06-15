@@ -25,6 +25,7 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IDisposable
     private readonly PeerEndpoint localEndpoint;
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<UdpPeerHandshaker> logger;
+    private readonly IPeerAuthenticator authenticator;
 
     private UdpClient? listener;
     private CancellationTokenSource? backgroundTaskCancellationSource;
@@ -45,6 +46,7 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IDisposable
         PeerEndpoint localEndpoint,
         ICrdtSerializer serializer,
         ILogger<UdpPeerHandshaker> logger,
+        IPeerAuthenticator authenticator,
         IMeterFactory? meterFactory = null)
     {
         ArgumentNullException.ThrowIfNull(meshId);
@@ -53,6 +55,7 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IDisposable
         ArgumentNullException.ThrowIfNull(localEndpoint);
         ArgumentNullException.ThrowIfNull(serializer);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(authenticator);
 
         this.meshId = meshId;
         this.optionsMonitor = optionsMonitor;
@@ -60,6 +63,7 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IDisposable
         this.localEndpoint = localEndpoint;
         this.serializer = serializer;
         this.logger = logger;
+        this.authenticator = authenticator;
 
         this.meter = meterFactory?.Create("Ama.Enterprise.P2p.UdpPeerHandshaker") ?? new Meter("Ama.Enterprise.P2p.UdpPeerHandshaker");
         this.requestsSentCounter = this.meter.CreateCounter<long>("p2p.handshaker.udp.requests_sent", "requests", "Total UDP handshake requests sent");
@@ -110,7 +114,7 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IDisposable
     }
 
     /// <inheritdoc />
-    public async Task<PeerNode?> HandshakeAsync(PeerNode localNode, IPEndPoint endpoint, CancellationToken cancellationToken)
+    public async Task<PeerHandshakePayload?> HandshakeAsync(PeerHandshakePayload localPayload, IPEndPoint endpoint, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(isDisposed, this);
         ArgumentNullException.ThrowIfNull(endpoint);
@@ -121,7 +125,7 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IDisposable
         using var client = new UdpClient(addressFamily);
         client.Client.Bind(new IPEndPoint(addressFamily == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any, 0));
 
-        var requestBytes = serializer.SerializeToBytes(localNode);
+        var requestBytes = serializer.SerializeToBytes(localPayload);
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(options.HandshakeTimeout);
 
@@ -132,7 +136,7 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IDisposable
 
             var result = await client.ReceiveAsync(timeoutCts.Token).ConfigureAwait(false);
 
-            return serializer.DeserializeFromBytes<PeerNode>(result.Buffer);
+            return serializer.DeserializeFromBytes<PeerHandshakePayload>(result.Buffer);
         }
         catch (OperationCanceledException)
         {
@@ -176,13 +180,19 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IDisposable
                 try
                 {
                     requestsReceivedCounter.Add(1, tags);
-                    var remoteNode = serializer.DeserializeFromBytes<PeerNode>(result.Buffer);
+                    var remotePayload = serializer.DeserializeFromBytes<PeerHandshakePayload>(result.Buffer);
 
-                    if (remoteNode.Id.Value != nodeOptions.LocalPeerId && remoteNode.Id.Value != Guid.Empty)
+                    if (remotePayload.Node.Id.Value != nodeOptions.LocalPeerId && remotePayload.Node.Id.Value != Guid.Empty)
                     {
                         var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), localEndpoint);
-                        var responseBytes = serializer.SerializeToBytes(localNode);
-
+                        var localHandshakeData = await authenticator.GetLocalHandshakeDataAsync(token).ConfigureAwait(false);
+                        var responsePayload = new PeerHandshakePayload
+                        {
+                            Node = localNode,
+                            HandshakeData = localHandshakeData.ToArray()
+                        };
+                        
+                        var responseBytes = serializer.SerializeToBytes(responsePayload);
                         await listener.SendAsync(responseBytes, responseBytes.Length, result.RemoteEndPoint).ConfigureAwait(false);
                     }
                 }

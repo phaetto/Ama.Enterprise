@@ -60,16 +60,16 @@ public sealed class DnsPeerDiscoveryIntegrationTests
             .ReturnsAsync(true);
 
         mockHandshaker
-            .Setup(h => h.HandshakeAsync(It.IsAny<PeerNode>(), It.IsAny<IPEndPoint>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PeerNode local, EndPoint endpoint, CancellationToken ct) =>
+            .Setup(h => h.HandshakeAsync(It.IsAny<PeerHandshakePayload>(), It.IsAny<IPEndPoint>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PeerHandshakePayload local, IPEndPoint endpoint, CancellationToken ct) =>
             {
-                if (endpoint is IPEndPoint ipEndpoint)
+                var remoteId = new PeerId(Guid.NewGuid());
+                var remoteEndpoint = new TcpPeerEndpoint(endpoint.Address.ToString(), endpoint.Port);
+                return new PeerHandshakePayload
                 {
-                    var remoteId = new PeerId(Guid.NewGuid());
-                    var remoteEndpoint = new TcpPeerEndpoint(ipEndpoint.Address.ToString(), ipEndpoint.Port);
-                    return new PeerNode(remoteId, remoteEndpoint);
-                }
-                return null;
+                    Node = new PeerNode(remoteId, remoteEndpoint),
+                    HandshakeData = Array.Empty<byte>()
+                };
             });
 
         using var discoveryService = new DnsPeerDiscovery(
@@ -99,8 +99,8 @@ public sealed class DnsPeerDiscoveryIntegrationTests
         {
             mockHandshaker.Verify(
                 h => h.HandshakeAsync(
-                    It.IsAny<PeerNode>(),
-                    It.Is<IPEndPoint>(ep => ep is IPEndPoint && ep.Address.ToString() == expectedIp && ep.Port == TestPort),
+                    It.IsAny<PeerHandshakePayload>(),
+                    It.Is<IPEndPoint>(ep => ep.Address.ToString() == expectedIp && ep.Port == TestPort),
                     It.IsAny<CancellationToken>()),
                 Times.Once,
                 $"Expected handshake with {expectedIp}:{TestPort}");
