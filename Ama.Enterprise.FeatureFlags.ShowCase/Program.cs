@@ -43,6 +43,9 @@ public static class Program
         using var clusterCert = GetOrCreateClusterCertificate();
         var certBytes = clusterCert.Export(X509ContentType.Cert);
 
+        // Generate or load a shared symmetric encryption key for wire encryption
+        var encryptionKey = GetOrCreateEncryptionKey();
+
         var replicaId = $"node-{currentPort}";
         var services = new ServiceCollection();
 
@@ -108,6 +111,11 @@ public static class Program
                     options.LocalCertificateBytes = certBytes;
                     options.AllowedThumbprints.Add(clusterCert.Thumbprint);
                     options.ValidateCertificateChain = false;
+                })
+                .AddWireEncoder(options =>
+                {
+                    options.IsEncryptionEnabled = true;
+                    options.EncryptionKeyBase64 = encryptionKey;
                 });
 
         await using var provider = services.BuildServiceProvider();
@@ -309,6 +317,25 @@ public static class Program
 
         File.WriteAllBytes(certPath, cert.Export(X509ContentType.Cert));
         return cert;
+    }
+
+    /// <summary>
+    /// Checks for an existing local encryption key to ensure all spawned clones share the same valid AES-GCM key.
+    /// Generates a new 32-byte cryptographically secure key if one doesn't exist.
+    /// </summary>
+    private static string GetOrCreateEncryptionKey()
+    {
+        const string keyPath = "showcase-encryption.key";
+        if (File.Exists(keyPath))
+        {
+            return File.ReadAllText(keyPath).Trim();
+        }
+
+        var keyBytes = RandomNumberGenerator.GetBytes(32);
+        var base64Key = Convert.ToBase64String(keyBytes);
+        
+        File.WriteAllText(keyPath, base64Key);
+        return base64Key;
     }
 
     // Custom lock-aware logger provider ensuring dependency injection traces format synchronously

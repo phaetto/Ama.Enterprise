@@ -102,7 +102,6 @@
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlag.cs` | Represents a single enterprise feature flag in the system incorporating audit and ownership structures. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagAudit.cs` | Audit trace structure tracking temporal modifications for a specific feature flag. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagMetadata.cs` | Metadata structure encapsulating enterprise multi-tenancy and product domain boundaries. |
-| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagOptions.cs` | Configuration structure for feature flags. Removed hardcoded network abstractions, delegating topology management to the host. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagOwnership.cs` | Ownership details specifying team contact routing for a feature flag. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagState.cs` | The root state dictionary representing active and tombstoned feature flags. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsCrdtAotContext.cs` | AOT reflection context for the Feature Flags CRDT models. |
