@@ -8,10 +8,20 @@ using System;
 public sealed record AspNetCoreDiscoveryOptions : IEquatable<AspNetCoreDiscoveryOptions>
 {
     /// <summary>
-    /// Gets or sets the target HTTP URI to connect to for discovering peers.
+    /// Gets or sets the target HTTP host or IP address to connect to for discovering peers.
     /// This is typically a load balancer routing to active nodes in the cluster.
     /// </summary>
-    public string DiscoveryUrl { get; set; } = string.Empty;
+    public string TargetHost { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the target port to connect to for discovering peers.
+    /// </summary>
+    public int TargetPort { get; set; } = 80;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the discovery target should be polled using HTTPS.
+    /// </summary>
+    public bool TargetUseHttps { get; set; } = false;
 
     /// <summary>
     /// Gets or sets the interval at which HTTP discovery requests are dispatched.

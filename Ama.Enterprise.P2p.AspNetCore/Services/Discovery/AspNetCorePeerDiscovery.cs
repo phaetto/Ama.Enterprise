@@ -180,17 +180,18 @@ public sealed class AspNetCorePeerDiscovery : IPeerDiscovery, IDisposable
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
         var options = optionsMonitor.Get(meshId);
-        if (string.IsNullOrWhiteSpace(options.DiscoveryUrl))
+        if (string.IsNullOrWhiteSpace(options.TargetHost))
         {
-            logger.LogTrace("[{MeshId}] ASP.NET Core discovery URL is not configured. Skipping active polling.", meshId);
+            logger.LogTrace("[{MeshId}] ASP.NET Core discovery TargetHost is not configured. Skipping active polling.", meshId);
             return Array.Empty<PeerNode>();
         }
 
-        if (!Uri.TryCreate(options.DiscoveryUrl, UriKind.Absolute, out var uri))
-        {
-            logger.LogTrace("[{MeshId}] ASP.NET Core discovery URL '{Url}' is invalid.", meshId, options.DiscoveryUrl);
-            return Array.Empty<PeerNode>();
-        }
+        var scheme = options.TargetUseHttps ? "https" : "http";
+        var basePath = string.IsNullOrWhiteSpace(options.PathPrefix) ? "/ama-enterprise/p2p-discovery" : options.PathPrefix.TrimEnd('/');
+        if (!basePath.StartsWith("/", StringComparison.Ordinal)) basePath = "/" + basePath;
+        
+        var uriBuilder = new UriBuilder(scheme, options.TargetHost, options.TargetPort, $"{basePath}/{meshId}");
+        var uri = uriBuilder.Uri;
 
         var nodeOptions = nodeOptionsMonitor.Get(meshId);
         var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), localEndpoint);
@@ -228,16 +229,16 @@ public sealed class AspNetCorePeerDiscovery : IPeerDiscovery, IDisposable
             }
             else
             {
-                logger.LogTrace("[{MeshId}] ASP.NET Core discovery request to {Url} returned status {StatusCode}.", meshId, options.DiscoveryUrl, response.StatusCode);
+                logger.LogTrace("[{MeshId}] ASP.NET Core discovery request to {Url} returned status {StatusCode}.", meshId, uri, response.StatusCode);
             }
         }
         catch (OperationCanceledException)
         {
-            logger.LogTrace("[{MeshId}] ASP.NET Core discovery request to {Url} timed out.", meshId, options.DiscoveryUrl);
+            logger.LogTrace("[{MeshId}] ASP.NET Core discovery request to {Url} timed out.", meshId, uri);
         }
         catch (Exception ex)
         {
-            logger.LogTrace(ex, "[{MeshId}] ASP.NET Core discovery request to {Url} failed during execution.", meshId, options.DiscoveryUrl);
+            logger.LogTrace(ex, "[{MeshId}] ASP.NET Core discovery request to {Url} failed during execution.", meshId, uri);
         }
 
         return Array.Empty<PeerNode>();

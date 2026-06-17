@@ -51,9 +51,6 @@ public sealed class AspNetCorePeerDiscoveryIntegrationTests : IClassFixture<Netw
         var portADiscovery = resourceManager.GetNextPort();
         var portBDiscovery = resourceManager.GetNextPort();
 
-        var discoveryUrlForA = $"http://127.0.0.1:{portBDiscovery}/ama-enterprise/p2p-discovery/{meshId}";
-        var discoveryUrlForB = $"http://127.0.0.1:{portADiscovery}/ama-enterprise/p2p-discovery/{meshId}";
-
         using var topologySemaphore = new SemaphoreSlim(0);
         Action onTopologyChanged = () => 
         {
@@ -61,8 +58,8 @@ public sealed class AspNetCorePeerDiscoveryIntegrationTests : IClassFixture<Netw
         };
 
         testOutputHelper.WriteLine("Initializing Nodes for Standalone ASP.NET Core Discovery...");
-        await using var nodeA = CreateStandaloneNode(meshId, peerAId, portAHandshake, portADiscovery, discoveryUrlForA, onTopologyChanged);
-        await using var nodeB = CreateStandaloneNode(meshId, peerBId, portBHandshake, portBDiscovery, discoveryUrlForB, onTopologyChanged);
+        await using var nodeA = CreateStandaloneNode(meshId, peerAId, portAHandshake, portADiscovery, "127.0.0.1", portBDiscovery, false, onTopologyChanged);
+        await using var nodeB = CreateStandaloneNode(meshId, peerBId, portBHandshake, portBDiscovery, "127.0.0.1", portADiscovery, false, onTopologyChanged);
 
         // Act
         testOutputHelper.WriteLine("Starting P2P infrastructure spanning Standalone ASP.NET Core bounds...");
@@ -119,9 +116,6 @@ public sealed class AspNetCorePeerDiscoveryIntegrationTests : IClassFixture<Netw
             var portADiscovery = resourceManager.GetNextPort();
             var portBDiscovery = resourceManager.GetNextPort();
 
-            var discoveryUrlForA = $"https://127.0.0.1:{portBDiscovery}/ama-enterprise/p2p-discovery/{meshId}";
-            var discoveryUrlForB = $"https://127.0.0.1:{portADiscovery}/ama-enterprise/p2p-discovery/{meshId}";
-
             using var topologySemaphore = new SemaphoreSlim(0);
             Action onTopologyChanged = () => 
             {
@@ -129,8 +123,8 @@ public sealed class AspNetCorePeerDiscoveryIntegrationTests : IClassFixture<Netw
             };
 
             testOutputHelper.WriteLine("Initializing Nodes for Standalone ASP.NET Core HTTPS Discovery...");
-            await using var nodeA = CreateStandaloneNode(meshId, peerAId, portAHandshake, portADiscovery, discoveryUrlForA, onTopologyChanged, true, certPath, certPass);
-            await using var nodeB = CreateStandaloneNode(meshId, peerBId, portBHandshake, portBDiscovery, discoveryUrlForB, onTopologyChanged, true, certPath, certPass);
+            await using var nodeA = CreateStandaloneNode(meshId, peerAId, portAHandshake, portADiscovery, "127.0.0.1", portBDiscovery, true, onTopologyChanged, true, certPath, certPass);
+            await using var nodeB = CreateStandaloneNode(meshId, peerBId, portBHandshake, portBDiscovery, "127.0.0.1", portADiscovery, true, onTopologyChanged, true, certPath, certPass);
 
             // Act
             testOutputHelper.WriteLine("Starting P2P infrastructure spanning Standalone ASP.NET Core HTTPS bounds...");
@@ -187,9 +181,6 @@ public sealed class AspNetCorePeerDiscoveryIntegrationTests : IClassFixture<Netw
         var portA = resourceManager.GetNextPort();
         var portB = resourceManager.GetNextPort();
 
-        var discoveryUrlForA = $"http://127.0.0.1:{portB}/test-discovery/{meshId}";
-        var discoveryUrlForB = $"http://127.0.0.1:{portA}/test-discovery/{meshId}";
-
         using var topologySemaphore = new SemaphoreSlim(0);
         Action onTopologyChanged = () => 
         {
@@ -197,8 +188,8 @@ public sealed class AspNetCorePeerDiscoveryIntegrationTests : IClassFixture<Netw
         };
 
         testOutputHelper.WriteLine("Initializing WebApplications for Integrated ASP.NET Core Discovery...");
-        await using var appA = CreateIntegratedTestNode(meshId, peerAId, portA, discoveryUrlForA, onTopologyChanged);
-        await using var appB = CreateIntegratedTestNode(meshId, peerBId, portB, discoveryUrlForB, onTopologyChanged);
+        await using var appA = CreateIntegratedTestNode(meshId, peerAId, portA, "127.0.0.1", portB, false, onTopologyChanged);
+        await using var appB = CreateIntegratedTestNode(meshId, peerBId, portB, "127.0.0.1", portA, false, onTopologyChanged);
 
         // Act
         testOutputHelper.WriteLine("Starting Integrated ASP.NET Core applications spanning single-port bindings...");
@@ -240,9 +231,7 @@ public sealed class AspNetCorePeerDiscoveryIntegrationTests : IClassFixture<Netw
         await appB.StopAsync(cts.Token);
     }
 
-    
-
-    private AspNetCoreTestNode CreateStandaloneNode(string meshId, PeerId peerId, int handshakePort, int discoveryPort, string? discoveryUrl, Action onTopologyChanged, bool useHttps = false, string? certPath = null, string? certPass = null)
+    private AspNetCoreTestNode CreateStandaloneNode(string meshId, PeerId peerId, int handshakePort, int discoveryPort, string targetHost, int targetPort, bool targetUseHttps, Action onTopologyChanged, bool useHttps = false, string? certPath = null, string? certPass = null)
     {
         var services = new ServiceCollection();
 
@@ -287,7 +276,9 @@ public sealed class AspNetCorePeerDiscoveryIntegrationTests : IClassFixture<Netw
             options.HostingMode = AspNetCoreHostingMode.Standalone;
             options.StandaloneListenHost = "+";
             options.StandaloneListenPort = discoveryPort;
-            options.DiscoveryUrl = discoveryUrl ?? string.Empty;
+            options.TargetHost = targetHost;
+            options.TargetPort = targetPort;
+            options.TargetUseHttps = targetUseHttps;
             options.DiscoveryInterval = TimeSpan.FromSeconds(2);
             options.DiscoveryTimeout = TimeSpan.FromSeconds(5);
             options.UseHttpsStandalone = useHttps;
@@ -305,7 +296,7 @@ public sealed class AspNetCorePeerDiscoveryIntegrationTests : IClassFixture<Netw
         );
     }
 
-    private WebApplication CreateIntegratedTestNode(string meshId, PeerId peerId, int listenPort, string? discoveryUrl, Action onTopologyChanged)
+    private WebApplication CreateIntegratedTestNode(string meshId, PeerId peerId, int listenPort, string targetHost, int targetPort, bool targetUseHttps, Action onTopologyChanged)
     {
         var builder = WebApplication.CreateBuilder();
 
@@ -338,7 +329,9 @@ public sealed class AspNetCorePeerDiscoveryIntegrationTests : IClassFixture<Netw
         .AddAspNetCorePeerDiscovery(options =>
         {
             options.HostingMode = AspNetCoreHostingMode.Integrated;
-            options.DiscoveryUrl = discoveryUrl ?? string.Empty;
+            options.TargetHost = targetHost;
+            options.TargetPort = targetPort;
+            options.TargetUseHttps = targetUseHttps;
             options.DiscoveryInterval = TimeSpan.FromSeconds(2);
             options.DiscoveryTimeout = TimeSpan.FromSeconds(5);
             options.PathPrefix = "/test-discovery/";

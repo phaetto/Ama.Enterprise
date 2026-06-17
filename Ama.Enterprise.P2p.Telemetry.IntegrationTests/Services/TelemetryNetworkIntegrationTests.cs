@@ -282,7 +282,6 @@ public sealed class TelemetryNetworkIntegrationTests(ITestOutputHelper testOutpu
             {
                 opts.TargetMeshId = meshId;
                 opts.FlushInterval = TimeSpan.FromMilliseconds(flushIntervalMs);
-                opts.IsEnabled = true;
 
                 if (customMeters is not null)
                 {
