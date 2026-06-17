@@ -1,15 +1,12 @@
 namespace Ama.Enterprise.P2p.Models.Transports;
 
+using System;
+
 /// <summary>
 /// Configuration options explicitly bound for configuring active TCP transport connectivity.
 /// </summary>
 public sealed class TcpTransportOptions : IEquatable<TcpTransportOptions>
 {
-    /// <summary>
-    /// Gets or sets a value indicating whether the TCP transport is enabled globally for this mesh.
-    /// </summary>
-    public bool IsEnabled { get; set; }
-    
     /// <summary>
     /// Gets or sets the target listening hostname or IP address mapping. 
     /// Explicitly supports '+' to bind across all available local interfaces natively.
@@ -32,8 +29,7 @@ public sealed class TcpTransportOptions : IEquatable<TcpTransportOptions>
         if (other is null) return false;
         if (ReferenceEquals(this, other)) return true;
         
-        return IsEnabled == other.IsEnabled &&
-               ListenHost == other.ListenHost &&
+        return ListenHost == other.ListenHost &&
                ListenPort == other.ListenPort &&
                MaxMessageSize == other.MaxMessageSize;
     }
@@ -42,5 +38,5 @@ public sealed class TcpTransportOptions : IEquatable<TcpTransportOptions>
     public override bool Equals(object? obj) => Equals(obj as TcpTransportOptions);
 
     /// <inheritdoc />
-    public override int GetHashCode() => HashCode.Combine(IsEnabled, ListenHost, ListenPort, MaxMessageSize);
+    public override int GetHashCode() => HashCode.Combine(ListenHost, ListenPort, MaxMessageSize);
 }

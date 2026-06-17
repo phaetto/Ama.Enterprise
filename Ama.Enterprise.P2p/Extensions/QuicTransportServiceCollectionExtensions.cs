@@ -25,7 +25,6 @@ public static class QuicTransportServiceCollectionExtensions
 
         Action<QuicTransportOptions> configAction = options => 
         {
-            options.IsEnabled = true;
             configureOptions?.Invoke(options);
         };
 

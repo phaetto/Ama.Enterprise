@@ -58,11 +58,6 @@ public sealed class TelemetryPushAlgorithm : IDisposable
         var options = telemetryOptionsMonitor.CurrentValue;
         var meshId = options.TargetMeshId;
 
-        if (!options.IsEnabled)
-        {
-            return Task.CompletedTask;
-        }
-
         logger.LogInformation("[{MeshId}] Starting Telemetry Push Protocol...", meshId);
 
         dispatcher = serviceProvider.GetRequiredKeyedService<IApplicationPayloadDispatcher>(meshId);

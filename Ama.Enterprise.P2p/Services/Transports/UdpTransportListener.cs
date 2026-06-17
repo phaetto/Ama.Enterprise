@@ -66,11 +66,6 @@ public sealed class UdpTransportListener : ITransportListener, IDisposable
         ArgumentNullException.ThrowIfNull(onMessageReceived);
 
         var options = optionsMonitor.Get(meshId);
-        if (!options.IsEnabled)
-        {
-            logger.LogInformation("[{MeshId}] Configured internal decoupled native generic listener explicitly skips inactive structural setups.", meshId);
-            return Task.CompletedTask;
-        }
 
         listenerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 

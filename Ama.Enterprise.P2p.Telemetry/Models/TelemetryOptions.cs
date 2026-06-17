@@ -21,11 +21,6 @@ public sealed record TelemetryOptions : IEquatable<TelemetryOptions>
     public TimeSpan FlushInterval { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// Toggle dynamically resolving explicit telemetry forwarding bounds tracking metrics efficiently natively.
-    /// </summary>
-    public bool IsEnabled { get; set; } = true;
-
-    /// <summary>
     /// A set of meter names that are permitted to be collected and forwarded natively by the telemetry aggregator.
     /// Defaults to the core P2P protocol meter names.
     /// </summary>
@@ -57,11 +52,6 @@ public sealed record TelemetryOptions : IEquatable<TelemetryOptions>
             return false;
         }
 
-        if (IsEnabled != other.IsEnabled)
-        {
-            return false;
-        }
-
         if (IncludedMeterNames is null && other.IncludedMeterNames is null)
         {
             return true;
@@ -86,7 +76,6 @@ public sealed record TelemetryOptions : IEquatable<TelemetryOptions>
         var hash = new HashCode();
         hash.Add(TargetMeshId, StringComparer.OrdinalIgnoreCase);
         hash.Add(FlushInterval);
-        hash.Add(IsEnabled);
         
         if (IncludedMeterNames is not null)
         {

@@ -25,7 +25,6 @@ public static class TcpTransportServiceCollectionExtensions
 
         Action<TcpTransportOptions> configAction = options => 
         {
-            options.IsEnabled = true;
             configureOptions?.Invoke(options);
         };
 

@@ -30,7 +30,6 @@ public static class ServiceCollectionExtensions
 
         Action<WebRtcSignalingOptions> configAction = options =>
         {
-            options.IsEnabled = true;
             configureOptions?.Invoke(options);
         };
 

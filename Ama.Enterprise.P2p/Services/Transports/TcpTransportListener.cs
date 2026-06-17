@@ -69,11 +69,6 @@ public sealed class TcpTransportListener : ITransportListener, IDisposable
         ArgumentNullException.ThrowIfNull(onMessageReceived);
 
         var options = optionsMonitor.Get(meshId);
-        if (!options.IsEnabled)
-        {
-            logger.LogInformation("[{MeshId}] TCP Transport Listener is disabled explicitly.", meshId);
-            return Task.CompletedTask;
-        }
 
         listenerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 

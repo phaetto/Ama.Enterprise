@@ -64,10 +64,6 @@ public sealed class TelemetryForwarderService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var options = optionsMonitor.CurrentValue;
-        if (!options.IsEnabled)
-        {
-            return;
-        }
 
         await telemetryProtocol.StartAsync(stoppingToken).ConfigureAwait(false);
 
@@ -83,10 +79,6 @@ public sealed class TelemetryForwarderService : BackgroundService
                     await Task.Delay(options.FlushInterval, stoppingToken).ConfigureAwait(false);
 
                     var activeOptions = optionsMonitor.CurrentValue;
-                    if (!activeOptions.IsEnabled)
-                    {
-                        continue;
-                    }
 
                     meterListener.RecordObservableInstruments();
 

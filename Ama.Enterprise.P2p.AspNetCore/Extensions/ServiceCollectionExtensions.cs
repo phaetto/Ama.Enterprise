@@ -73,7 +73,6 @@ public static class ServiceCollectionExtensions
 
         Action<AspNetCoreTransportOptions> configAction = options => 
         {
-            options.IsEnabled = true;
             configureOptions?.Invoke(options);
         };
 

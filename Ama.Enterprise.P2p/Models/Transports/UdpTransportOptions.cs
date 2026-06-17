@@ -1,15 +1,12 @@
 namespace Ama.Enterprise.P2p.Models.Transports;
 
+using System;
+
 /// <summary>
 /// Configuration options explicitly bound for configuring active UDP datagram connectivity.
 /// </summary>
 public sealed class UdpTransportOptions : IEquatable<UdpTransportOptions>
 {
-    /// <summary>
-    /// Gets or sets a value indicating whether the UDP transport is enabled globally for this mesh.
-    /// </summary>
-    public bool IsEnabled { get; set; }
-    
     /// <summary>
     /// Gets or sets the target listening hostname or IP address mapping. 
     /// Explicitly supports '+' to bind across all available local interfaces natively.
@@ -27,8 +24,7 @@ public sealed class UdpTransportOptions : IEquatable<UdpTransportOptions>
         if (other is null) return false;
         if (ReferenceEquals(this, other)) return true;
         
-        return IsEnabled == other.IsEnabled &&
-               ListenHost == other.ListenHost &&
+        return ListenHost == other.ListenHost &&
                ListenPort == other.ListenPort;
     }
 
@@ -36,5 +32,5 @@ public sealed class UdpTransportOptions : IEquatable<UdpTransportOptions>
     public override bool Equals(object? obj) => Equals(obj as UdpTransportOptions);
 
     /// <inheritdoc />
-    public override int GetHashCode() => HashCode.Combine(IsEnabled, ListenHost, ListenPort);
+    public override int GetHashCode() => HashCode.Combine(ListenHost, ListenPort);
 }

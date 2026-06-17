@@ -6,11 +6,6 @@ namespace Ama.Enterprise.P2p.AspNetCore.Models;
 public sealed record AspNetCoreTransportOptions
 {
     /// <summary>
-    /// Gets or sets a value indicating whether this underlying transport is dynamically enabled.
-    /// </summary>
-    public bool IsEnabled { get; set; }
-
-    /// <summary>
     /// Gets or sets the hosting mode determining if the P2P transport relies on the host pipeline or an isolated server.
     /// </summary>
     public AspNetCoreHostingMode HostingMode { get; set; } = AspNetCoreHostingMode.Integrated;

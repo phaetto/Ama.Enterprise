@@ -103,10 +103,6 @@ public sealed class AspNetCoreTransport : ITransport, IDisposable
         }
 
         var options = optionsMonitor.Get(meshId);
-        if (!options.IsEnabled)
-        {
-            return;
-        }
 
         var basePath = string.IsNullOrWhiteSpace(options.PathPrefix) ? "/ama-enterprise/p2p-mesh" : options.PathPrefix.TrimEnd('/');
         if (!basePath.StartsWith("/", StringComparison.Ordinal)) basePath = "/" + basePath;

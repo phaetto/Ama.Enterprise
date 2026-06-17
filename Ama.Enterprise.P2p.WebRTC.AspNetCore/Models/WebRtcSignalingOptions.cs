@@ -8,11 +8,6 @@ using Ama.Enterprise.P2p.AspNetCore.Models;
 public sealed record WebRtcSignalingOptions
 {
     /// <summary>
-    /// Gets or sets a value indicating whether out-of-band WebRTC HTTP signaling is actively evaluated.
-    /// </summary>
-    public bool IsEnabled { get; set; }
-
-    /// <summary>
     /// Determines whether the ASP.NET Core signaling relies on the host application's HTTP pipeline explicitly routed via MapP2pWebRtcSignalingEndpoints() or spins up an isolated Standalone Kestrel web server.
     /// </summary>
     public AspNetCoreHostingMode HostingMode { get; set; } = AspNetCoreHostingMode.Integrated;

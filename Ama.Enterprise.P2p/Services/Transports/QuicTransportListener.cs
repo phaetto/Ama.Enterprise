@@ -70,11 +70,6 @@ public sealed class QuicTransportListener : ITransportListener, IDisposable
         ArgumentNullException.ThrowIfNull(onMessageReceived);
 
         var options = optionsMonitor.Get(meshId);
-        if (!options.IsEnabled)
-        {
-            logger.LogInformation("[{MeshId}] QUIC Transport Listener is disabled explicitly.", meshId);
-            return;
-        }
 
         if (!QuicListener.IsSupported)
         {

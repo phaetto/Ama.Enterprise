@@ -25,7 +25,6 @@ public static class UdpTransportServiceCollectionExtensions
 
         Action<UdpTransportOptions> configAction = options => 
         {
-            options.IsEnabled = true;
             configureOptions?.Invoke(options);
         };
 
