@@ -152,6 +152,7 @@
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/P2pVersioningIntegrationTests.cs` | Integration tests verifying backwards compatibility and protocol versioning constraints. Upgraded to utilize TCP transports dropping obsolete HTTP bindings. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/PushPullGossipIntegrationTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/QuicNetworkIntegrationTests.cs` | Added explicit comprehensive integration testing capabilities evaluating multiplexed robust natively encrypted QUIC TLS 1.3 behaviors directly validating standard networking flows reliably. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/SessionRoutingIntegrationTests.cs` | Integration tests verifying end-to-end multi-mesh Zero-Trust routing policies tracking token validations, outbound drops, and inbound structural rejections implicitly. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/TcpNetworkIntegrationTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/UdpNetworkIntegrationTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/UdpPeerDiscoveryIntegrationTests.cs` | No description provided. |
@@ -261,10 +262,12 @@
 | `$/Ama.Enterprise.P2p/Extensions/PushPullGossipNetworkServiceCollectionExtensions.cs` | Extension methods for registering generic Push-Pull Gossip algorithm components. |
 | `$/Ama.Enterprise.P2p/Extensions/QuicTransportServiceCollectionExtensions.cs` | Dedicated P2P dependency injection extensions exposing decoupled QUIC transport configurations bounded seamlessly into the existing builder architectures. |
 | `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Extension methods for registering generic P2P meshes. Refactored to extract specific algorithm and transport registrations into separate distinct files. |
+| `$/Ama.Enterprise.P2p/Extensions/SessionAuthenticationServiceCollectionExtensions.cs` | Dependency injection extensions to configure token-based session authentication for a P2P mesh. |
 | `$/Ama.Enterprise.P2p/Extensions/TcpTransportServiceCollectionExtensions.cs` | Extension methods for registering TCP transports dynamically mapped to multi-mesh pipelines. |
 | `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Removed tightly coupled injected Handshaker Options isolating generic P2P mesh parameters decoupling configuration. |
 | `$/Ama.Enterprise.P2p/Extensions/UdpTransportServiceCollectionExtensions.cs` | Extension methods for registering robust UDP datagram transports decoupled to multi-mesh pipelines. |
 | `$/Ama.Enterprise.P2p/Extensions/WireEncoderServiceCollectionExtensions.cs` | Extension methods for registering structural wire encoders. Updated with explicit XML documentation warning developers about the security guarantees and transport prerequisites. |
+| `$/Ama.Enterprise.P2p/Extensions/ZeroTrustRoutingServiceCollectionExtensions.cs` | Dependency injection extensions to configure zero-trust routing policies and decorators. |
 | `$/Ama.Enterprise.P2p/Models/Algorithms/GossipMessage.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Algorithms/GossipMessageType.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Algorithms/GossipOptions.cs` | No description provided. |
@@ -280,6 +283,8 @@
 | `$/Ama.Enterprise.P2p/Models/Core/PeerId.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerNode.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Core/PeerStatus.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Models/Core/SessionAuthenticatorOptions.cs` | Configuration structure for tuning session and token-based authentication capabilities within a Zero-Trust P2P mesh architecture. |
+| `$/Ama.Enterprise.P2p/Models/Core/SessionContext.cs` | DTO representing an authenticated session context with explicit claims extracted from the network handshakes. |
 | `$/Ama.Enterprise.P2p/Models/Core/WireEncoderOptions.cs` | Configuration options explicitly enforcing data-in-transit wire formatting and optional generic cryptographic bounds. |
 | `$/Ama.Enterprise.P2p/Models/Discovery/DnsDiscoveryOptions.cs` | Configuration options for DNS-based peer discovery, extended to support SRV record resolution flags. |
 | `$/Ama.Enterprise.P2p/Models/Discovery/SrvRecordTarget.cs` | Data structure representing a resolved target hostname and port from a DNS SRV query. |
@@ -304,6 +309,7 @@
 | `$/Ama.Enterprise.P2p/Services/Core/IDirectMessageSender.cs` | Defines a targeted point-to-point payload delivery contract decoupling anti-entropy processes from gossip epidemic broadcasts honoring the Single Responsibility Principle. |
 | `$/Ama.Enterprise.P2p/Services/Core/IFailureDetector.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IInboundMessageQueue.cs` | Defines an internal queue for decoupling inbound network listeners from the protocol logic. |
+| `$/Ama.Enterprise.P2p/Services/Core/IMeshRoutingPolicy.cs` | Interface for defining zero-trust routing policies that accept or reject messages based on session contexts. |
 | `$/Ama.Enterprise.P2p/Services/Core/IMeshWireEncoder.cs` | Interface for encoding and decoding mesh messages. Updated with explicit XML documentation clarifying security limitations and HTTPS tunneling requirements. |
 | `$/Ama.Enterprise.P2p/Services/Core/IP2pAlgorithm.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerAuthenticator.cs` | Expanded evaluating explicit outgoing local data arrays actively traversing generic topologies properly explicit natively mapped inherently. |
@@ -311,15 +317,21 @@
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerHandshaker.cs` | Handshake interface bounds updated replacing generic identities mapping correctly utilizing explicit encapsulated payload DTO resolving generic explicit securely. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerRegistry.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerSelector.cs` | Interface for algorithms that select a generic subset of peers for communication. |
+| `$/Ama.Enterprise.P2p/Services/Core/IPeerSessionRegistry.cs` | Contract mapping active Peer identifiers to their authenticated Session Context tracking live untrusted multi-mesh topologies. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerTopologyObserver.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Services/Core/ISessionTokenValidator.cs` | Interface for validating session authorization tokens like JWTs during peer handshakes. |
 | `$/Ama.Enterprise.P2p/Services/Core/ITransport.cs` | Generic interface defining the outbound network transport capabilities, augmented with endpoint routing capabilities. |
 | `$/Ama.Enterprise.P2p/Services/Core/ITransportListener.cs` | Generic interface defining the inbound network listener capabilities for receiving protocol messages. |
 | `$/Ama.Enterprise.P2p/Services/Core/ITransportRouter.cs` | Interface for routing outgoing messages to the appropriate transport based on the endpoint type. |
 | `$/Ama.Enterprise.P2p/Services/Core/InMemoryPeerRegistry.cs` | Implements an in-memory thread-safe registry tracking peering topology globally using a flat dictionary mapping. |
+| `$/Ama.Enterprise.P2p/Services/Core/InMemoryPeerSessionRegistry.cs` | Thread-safe singleton mapping dynamically extracted session contexts per Peer across partitioned boundaries. |
 | `$/Ama.Enterprise.P2p/Services/Core/InboundMessageQueue.cs` | Channel-backed implementation of the inbound message queue. |
 | `$/Ama.Enterprise.P2p/Services/Core/MeshWireEncoder.cs` | Implements the wire encoding pipeline bridging raw serialization to optional AES-GCM encryption. Removed legacy fallback for unformatted payload and added strict unencrypted payload rejection when encryption is mandated, completely neutralizing downgrade attacks. |
 | `$/Ama.Enterprise.P2p/Services/Core/PassThroughPeerAuthenticator.cs` | Implemented required generic local array boundaries securely resolving natively mapping explicitly naturally safely explicitly smartly directly structurally. |
+| `$/Ama.Enterprise.P2p/Services/Core/PolicyEnforcingPayloadDispatcher.cs` | Decorator implementation over the application dispatcher executing strict inbound policy boundaries preventing unauthorized data evaluation. |
+| `$/Ama.Enterprise.P2p/Services/Core/PolicyEnforcingTransportRouter.cs` | Decorator implementation over the outbound transport router preventing malicious or unauthorized broadcasts to generic client sessions explicitly. |
 | `$/Ama.Enterprise.P2p/Services/Core/RandomPeerSelector.cs` | Implementation of IPeerSelector utilizing random distribution selection. |
+| `$/Ama.Enterprise.P2p/Services/Core/SessionPeerAuthenticator.cs` | Peer authenticator establishing and tracking zero-trust session-based boundaries via tokens instead of traditional mutual TLS certificates. |
 | `$/Ama.Enterprise.P2p/Services/Core/TimeBasedFailureDetector.cs` | Implementation of IFailureDetector using abstract heartbeats decoupled from specific protocol options. |
 | `$/Ama.Enterprise.P2p/Services/Core/TransportRouter.cs` | Composite transport router that delegates sending messages to the correct specific transport implementation. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/DnsPeerDiscovery.cs` | Encapsulated targeted structures reading implicitly correctly arrays mapping safely dynamically cleanly intelligently smoothly rationally completely seamlessly naturally organically successfully logically intelligently explicitly efficiently natively naturally naturally perfectly elegantly gracefully gracefully logically intelligently implicitly inherently intelligently seamlessly properly explicitly logically inherently. |

@@ -14,12 +14,14 @@ Always protect for null or empty inputs on a method.
 Use IHttpClientFactory to manage HttpClient always.
 The integration tests that make requests need to be by default skipped.
 Put namespaces inside the main namespace and only use file-scoped namespaces for files.
-Interfaces should always include deatiled XmlDoc comments.
 Never use tuples, only construct DTOs to pass ar retrieve data.
 Always introduce models with implementation of `IEquatable<>` and be explicit when the model using ISet, IEnumerable or other deep structures.
 For JSON you should only use System.Text.Json and only AOT mode.
 Same for reflection, never use non friendly for AOT reflection.
 Do not use `using Xunit.Abstractions;` in unit tests, this namespace does not exists anymore.
+Interfaces should always include deatiled XmlDoc comments.
+Use simple language for XmlDocs and comments.
+Add example on XmlDocs on interfaces.
 
 # Filesystem structure
 
