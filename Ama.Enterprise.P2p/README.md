@@ -6,10 +6,12 @@
 
 - **Multi-Mesh Architecture**: Run multiple independent P2P networks concurrently within the same application process using decoupled Keyed DI boundaries.
 - **Native AOT Ready**: Designed without dynamic reflection or emit, ensuring full compatibility with Native AOT compilation workflows.
-- **Pluggable Transports**: Built-in support for TCP streams and UDP datagrams.
+- **Pluggable Transports**: Built-in support for TCP streams, UDP datagrams, and natively multiplexed QUIC TLS 1.3 streams.
 - **Two-Phase Discovery**: Multi-protocol peer discovery supporting UDP Multicast and DNS A/SRV record polling.
 - **Advanced Routing Protocols**: Orchestrates standard Epidemic Gossip and Push-Pull Anti-Entropy Gossip routing topologies.
 - **Automatic Failure Detection**: Configurable time-based heartbeats evaluating node lifecycles and network partition tolerance.
+- **Zero-Trust Architecture**: Complete support for token-based session authentication, X.509 certificate peer validation, and strict inbound/outbound routing policies.
+- **Wire Encryption**: Optional AES-GCM data-in-transit wire encryption for an added layer of defense-in-depth.
 
 ---
 
@@ -37,14 +39,26 @@ services.AddP2pMesh("InternalCluster", options =>
 
 ### 2. Configure Peer Transports
 
-A mesh requires a transport protocol for communication. You must choose either TCP or UDP for a given mesh configuration.
+A mesh requires a transport protocol for communication. You must choose TCP, UDP, or QUIC for a given mesh configuration.
 
+**TCP Transport:**
 ```csharp
 services.AddP2pMesh("InternalCluster")
     .AddTcpTransport(options =>
     {
         options.ListenHost = "127.0.0.1";
         options.ListenPort = 8080;
+    });
+```
+
+**QUIC Transport:**
+```csharp
+services.AddP2pMesh("InternalCluster")
+    .AddQuicTransport(options =>
+    {
+        options.ListenHost = "127.0.0.1";
+        options.ListenPort = 8080;
+        options.ServerCertificate = myX509Certificate;
     });
 ```
 
@@ -126,6 +140,41 @@ services.AddP2pMesh("InternalCluster")
         options.SuspectThresholdMultiplier = 3; // Evaluated as Suspect after 15s
         options.DeadThresholdMultiplier = 6;    // Evicted as Dead after 30s
     });
+```
+
+### 6. Security and Zero-Trust Capabilities (Optional)
+
+`Ama.Enterprise.P2p` supports robust security extensions to build Zero-Trust decentralized networks.
+
+**Wire Encryption (Defense in Depth):**
+Enables AES-GCM encryption for payload formatting. This should be combined with secure transports (like QUIC or mTLS) to ensure Perfect Forward Secrecy and Replay Protection natively.
+```csharp
+services.AddP2pMesh("InternalCluster")
+    .AddWireEncoder(options =>
+    {
+        options.IsEncryptionEnabled = true;
+        options.EncryptionKeyBase64 = "YOUR_BASE64_32_BYTE_KEY";
+    });
+```
+
+**Certificate Peer Authentication:**
+Authenticate network peers by enforcing valid X.509 certificate chains or thumbprints during phase 2 handshakes.
+```csharp
+services.AddP2pMesh("InternalCluster")
+    .AddCertificateAuthenticator(options =>
+    {
+        options.ValidateCertificateChain = false;
+        options.AllowedThumbprints.Add("ALLOWED_THUMBPRINT_HEX");
+    });
+```
+
+**Session Token Authentication & Zero-Trust Routing:**
+Establish and validate explicit application-level tokens (such as JWTs) to generate session contexts, then execute strict inbound and outbound routing policies avoiding broad exposure.
+```csharp
+services.AddP2pMesh("InternalCluster")
+    .AddSessionAuthentication<CustomJwtValidator>() // Must implement ISessionTokenValidator
+    .EnableZeroTrustRouting()
+    .AddRoutingPolicy<AdminOnlyRoutingPolicy>();    // Must implement IMeshRoutingPolicy
 ```
 
 ---
