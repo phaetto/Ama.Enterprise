@@ -20,7 +20,7 @@ public static class ServiceCollectionExtensions
     /// <returns>The updated service collection.</returns>
     /// <remarks>
     /// This method registers the internal licensing managers and background startup services. 
-    /// You must also invoke either <see cref="ConfigureAmaOpenSourceLicense"/> or <see cref="ConfigureAmaEnterpriseLicense"/> to set the required configuration.
+    /// You must also invoke either <see cref="ConfigureAmaCommunityLicense"/> or <see cref="ConfigureAmaEnterpriseLicense"/> to set the required configuration.
     /// </remarks>
     /// <example>
     /// <code>
@@ -43,19 +43,19 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Configures the application to operate under the Open Source license terms.
+    /// Configures the application to operate under the Community license terms.
     /// </summary>
     /// <param name="services">The service collection to configure the options for.</param>
     /// <returns>The updated service collection.</returns>
     /// <remarks>
-    /// This method explicitly declares the open-source intent and is perfectly safe for client-side (Blazor WebAssembly) execution.
+    /// This method explicitly declares the Community intent and is safe for client-side (Blazor WebAssembly) execution.
     /// </remarks>
     /// <example>
     /// <code>
-    /// builder.Services.ConfigureAmaOpenSourceLicense();
+    /// builder.Services.ConfigureAmaCommunityLicense();
     /// </code>
     /// </example>
-    public static IServiceCollection ConfigureAmaOpenSourceLicense(this IServiceCollection services)
+    public static IServiceCollection ConfigureAmaCommunityLicense(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
 
@@ -63,7 +63,7 @@ public static class ServiceCollectionExtensions
         
         services.Configure<LicenseOptions>(options =>
         {
-            options.DeclaredLicenseType = DeclaredLicenseType.OpenSource;
+            options.DeclaredLicenseType = DeclaredLicenseType.Community;
         });
 
         return services;

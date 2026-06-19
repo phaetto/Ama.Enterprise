@@ -62,8 +62,8 @@ public static class Program
             builder.AddProvider(new LockedConsoleLoggerProvider());
         });
 
-        // Register licensing explicitly specifying Open Source mode natively matching explicit structural generic mappings
-        services.ConfigureAmaOpenSourceLicense();
+        // Register licensing explicitly specifying Community mode natively matching explicit structural generic mappings
+        services.ConfigureAmaCommunityLicense();
 
         // 1. Explicitly register the distributed CRDT topological core bounds
         services.AddDistributedCrdtReplica(replicaId);

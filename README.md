@@ -54,8 +54,8 @@ using Ama.Enterprise.Licensing.Models;
 
 var services = new ServiceCollection();
 
-// 1. Declare Open Source or Enterprise license type
-services.ConfigureAmaOpenSourceLicense();
+// 1. Declare Community (Source-Available) or Enterprise license type
+services.ConfigureAmaCommunityLicense(); 
 
 // 2. Add Distributed CRDT Core Services
 services.AddDistributedCrdtCore(options =>
@@ -139,26 +139,26 @@ To maintain full transparency, please note that AI coding assistants and Large L
 
 `Ama.Enterprise` is built on a sustainable, developer-first licensing model. I believe in trusting developers. There is no draconian DRM, and absolutely no "phone home" analytics or telemetry.
 
-To balance open-source accessibility with the reality of maintaining enterprise-grade distributed systems, `Ama.Enterprise` uses a revenue-capped dual license system enforced by an honor-based cryptographic key.
+To balance source-available accessibility with the reality of maintaining enterprise-grade distributed systems, `Ama.Enterprise` uses a revenue-capped dual license system enforced by an honor-based cryptographic key.
 
 ### Types of license
 
 #### 1. Community License (Free)
-This license is designed for startups, indie developers, hobbyists, and non-profit open-source projects.
+This license is designed for startups, indie developers, hobbyists, and non-profit source-available projects.
 
-You qualify for the free Community License if your company or you as an individual have less than $1,000,000 USD in annual gross revenue, or if you are a registered non-profit with less than a $1,000,000 USD annual total budget. Government or quasi-government agencies do not qualify. 
+You qualify for the free Community License if your company (including parent/controlling entities) or you as an individual have less than $1,000,000 USD in Trailing 12 Months (TTM) gross revenue, or if you are a registered non-profit with less than a $1,000,000 USD annual total budget. Government or quasi-government agencies do not qualify. 
 
-Note: To remain eligible, your entity or organization must not have ever received more than $1,000,000 USD in capital from outside sources, such as private equity or venture capital.
+Note: To remain eligible, your entity or organization must not have ever received more than $1,000,000 USD in outside capital, such as Private Equity, Venture Capital, or Angel investments. (Standard commercial bank debt or loans are explicitly excluded from this capital limit).
 
 You do not need a license key. The software will run completely unrestricted.
 
 #### 2. Enterprise License (Paid)
 This license is for established companies, enterprises, heavily funded startups, and government agencies.
 
-If your organization generates $1,000,000 USD or more in gross annual revenue, has a budget over $1,000,000 USD, has raised $1,000,000 USD or more in outside capital, or is a government/quasi-government agency, you are required to purchase an Enterprise License.
+If your organization generates $1,000,000 USD or more in Trailing 12 Months (TTM) gross revenue, has a budget over $1,000,000 USD, has raised $1,000,000 USD or more in outside capital, or is a government/quasi-government agency, you are required to purchase an Enterprise License.
 
 When you purchase an Enterprise License, you are paying for three things:
-1. Legal Compliance & Risk Mitigation: An enterprise EULA that clears your legal department.
+1. Legal Compliance & Risk Mitigation: A commercial Enterprise EULA that clears your legal department. The base Community License is provided strictly "AS IS" with an absolute limitation of liability protecting the author. The Enterprise tier provides the explicit commercial agreements and risk mitigation required by corporate compliance teams.
 2. Guaranteed Support SLAs: Direct access to the author for architectural guidance, debugging, and prioritized bug fixes.
 3. The Sustainability of the Toolkit: Ensuring the P2P mesh and CRDT engine you rely on continues to receive updates, security patches, and new features.
 
@@ -179,18 +179,23 @@ services.AddP2pMesh("internal")
         // ... add transports and discovery mechanisms
 ```
 
-* To prevent inadvertently leaking private enterprise licenses into public-facing frontends, the `ConfigureAmaEnterpriseLicense` API forces a compile-time error (`[UnsupportedOSPlatform("browser")]`) if called from a Blazor WebAssembly environment. Client-side environments strictly rely on backend services for validation.
+* Note on Client-Side Environments: To prevent inadvertently leaking private enterprise licenses into public-facing frontends, the `ConfigureAmaEnterpriseLicense` API forces a compile-time error (`[UnsupportedOSPlatform("browser")]`) if called from a Blazor WebAssembly environment. Client-side environments strictly rely on backend services for validation. For client-side deployments (like Blazor WebAssembly), use the `ConfigureAmaCommunityLicense()` declaration locally to satisfy initialization requirements. Your Enterprise license is successfully validated and enforced at the backend cluster level.
 * The node validates the cryptographic signature locally. No network requests are ever made.
 * If a license is missing or expired, the node will never crash, pause, or throttle your application. It will simply emit a single warning to your application logs on startup reminding you to acquire a license. Your mesh will remain 100% operational.
 
-### Agencies and Consultancies
+### Agencies, Consultancies, and SaaS
 If you are an agency or consultancy building software for a client, the licensing requirement applies to the end-client running the software in production. 
 * If your client qualifies under the thresholds, the Community License applies.
 * If you are building a system for a large company or government entity exceeding the thresholds, the end-client (or the specific project budget) must procure the Enterprise License.
+
+For SaaS products, the license tier is based on the Trailing 12 Months (TTM) revenue of the SaaS company providing the service, not the users of the SaaS.
+
+### Open Source Ecosystem & Transitive Dependencies
+You may not package `Ama.Enterprise` as a transitive dependency in a public library or framework (e.g., publishing an MIT-licensed package to NuGet) without explicitly disclosing and enforcing these revenue caps on your downstream users. Bypassing the revenue cap by wrapping the toolkit in a permissive open-source library is strictly prohibited.
 
 ### Enterprise Support & SLAs
 If you decide to buy the Enterprise license in addition to supporting the project you get accountability as well. An Enterprise License includes the following support guarantees:
 
 * Direct Developer Access: Private email and issue-tracker access directly to the library's developer.
-* Prioritized Hotfixes: If you find a critical bug in the core CRDT or P2P networking layers, a patched NuGet package will be provided as fast as possible.
+* Prioritized Hotfixes: If you find a critical bug in the core CRDT or P2P networking layers, a patched NuGet package will be provided via a best-effort prioritized response within 2 business days (excluding public holidays and scheduled developer unavailability).
 * Architectural Guidance: Up to 2 hours per year of direct architectural review to ensure you are configuring your CRDTs, mesh topologies, and data models correctly for your specific use case.

@@ -63,12 +63,12 @@ public sealed class HonorLicenseManager : ILicenseManager
             return;
         }
 
-        if (options.DeclaredLicenseType == DeclaredLicenseType.OpenSource)
+        if (options.DeclaredLicenseType == DeclaredLicenseType.Community)
         {
-            LicenseType = "Open Source";
+            LicenseType = "Community";
             CompanyName = null;
             RegistrationDate = null;
-            logger.LogInformation("Open Source license terms accepted. Thank you for playing fair.");
+            logger.LogInformation("Community license terms accepted. Thank you for playing fair.");
             return;
         }
 
@@ -116,7 +116,7 @@ public sealed class HonorLicenseManager : ILicenseManager
         LicenseType = "Unknown";
         CompanyName = null;
         RegistrationDate = null;
-        logger.LogError("No valid license type declared. You must set DeclaredLicenseType to OpenSource or Enterprise to accept the terms of use. Please use 'services.ConfigureAmaEnterpriseLicense' to configure a valid license.");
+        logger.LogError("No valid license type declared. You must set DeclaredLicenseType to Community or Enterprise to accept the terms of use. Please use 'services.ConfigureAmaEnterpriseLicense' to configure a valid license.");
     }
 
     private string? LoadLicenseFromFile(string filePath)

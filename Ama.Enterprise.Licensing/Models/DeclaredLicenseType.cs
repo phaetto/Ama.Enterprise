@@ -11,9 +11,9 @@ public enum DeclaredLicenseType
     Unknown = 0,
 
     /// <summary>
-    /// Open Source license terms accepted.
+    /// Community license terms accepted.
     /// </summary>
-    OpenSource = 1,
+    Community = 1,
 
     /// <summary>
     /// Enterprise license terms accepted.

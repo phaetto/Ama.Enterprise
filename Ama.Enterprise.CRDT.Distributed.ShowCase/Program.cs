@@ -53,7 +53,7 @@ public static class Program
         });
 
         // Register licensing
-        services.ConfigureAmaOpenSourceLicense();
+        services.ConfigureAmaCommunityLicense();
 
         // Add core CRDT distributed services and resolve the orchestrator
         services.AddDistributedCrdtCore(options =>

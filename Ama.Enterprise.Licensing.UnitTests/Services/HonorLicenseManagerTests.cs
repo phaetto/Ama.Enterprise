@@ -137,11 +137,11 @@ public sealed class HonorLicenseManagerTests
     }
 
     [Fact]
-    public void ValidateLicense_WhenDeclaredOpenSource_ShouldSetOpenSource()
+    public void ValidateLicense_WhenDeclaredCommunity_ShouldSetCommunity()
     {
         // Arrange
         var licenseOptions = new LicenseOptions();
-        licenseOptions.GetType().GetProperty(nameof(LicenseOptions.DeclaredLicenseType))?.SetValue(licenseOptions, DeclaredLicenseType.OpenSource);
+        licenseOptions.GetType().GetProperty(nameof(LicenseOptions.DeclaredLicenseType))?.SetValue(licenseOptions, DeclaredLicenseType.Community);
         var options = Options.Create(licenseOptions);
         
         var loaderMock = new Mock<ICertificateLoader>();
@@ -151,7 +151,7 @@ public sealed class HonorLicenseManagerTests
         manager.ValidateLicense();
 
         // Assert
-        manager.LicenseType.ShouldBe("Open Source");
+        manager.LicenseType.ShouldBe("Community");
         manager.CompanyName.ShouldBeNull();
         manager.RegistrationDate.ShouldBeNull();
     }

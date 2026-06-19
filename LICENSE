@@ -6,10 +6,10 @@ This software, Ama.Enterprise, is distributed under a revenue-capped dual licens
 The Community License grants you a perpetual, non-exclusive, royalty-free license to use, modify, and distribute the software.
 
 You qualify for the free Community License if you meet ALL of the following criteria:
-- You are an individual, startup, hobbyist, or non-profit open-source project.
-- Your company or individual annual gross revenue is strictly less than $1,000,000 USD (or local equivalent).
+- You are an individual, startup, hobbyist, or non-profit source-available project.
+- Your company (including parent/controlling entities) or you as an individual have less than $1,000,000 USD (or local equivalent) in Trailing 12 Months (TTM) gross revenue.
 - If a registered non-profit, your total annual budget is strictly less than $1,000,000 USD.
-- Your entity or organization has NEVER received more than $1,000,000 USD in capital from outside sources (e.g., private equity, venture capital).
+- Your entity or organization has NEVER received $1,000,000 USD or more in outside capital (such as Private Equity, Venture Capital, or Angel investments). Standard commercial bank debt or loans are explicitly excluded from this capital limit.
 - You are NOT a government or quasi-government agency.
 
 Under this license, the software may be used unrestricted without a license key.
@@ -18,30 +18,35 @@ Under this license, the software may be used unrestricted without a license key.
 If you do not meet the criteria for the Community License, you are required to purchase an Enterprise License.
 
 You MUST purchase an Enterprise License if ANY of the following apply:
-- Your organization generates $1,000,000 USD or more in gross annual revenue.
+- Your organization (including parent/controlling entities) generates $1,000,000 USD or more in Trailing 12 Months (TTM) gross revenue.
 - Your organization has an annual budget of $1,000,000 USD or more.
-- Your organization has raised $1,000,000 USD or more in outside capital.
+- Your organization has raised $1,000,000 USD or more in outside capital (such as Private Equity, Venture Capital, or Angel investments).
 - You are a government or quasi-government agency.
 
 The Enterprise License includes:
 - Legal compliance through an Enterprise End-User License Agreement (EULA).
-- Guaranteed Support SLAs (Direct developer access and prioritized hotfixes).
+- Guaranteed Support SLAs (Direct developer access and best-effort prioritized hotfixes within bounded SLA windows).
 
-3. AGENCIES AND CONSULTANCIES
+3. AGENCIES, CONSULTANCIES, AND SAAS
 If you are an agency or consultancy building software for a client, the licensing requirement applies to the end-client running the software in production.
 - If the end-client qualifies under the Community License thresholds, the Community License applies.
 - If the end-client exceeds the thresholds or is a government entity, the end-client (or the project budget) must procure an Enterprise License.
 
-4. FORKING AND DERIVATIVE WORKS
+For Software-as-a-Service (SaaS) products, the license tier is based on the Trailing 12 Months (TTM) revenue of the SaaS company providing the service, not the users of the SaaS.
+
+4. OPEN SOURCE ECOSYSTEM & TRANSITIVE DEPENDENCIES
+You may not package this software as a transitive dependency in a public library or framework (e.g., publishing a permissively licensed package to a public registry) without explicitly disclosing and enforcing these revenue caps on your downstream users. Bypassing the revenue cap by wrapping the toolkit in a permissive open-source library is strictly prohibited.
+
+5. FORKING AND DERIVATIVE WORKS
 If you fork the source code or create derivative works from this software, you may only distribute the resulting source code under one of the following two licensing options:
 - Option A: This exact same Ama.Enterprise License Agreement, with the explicit condition that the original repository owner retains the sole and exclusive right to act as the license generator and issuer for any required Enterprise Licenses.
 - Option B: The GNU General Public License, version 3 (GPLv3).
 
-5. ENFORCEMENT AND TELEMETRY
+6. ENFORCEMENT AND TELEMETRY
 This software operates on an honor-based cryptographic license system.
 - There is no active DRM.
 - The software does not "phone home," and collects no telemetry or analytics.
 - A missing or expired license key will only emit a warning to the application logs on startup. The software will not crash, pause, or throttle operations.
 
-6. DISCLAIMER OF WARRANTY
+7. DISCLAIMER OF WARRANTY
 UNLESS EXPLICITLY PROVIDED OTHERWISE IN AN ENTERPRISE EULA, THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
