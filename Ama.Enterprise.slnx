@@ -29,6 +29,7 @@
     <File Path=".github/workflows/publish-nuget.yml" />
     <File Path=".gitignore" />
     <File Path="CodingStandards.md" />
+    <File Path="LICENSE" />
     <File Path="README.md" />
   </Folder>
   <Folder Name="/Tooling/">

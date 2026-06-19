@@ -369,6 +369,7 @@
 | `$/Ama.Enterprise.slnx` | Updated solution structure definitions tracking explicitly configured bounds explicitly modifying renamed structural instances naturally. |
 | `$/CodingStandards.md` | No description provided. |
 | `$/FilesDescription.md` | No description provided. |
+| `$/LICENSE` | Dual-license agreement detailing the revenue-capped Community and Enterprise honor-based terms, updated to enforce strictly constrained GPLv3 or standard license bounds for forks and derivative works. |
 | `$/README.md` | Primary introduction documentation explaining the core architecture, capabilities, getting started guide, and repository structure for the decentralized P2P toolkit. |
 | `$/apps-todo.txt` | No description provided. |
 | `$/p2p-mesh-architectures.md` | No description provided. |
