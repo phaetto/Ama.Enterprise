@@ -8,13 +8,16 @@ A .NET 10 enterprise-grade toolkit for building decentralized, masterless Peer-t
 - **Masterless P2P Mesh Networking**: Form decentralized clusters dynamically. Nodes automatically discover peers, negotiate connections, and replicate states via highly optimized Gossip and Anti-Entropy protocols.
 - **Transport Agnostic**: Out-of-the-box support for multiple network transports and topologies:
   - **TCP & UDP**: Low-level stream and datagram routing.
+  - **QUIC**: High-performance natively multiplexed and encrypted TLS 1.3 streams.
   - **ASP.NET Core (Kestrel)**: Bind P2P meshes directly into existing web host pipelines natively.
-  - **WebRTC**: Out-of-band signaling and data channels for direct browser-to-server or NAT-traversing node communication.
+  - **WebRTC**: Out-of-band signaling and data channels for direct browser-to-server or NAT-traversing node communication (includes Secure WebSockets/WSS support).
   - **MQTT**: Decoupled multi-mesh architectures using standard IoT brokers for discovery and transport.
-- **Pluggable Peer Discovery**: Locate peers dynamically using UDP Multicast, DNS A/SRV records, or active HTTP polling depending on your infrastructure constraints.
+- **Enterprise Security & Zero-Trust**: Implement End-to-End (E2E) AES-GCM data-in-transit wire encryption. Secure node connections using strict X.509 Certificate authentication (with offline/air-gapped revocation support) or dynamic Zero-Trust session token routing policies.
+- **High-Performance Architecture**: Lock-free single-reader object pooled channels (`IValueTaskSource`), dynamic journal backpressure limits, and anti-entropy network jitter algorithms to prevent "thundering herd" broadcast storms. Includes built-in distributed amnesia and split-brain protection.
+- **Pluggable Peer Discovery**: Locate peers dynamically using UDP Multicast, DNS A records (with possible extension to SRV), or active HTTP polling depending on your infrastructure constraints.
 - **Distributed CRDT Orchestrator**: Manage the lifecycles of hundreds of distributed CRDT documents dynamically. Create, sync, and tombstone documents across the mesh automatically with built-in snapshotting and journal truncation.
-- **Storage Backends**: Persist distributed states safely using ephemeral Memory, scalable Azure Table Storage or easily connect your own backend (`Ama.Enterprise.CRDT.Distributed.ShowCase` has it own implementation of AOT SQLite).
-- **Built-in Telemetry**: Natively integrated with `System.Diagnostics.Metrics`. It includes a P2P metric aggregator that pushes time-series hardware and mesh statistics across isolated nodes dynamically.
+- **Storage Backends**: Persist distributed states safely using ephemeral Memory, scalable Azure Table Storage (with unified bounds tracking), or easily connect your own backend (`Ama.Enterprise.CRDT.Distributed.ShowCase` has its own implementation of AOT SQLite).
+- **Built-in Telemetry**: Natively integrated with `System.Diagnostics.Metrics`. It includes a P2P metric aggregator utilizing magic-byte binary slicing that pushes time-series hardware and mesh statistics across isolated nodes dynamically.
 
 ## Project Structure & Architecture
 
@@ -22,21 +25,22 @@ To understand the repository in 60 seconds, the architecture is divided into thr
 
 ### 1. The Network Layer (`Ama.Enterprise.P2p.*`)
 The foundation of the system. It handles decentralized node discovery, failure detection, transport routing, and payload delivery (Gossip/Anti-Entropy).
-- `Ama.Enterprise.P2p`: Core interfaces, base generic algorithms, and UDP/TCP/DNS implementations.
+- `Ama.Enterprise.P2p`: Core interfaces, base generic algorithms, multi-mesh tracking, and UDP/TCP/QUIC/DNS implementations.
 - `Ama.Enterprise.P2p.AspNetCore`: HTTP/Kestrel integration.
-- `Ama.Enterprise.P2p.Mqtt`: MQTT integration.
-- `Ama.Enterprise.P2p.WebRTC`: WebRTC data channels and signaling.
-- `Ama.Enterprise.P2p.Telemetry`: P2P cluster metrics aggregation.
+- `Ama.Enterprise.P2p.Mqtt`: MQTT integration and JSON polymorphism bounds.
+- `Ama.Enterprise.P2p.WebRTC`: WebRTC data channels and distributed out-of-band signaling.
+- `Ama.Enterprise.P2p.Telemetry`: P2P cluster metrics aggregation and real-time computation.
 
 ### 2. The Distributed Orchestration Layer (`Ama.Enterprise.CRDT.Distributed.*`)
 Built on top of the P2P layer and `Ama.CRDT`. It manages the global registry of instantiated CRDT documents across the mesh, evaluating version vectors, syncing states, and abstracting data storage.
-- `Ama.Enterprise.CRDT.Distributed`: Core orchestrator, background sync workers, and scope managers.
-- `Ama.Enterprise.CRDT.Distributed.TableStorage`: Azure Table backend.
+- `Ama.Enterprise.CRDT.Distributed`: Core async orchestrator, background sync workers, and scope managers mapping distinct replica boundaries.
+- `Ama.Enterprise.CRDT.Distributed.TableStorage`: Azure Table backend replica persistence.
 - `Ama.Enterprise.CRDT.MessagePack`: Binary serialization formatters.
 
 ### 3. Application Domain Layer (`Ama.Enterprise.FeatureFlags`)
 High-level features utilizing the CRDT Orchestrator to provide instant business value.
 - `Ama.Enterprise.FeatureFlags`: A decentralized, masterless feature flag system.
+- `Ama.Enterprise.P2p.WebRTC.DistributedSignaling`: Decentralized, masterless signaling state that allows P2P WebRTC connections grouped in "rooms".
 
 ## Quick Start
 
@@ -63,6 +67,7 @@ services.AddDistributedCrdtCore(options =>
     options.ActiveSyncEnabled = true;
     options.CheckpointIntervalSeconds = 30;
     options.AntiEntropyIntervalSeconds = 5;
+    options.JournalBackpressureCeilingThreshold = 10000;
 });
 
 // 3. Register your AOT JSON Contexts and Types
@@ -116,6 +121,12 @@ This repository includes highly interactive console applications demonstrating t
 - [**Feature Flags Showcase**](Ama.Enterprise.FeatureFlags.ShowCase/README.md) (`Ama.Enterprise.FeatureFlags.ShowCase`): A masterless P2P Feature Flag management console. Demonstrates extracting high-level applications backed by CRDT synchronization and dynamic UDP cluster discovery.
 
 *Tip: While running either showcase, type `clone` into the console. This will automatically spawn a brand-new node process on a new port that instantly discovers and syncs with your primary node.*
+
+## Applications that provided Out-Of-The-Box
+
+This repository includes highly interactive console applications demonstrating the framework across dynamically spawned nodes:
+
+- **P2P Telemetry CLI** (`Ama.Enterprise.P2p.Telemetry.Cli`): A terminal-based real-time UI built with `Terminal.Gui`. It connects to the mesh as a passive observer to aggregate and display decentralized cluster metrics, time-series histories, and hardware utilization across the distributed topology.
 
 ## Building and Testing
 
@@ -197,5 +208,5 @@ You may not package `Ama.Enterprise` as a transitive dependency in a public libr
 If you decide to buy the Enterprise license in addition to supporting the project you get accountability as well. An Enterprise License includes the following support guarantees:
 
 * Direct Developer Access: Private email and issue-tracker access directly to the library's developer.
-* Prioritized Hotfixes: If you find a critical bug in the core CRDT or P2P networking layers, a patched NuGet package will be provided via a best-effort prioritized response within 2 business days (excluding public holidays and scheduled developer unavailability).
-* Architectural Guidance: Up to 2 hours per year of direct architectural review to ensure you are configuring your CRDTs, mesh topologies, and data models correctly for your specific use case.
+* Prioritized Hotfixes: If you find a critical bug in the core CRDT or P2P networking layers, a patched NuGet package will be provided via a best-effort prioritized response within a number of business days (excluding public holidays and scheduled developer unavailability).
+* Architectural Guidance: A number of hours per year of direct architectural review to ensure you are configuring your CRDTs, mesh topologies, and data models correctly for your specific use case.
