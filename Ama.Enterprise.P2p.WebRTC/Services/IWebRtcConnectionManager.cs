@@ -28,4 +28,11 @@ public interface IWebRtcConnectionManager
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous send operation.</returns>
     Task SendMessageAsync(Guid connectionId, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Checks if the underlying WebRTC connection and its data channel are currently open and active.
+    /// </summary>
+    /// <param name="connectionId">The local connection identifier tracking the remote peer.</param>
+    /// <returns>True if the connection and data channel are active; otherwise, false.</returns>
+    bool IsConnectionActive(Guid connectionId);
 }

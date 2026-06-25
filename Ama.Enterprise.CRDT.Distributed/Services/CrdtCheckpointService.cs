@@ -146,7 +146,8 @@ public sealed class CrdtCheckpointService : BackgroundService
 
                         foreach (var networkKvp in exportedClusterState.NetworkIdToReplicaId)
                         {
-                            if (topologyProvider.IsPeerExpected(networkKvp.Key))
+                            var isExpected = await topologyProvider.IsPeerExpectedAsync(networkKvp.Key, stoppingToken).ConfigureAwait(false);
+                            if (isExpected)
                             {
                                 if (exportedClusterState.PeerStates.TryGetValue(networkKvp.Value, out var peerStateDto))
                                 {

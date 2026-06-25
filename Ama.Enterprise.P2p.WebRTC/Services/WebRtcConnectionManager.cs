@@ -195,6 +195,12 @@ public sealed class WebRtcConnectionManager : IWebRtcConnectionManager, IWebRtcI
     }
 
     /// <inheritdoc />
+    public bool IsConnectionActive(Guid connectionId)
+    {
+        return connections.TryGetValue(connectionId, out var state) && state.DataChannel is { readyState: RTCDataChannelState.open };
+    }
+
+    /// <inheritdoc />
     public void Dispose()
     {
         foreach (var kvp in connections)

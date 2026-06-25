@@ -9,5 +9,7 @@ public enum WebRtcSignalingAction : byte
     Offer = 2,
     Answer = 3,
     FinalizeAck = 4,
-    Error = 5
+    Error = 5,
+    AuthRequest = 6,
+    AuthResponse = 7
 }

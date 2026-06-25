@@ -7,6 +7,6 @@ using System.Text.Json.Serialization;
 /// </summary>
 [JsonSerializable(typeof(MqttDiscoveryMessage))]
 [JsonSerializable(typeof(MqttHandshakeMessage))]
-internal sealed partial class MqttDiscoveryJsonContext : JsonSerializerContext
+public sealed partial class MqttDiscoveryJsonContext : JsonSerializerContext
 {
 }

@@ -52,9 +52,9 @@ public sealed class ScopeTopologyProviderIntegrationTests
     {
         public HashSet<string> ExpectedPeers { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        public bool IsPeerExpected(string peerNetworkId)
+        public ValueTask<bool> IsPeerExpectedAsync(string peerNetworkId, CancellationToken cancellationToken = default)
         {
-            return ExpectedPeers.Contains(peerNetworkId);
+            return new ValueTask<bool>(ExpectedPeers.Contains(peerNetworkId));
         }
     }
 

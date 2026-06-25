@@ -351,7 +351,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     public async Task ProvideSnapshotAsync(string documentId, string targetReplicaId, PeerId targetPeerId, CancellationToken cancellationToken = default)
     {
         var topologyProvider = serviceProvider.GetRequiredService<IScopeTopologyProvider>();
-        if (!topologyProvider.IsPeerExpected(targetPeerId.Value.ToString()))
+        var isExpected = await topologyProvider.IsPeerExpectedAsync(targetPeerId.Value.ToString(), cancellationToken).ConfigureAwait(false);
+        if (!isExpected)
         {
             logger.LogWarning("Rejected snapshot request for document {DocumentId} from explicitly excluded peer {PeerId}.", documentId, targetPeerId.Value);
             return;
@@ -430,7 +431,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 foreach (var peer in activePeers)
                 {
                     var networkIdStr = peer.Id.Value.ToString();
-                    if (topologyProvider.IsPeerExpected(networkIdStr))
+                    var isExpected = await topologyProvider.IsPeerExpectedAsync(networkIdStr, cancellationToken).ConfigureAwait(false);
+                    if (isExpected)
                     {
                         validPeers.Add(peer.Id);
                     }

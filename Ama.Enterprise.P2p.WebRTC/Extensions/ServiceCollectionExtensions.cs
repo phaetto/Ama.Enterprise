@@ -104,6 +104,22 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredKeyedService<IMeshWireEncoder>(key),
                 sp.GetRequiredService<ILogger<WebRtcTransportListener>>()));
 
+        var failureDetectorDescriptor = builder.Services.FirstOrDefault(d => 
+            d.ServiceType == typeof(IFailureDetector) && 
+            Equals(d.ServiceKey, builder.MeshId));
+
+        if (failureDetectorDescriptor != null)
+        {
+            builder.Services.Remove(failureDetectorDescriptor);
+        }
+
+        builder.Services.AddKeyedSingleton<IFailureDetector>(builder.MeshId, (sp, key) =>
+            new WebRtcFailureDetector(
+                (string)key!,
+                sp.GetRequiredService<IPeerRegistry>(),
+                sp.GetRequiredKeyedService<IWebRtcConnectionManager>(key),
+                sp.GetRequiredService<ILogger<WebRtcFailureDetector>>()));
+
         return builder;
     }
 }

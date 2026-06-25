@@ -4,6 +4,7 @@ using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.MessagePack.Extensions;
 using Ama.Enterprise.CRDT.MessagePack.Formatters;
 using Ama.Enterprise.CRDT.MessagePack.UnitTests.Models;
+using Ama.Enterprise.P2p.Models.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using System;
@@ -514,6 +515,24 @@ public sealed class MessagePackSerializerIntegrationTests
         // Assert
         result.ShouldNotBeNull();
         result.ShouldBe(model);
+    }
+
+    [Fact]
+    public void SerializeDeserialize_SmartConventionPeerEndpoint_PolymorphicallyRestoresInstance()
+    {
+        // Arrange
+        PeerEndpoint model = new SmartConventionPeerEndpoint(default, 9090);
+
+        // Act
+        var bytes = crdtSerializer.SerializeToBytes(model);
+        var result = crdtSerializer.DeserializeFromBytes<PeerEndpoint>(bytes);
+
+        // Assert
+        result.ShouldNotBeNull();
+        result.ShouldBeOfType<SmartConventionPeerEndpoint>();
+        var typedResult = (SmartConventionPeerEndpoint)result;
+        typedResult.ConventionPort.ShouldBe(9090);
+        typedResult.ShouldBe(model);
     }
 
     private static ICrdtSerializer InitializeSerializer()

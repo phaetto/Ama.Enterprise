@@ -6,6 +6,6 @@ using System.Text.Json.Serialization;
 /// Generic context guaranteeing isolated AOT interoperability evaluating exclusively standard ASP.NET Core endpoint bindings.
 /// </summary>
 [JsonSerializable(typeof(AspNetCorePeerEndpoint))]
-internal partial class AspNetCoreJsonContext : JsonSerializerContext
+public partial class AspNetCoreJsonContext : JsonSerializerContext
 {
 }

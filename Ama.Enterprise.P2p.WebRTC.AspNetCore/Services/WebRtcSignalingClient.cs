@@ -7,6 +7,7 @@ using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
+using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.WebRTC.AspNetCore.Models;
 using Ama.Enterprise.P2p.WebRTC.Models;
 using Microsoft.Extensions.Logging;
@@ -55,7 +56,13 @@ public sealed class WebRtcSignalingClient : IWebRtcSignalingClient, IDisposable
             "Size of inbound WebRTC signaling WebSocket payload bounds explicitly in bytes");
     }
 
-    public async Task<string?> NegotiateOfferAsync(Uri peerUri, string meshId, string? pathPrefix, Func<WebRtcInvitationOffer, CancellationToken, Task<WebRtcInvitationAnswer>> answerFactory, CancellationToken cancellationToken = default)
+    public async Task<(string? ConnectionId, PeerHandshakePayload? RemotePayload)> NegotiateOfferAsync(
+        Uri peerUri, 
+        string meshId, 
+        string? pathPrefix, 
+        PeerHandshakePayload localPayload,
+        Func<WebRtcInvitationOffer, CancellationToken, Task<WebRtcInvitationAnswer>> answerFactory, 
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(peerUri);
         ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
@@ -77,6 +84,23 @@ public sealed class WebRtcSignalingClient : IWebRtcSignalingClient, IDisposable
         {
             await webSocket.ConnectAsync(wsUri, cancellationToken).ConfigureAwait(false);
             
+            // 1. Perform Authentication Handshake
+            var localPayloadBytes = serializer.SerializeToBytes(localPayload);
+            await WebRtcSignalingWsHelper.SendMessageAsync(webSocket, WebRtcSignalingAction.AuthRequest, localPayloadBytes, cancellationToken).ConfigureAwait(false);
+            payloadOutHistogram.Record(localPayloadBytes.Length, tags);
+
+            var (authAction, authPayload) = await WebRtcSignalingWsHelper.ReceiveMessageAsync(webSocket, cancellationToken).ConfigureAwait(false);
+            payloadInHistogram.Record(authPayload.Length, tags);
+
+            if (authAction != WebRtcSignalingAction.AuthResponse)
+            {
+                logger.LogWarning("[{MeshId}] Remote signaling server rejected explicit authentication handshake.", meshId);
+                return (null, null);
+            }
+
+            var remotePayload = serializer.DeserializeFromBytes<PeerHandshakePayload>(authPayload);
+
+            // 2. Request Offer for SDP negotiation
             await WebRtcSignalingWsHelper.SendMessageAsync(webSocket, WebRtcSignalingAction.RequestOffer, Array.Empty<byte>(), cancellationToken).ConfigureAwait(false);
             payloadOutHistogram.Record(0, tags);
 
@@ -85,7 +109,7 @@ public sealed class WebRtcSignalingClient : IWebRtcSignalingClient, IDisposable
 
             if (action != WebRtcSignalingAction.Offer) 
             {
-                return null;
+                return (null, null);
             }
 
             var offer = serializer.DeserializeFromBytes<WebRtcInvitationOffer>(payload);
@@ -106,16 +130,16 @@ public sealed class WebRtcSignalingClient : IWebRtcSignalingClient, IDisposable
                 }
 
                 requestsCounter.Add(1, new KeyValuePair<string, object?>[] { new("mesh_id", meshId), new("success", true) });
-                return offer.ConnectionId.ToString();
+                return (offer.ConnectionId.ToString(), remotePayload);
             }
 
-            return null;
+            return (null, null);
         }
         catch (Exception ex)
         {
             requestsCounter.Add(1, new KeyValuePair<string, object?>[] { new("mesh_id", meshId), new("success", false) });
             logger.LogWarning(ex, "[{MeshId}] Failed to negotiate explicit WebRTC out-of-band WebSockets signaling against {PeerUri}.", meshId, peerUri);
-            return null;
+            return (null, null);
         }
     }
 

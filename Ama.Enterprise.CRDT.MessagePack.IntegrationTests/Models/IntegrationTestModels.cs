@@ -611,6 +611,11 @@ public sealed class TolerantReaderPayloadV2 : IExtensibleDistributedPayload
 }
 
 /// <summary>
+/// Custom peer endpoint relying gracefully on the generator's smart convention mapping dynamically (EndsWith "PeerEndpoint").
+/// </summary>
+public sealed record SmartConventionPeerEndpoint(PeerId Id, int ConventionPort) : PeerEndpoint();
+
+/// <summary>
 /// AOT Source Generation bounds intentionally explicit triggering MessagePack mappings via Standard System.Text.Json metadata context boundaries.
 /// </summary>
 [JsonSerializable(typeof(SimpleValueModel))]
@@ -637,6 +642,7 @@ public sealed class TolerantReaderPayloadV2 : IExtensibleDistributedPayload
 [JsonSerializable(typeof(SimulatedGossipMessage))]
 [JsonSerializable(typeof(TolerantReaderPayload))]
 [JsonSerializable(typeof(TolerantReaderPayloadV2))]
+[JsonSerializable(typeof(SmartConventionPeerEndpoint))]
 public partial class MessagePackIntegrationTestContext : JsonSerializerContext
 {
 }

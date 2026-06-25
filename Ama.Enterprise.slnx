@@ -20,6 +20,7 @@
   </Folder>
   <Folder Name="/ShowCases/">
     <Project Path="Ama.Enterprise.CRDT.Distributed.ShowCase/Ama.Enterprise.CRDT.Distributed.ShowCase.csproj" Id="9994275b-bff7-448d-8763-3a41999774cb" />
+    <Project Path="Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase.csproj" />
     <Project Path="Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">

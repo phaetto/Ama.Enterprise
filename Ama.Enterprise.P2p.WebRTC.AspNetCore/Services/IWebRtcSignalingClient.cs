@@ -3,6 +3,7 @@ namespace Ama.Enterprise.P2p.WebRTC.AspNetCore.Services;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.WebRTC.Models;
 
 /// <summary>
@@ -16,13 +17,15 @@ public interface IWebRtcSignalingClient
     /// <param name="peerUri">The base URI of the target peer's signaling server.</param>
     /// <param name="meshId">The identifier of the active P2P mesh architecture.</param>
     /// <param name="pathPrefix">The explicit path prefix configured on the peer (optional).</param>
+    /// <param name="localPayload">The local peer handshake payload establishing zero-trust authentication boundaries natively.</param>
     /// <param name="answerFactory">A delegate orchestrator invoking the local SDP answer evaluations based on the remote peer's explicit offer effectively.</param>
     /// <param name="cancellationToken">A token to observe for cancellation requests.</param>
-    /// <returns>The remote peer connection ID if the negotiation concluded properly, otherwise null.</returns>
-    Task<string?> NegotiateOfferAsync(
+    /// <returns>The remote peer connection ID and remote handshake payload if the negotiation concluded properly, otherwise null.</returns>
+    Task<(string? ConnectionId, PeerHandshakePayload? RemotePayload)> NegotiateOfferAsync(
         Uri peerUri, 
         string meshId, 
         string? pathPrefix, 
+        PeerHandshakePayload localPayload,
         Func<WebRtcInvitationOffer, CancellationToken, Task<WebRtcInvitationAnswer>> answerFactory, 
         CancellationToken cancellationToken = default);
 }

@@ -11,6 +11,8 @@ using System.Threading.Tasks;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.Licensing.Services;
 using Ama.Enterprise.P2p.AspNetCore.Models;
+using Ama.Enterprise.P2p.Models.Core;
+using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.WebRTC.AspNetCore.Models;
 using Ama.Enterprise.P2p.WebRTC.Models;
 using Ama.Enterprise.P2p.WebRTC.Services;
@@ -32,6 +34,10 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
     private readonly IWebRtcInvitationService invitationService;
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<WebRtcSignalingServer> logger;
+    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
+    private readonly IPeerAuthenticator authenticator;
+    private readonly IPeerRegistry peerRegistry;
+    private readonly IFailureDetector failureDetector;
     private readonly ICertificateLoader? certificateLoader;
 
     private readonly Meter meter;
@@ -48,6 +54,10 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
         IWebRtcInvitationService invitationService,
         ICrdtSerializer serializer,
         ILogger<WebRtcSignalingServer> logger,
+        IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
+        IPeerAuthenticator authenticator,
+        IPeerRegistry peerRegistry,
+        IFailureDetector failureDetector,
         ICertificateLoader? certificateLoader = null,
         IMeterFactory? meterFactory = null)
     {
@@ -56,12 +66,20 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
         ArgumentNullException.ThrowIfNull(invitationService);
         ArgumentNullException.ThrowIfNull(serializer);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(nodeOptionsMonitor);
+        ArgumentNullException.ThrowIfNull(authenticator);
+        ArgumentNullException.ThrowIfNull(peerRegistry);
+        ArgumentNullException.ThrowIfNull(failureDetector);
 
         this.meshId = meshId;
         this.optionsMonitor = optionsMonitor;
         this.invitationService = invitationService;
         this.serializer = serializer;
         this.logger = logger;
+        this.nodeOptionsMonitor = nodeOptionsMonitor;
+        this.authenticator = authenticator;
+        this.peerRegistry = peerRegistry;
+        this.failureDetector = failureDetector;
         this.certificateLoader = certificateLoader;
 
         this.meter = meterFactory?.Create("Ama.Enterprise.P2p.WebRtcSignalingServer") ?? new Meter("Ama.Enterprise.P2p.WebRtcSignalingServer");
@@ -184,9 +202,56 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
             var (action, reqPayload) = await WebRtcSignalingWsHelper.ReceiveMessageAsync(webSocket, cancellationToken).ConfigureAwait(false);
             payloadInHistogram.Record(reqPayload.Length, tags);
 
+            // 1. Enforce Authentication Step
+            if (action != WebRtcSignalingAction.AuthRequest)
+            {
+                logger.LogWarning("[{MeshId}] Dropping WebSocket connection. Required authentication handshake missing.", meshId);
+                await WebRtcSignalingWsHelper.SendMessageAsync(webSocket, WebRtcSignalingAction.Error, Array.Empty<byte>(), cancellationToken).ConfigureAwait(false);
+                await webSocket.CloseAsync(WebSocketCloseStatus.PolicyViolation, "Authentication Required", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            var clientPayload = serializer.DeserializeFromBytes<PeerHandshakePayload>(reqPayload);
+            var isAuthenticated = await authenticator.AuthenticateAsync(clientPayload.Node, clientPayload.HandshakeData, cancellationToken).ConfigureAwait(false);
+
+            if (!isAuthenticated)
+            {
+                logger.LogWarning("[{MeshId}] Unauthorized WebRTC WebSocket signaling connection explicitly rejected.", meshId);
+                await WebRtcSignalingWsHelper.SendMessageAsync(webSocket, WebRtcSignalingAction.Error, Array.Empty<byte>(), cancellationToken).ConfigureAwait(false);
+                await webSocket.CloseAsync(WebSocketCloseStatus.PolicyViolation, "Unauthorized", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            // 2. Respond with Local Authentication
+            var nodeOptions = nodeOptionsMonitor.Get(meshId);
+            var localHandshakeData = await authenticator.GetLocalHandshakeDataAsync(cancellationToken).ConfigureAwait(false);
+            var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), new WebRtcPeerEndpoint(Guid.Empty));
+            
+            var serverPayload = new PeerHandshakePayload
+            {
+                Node = localNode,
+                HandshakeData = localHandshakeData.ToArray()
+            };
+            
+            var serverPayloadBytes = serializer.SerializeToBytes(serverPayload);
+            await WebRtcSignalingWsHelper.SendMessageAsync(webSocket, WebRtcSignalingAction.AuthResponse, serverPayloadBytes, cancellationToken).ConfigureAwait(false);
+            payloadOutHistogram.Record(serverPayloadBytes.Length, tags);
+
+            // 3. Receive Next Action (RequestOffer or Offer)
+            var nextMsg = await WebRtcSignalingWsHelper.ReceiveMessageAsync(webSocket, cancellationToken).ConfigureAwait(false);
+            action = nextMsg.Action;
+            reqPayload = nextMsg.Payload;
+            payloadInHistogram.Record(reqPayload.Length, tags);
+
             if (action == WebRtcSignalingAction.RequestOffer)
             {
                 var offer = await invitationService.CreateInvitationAsync(cancellationToken).ConfigureAwait(false);
+                
+                // Track explicitly authorized remote peer using dynamic SDP connection binding
+                var remoteNode = new PeerNode(clientPayload.Node.Id, new WebRtcPeerEndpoint(offer.ConnectionId));
+                await failureDetector.RecordHeartbeatAsync(remoteNode.Id, cancellationToken).ConfigureAwait(false);
+                await peerRegistry.AddOrUpdatePeerAsync(meshId, remoteNode, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
+
                 var offerPayload = serializer.SerializeToBytes(offer);
                 
                 payloadOutHistogram.Record(offerPayload.Length, tags);
@@ -211,6 +276,12 @@ public sealed class WebRtcSignalingServer : IHostedService, IDisposable
             else if (action == WebRtcSignalingAction.Offer)
             {
                 var offer = serializer.DeserializeFromBytes<WebRtcInvitationOffer>(reqPayload);
+
+                // Track explicitly authorized remote peer using dynamic SDP connection binding
+                var remoteNode = new PeerNode(clientPayload.Node.Id, new WebRtcPeerEndpoint(offer.ConnectionId));
+                await failureDetector.RecordHeartbeatAsync(remoteNode.Id, cancellationToken).ConfigureAwait(false);
+                await peerRegistry.AddOrUpdatePeerAsync(meshId, remoteNode, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
+
                 var localAnswer = await invitationService.AcceptInvitationAsync(offer.SdpOffer, cancellationToken).ConfigureAwait(false);
                 var answerDto = new WebRtcInvitationAnswer(offer.ConnectionId, localAnswer.SdpAnswer);
                 var ansPayload = serializer.SerializeToBytes(answerDto);

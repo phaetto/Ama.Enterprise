@@ -16,9 +16,9 @@ public abstract record PeerEndpoint : IEquatable<PeerEndpoint>, IExtensibleDistr
 {
     /// <inheritdoc />
     [JsonExtensionData]
-    public IDictionary<string, JsonElement> JsonExtensionData { get; set; } = new Dictionary<string, JsonElement>();
+    public IDictionary<string, JsonElement>? JsonExtensionData { get; set; }
 
     /// <inheritdoc />
     [JsonIgnore]
-    public IList<ReadOnlyMemory<byte>> BinaryExtensionData { get; set; } = new List<ReadOnlyMemory<byte>>();
+    public IList<ReadOnlyMemory<byte>>? BinaryExtensionData { get; set; }
 }

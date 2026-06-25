@@ -10,6 +10,7 @@ using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.WebRTC.Models;
 using Ama.Enterprise.P2p.WebRTC.Services;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Implements programmatic WebRTC discovery automating the explicit signaling workflow out-of-band natively.
@@ -23,6 +24,8 @@ public sealed class WebRtcHttpPeerDiscovery : IWebRtcHttpPeerDiscovery, IDisposa
     private readonly IPeerAuthenticator authenticator;
     private readonly IFailureDetector failureDetector;
     private readonly ILogger<WebRtcHttpPeerDiscovery> logger;
+    private readonly IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor;
+    private readonly PeerEndpoint localEndpoint;
 
     private readonly Meter meter;
     private readonly Counter<long> discoveryAttemptsCounter;
@@ -35,6 +38,8 @@ public sealed class WebRtcHttpPeerDiscovery : IWebRtcHttpPeerDiscovery, IDisposa
         IPeerAuthenticator authenticator,
         IFailureDetector failureDetector,
         ILogger<WebRtcHttpPeerDiscovery> logger,
+        IOptionsMonitor<P2pNodeOptions> nodeOptionsMonitor,
+        PeerEndpoint localEndpoint,
         IMeterFactory? meterFactory = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(meshId);
@@ -44,6 +49,8 @@ public sealed class WebRtcHttpPeerDiscovery : IWebRtcHttpPeerDiscovery, IDisposa
         ArgumentNullException.ThrowIfNull(authenticator);
         ArgumentNullException.ThrowIfNull(failureDetector);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(nodeOptionsMonitor);
+        ArgumentNullException.ThrowIfNull(localEndpoint);
 
         this.meshId = meshId;
         this.signalingClient = signalingClient;
@@ -52,6 +59,8 @@ public sealed class WebRtcHttpPeerDiscovery : IWebRtcHttpPeerDiscovery, IDisposa
         this.authenticator = authenticator;
         this.failureDetector = failureDetector;
         this.logger = logger;
+        this.nodeOptionsMonitor = nodeOptionsMonitor;
+        this.localEndpoint = localEndpoint;
 
         this.meter = meterFactory?.Create("Ama.Enterprise.P2p.WebRtcHttpPeerDiscovery") ?? new Meter("Ama.Enterprise.P2p.WebRtcHttpPeerDiscovery");
         this.discoveryAttemptsCounter = this.meter.CreateCounter<long>(
@@ -69,28 +78,37 @@ public sealed class WebRtcHttpPeerDiscovery : IWebRtcHttpPeerDiscovery, IDisposa
 
         try
         {
-            var connectionId = await signalingClient.NegotiateOfferAsync(peerUri, meshId, pathPrefix, async (remoteOffer, ct) =>
+            var nodeOptions = nodeOptionsMonitor.Get(meshId);
+            var localHandshakeData = await authenticator.GetLocalHandshakeDataAsync(cancellationToken).ConfigureAwait(false);
+            var localPayload = new PeerHandshakePayload
+            {
+                Node = new PeerNode(new PeerId(nodeOptions.LocalPeerId), localEndpoint),
+                HandshakeData = localHandshakeData.ToArray()
+            };
+
+            var (connectionId, remotePayload) = await signalingClient.NegotiateOfferAsync(peerUri, meshId, pathPrefix, localPayload, async (remoteOffer, ct) =>
             {
                 var localAnswer = await invitationService.AcceptInvitationAsync(remoteOffer.SdpOffer, ct).ConfigureAwait(false);
                 return new WebRtcInvitationAnswer(remoteOffer.ConnectionId, localAnswer.SdpAnswer);
             }, cancellationToken).ConfigureAwait(false);
 
-            if (!string.IsNullOrWhiteSpace(connectionId))
+            if (!string.IsNullOrWhiteSpace(connectionId) && remotePayload.HasValue)
             {
                 Guid connectionGuidId = Guid.Parse(connectionId);
-                var remoteEndpoint = new WebRtcPeerEndpoint(connectionGuidId);
-                var remoteNode = new PeerNode(new PeerId(connectionGuidId), remoteEndpoint);
+                
+                // Track explicitly authorized remote peer using its actual explicit NodeId, replacing amnesia-inducing connection IDs natively
+                var remoteNode = new PeerNode(remotePayload.Value.Node.Id, new WebRtcPeerEndpoint(connectionGuidId));
 
-                var isAuthenticated = await authenticator.AuthenticateAsync(remoteNode, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
+                var isAuthenticated = await authenticator.AuthenticateAsync(remoteNode, remotePayload.Value.HandshakeData, cancellationToken).ConfigureAwait(false);
                 if (isAuthenticated)
                 {
                     await failureDetector.RecordHeartbeatAsync(remoteNode.Id, cancellationToken).ConfigureAwait(false);
                     await peerRegistry.AddOrUpdatePeerAsync(meshId, remoteNode, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
+                    
+                    logger.LogInformation("[{MeshId}] Orchestrated WebRTC WebSockets signaling mapping connection natively to {PeerUri}.", meshId, peerUri);
+                    success = true;
+                    return true;
                 }
-
-                logger.LogInformation("[{MeshId}] Orchestrated WebRTC WebSockets signaling mapping connection natively to {PeerUri}.", meshId, peerUri);
-                success = true;
-                return true;
             }
 
             logger.LogWarning("[{MeshId}] Remote peer {PeerUri} rejected the WebRTC finalization explicitly.", meshId, peerUri);

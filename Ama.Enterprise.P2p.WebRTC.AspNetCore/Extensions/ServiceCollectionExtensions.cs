@@ -5,6 +5,7 @@ using System.Diagnostics.Metrics;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.Licensing.Services;
 using Ama.Enterprise.P2p.Extensions;
+using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.WebRTC.AspNetCore.Models;
 using Ama.Enterprise.P2p.WebRTC.AspNetCore.Services;
@@ -47,6 +48,10 @@ public static class ServiceCollectionExtensions
             var invitationService = sp.GetRequiredKeyedService<IWebRtcInvitationService>(builder.MeshId);
             var serializer = sp.GetRequiredService<ICrdtSerializer>();
             var logger = sp.GetRequiredService<ILogger<WebRtcSignalingServer>>();
+            var nodeOptionsMonitor = sp.GetRequiredService<IOptionsMonitor<P2pNodeOptions>>();
+            var authenticator = sp.GetRequiredKeyedService<IPeerAuthenticator>(builder.MeshId);
+            var peerRegistry = sp.GetRequiredService<IPeerRegistry>();
+            var failureDetector = sp.GetRequiredKeyedService<IFailureDetector>(builder.MeshId);
             var certLoader = sp.GetService<ICertificateLoader>();
             var meterFactory = sp.GetService<IMeterFactory>();
 
@@ -56,6 +61,10 @@ public static class ServiceCollectionExtensions
                 invitationService,
                 serializer,
                 logger,
+                nodeOptionsMonitor,
+                authenticator,
+                peerRegistry,
+                failureDetector,
                 certLoader,
                 meterFactory);
         });
@@ -86,8 +95,21 @@ public static class ServiceCollectionExtensions
             var authenticator = sp.GetRequiredKeyedService<IPeerAuthenticator>(key);
             var failureDetector = sp.GetRequiredKeyedService<IFailureDetector>(key);
             var logger = sp.GetRequiredService<ILogger<WebRtcHttpPeerDiscovery>>();
+            var nodeOptionsMonitor = sp.GetRequiredService<IOptionsMonitor<P2pNodeOptions>>();
+            var localEndpoint = sp.GetRequiredKeyedService<PeerEndpoint>(key);
+            var meterFactory = sp.GetService<IMeterFactory>();
             
-            return new WebRtcHttpPeerDiscovery((string)key!, signalingClient, invitationService, peerRegistry, authenticator, failureDetector, logger);
+            return new WebRtcHttpPeerDiscovery(
+                (string)key!, 
+                signalingClient, 
+                invitationService, 
+                peerRegistry, 
+                authenticator, 
+                failureDetector, 
+                logger, 
+                nodeOptionsMonitor, 
+                localEndpoint, 
+                meterFactory);
         });
 
         return builder;
