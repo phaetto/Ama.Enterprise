@@ -158,6 +158,7 @@ public sealed class ConcurrencyIntegrationTests
         var scope = scopeManager.GetOrCreateScope("Replica1");
         
         var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var clusterTracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
         await orchestrator.InitializeAsync(CancellationToken.None);
         
         // Map an initial target document natively
@@ -166,6 +167,9 @@ public sealed class ConcurrencyIntegrationTests
 
         var targetPeerId = new PeerId(Guid.NewGuid());
         const int TotalTasks = 600;
+
+        // Register the target peer in the cluster tracker so DispatchAntiEntropyStateAsync actually routes targeted messages natively
+        clusterTracker.UpdatePeerState("RemoteRep", targetPeerId.ToString(), new DottedVersionVector());
 
         // Act - Flood orchestrator channel with distinct network bound intent messages
         var broadcastTasks = Enumerable.Range(0, TotalTasks).Select(i => Task.Run(async () =>
@@ -190,9 +194,8 @@ public sealed class ConcurrencyIntegrationTests
         // Assert - The single reader should gracefully process all generic network constraints natively without dropping or blocking
         mockP2p.Verify(x => x.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Exactly(TotalTasks / 3));
         
-        // Direct sender is invoked by ProvideSnapshot and DispatchAntiEntropyState
+        // Direct sender is actively bounded by ProvideSnapshot and DispatchAntiEntropyState ensuring direct point-to-point payload pushes securely avoiding Thundering Herd
         mockSender.Verify(x => x.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Exactly(TotalTasks / 3));
-        mockSender.Verify(x => x.SendToRandomPeerAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Exactly(TotalTasks / 3));
     }
 
     [IntegrationFact]

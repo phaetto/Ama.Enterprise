@@ -64,7 +64,7 @@ public interface ICrdtDocumentOrchestrator
     Task BroadcastPatchAsync(string documentId, CrdtPatch patch, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Dispatches a targeted point-to-point synchronization request to evaluate causal differences avoiding broadcast storms natively.
+    /// Dispatches a targeted point-to-point synchronization request mapping peer topologies extracting random active peers internally automatically.
     /// </summary>
     Task DispatchAntiEntropyStateAsync(CancellationToken cancellationToken = default);
 }

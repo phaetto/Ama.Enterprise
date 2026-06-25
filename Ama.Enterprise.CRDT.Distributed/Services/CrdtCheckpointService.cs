@@ -3,6 +3,7 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
@@ -71,6 +72,7 @@ public sealed class CrdtCheckpointService : BackgroundService
                 {
                     var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
                     var orchestrator = scope.Orchestrator;
+                    var topologyProvider = scope.ServiceProvider.GetRequiredService<IScopeTopologyProvider>();
                     var documents = orchestrator.GetActiveDocuments();
                     
                     var tag = new KeyValuePair<string, object?>("replica_id", scope.ReplicaId);
@@ -140,21 +142,29 @@ public sealed class CrdtCheckpointService : BackgroundService
                     }
                     else
                     {
-                        var clusterStates = new List<DottedVersionVector>(scope.ClusterTracker.GetClusterStates())
-                        {
-                            safelyPersistedDvv
-                        };
+                        var validClusterStates = new List<DottedVersionVector> { safelyPersistedDvv };
 
-                        if (clusterStates.Count > 0)
+                        foreach (var networkKvp in exportedClusterState.NetworkIdToReplicaId)
+                        {
+                            if (topologyProvider.IsPeerExpected(networkKvp.Key))
+                            {
+                                if (exportedClusterState.PeerStates.TryGetValue(networkKvp.Value, out var peerStateDto))
+                                {
+                                    validClusterStates.Add(peerStateDto.State);
+                                }
+                            }
+                        }
+
+                        if (validClusterStates.Count > 0)
                         {
                             var syncService = scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
-                            var gmvv = syncService.CalculateGlobalMinimumVersionVector(clusterStates);
+                            var gmvv = syncService.CalculateGlobalMinimumVersionVector(validClusterStates);
 
                             if (gmvv.Count > 0)
                             {
                                 await scope.Storage.TrimAsync(gmvv.ToDictionary(), stoppingToken).ConfigureAwait(false);
                                 trimmedJournalsCounter.Add(1, tag);
-                                logger.LogTrace("[{ReplicaId}] Executed background journal trim matching Global Minimum Version Vector bounds.", scope.ReplicaId);
+                                logger.LogTrace("[{ReplicaId}] Executed background journal trim matching Global Minimum Version Vector bounds across expected topology peers.", scope.ReplicaId);
                             }
                         }
                     }

@@ -71,6 +71,10 @@ public sealed class BackgroundAndStorageIntegrationTests
 
         services.AddSingleton(Mock.Of<IP2pAlgorithm>());
         services.AddSingleton(Mock.Of<IDirectMessageSender>());
+        
+        // Anti-Entropy peer resolution explicitly maps internal registries natively 
+        services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
+        services.AddSingleton(new P2pMeshMetadata(TestMeshId));
 
         configureExtra?.Invoke(services);
 
@@ -117,7 +121,7 @@ public sealed class BackgroundAndStorageIntegrationTests
     }
 
     [IntegrationFact]
-    public async Task CrdtTopologyObserver_ShouldBroadcastOnFirstPeer()
+    public async Task CrdtTopologyObserver_HandlesPeerJoined_WithoutBroadcastStorms()
     {
         // Arrange
         var mockSender = new Mock<IDirectMessageSender>();
@@ -135,18 +139,24 @@ public sealed class BackgroundAndStorageIntegrationTests
 
         var observer = sp.GetRequiredKeyedService<IPeerTopologyObserver>(TestMeshId);
         var peerNode = new PeerNode(new PeerId(Guid.NewGuid()), new TcpPeerEndpoint("http://localhost", 5000));
+        
+        // We must map it explicitly into the test registry so orchestrator extracts it during decision making natively
+        var registry = sp.GetRequiredService<IPeerRegistry>();
+        await registry.AddOrUpdatePeerAsync(TestMeshId, peerNode, PeerStatus.Active, CancellationToken.None);
 
         // Act - Trigger Peer Joined naturally
         await observer.OnPeerJoinedAsync(TestMeshId, peerNode, CancellationToken.None);
         
-        // Assert - The observer should trigger document state sync broadcast
-        mockSender.Verify(p => p.SendToRandomPeerAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
+        // Assert - The observer should trigger point-to-point direct message for anti-entropy right away evaluating registry mappings directly
+        mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
         
-        // Act - Trigger again to test thread-safe connection check
-        await observer.OnPeerJoinedAsync(TestMeshId, new PeerNode(new PeerId(Guid.NewGuid()), new TcpPeerEndpoint("http://localhost2", 5001)), CancellationToken.None);
-        
-        // Assert - Only triggered on the FIRST connected peer
-        mockSender.Verify(p => p.SendToRandomPeerAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
+        // Act - Trigger again to test thread-safe connection check constraints
+        var peerNode2 = new PeerNode(new PeerId(Guid.NewGuid()), new TcpPeerEndpoint("http://localhost2", 5001));
+        await registry.AddOrUpdatePeerAsync(TestMeshId, peerNode2, PeerStatus.Active, CancellationToken.None);
+        await observer.OnPeerJoinedAsync(TestMeshId, peerNode2, CancellationToken.None);
+
+        // Assert - Still averting overlapping broadcasts for subsequent joins
+        mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
     }
 
     [IntegrationFact]

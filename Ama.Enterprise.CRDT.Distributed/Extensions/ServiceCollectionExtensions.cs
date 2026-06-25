@@ -83,6 +83,8 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IDistributedCrdtScopeFactory, DistributedCrdtScopeFactory>();
         services.TryAddSingleton<DistributedCrdtScopeManager>();
 
+        services.TryAddScoped<IScopeTopologyProvider, DefaultScopeTopologyProvider>();
+
         services.AddScoped<ICrdtDocumentOrchestrator, CrdtDocumentOrchestrator>();
         services.AddScoped<IClusterStateTracker, ClusterStateTracker>();
         services.AddScoped<ICrdtEvictionService, CrdtEvictionService>();

@@ -350,6 +350,13 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
     public async Task ProvideSnapshotAsync(string documentId, string targetReplicaId, PeerId targetPeerId, CancellationToken cancellationToken = default)
     {
+        var topologyProvider = serviceProvider.GetRequiredService<IScopeTopologyProvider>();
+        if (!topologyProvider.IsPeerExpected(targetPeerId.Value.ToString()))
+        {
+            logger.LogWarning("Rejected snapshot request for document {DocumentId} from explicitly excluded peer {PeerId}.", documentId, targetPeerId.Value);
+            return;
+        }
+
         if (!activeDocuments.TryGetValue(documentId, out var doc) && Registry.DocumentId != documentId)
         {
             logger.LogWarning("Requested snapshot for unknown document {DocumentId}.", documentId);
@@ -376,7 +383,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             
             snapshotsDispatchedCounter.Add(1, new KeyValuePair<string, object?>("document_id", documentId));
             snapshotBytesDispatchedCounter.Add(finalBytes.Length, new KeyValuePair<string, object?>("document_id", documentId));
-            logger.LogInformation("Dispatched targeted complete document snapshot fallback payload for document {DocumentId} to peer {PeerId}.", documentId, targetPeerId.Value);
+            logger.LogInformation("Dispatched targeted complete document snapshot fallback payload for document {DocumentId} to expected peer {PeerId}.", documentId, targetPeerId.Value);
         }
         catch (Exception ex)
         {
@@ -412,6 +419,31 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     {
         try
         {
+            var topologyProvider = serviceProvider.GetRequiredService<IScopeTopologyProvider>();
+            var peerRegistry = serviceProvider.GetRequiredService<IPeerRegistry>();
+            var meshes = serviceProvider.GetServices<P2pMeshMetadata>();
+            
+            var validPeers = new List<PeerId>();
+            foreach (var mesh in meshes)
+            {
+                var activePeers = await peerRegistry.GetPeersByStatusAsync(mesh.MeshId, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
+                foreach (var peer in activePeers)
+                {
+                    var networkIdStr = peer.Id.Value.ToString();
+                    if (topologyProvider.IsPeerExpected(networkIdStr))
+                    {
+                        validPeers.Add(peer.Id);
+                    }
+                }
+            }
+
+            if (validPeers.Count == 0)
+            {
+                return;
+            }
+
+            var targetPeerId = validPeers[Random.Shared.Next(validPeers.Count)];
+
             var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
             var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
             var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
@@ -428,10 +460,10 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             var wrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", payload);
             var finalBytes = serializer.SerializeToBytes(wrapper);
 
-            await directSender.SendToRandomPeerAsync(finalBytes, cancellationToken).ConfigureAwait(false);
+            await directSender.SendDirectAsync(targetPeerId, finalBytes, cancellationToken).ConfigureAwait(false);
             
             antiEntropySyncCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
-            logger.LogTrace("Dispatched targeted global DVV cluster state sync.");
+            logger.LogTrace("Dispatched targeted global DVV cluster state sync to expected peer {PeerId}.", targetPeerId.Value);
         }
         catch (Exception ex)
         {
