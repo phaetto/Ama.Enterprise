@@ -87,6 +87,8 @@ public static class UdpDiscoveryServiceCollectionExtensions
                 sp.GetRequiredService<ICrdtSerializer>(),
                 sp.GetRequiredService<ILogger<UdpPeerHandshaker>>(),
                 sp.GetRequiredKeyedService<IPeerAuthenticator>(key),
+                sp.GetRequiredService<IPeerRegistry>(),
+                sp.GetRequiredKeyedService<IFailureDetector>(key),
                 sp.GetService<IMeterFactory>()));
 
         return builder;

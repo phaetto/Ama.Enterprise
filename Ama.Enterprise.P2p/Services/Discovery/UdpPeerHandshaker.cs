@@ -26,6 +26,8 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IDisposable
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<UdpPeerHandshaker> logger;
     private readonly IPeerAuthenticator authenticator;
+    private readonly IPeerRegistry peerRegistry;
+    private readonly IFailureDetector failureDetector;
 
     private UdpClient? listener;
     private CancellationTokenSource? backgroundTaskCancellationSource;
@@ -47,6 +49,8 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IDisposable
         ICrdtSerializer serializer,
         ILogger<UdpPeerHandshaker> logger,
         IPeerAuthenticator authenticator,
+        IPeerRegistry peerRegistry,
+        IFailureDetector failureDetector,
         IMeterFactory? meterFactory = null)
     {
         ArgumentNullException.ThrowIfNull(meshId);
@@ -56,6 +60,8 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IDisposable
         ArgumentNullException.ThrowIfNull(serializer);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(authenticator);
+        ArgumentNullException.ThrowIfNull(peerRegistry);
+        ArgumentNullException.ThrowIfNull(failureDetector);
 
         this.meshId = meshId;
         this.optionsMonitor = optionsMonitor;
@@ -64,6 +70,8 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IDisposable
         this.serializer = serializer;
         this.logger = logger;
         this.authenticator = authenticator;
+        this.peerRegistry = peerRegistry;
+        this.failureDetector = failureDetector;
 
         this.meter = meterFactory?.Create("Ama.Enterprise.P2p.UdpPeerHandshaker") ?? new Meter("Ama.Enterprise.P2p.UdpPeerHandshaker");
         this.requestsSentCounter = this.meter.CreateCounter<long>("p2p.handshaker.udp.requests_sent", "requests", "Total UDP handshake requests sent");
@@ -194,6 +202,21 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IDisposable
                         
                         var responseBytes = serializer.SerializeToBytes(responsePayload);
                         await listener.SendAsync(responseBytes, responseBytes.Length, result.RemoteEndPoint).ConfigureAwait(false);
+
+                        try
+                        {
+                            var isAuthenticated = await authenticator.AuthenticateAsync(remotePayload.Node, remotePayload.HandshakeData, token).ConfigureAwait(false);
+
+                            if (isAuthenticated)
+                            {
+                                await failureDetector.RecordHeartbeatAsync(remotePayload.Node.Id, token).ConfigureAwait(false);
+                                await peerRegistry.AddOrUpdatePeerAsync(meshId, remotePayload.Node, PeerStatus.Active, token).ConfigureAwait(false);
+                            }
+                        }
+                        catch (Exception authEx)
+                        {
+                            logger.LogWarning(authEx, "[{MeshId}] Inbound UDP handshake authentication failed for {PeerId}.", meshId, remotePayload.Node.Id.Value);
+                        }
                     }
                 }
                 catch (Exception ex)

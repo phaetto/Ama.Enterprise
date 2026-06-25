@@ -35,6 +35,8 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<AspNetCorePeerHandshaker> logger;
     private readonly IPeerAuthenticator authenticator;
+    private readonly IPeerRegistry peerRegistry;
+    private readonly IFailureDetector failureDetector;
     private readonly ICertificateLoader? certificateLoader;
 
     private readonly Meter meter;
@@ -56,6 +58,8 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
         ICrdtSerializer serializer,
         ILogger<AspNetCorePeerHandshaker> logger,
         IPeerAuthenticator authenticator,
+        IPeerRegistry peerRegistry,
+        IFailureDetector failureDetector,
         IMeterFactory? meterFactory = null,
         ICertificateLoader? certificateLoader = null)
     {
@@ -67,6 +71,8 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
         ArgumentNullException.ThrowIfNull(serializer);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(authenticator);
+        ArgumentNullException.ThrowIfNull(peerRegistry);
+        ArgumentNullException.ThrowIfNull(failureDetector);
 
         this.meshId = meshId;
         this.optionsMonitor = optionsMonitor;
@@ -76,6 +82,8 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
         this.serializer = serializer;
         this.logger = logger;
         this.authenticator = authenticator;
+        this.peerRegistry = peerRegistry;
+        this.failureDetector = failureDetector;
         this.certificateLoader = certificateLoader;
 
         this.meter = meterFactory?.Create("Ama.Enterprise.P2p.AspNetCorePeerHandshaker") ?? new Meter("Ama.Enterprise.P2p.AspNetCorePeerHandshaker");
@@ -255,6 +263,21 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
                 context.Response.ContentType = "application/octet-stream";
                 context.Response.ContentLength = responseBytes.Length;
                 await context.Response.Body.WriteAsync(responseBytes, context.RequestAborted).ConfigureAwait(false);
+
+                try
+                {
+                    var isAuthenticated = await authenticator.AuthenticateAsync(remotePayload.Node, remotePayload.HandshakeData, context.RequestAborted).ConfigureAwait(false);
+
+                    if (isAuthenticated)
+                    {
+                        await failureDetector.RecordHeartbeatAsync(remotePayload.Node.Id, context.RequestAborted).ConfigureAwait(false);
+                        await peerRegistry.AddOrUpdatePeerAsync(meshId, remotePayload.Node, PeerStatus.Active, context.RequestAborted).ConfigureAwait(false);
+                    }
+                }
+                catch (Exception authEx)
+                {
+                    logger.LogWarning(authEx, "[{MeshId}] Inbound ASP.NET Core handshake authentication failed for {PeerId}.", meshId, remotePayload.Node.Id.Value);
+                }
             }
             else
             {

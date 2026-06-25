@@ -16,7 +16,7 @@ using Microsoft.Extensions.Options;
 using MQTTnet;
 
 /// <summary>
-/// Implementation of IPeerHandshaker orchestrating isolated Phase 2 MQTT unicast negotiations securely smoothly effectively effortlessly optimally seamlessly gracefully completely naturally natively efficiently perfectly completely accurately mapping standalone generic instances natively explicitly completely smoothly explicitly dynamically correctly effectively gracefully natively effectively actively dynamically safely effectively natively mapped smartly explicitly.
+/// Implementation of IPeerHandshaker orchestrating isolated Phase 2 MQTT unicast negotiations.
 /// </summary>
 public sealed class MqttPeerHandshaker : IPeerHandshaker, IDisposable
 {
@@ -27,13 +27,15 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IDisposable
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<MqttPeerHandshaker> logger;
     private readonly IPeerAuthenticator authenticator;
+    private readonly IPeerRegistry peerRegistry;
+    private readonly IFailureDetector failureDetector;
 
     private IMqttClient? listener;
     private CancellationTokenSource? backgroundTaskCancellationSource;
     private bool isDisposed;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="MqttPeerHandshaker"/> class decoupling active generic streams natively globally inherently.
+    /// Initializes a new instance of the <see cref="MqttPeerHandshaker"/> class.
     /// </summary>
     public MqttPeerHandshaker(
         string meshId,
@@ -42,7 +44,9 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IDisposable
         PeerEndpoint localEndpoint,
         ICrdtSerializer serializer,
         ILogger<MqttPeerHandshaker> logger,
-        IPeerAuthenticator authenticator)
+        IPeerAuthenticator authenticator,
+        IPeerRegistry peerRegistry,
+        IFailureDetector failureDetector)
     {
         ArgumentNullException.ThrowIfNull(meshId);
         ArgumentNullException.ThrowIfNull(optionsMonitor);
@@ -51,6 +55,8 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IDisposable
         ArgumentNullException.ThrowIfNull(serializer);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(authenticator);
+        ArgumentNullException.ThrowIfNull(peerRegistry);
+        ArgumentNullException.ThrowIfNull(failureDetector);
 
         this.meshId = meshId;
         this.optionsMonitor = optionsMonitor;
@@ -59,6 +65,8 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IDisposable
         this.serializer = serializer;
         this.logger = logger;
         this.authenticator = authenticator;
+        this.peerRegistry = peerRegistry;
+        this.failureDetector = failureDetector;
     }
 
     /// <inheritdoc />
@@ -84,7 +92,7 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IDisposable
             var endpointStr = options.HandshakePort > 0 ? $"{GetLocalIpAddress()}:{options.HandshakePort}" : GetLocalIpAddress();
             var topic = BuildHandshakeTopic(options.TopicPrefix, meshId, options.HandshakeTopicSuffix, endpointStr);
             
-            logger.LogInformation("[{MeshId}] MQTT Peer Handshaker started explicitly listening on localized effectively mapped actively targeted topic: {Topic}", meshId, topic);
+            logger.LogInformation("[{MeshId}] MQTT Peer Handshaker started explicitly listening on targeted topic: {Topic}", meshId, topic);
         }
         catch (Exception ex)
         {
@@ -278,11 +286,26 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IDisposable
                     .Build();
 
                 await listener!.PublishAsync(message, CancellationToken.None).ConfigureAwait(false);
+
+                try
+                {
+                    var isAuthenticated = await authenticator.AuthenticateAsync(remotePayload.Node, remotePayload.HandshakeData, CancellationToken.None).ConfigureAwait(false);
+
+                    if (isAuthenticated)
+                    {
+                        await failureDetector.RecordHeartbeatAsync(remotePayload.Node.Id, CancellationToken.None).ConfigureAwait(false);
+                        await peerRegistry.AddOrUpdatePeerAsync(meshId, remotePayload.Node, PeerStatus.Active, CancellationToken.None).ConfigureAwait(false);
+                    }
+                }
+                catch (Exception authEx)
+                {
+                    logger.LogWarning(authEx, "[{MeshId}] Inbound MQTT handshake authentication failed for {PeerId}.", meshId, remotePayload.Node.Id.Value);
+                }
             }
         }
         catch (Exception ex)
         {
-            logger.LogTrace(ex, "[{MeshId}] Ignored generic handshake request explicitly avoiding failures locally natively mapped elegantly natively securely mapped correctly optimally structurally successfully rationally logically completely successfully rationally successfully efficiently structurally rationally flawlessly natively.", meshId);
+            logger.LogTrace(ex, "[{MeshId}] Ignored generic handshake request explicitly avoiding failures locally.", meshId);
         }
     }
 
@@ -303,7 +326,7 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IDisposable
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "[{MeshId}] Failed to reconnect MQTT handshaker natively mapped actively effectively safely optimally.", meshId);
+            logger.LogError(ex, "[{MeshId}] Failed to reconnect MQTT handshaker natively mapped actively effectively.", meshId);
         }
     }
 
