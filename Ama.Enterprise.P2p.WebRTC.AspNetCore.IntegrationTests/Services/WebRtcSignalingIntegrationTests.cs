@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Extensions;
 using Ama.Enterprise.Licensing.Services;
+using Ama.Enterprise.P2p.AspNetCore.Extensions;
 using Ama.Enterprise.P2p.AspNetCore.Models;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.Models.Core;
@@ -49,7 +50,13 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
 
         // Act
         testOutputHelper.WriteLine("Node A requesting SDP negotiation natively from Node B over WebSockets...");
-        var connectionId = await nodeA.Client.NegotiateOfferAsync(uriB, meshId, null, async (remoteOffer, ct) =>
+        var localPayload = new PeerHandshakePayload
+        {
+            Node = new PeerNode(nodeA.Id, new WebRtcPeerEndpoint(Guid.NewGuid())),
+            HandshakeData = Array.Empty<byte>()
+        };
+
+        var result = await nodeA.Client.NegotiateOfferAsync(uriB, meshId, null, localPayload, async (remoteOffer, ct) =>
         {
             testOutputHelper.WriteLine("Node A dynamically answering remote SDP offer...");
             var localAnswer = await nodeA.InvitationService.AcceptInvitationAsync(remoteOffer.SdpOffer, ct).ConfigureAwait(false);
@@ -57,7 +64,7 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
         }, CancellationToken.None);
         
         // Assert
-        connectionId.ShouldNotBeNullOrWhiteSpace();
+        result.ConnectionId.ShouldNotBeNullOrWhiteSpace();
         testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange negotiated explicitly over WebSockets.");
     }
 
@@ -79,7 +86,13 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
 
             // Act
             testOutputHelper.WriteLine("Node A requesting SDP negotiation over HTTPS (WSS) natively from Standalone Node B...");
-            var connectionId = await nodeA.Client.NegotiateOfferAsync(uriB, meshId, null, async (remoteOffer, ct) =>
+            var localPayload = new PeerHandshakePayload
+            {
+                Node = new PeerNode(nodeA.Id, new WebRtcPeerEndpoint(Guid.NewGuid())),
+                HandshakeData = Array.Empty<byte>()
+            };
+
+            var result = await nodeA.Client.NegotiateOfferAsync(uriB, meshId, null, localPayload, async (remoteOffer, ct) =>
             {
                 testOutputHelper.WriteLine("Node A dynamically answering remote SDP offer over WSS...");
                 var localAnswer = await nodeA.InvitationService.AcceptInvitationAsync(remoteOffer.SdpOffer, ct).ConfigureAwait(false);
@@ -87,7 +100,7 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
             }, CancellationToken.None);
             
             // Assert
-            connectionId.ShouldNotBeNullOrWhiteSpace();
+            result.ConnectionId.ShouldNotBeNullOrWhiteSpace();
             testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange securely negotiated explicitly over Secure WebSockets (WSS).");
         }
         finally
@@ -111,7 +124,13 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
 
         // Act
         testOutputHelper.WriteLine("Node A requesting SDP negotiation explicitly from Integrated Node B over WebSockets...");
-        var connectionId = await nodeA.Client.NegotiateOfferAsync(uriB, meshId, null, async (remoteOffer, ct) =>
+        var localPayload = new PeerHandshakePayload
+        {
+            Node = new PeerNode(nodeA.Id, new WebRtcPeerEndpoint(Guid.NewGuid())),
+            HandshakeData = Array.Empty<byte>()
+        };
+
+        var result = await nodeA.Client.NegotiateOfferAsync(uriB, meshId, null, localPayload, async (remoteOffer, ct) =>
         {
             testOutputHelper.WriteLine("Node A answering remote Integrated SDP offer natively...");
             var localAnswer = await nodeA.InvitationService.AcceptInvitationAsync(remoteOffer.SdpOffer, ct).ConfigureAwait(false);
@@ -119,7 +138,7 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
         }, CancellationToken.None);
         
         // Assert
-        connectionId.ShouldNotBeNullOrWhiteSpace();
+        result.ConnectionId.ShouldNotBeNullOrWhiteSpace();
         testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange finalized across integrated WS endpoints.");
     }
 
@@ -141,7 +160,13 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
 
             // Act
             testOutputHelper.WriteLine("Node A requesting SDP negotiation over HTTPS (WSS) natively from Integrated Node B...");
-            var connectionId = await nodeA.Client.NegotiateOfferAsync(uriB, meshId, null, async (remoteOffer, ct) =>
+            var localPayload = new PeerHandshakePayload
+            {
+                Node = new PeerNode(nodeA.Id, new WebRtcPeerEndpoint(Guid.NewGuid())),
+                HandshakeData = Array.Empty<byte>()
+            };
+
+            var result = await nodeA.Client.NegotiateOfferAsync(uriB, meshId, null, localPayload, async (remoteOffer, ct) =>
             {
                 testOutputHelper.WriteLine("Node A dynamically answering remote SDP offer over WSS...");
                 var localAnswer = await nodeA.InvitationService.AcceptInvitationAsync(remoteOffer.SdpOffer, ct).ConfigureAwait(false);
@@ -149,7 +174,7 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
             }, CancellationToken.None);
             
             // Assert
-            connectionId.ShouldNotBeNullOrWhiteSpace();
+            result.ConnectionId.ShouldNotBeNullOrWhiteSpace();
             testOutputHelper.WriteLine("WebRTC out-of-band signaling exchange securely finalized across integrated WSS endpoints.");
         }
         finally
@@ -172,13 +197,19 @@ public sealed class WebRtcSignalingIntegrationTests(ITestOutputHelper testOutput
 
         // Act
         testOutputHelper.WriteLine($"Node A requesting explicit WebSocket negotiation from offline endpoint {offlineUri}...");
-        var connectionId = await nodeA.Client.NegotiateOfferAsync(offlineUri, meshId, null, (offer, ct) => 
+        var localPayload = new PeerHandshakePayload
+        {
+            Node = new PeerNode(nodeA.Id, new WebRtcPeerEndpoint(Guid.NewGuid())),
+            HandshakeData = Array.Empty<byte>()
+        };
+
+        var result = await nodeA.Client.NegotiateOfferAsync(offlineUri, meshId, null, localPayload, (offer, ct) => 
         {
             return Task.FromResult(new WebRtcInvitationAnswer(offer.ConnectionId, "dummy"));
         }, CancellationToken.None);
         
         // Assert
-        connectionId.ShouldBeNull();
+        result.ConnectionId.ShouldBeNull();
         testOutputHelper.WriteLine("Client suppressed the WS connection failure structurally.");
     }
 
