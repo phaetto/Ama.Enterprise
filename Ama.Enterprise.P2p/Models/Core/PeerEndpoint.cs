@@ -12,6 +12,7 @@ using Ama.Enterprise.P2p.Models.Transports;
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type", IgnoreUnrecognizedTypeDiscriminators = true, UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
 [JsonDerivedType(typeof(TcpPeerEndpoint), "tcp-peer-endpoint")]
 [JsonDerivedType(typeof(UdpPeerEndpoint), "udp-peer-endpoint")]
+[JsonDerivedType(typeof(QuicPeerEndpoint), "quic-peer-endpoint")]
 public abstract record PeerEndpoint : IEquatable<PeerEndpoint>, IExtensibleDistributedPayload
 {
     /// <inheritdoc />

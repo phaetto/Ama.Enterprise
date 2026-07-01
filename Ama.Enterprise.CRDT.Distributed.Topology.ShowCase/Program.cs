@@ -18,12 +18,10 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Ama.Enterprise.Licensing.Extensions;
-using Ama.Enterprise.P2p.Telemetry.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Topology.ShowCase.Services;
 using Ama.Enterprise.CRDT.Distributed.Topology.ShowCase.Models;
 using Ama.Enterprise.P2p.WebRTC.Extensions;
 using Ama.Enterprise.P2p.WebRTC.AspNetCore.Extensions;
-using Ama.Enterprise.P2p.WebRTC.AspNetCore.Models;
 using Ama.Enterprise.P2p.WebRTC.AspNetCore.Services;
 using Ama.Enterprise.P2p.AspNetCore.Models;
 
