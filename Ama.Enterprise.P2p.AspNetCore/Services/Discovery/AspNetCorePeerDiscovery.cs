@@ -204,7 +204,14 @@ public sealed class AspNetCorePeerDiscovery : IPeerDiscovery, IDisposable
 
         try
         {
-            var requestBytes = serializer.SerializeToBytes(localNode);
+            var localHandshakeData = await authenticator.GetLocalHandshakeDataAsync(timeoutCts.Token).ConfigureAwait(false);
+            var localPayload = new PeerHandshakePayload
+            {
+                Node = localNode,
+                HandshakeData = localHandshakeData.ToArray()
+            };
+
+            var requestBytes = serializer.SerializeToBytes(localPayload);
             using var content = new ByteArrayContent(requestBytes);
             content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
 
@@ -214,16 +221,16 @@ public sealed class AspNetCorePeerDiscovery : IPeerDiscovery, IDisposable
             if (response.IsSuccessStatusCode)
             {
                 var responseBytes = await response.Content.ReadAsByteArrayAsync(timeoutCts.Token).ConfigureAwait(false);
-                var remoteNode = serializer.DeserializeFromBytes<PeerNode>(responseBytes);
+                var remotePayload = serializer.DeserializeFromBytes<PeerHandshakePayload>(responseBytes);
 
-                if (remoteNode.Id.Value != nodeOptions.LocalPeerId && remoteNode.Id.Value != Guid.Empty)
+                if (remotePayload.Node.Id.Value != nodeOptions.LocalPeerId && remotePayload.Node.Id.Value != Guid.Empty)
                 {
-                    var isAuthenticated = await authenticator.AuthenticateAsync(remoteNode, ReadOnlyMemory<byte>.Empty, timeoutCts.Token).ConfigureAwait(false);
+                    var isAuthenticated = await authenticator.AuthenticateAsync(remotePayload.Node, remotePayload.HandshakeData, timeoutCts.Token).ConfigureAwait(false);
                     if (isAuthenticated)
                     {
-                        await failureDetector.RecordHeartbeatAsync(remoteNode.Id, timeoutCts.Token).ConfigureAwait(false);
+                        await failureDetector.RecordHeartbeatAsync(remotePayload.Node.Id, timeoutCts.Token).ConfigureAwait(false);
                         peersFoundCounter.Add(1, tags);
-                        return new[] { remoteNode };
+                        return new[] { remotePayload.Node };
                     }
                 }
             }
@@ -258,18 +265,25 @@ public sealed class AspNetCorePeerDiscovery : IPeerDiscovery, IDisposable
 
             using var ms = new MemoryStream();
             await context.Request.Body.CopyToAsync(ms).ConfigureAwait(false);
-            var remoteNode = serializer.DeserializeFromBytes<PeerNode>(ms.ToArray());
+            var remotePayload = serializer.DeserializeFromBytes<PeerHandshakePayload>(ms.ToArray());
 
-            if (remoteNode.Id.Value != nodeOptions.LocalPeerId && remoteNode.Id.Value != Guid.Empty)
+            if (remotePayload.Node.Id.Value != nodeOptions.LocalPeerId && remotePayload.Node.Id.Value != Guid.Empty)
             {
-                var isAuthenticated = await authenticator.AuthenticateAsync(remoteNode, ReadOnlyMemory<byte>.Empty, context.RequestAborted).ConfigureAwait(false);
+                var isAuthenticated = await authenticator.AuthenticateAsync(remotePayload.Node, remotePayload.HandshakeData, context.RequestAborted).ConfigureAwait(false);
                 if (isAuthenticated)
                 {
-                    await failureDetector.RecordHeartbeatAsync(remoteNode.Id, context.RequestAborted).ConfigureAwait(false);
+                    await failureDetector.RecordHeartbeatAsync(remotePayload.Node.Id, context.RequestAborted).ConfigureAwait(false);
                 }
 
                 var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), localEndpoint);
-                var responseBytes = serializer.SerializeToBytes(localNode);
+                var localHandshakeData = await authenticator.GetLocalHandshakeDataAsync(context.RequestAborted).ConfigureAwait(false);
+                var responsePayload = new PeerHandshakePayload
+                {
+                    Node = localNode,
+                    HandshakeData = localHandshakeData.ToArray()
+                };
+
+                var responseBytes = serializer.SerializeToBytes(responsePayload);
                 
                 context.Response.StatusCode = StatusCodes.Status200OK;
                 context.Response.ContentType = "application/octet-stream";
