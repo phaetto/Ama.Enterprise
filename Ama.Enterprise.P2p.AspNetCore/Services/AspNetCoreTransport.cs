@@ -108,7 +108,14 @@ public sealed class AspNetCoreTransport : ITransport, IDisposable
         if (!basePath.StartsWith("/", StringComparison.Ordinal)) basePath = "/" + basePath;
         
         var scheme = options.UseHttps ? "https" : "http";
-        var url = $"{scheme}://{targetEndpoint.Host}:{targetEndpoint.Port}{basePath}/{meshId}";
+        
+        var uriBuilder = new UriBuilder
+        {
+            Scheme = scheme,
+            Host = targetEndpoint.Host,
+            Port = targetEndpoint.Port,
+            Path = $"{basePath}/{meshId}"
+        };
 
         using var client = httpClientFactory.CreateClient($"{meshId}_P2pAspNetCoreTransport");
         client.Timeout = TimeSpan.FromSeconds(5); // TODO: Add/Use to options
@@ -122,13 +129,13 @@ public sealed class AspNetCoreTransport : ITransport, IDisposable
         using var content = new ByteArrayContent(payload);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, url)
+        using var request = new HttpRequestMessage(HttpMethod.Post, uriBuilder.Uri)
         {
             Content = content
         };
         request.Headers.TryAddWithoutValidation("X-P2P-Protocol-Version", Constants.ProtocolVersion);
 
-        logger.LogTrace("[{MeshId}] Sending message via ASP.NET Core transport to explicitly isolated path {Url}", meshId, url);
+        logger.LogTrace("[{MeshId}] Sending message via ASP.NET Core transport to explicitly isolated path {Url}", meshId, uriBuilder.Uri);
 
         try
         {
@@ -137,7 +144,7 @@ public sealed class AspNetCoreTransport : ITransport, IDisposable
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TimeoutException)
         {
-            logger.LogWarning(ex, "[{MeshId}] ASP.NET Core Transport failure when communicating with {Url}. Removing peer from registry.", meshId, url);
+            logger.LogWarning(ex, "[{MeshId}] ASP.NET Core Transport failure when communicating with {Url}. Removing peer from registry.", meshId, uriBuilder.Uri);
             
             var allPeers = await peerRegistry.GetAllPeersAsync(meshId, cancellationToken).ConfigureAwait(false);
             var deadPeer = allPeers.FirstOrDefault(p => p.Endpoint.Equals(endpoint));
