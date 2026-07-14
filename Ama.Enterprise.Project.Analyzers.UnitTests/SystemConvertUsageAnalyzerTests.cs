@@ -113,7 +113,7 @@ public class TestClass
     {
         var test = new CSharpAnalyzerTest<SystemConvertUsageAnalyzer, DefaultVerifier>
         {
-            ReferenceAssemblies = ReferenceAssemblies.Net.Net80
+            ReferenceAssemblies = ReferenceAssemblies.Net.Net100
         };
 
         return test;
