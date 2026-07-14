@@ -2,6 +2,7 @@ namespace Ama.Enterprise.FeatureFlags.ShowCase;
 
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Services;
+using Ama.Enterprise.CRDT.Distributed.TableStorage.Extensions;
 using Ama.Enterprise.FeatureFlags.Extensions;
 using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Services;
@@ -64,6 +65,11 @@ public static class Program
 
         // Register licensing explicitly specifying Community mode natively matching explicit structural generic mappings
         services.ConfigureAmaCommunityLicense();
+
+        // Register Showcase tablestorage persistence provider
+        services.AddDistributedCrdtTableStorage(options => {
+            options.ConnectionString = "UseDevelopmentStorage=true";
+        });
 
         // 1. Explicitly register the distributed CRDT topological core bounds
         services.AddDistributedCrdtReplica(replicaId);

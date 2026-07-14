@@ -7,10 +7,18 @@
 		<Nullable>enable</Nullable>
 		<PublishAot>true</PublishAot>
 		<InvariantGlobalization>true</InvariantGlobalization>
+		<!-- Disables Visual Studio's fast up-to-date check so the MSBuild StartAzurite target runs every time you press F5, even if no C# files changed -->
+		<DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
 	</PropertyGroup>
 
 	<ItemGroup>
+		<ProjectReference Include="..\Ama.Enterprise.CRDT.Distributed.TableStorage\Ama.Enterprise.CRDT.Distributed.TableStorage.csproj" />
 		<ProjectReference Include="..\Ama.Enterprise.FeatureFlags\Ama.Enterprise.FeatureFlags.csproj" />
 	</ItemGroup>
+
+	<!-- Automatically execute the background script to start Azurite natively before building -->
+	<Target Name="StartAzurite" BeforeTargets="BeforeBuild" Condition="'$(OS)' == 'Windows_NT'">
+		<Exec Command="cmd.exe /c start-azurite.bat" WorkingDirectory="$(ProjectDir)" IgnoreExitCode="true" />
+	</Target>
 
 </Project>
