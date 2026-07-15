@@ -384,7 +384,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         var minRowKey = GetJournalRowKey(minGlobalClock);
         var maxRowKey = GetJournalRowKey(maxGlobalClock);
 
-        var filter = $"PartitionKey eq '{partitionKey}' and RowKey gt '{minRowKey}' and RowKey le '{maxRowKey}'";
+        var filter = TableClient.CreateQueryFilter($"PartitionKey eq {partitionKey} and RowKey gt {minRowKey} and RowKey le {maxRowKey}");
 
         var query = this.tableClient.QueryAsync<TableEntity>(filter, cancellationToken: cancellationToken);
         var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
@@ -455,7 +455,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         var startPartition = JournalPartitionPrefix;
         var endPartition = JournalPartitionPrefix + "~";
 
-        var filter = $"PartitionKey ge '{startPartition}' and PartitionKey le '{endPartition}'";
+        var filter = TableClient.CreateQueryFilter($"PartitionKey ge {startPartition} and PartitionKey le {endPartition}");
 
         var query = this.tableClient.QueryAsync<TableEntity>(filter, select: new[] { "PartitionKey", "RowKey" }, cancellationToken: cancellationToken);
         
@@ -476,7 +476,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         var startPartition = JournalPartitionPrefix;
         var endPartition = JournalPartitionPrefix + "~";
 
-        var filter = $"PartitionKey ge '{startPartition}' and PartitionKey le '{endPartition}'";
+        var filter = TableClient.CreateQueryFilter($"PartitionKey ge {startPartition} and PartitionKey le {endPartition}");
 
         var query = this.tableClient.QueryAsync<TableEntity>(filter, cancellationToken: cancellationToken);
         var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
@@ -513,7 +513,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
             var partitionKey = GetJournalPartitionKey(replicaId);
             var maxRowKey = GetJournalRowKey(maxClock);
 
-            var filter = $"PartitionKey eq '{partitionKey}' and RowKey le '{maxRowKey}'";
+            var filter = TableClient.CreateQueryFilter($"PartitionKey eq {partitionKey} and RowKey le {maxRowKey}");
 
             var query = this.tableClient.QueryAsync<TableEntity>(filter, select: new[] { "PartitionKey", "RowKey" }, cancellationToken: cancellationToken);
 
@@ -522,7 +522,11 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
             await foreach (var entity in query.WithCancellation(cancellationToken))
             {
                 this.operationsDeleteCounter.Add(1, tags);
-                batch.Add(new TableTransactionAction(TableTransactionActionType.Delete, entity));
+                
+                // Azure Table Storage requires an ETag for Delete operations. 
+                // Since we restrict the query with 'select', the entity's ETag is not populated. 
+                // We use ETag.All to bypass the check and force delete the entry safely.
+                batch.Add(new TableTransactionAction(TableTransactionActionType.Delete, entity, ETag.All));
 
                 if (batch.Count == 100)
                 {

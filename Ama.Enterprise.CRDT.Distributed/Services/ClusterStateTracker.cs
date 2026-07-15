@@ -160,6 +160,11 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
     /// <inheritdoc />
     public void CleanupExpiredTombstones(TimeSpan cooldown)
     {
+        if (cooldown <= TimeSpan.Zero)
+        {
+            return;
+        }
+
         var now = DateTime.UtcNow;
 
         lock (syncRoot)
@@ -247,7 +252,10 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
         }
         
         // Immediately purge tombstones that expired while offline evaluating limits.
-        CleanupExpiredTombstones(cooldown);
+        if (cooldown > TimeSpan.Zero)
+        {
+            CleanupExpiredTombstones(cooldown);
+        }
     }
 
     public void Dispose()

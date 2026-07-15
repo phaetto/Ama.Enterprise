@@ -17,6 +17,9 @@ using Ama.Enterprise.CRDT.Distributed.Models;
 public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
 {
     private readonly List<JournaledOperation> operations = new();
+    private readonly Dictionary<string, ClusterStateSnapshotDto> clusterStates = new();
+    private readonly Dictionary<string, DottedVersionVector> globalVersionVectors = new();
+    private readonly Dictionary<string, object> documents = new();
     private readonly object syncRoot = new();
 
     private readonly Meter meter;
@@ -149,22 +152,65 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     }
 
     /// <inheritdoc />
-    public Task<DottedVersionVector?> LoadGlobalVersionVectorAsync(string replicaId, CancellationToken cancellationToken = default) => Task.FromResult<DottedVersionVector?>(null);
+    public Task<DottedVersionVector?> LoadGlobalVersionVectorAsync(string replicaId, CancellationToken cancellationToken = default)
+    {
+        lock (syncRoot)
+        {
+            return Task.FromResult(globalVersionVectors.TryGetValue(replicaId, out var dvv) ? dvv : null);
+        }
+    }
 
     /// <inheritdoc />
-    public Task SaveGlobalVersionVectorAsync(string replicaId, DottedVersionVector globalVersionVector, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task SaveGlobalVersionVectorAsync(string replicaId, DottedVersionVector globalVersionVector, CancellationToken cancellationToken = default)
+    {
+        lock (syncRoot)
+        {
+            globalVersionVectors[replicaId] = globalVersionVector;
+        }
+        return Task.CompletedTask;
+    }
 
     /// <inheritdoc />
-    public Task<ClusterStateSnapshotDto?> LoadClusterStateAsync(string replicaId, CancellationToken cancellationToken = default) => Task.FromResult<ClusterStateSnapshotDto?>(null);
+    public Task<ClusterStateSnapshotDto?> LoadClusterStateAsync(string replicaId, CancellationToken cancellationToken = default)
+    {
+        lock (syncRoot)
+        {
+            return Task.FromResult(clusterStates.TryGetValue(replicaId, out var state) ? state : null);
+        }
+    }
 
     /// <inheritdoc />
-    public Task SaveClusterStateAsync(string replicaId, ClusterStateSnapshotDto state, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task SaveClusterStateAsync(string replicaId, ClusterStateSnapshotDto state, CancellationToken cancellationToken = default)
+    {
+        lock (syncRoot)
+        {
+            clusterStates[replicaId] = state;
+        }
+        return Task.CompletedTask;
+    }
 
     /// <inheritdoc />
-    public Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new() => Task.FromResult<CrdtDocument<TState>?>(null);
+    public Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        lock (syncRoot)
+        {
+            if (documents.TryGetValue(documentId, out var doc) && doc is CrdtDocument<TState> typedDoc)
+            {
+                return Task.FromResult<CrdtDocument<TState>?>(typedDoc);
+            }
+            return Task.FromResult<CrdtDocument<TState>?>(null);
+        }
+    }
 
     /// <inheritdoc />
-    public Task SaveDocumentAsync<TState>(string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new() => Task.CompletedTask;
+    public Task SaveDocumentAsync<TState>(string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        lock (syncRoot)
+        {
+            documents[documentId] = document;
+        }
+        return Task.CompletedTask;
+    }
 
     /// <inheritdoc />
     public Task DeleteDocumentAsync(string documentId, CancellationToken cancellationToken = default)
@@ -174,6 +220,7 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
         lock (syncRoot)
         {
             operations.RemoveAll(op => op.DocumentId == documentId);
+            documents.Remove(documentId);
         }
 
         return Task.CompletedTask;

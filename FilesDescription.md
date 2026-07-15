@@ -72,7 +72,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtSystemJsonContext.cs` | Updated AOT JSON serialization context ensuring compatibility for explicitly tracked overarching cluster states. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/PooledDocumentCommand.cs` | Custom awaitable envelope implementing an IValueTaskSource object pool for the Single-Reader lock-free document channels, avoiding garbage blockages. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/PooledOrchestratorCommand.cs` | Custom awaitable envelope implementing an IValueTaskSource object pool for the lock-free Single-Reader orchestrator channel, executing commands sequentially and mapping constraints. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/ClusterStateTracker.cs` | Modified `ImportState` evaluating expired tombstones executing immediate tracking cleanup upon offline state recovery avoiding dead locks. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/ClusterStateTracker.cs` | Updated `ImportState` and `CleanupExpiredTombstones` to bypass tombstone cleanup completely if `cooldown` is less than or equal to `TimeSpan.Zero`, treating the feature as explicitly disabled. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtCheckpointService.cs` | Extracted trimming and eviction logic to enforce SRP, allowing strict persistence cycles avoiding stalling delays. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Updated anti-entropy limits and fallback sync boundaries to `await IsPeerExpectedAsync` extracting bounds against decoupled active network states. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtEvictionService.cs` | Implementation of `ICrdtEvictionService` extracting the eviction logic, avoiding duplication. |
@@ -91,7 +91,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtStorage.cs` | Expanded unified bounds tracking defining dynamic state extraction and preservation for memory topologies. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDocumentFactory.cs` | AOT-friendly generic factory interface for resolving mapped distributed CRDT instances. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IScopeTopologyProvider.cs` | Converted `IsPeerExpected` to `IsPeerExpectedAsync` returning a `ValueTask<bool>` to allow asynchronous network and session lookups. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/MemoryCrdtStorage.cs` | Extended ephemeral storage mapping adhering to updated cluster tracker extraction mappings returning blank instances. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/MemoryCrdtStorage.cs` | Extended ephemeral storage mapping adhering to updated cluster tracker extraction mappings by storing cluster states, documents, and global version vectors. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtAntiEntropyService.cs` | Implemented network traffic smoothing jitter algorithms, preventing UDP/HTTP overflow "Thundering Herd" payload storms. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtP2pPayloadHandler.cs` | Extracted `IDirectMessageSender` to bound Anti-Entropy replies via targeted pushes preventing "Thundering Herd" broadcast storms. Evaluates targeted CRDT snapshots and drops concurrent DVV matrices preventing offline amnesia overwrites. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtTopologyObserver.cs` | Observes network connections and hooks into the core P2P protocols. Refactored new peer join events to trigger targeted state syncs directly to the new peer. |
