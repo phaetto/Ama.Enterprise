@@ -21,18 +21,20 @@ using Shouldly;
 
 public sealed class ClusterStatePersistenceIntegrationTests
 {
-    private IServiceProvider BuildNode(string replicaId, IDistributedCrdtStorage customStorage, Action<DistributedCrdtOptions>? configureOptions = null)
+    private IServiceProvider BuildNode(string replicaId, Action<IServiceCollection>? configureExtra = null)
+    {
+        return BuildNodeWithStorage(replicaId, null, configureExtra);
+    }
+
+    private IServiceProvider BuildNodeWithStorage(string replicaId, IDistributedCrdtStorage? customStorage, Action<IServiceCollection>? configureExtra = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
 
         services.AddDistributedCrdtCore(opt =>
         {
-            // Accelerated for testing boundaries
             opt.CheckpointIntervalSeconds = 1;
             opt.ActiveSyncEnabled = true;
-            
-            configureOptions?.Invoke(opt);
         });
 
         services.AddDistributedCrdtReplica(replicaId);
@@ -41,9 +43,14 @@ public sealed class ClusterStatePersistenceIntegrationTests
                 .AddCrdtAotContext(new DistributedCrdtSystemAotContext())
                 .AddCrdtJsonTypeInfoResolver(DistributedCrdtSystemJsonContext.Default);
 
-        // Map the mocked tracking storage explicitly intercepting bounds
-        services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(customStorage));
+        if (customStorage != null)
+        {
+            services.Replace(ServiceDescriptor.Singleton(customStorage));
+        }
+
         services.AddSingleton(Mock.Of<IP2pAlgorithm>());
+
+        configureExtra?.Invoke(services);
 
         return services.BuildServiceProvider();
     }
@@ -54,6 +61,129 @@ public sealed class ClusterStatePersistenceIntegrationTests
         yield break;
     }
 #pragma warning restore CS1998 // Async method lacks 'await' operators and will run synchronously
+
+    [IntegrationFact]
+    public void ClusterStateTracker_UpdateAndTombstone_StateTransitions()
+    {
+        // Arrange
+        var sp = BuildNode("Replica1");
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var tracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
+        var remoteDvv = new DottedVersionVector();
+        remoteDvv.Versions["RemoteReplica1"] = 10;
+
+        // Act - Track a new peer
+        tracker.UpdatePeerState("RemoteReplica1", "NetworkId1", remoteDvv);
+
+        // Assert
+        var states = tracker.GetClusterStates();
+        states.Count.ShouldBe(1);
+        states[0].Versions["RemoteReplica1"].ShouldBe(10);
+        tracker.IsReplicaTombstoned("RemoteReplica1").ShouldBeFalse();
+
+        // Act - Unmap network
+        tracker.RemovePeerByNetworkId("NetworkId1");
+
+        // Assert - State preserved offline
+        tracker.GetClusterStates().Count.ShouldBe(1);
+
+        // Act - Force tombstone
+        tracker.TombstoneReplica("RemoteReplica1");
+
+        // Assert
+        tracker.GetClusterStates().Count.ShouldBe(0);
+        tracker.IsReplicaTombstoned("RemoteReplica1").ShouldBeTrue();
+    }
+
+    [IntegrationFact]
+    public async Task ClusterStateTracker_TombstoneCooldown_PurgesExpiredReplicas()
+    {
+        // Arrange
+        var sp = BuildNode("Replica1");
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var tracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
+
+        // Act
+        tracker.TombstoneReplica("RemoteReplica1");
+
+        // Assert
+        tracker.IsReplicaTombstoned("RemoteReplica1").ShouldBeTrue();
+
+        // Act - Attempt clean up with large cooldown
+        tracker.CleanupExpiredTombstones(TimeSpan.FromMinutes(5));
+
+        // Assert
+        tracker.IsReplicaTombstoned("RemoteReplica1").ShouldBeTrue();
+
+        // Act - Trigger short cooldown
+        await Task.Delay(50);
+        tracker.CleanupExpiredTombstones(TimeSpan.FromMilliseconds(10));
+
+        // Assert
+        tracker.IsReplicaTombstoned("RemoteReplica1").ShouldBeFalse();
+    }
+
+    [IntegrationFact]
+    public async Task CrdtMaintenanceService_TombstoneCooldown_PurgesTombstones()
+    {
+        // Arrange
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.Configure<DistributedCrdtOptions>(opt =>
+            {
+                opt.MaintenanceIntervalSeconds = 1;
+                opt.PeerTombstoneCooldownSeconds = 1;
+            });
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var tracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
+
+        tracker.TombstoneReplica("RemoteReplica1");
+        tracker.IsReplicaTombstoned("RemoteReplica1").ShouldBeTrue();
+
+        var maintenanceService = sp.GetServices<IHostedService>().OfType<CrdtMaintenanceService>().First();
+
+        // Act
+        await maintenanceService.StartAsync(CancellationToken.None);
+        await Task.Delay(2500);
+        await maintenanceService.StopAsync(CancellationToken.None);
+
+        // Assert
+        tracker.IsReplicaTombstoned("RemoteReplica1").ShouldBeFalse();
+    }
+
+    [IntegrationFact]
+    public async Task CrdtInitializationService_Startup_RestoresPersistedState()
+    {
+        // Arrange
+        var mockStorage = new Mock<IDistributedCrdtStorage>();
+        var sp = BuildNodeWithStorage("Replica1", mockStorage.Object);
+
+        var savedDvv = new DottedVersionVector();
+        savedDvv.Versions["Replica1"] = 100;
+        
+        mockStorage.Setup(s => s.LoadGlobalVersionVectorAsync("Replica1", It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(savedDvv);
+        
+        mockStorage.Setup(s => s.GetAllJournaledOperationsAsync(It.IsAny<CancellationToken>()))
+                   .Returns(EmptyJournalStream());
+
+        var initService = sp.GetServices<IHostedService>().OfType<CrdtInitializationService>().First();
+
+        // Act
+        await initService.StartAsync(CancellationToken.None);
+
+        // Assert
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var context = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+
+        context.GlobalVersionVector.Versions["Replica1"].ShouldBe(100);
+    }
 
     [IntegrationFact]
     public async Task CrdtCheckpointService_ShouldExportAndPersistClusterState_OnInterval()
@@ -72,7 +202,6 @@ public sealed class ClusterStatePersistenceIntegrationTests
         storageMock.Setup(s => s.GetJournalCountAsync(It.IsAny<CancellationToken>()))
                    .ReturnsAsync(0);
 
-        // Mocks required by CrdtInitializationService
         storageMock.Setup(s => s.LoadClusterStateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                    .ReturnsAsync((ClusterStateSnapshotDto?)null);
 
@@ -82,9 +211,8 @@ public sealed class ClusterStatePersistenceIntegrationTests
         storageMock.Setup(s => s.LoadGlobalVersionVectorAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                    .ReturnsAsync(new DottedVersionVector());
 
-        var sp = BuildNode("Replica1", storageMock.Object);
+        var sp = BuildNodeWithStorage("Replica1", storageMock.Object);
 
-        // Start initialization service to ensure ReplicaContext bounds are established preventing ArgumentNullExceptions natively
         var initService = sp.GetServices<IHostedService>().OfType<CrdtInitializationService>().First();
         await initService.StartAsync(CancellationToken.None);
 
@@ -92,10 +220,8 @@ public sealed class ClusterStatePersistenceIntegrationTests
         var scope = scopeManager.GetOrCreateScope("Replica1");
         var tracker = scope.ClusterTracker;
 
-        // Populate the in-memory tracker with mocked connected topologies simulating network activities natively
         var dvv = new DottedVersionVector();
         dvv.Versions["ReplicaB"] = 15;
-        
         tracker.UpdatePeerState("ReplicaB", "NetworkB", dvv);
         tracker.TombstoneReplica("ReplicaC");
 
@@ -103,11 +229,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
 
         // Act
         await checkpointService.StartAsync(CancellationToken.None);
-
-        // Wait for the periodic background loop to execute explicitly exporting tracking limits cleanly.
-        // TaskCompletionSource avoids flaky Thread.Sleep or Task.Delay constraints natively safely resolving when matched.
         var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(5000));
-
         await checkpointService.StopAsync(CancellationToken.None);
 
         // Assert
@@ -150,7 +272,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
         storageMock.Setup(s => s.LoadGlobalVersionVectorAsync("Replica1", It.IsAny<CancellationToken>()))
                    .ReturnsAsync((DottedVersionVector?)null);
 
-        var sp = BuildNode("Replica1", storageMock.Object);
+        var sp = BuildNodeWithStorage("Replica1", storageMock.Object);
         var initService = sp.GetServices<IHostedService>().OfType<CrdtInitializationService>().First();
 
         // Act
@@ -161,14 +283,12 @@ public sealed class ClusterStatePersistenceIntegrationTests
         var scope = scopeManager.GetOrCreateScope("Replica1");
         var tracker = scope.ClusterTracker;
 
-        // The tracker must now securely recognize the resurrected state preventing split-brain topologies inherently
         tracker.IsReplicaTombstoned("ReplicaZOMBIE").ShouldBeTrue();
         
         var states = tracker.GetClusterStates();
         states.Count.ShouldBe(1);
         states[0].Versions.ShouldContainKeyAndValue("ReplicaD", 42);
         
-        // Ensure that querying the tracker natively reflects the loaded bounds mapped across
         var tombstonedPeer = tracker.TombstonePeerByNetworkId("NetworkD");
         tombstonedPeer.ShouldBe("ReplicaD");
         tracker.IsReplicaTombstoned("ReplicaD").ShouldBeTrue();
@@ -185,17 +305,14 @@ public sealed class ClusterStatePersistenceIntegrationTests
         var storageMock = new Mock<IDistributedCrdtStorage>();
 
         storageMock.Setup(s => s.SaveClusterStateAsync(It.IsAny<string>(), It.IsAny<ClusterStateSnapshotDto>(), It.IsAny<CancellationToken>()))
-                   .Callback(() => 
-                   {
-                       Interlocked.Increment(ref saveClusterCount);
-                   })
+                   .Callback(() => Interlocked.Increment(ref saveClusterCount))
                    .Returns(Task.CompletedTask);
 
         storageMock.Setup(s => s.SaveGlobalVersionVectorAsync(It.IsAny<string>(), It.IsAny<DottedVersionVector>(), It.IsAny<CancellationToken>()))
                    .Callback(() => 
                    {
                        Interlocked.Increment(ref saveDvvCount);
-                       tcsFirstWrite.TrySetResult(); // Trigger signal explicitly on first cache execution natively
+                       tcsFirstWrite.TrySetResult();
                    })
                    .Returns(Task.CompletedTask);
                    
@@ -211,10 +328,13 @@ public sealed class ClusterStatePersistenceIntegrationTests
         storageMock.Setup(s => s.LoadGlobalVersionVectorAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                    .ReturnsAsync(new DottedVersionVector());
 
-        var sp = BuildNode("Replica1", storageMock.Object, opt => 
+        var sp = BuildNodeWithStorage("Replica1", storageMock.Object, services => 
         {
-            opt.CheckpointIntervalSeconds = 1;
-            opt.AvoidBlindCheckpointWrites = true; // Key configuration strictly tracked
+            services.Configure<DistributedCrdtOptions>(opt => 
+            {
+                opt.CheckpointIntervalSeconds = 1;
+                opt.AvoidBlindCheckpointWrites = true;
+            });
         });
 
         var initService = sp.GetServices<IHostedService>().OfType<CrdtInitializationService>().First();
@@ -224,13 +344,8 @@ public sealed class ClusterStatePersistenceIntegrationTests
 
         // Act
         await checkpointService.StartAsync(CancellationToken.None);
-
-        // Wait for the first cycle to definitely execute and populate the isolated cache natively
         await Task.WhenAny(tcsFirstWrite.Task, Task.Delay(5000));
-        
-        // Now delay enough for at least 2 more background cycles to trigger naturally ensuring bounds don't leak
-        await Task.Delay(2500);
-
+        await Task.Delay(2500); // 2 more cycles naturally
         await checkpointService.StopAsync(CancellationToken.None);
 
         // Assert
@@ -259,10 +374,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
                    .Returns(Task.CompletedTask);
 
         storageMock.Setup(s => s.SaveGlobalVersionVectorAsync(It.IsAny<string>(), It.IsAny<DottedVersionVector>(), It.IsAny<CancellationToken>()))
-                   .Callback(() => 
-                   {
-                       Interlocked.Increment(ref saveDvvCount);
-                   })
+                   .Callback(() => Interlocked.Increment(ref saveDvvCount))
                    .Returns(Task.CompletedTask);
                    
         storageMock.Setup(s => s.GetJournalCountAsync(It.IsAny<CancellationToken>()))
@@ -277,10 +389,13 @@ public sealed class ClusterStatePersistenceIntegrationTests
         storageMock.Setup(s => s.LoadGlobalVersionVectorAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                    .ReturnsAsync(new DottedVersionVector());
 
-        var sp = BuildNode("Replica1", storageMock.Object, opt => 
+        var sp = BuildNodeWithStorage("Replica1", storageMock.Object, services => 
         {
-            opt.CheckpointIntervalSeconds = 1;
-            opt.AvoidBlindCheckpointWrites = true;
+            services.Configure<DistributedCrdtOptions>(opt => 
+            {
+                opt.CheckpointIntervalSeconds = 1;
+                opt.AvoidBlindCheckpointWrites = true;
+            });
         });
 
         var initService = sp.GetServices<IHostedService>().OfType<CrdtInitializationService>().First();
@@ -288,16 +403,13 @@ public sealed class ClusterStatePersistenceIntegrationTests
 
         var checkpointService = sp.GetServices<IHostedService>().OfType<CrdtCheckpointService>().First();
 
-        // Act - Start background loops safely
+        // Act
         await checkpointService.StartAsync(CancellationToken.None);
-
-        // Wait for the first cycle explicit extraction
         await Task.WhenAny(tcsFirstWrite.Task, Task.Delay(5000));
 
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
         var scope = scopeManager.GetOrCreateScope("Replica1");
         
-        // Mutate the local explicit bound dynamically
         scope.ClusterTracker.TombstoneReplica("ReplicaMutated");
         
         var context = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
@@ -306,9 +418,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
             context.GlobalVersionVector.Versions["ReplicaMutated"] = 10;
         }
 
-        // Wait for the mutation to inherently trigger a subsequent bounded storage write explicitly overriding skip rules
         await Task.WhenAny(tcsSecondWrite.Task, Task.Delay(5000));
-
         await checkpointService.StopAsync(CancellationToken.None);
 
         // Assert

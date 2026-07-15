@@ -18,6 +18,8 @@ using Ama.CRDT.Services.Versioning;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
+using Ama.Enterprise.P2p.Models.Algorithms;
+using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.Project.Tests.Common.Attributes;
 using Microsoft.Extensions.DependencyInjection;
@@ -43,7 +45,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     public sealed class JournalTestState
     {
         public string Id { get; set; } = "journal-doc";
-        // Switched to Dictionary explicitly allowing MapSetIntent to correctly and safely map natively via the core Patcher
         public Dictionary<string, string> DataMap { get; set; } = new(StringComparer.Ordinal);
     }
 
@@ -67,11 +68,179 @@ public sealed class JournalingAndSnapshottingIntegrationTests
                 .AddCrdtJsonTypeInfoResolver(JournalTestJsonContext.Default);
 
         services.AddDistributedDocumentType<JournalTestState>("journal-doc");
+        services.AddDistributedCrdtP2p("TestMesh", replicaId);
         services.AddSingleton(Mock.Of<IP2pAlgorithm>());
 
         configureExtra?.Invoke(services);
 
         return services.BuildServiceProvider();
+    }
+
+    [IntegrationFact]
+    public async Task MemoryCrdtStorage_ShouldAppendRetrieveAndTrim()
+    {
+        // Arrange
+        var storage = new MemoryCrdtStorage();
+        var op1Id = Guid.NewGuid();
+        var op2Id = Guid.NewGuid();
+        var op3Id = Guid.NewGuid();
+
+        var ops = new List<CrdtOperation>
+        {
+            default(CrdtOperation) with { Id = op1Id, ReplicaId = "ReplicaA", GlobalClock = 1 },
+            default(CrdtOperation) with { Id = op2Id, ReplicaId = "ReplicaA", GlobalClock = 2 },
+            default(CrdtOperation) with { Id = op3Id, ReplicaId = "ReplicaB", GlobalClock = 1 }
+        };
+
+        // Act - Append
+        await storage.AppendAsync("journal-doc", ops, CancellationToken.None);
+
+        // Assert
+        var allOps = await storage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
+        allOps.Count.ShouldBe(3);
+
+        // Act - Trim based on Global Minimum Version Vector (GMVV) bounds
+        var gmvv = new Dictionary<string, long>
+        {
+            { "ReplicaA", 1 }, // ReplicaA up to 1 is known by all, so op1 can be trimmed
+            { "ReplicaB", 0 }  // ReplicaB 1 is not known by everyone, so op3 must be kept
+        };
+        await storage.TrimAsync(gmvv, CancellationToken.None);
+
+        // Assert
+        var postTrimOps = await storage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
+        postTrimOps.Count.ShouldBe(2);
+        postTrimOps.Any(o => o.Operation.Id == op1Id).ShouldBeFalse();
+        postTrimOps.Any(o => o.Operation.Id == op2Id).ShouldBeTrue();
+    }
+
+    [IntegrationFact]
+    public async Task CrdtCheckpointService_Executes_SavingBounds()
+    {
+        // Arrange
+        var mockStorage = new Mock<IDistributedCrdtStorage>();
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.Configure<DistributedCrdtOptions>(opt =>
+            {
+                opt.CheckpointIntervalSeconds = 1;
+            });
+            services.Replace(ServiceDescriptor.Singleton(mockStorage.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var patcher = scope.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
+        
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
+        var docManager = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
+        
+        var intent = new MapSetIntent("testKey", "DirtyData");
+        var op = await patcher.GenerateOperationAsync(docManager.Document, x => x.DataMap, intent, CancellationToken.None);
+        await docManager.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
+
+        var checkpointService = sp.GetServices<IHostedService>().OfType<CrdtCheckpointService>().First();
+
+        // Act
+        await checkpointService.StartAsync(CancellationToken.None);
+        await Task.Delay(1500);
+        await checkpointService.StopAsync(CancellationToken.None);
+
+        // Assert
+        mockStorage.Verify(s => s.SaveGlobalVersionVectorAsync(It.IsAny<string>(), It.IsAny<DottedVersionVector>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        mockStorage.Verify(s => s.SaveDocumentAsync(It.IsAny<string>(), It.IsAny<CrdtDocument<JournalTestState>>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+    }
+
+    [IntegrationFact]
+    public async Task DistributedCrdtDocument_InitializeAndSnapshot_SendsDirectMessage()
+    {
+        // Arrange
+        var mockSender = new Mock<IDirectMessageSender>();
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
+        var docManager = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
+
+        // Act
+        await docManager.InitializeAsync(CancellationToken.None);
+
+        // Assert
+        docManager.DocumentId.ShouldBe("journal-doc");
+
+        // Act
+        await scope.Orchestrator.ProvideSnapshotAsync(docManager.DocumentId, "RemoteReplica2", new PeerId(Guid.NewGuid()), CancellationToken.None);
+
+        // Assert
+        mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    [IntegrationFact]
+    public async Task CrdtGossipHandler_ProcessSnapshot_ShouldMerge_ResolvingGaps()
+    {
+        // Arrange
+        var mockP2p = new Mock<IP2pAlgorithm>();
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockP2p.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
+        var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>("TestMesh");
+        var serializer = sp.GetRequiredService<ICrdtSerializer>();
+        
+        var context = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+        var globalDvv = new DottedVersionVector();
+        globalDvv.Versions["RemoteA"] = 10;
+        
+        lock (context.GlobalVersionVector)
+        {
+            globalDvv.Merge(context.GlobalVersionVector);
+        }
+        
+        var docManager = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
+        var metadataManager = scope.ServiceProvider.GetRequiredService<ICrdtMetadataManager>();
+        
+        var snapshotState = new JournalTestState { Id = "journal-doc" };
+        snapshotState.DataMap["Field"] = "SnapshotData";
+
+        var metadata = metadataManager.Initialize(snapshotState);
+        var snapshotDoc = new CrdtDocument<JournalTestState>(snapshotState, metadata);
+        var snapshotBytes = serializer.SerializeToBytes(snapshotDoc);
+        
+        var snapshotMsg = new CrdtSnapshotMessage("RemoteA", snapshotBytes, globalDvv);
+        var payloadBytes = serializer.SerializeToBytes(snapshotMsg);
+        var wrapper = new CrdtMessageWrapper("journal-doc", "CrdtSnapshot", payloadBytes);
+        var wrapperBytes = serializer.SerializeToBytes(wrapper);
+        
+        var gossipMsg = new GossipMessage("TestMesh", Guid.NewGuid(), new PeerId(Guid.NewGuid()), 10, wrapperBytes);
+
+        // Act
+        await handler.HandlePayloadAsync(gossipMsg.MeshId, gossipMsg.SenderId, gossipMsg.Payload, CancellationToken.None);
+
+        // Assert
+        docManager.Document.Data.DataMap.ShouldContainKeyAndValue("Field", "SnapshotData");
+        context.GlobalVersionVector.Versions["RemoteA"].ShouldBe(10);
     }
 
     [IntegrationFact]
@@ -86,12 +255,11 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         await orchestrator.InitializeAsync(CancellationToken.None);
 
-        // Act - Create a brand new document across the active matrix dynamically
+        // Act
         await orchestrator.CreateDocumentAsync("brand-new-doc", "journal-doc", CancellationToken.None);
         
-        // Assert - The creation relies on the system-document-registry bounds natively
+        // Assert
         var allOps = await storage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
-        
         var registryOps = allOps.Where(o => o.DocumentId == orchestrator.Registry.DocumentId).ToList();
         
         registryOps.ShouldNotBeEmpty();
@@ -119,14 +287,10 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         var docA = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
 
-        // Apply a mapped patch using the Patcher saving to the active journal.
-        // This ensures the operation is structurally valid, preventing the applicator from rejecting it as "Unapplied"
         var intent = new MapSetIntent("testKey", "Updated");
         var op = await patcher.GenerateOperationAsync(docA.Document, x => x.DataMap, intent, CancellationToken.None);
-        
         await docA.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
 
-        // Remote node asks for missing operations indicating it has completely empty bounds mapping natively
         var remoteDvv = new DottedVersionVector();
 
         // Act
@@ -160,24 +324,21 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         var docA = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
 
-        // Apply a mapped patch using the Patcher explicitly
         var intent = new MapSetIntent("testKey", "Updated");
         var op = await patcher.GenerateOperationAsync(docA.Document, x => x.DataMap, intent, CancellationToken.None);
-        
         await docA.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
 
-        // Intentionally trim the journal aggressively beyond the operation clock simulating background garbage collection cleanly mathematically
         var gmvv = new Dictionary<string, long> { { "ReplicaA", 10 } }; 
         await storage.TrimAsync(gmvv, CancellationToken.None);
 
-        // Act - Remote node with empty bounds asks for missing operations triggering gap logic
         var remoteDvv = new DottedVersionVector();
         
+        // Act
         var requirement = syncService.CalculateRequirement("ReplicaB", remoteDvv, replicaContext.ReplicaId, replicaContext.GlobalVersionVector);
         var missingOpsStream = journalManager.GetMissingOperationsAsync(requirement, CancellationToken.None);
         var result = await syncService.EvaluateJournalCompletionAsync(missingOpsStream, requirement, CancellationToken.None);
 
-        // Assert - The mechanism detects causal truncation and requests a complete fallback snapshot.
+        // Assert
         result.SnapshotRequired.ShouldBeTrue();
         result.Operations.ShouldBeEmpty();
     }
@@ -200,12 +361,10 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         var docA = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
 
-        // Add some local state using native explicit pathing to ensure the patcher correctly diffs differences natively.
         var localIntent = new MapSetIntent("LocalKey", "LocalValue");
         var localOp = await patcher.GenerateOperationAsync(docA.Document, x => x.DataMap, localIntent, CancellationToken.None);
         await docA.ApplyPatchAsync(new CrdtPatch(new[] { localOp }), CancellationToken.None);
 
-        // Build simulated remote snapshot payload dropping the local key and adding a remote key cleanly
         var remoteState = new JournalTestState { Id = "journal-doc" };
         remoteState.DataMap["RemoteKey"] = "RemoteValue";
         
@@ -220,7 +379,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         CrdtPatch? broadcastedPatch = null;
         var tcs = new TaskCompletionSource<CrdtPatch>();
         
-        // Asynchronous multi-threaded lock-free orchestrator safely capturing distinct emitted diff intent natively.
         docA.PatchGenerated += (s, p) => 
         {
             broadcastedPatch = p;
@@ -229,23 +387,20 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         // Act
         await docA.MergeSnapshotAsync(snapshotBytes, globalDvv, CancellationToken.None);
-
-        // Wait for the asynchronous distinct queue mechanism to calculate and securely broadcast intents cleanly
         await Task.WhenAny(tcs.Task, Task.Delay(2000));
 
         // Assert
         broadcastedPatch.ShouldNotBeNull();
         broadcastedPatch.Value.Operations.ShouldNotBeEmpty();
 
-        // The diff generator should emit a Delete/Remove intent for "LocalKey" and an Upsert/Set intent for "RemoteKey" resolving missing operations efficiently.
         var ops = broadcastedPatch.Value.Operations;
 
-#pragma warning disable CS8602 // Dereference of a possibly null reference.
-#pragma warning disable CS8605 // Unboxing a possibly null value.
+#pragma warning disable CS8602
+#pragma warning disable CS8605
         ops.Any(o => ((KeyValuePair<object, object>)o.Value).Key.ToString().Contains("LocalKey") && o.Type == OperationType.Remove).ShouldBeTrue();
         ops.Any(o => ((KeyValuePair<object, object>)o.Value).Key.ToString().Contains("RemoteKey") && o.Type == OperationType.Upsert).ShouldBeTrue();
-#pragma warning restore CS8605 // Unboxing a possibly null value.
-#pragma warning restore CS8602 // Dereference of a possibly null reference.
+#pragma warning restore CS8605
+#pragma warning restore CS8602
 
         docA.Document.Data.DataMap.ShouldNotContainKey("LocalKey");
         docA.Document.Data.DataMap.ShouldContainKeyAndValue("RemoteKey", "RemoteValue");
@@ -257,7 +412,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     [IntegrationFact]
     public async Task CrdtInitializationService_ShouldReplayJournaledOperations_OnStartup()
     {
-        // Arrange - Node 1 (Simulates initial application run writing to the WAL without checkpointing)
+        // Arrange - Node 1
         var sharedStorage = new MemoryCrdtStorage();
 
         var sp1 = BuildNode("Replica1", services =>
@@ -270,40 +425,33 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var orchestrator1 = scope1.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         var patcher1 = scope1.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
 
-        // Orchestrator initialization creates the empty registry.
         await orchestrator1.InitializeAsync(CancellationToken.None);
-        
-        // Creating a document mutates the registry and appends a valid patch to the shared storage WAL inherently via decorators.
         await orchestrator1.CreateDocumentAsync("test-replayed-doc", "journal-doc", CancellationToken.None);
         await orchestrator1.SyncDocumentsAsync(CancellationToken.None);
 
         var doc1 = orchestrator1.GetDocument<JournalTestState>("test-replayed-doc")!;
         
-        // Generate multiple operations safely using the Patcher to explicitly map true logical clock values natively
         var intent1 = new MapSetIntent("key1", "ReplayedData1");
         var op1 = await patcher1.GenerateOperationAsync(doc1.Document, x => x.DataMap, intent1, CancellationToken.None);
 
         var intent2 = new MapSetIntent("key2", "ReplayedData2");
         var op2 = await patcher1.GenerateOperationAsync(doc1.Document, x => x.DataMap, intent2, CancellationToken.None);
 
-        // Apply patches correctly invoking the decorators natively explicit writing structurally valid WAL entries.
         await doc1.ApplyPatchAsync(new CrdtPatch(new[] { op1, op2 }), CancellationToken.None);
 
-        // Verify the uncheckpointed operations hit the underlying storage correctly inherently
         var journalOps = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
         journalOps.Count.ShouldBeGreaterThan(2);
 
-        // Act - Node 2 (Simulates a restart binding the same storage mapping natively to recover the state)
+        // Act - Node 2
         var sp2 = BuildNode("Replica1", services =>
         {
             services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(sharedStorage));
         });
 
-        // The HostedService startup simulates the application boot sequence natively reading uncheckpointed fallback operations.
         var initService = sp2.GetServices<IHostedService>().OfType<CrdtInitializationService>().First();
         await initService.StartAsync(CancellationToken.None);
 
-        // Assert - The orchestrator should have rebuilt the registry and replayed operations.
+        // Assert
         var scopeManager2 = sp2.GetRequiredService<DistributedCrdtScopeManager>();
         var scope2 = scopeManager2.GetOrCreateScope("Replica1");
         var orchestrator2 = scope2.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
@@ -324,7 +472,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         var sp = BuildNode("Replica1", services =>
         {
-            // Override the default options injected by BuildNode to trigger fast checkpoints and tight bounds limits
             services.Configure<DistributedCrdtOptions>(opt =>
             {
                 opt.CheckpointIntervalSeconds = 1;
@@ -344,7 +491,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         var doc = orchestrator.GetDocument<JournalTestState>("trim-test-doc")!;
 
-        // Generate and apply more than 5 operations to exceed the aggressive trim threshold natively
         for (int i = 0; i < 10; i++)
         {
             var intent = new MapSetIntent($"key{i}", $"value{i}");
@@ -352,30 +498,20 @@ public sealed class JournalingAndSnapshottingIntegrationTests
             await doc.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
         }
 
-        // Verify journal has accumulated operations successfully before background trimming begins
         var initialJournalOps = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
         initialJournalOps.Count.ShouldBeGreaterThan(10);
 
-        // Fetch the active background service managing the checkpoints
         var checkpointService = sp.GetServices<IHostedService>().OfType<CrdtCheckpointService>().First();
         
-        // Act - Start the background service manually executing the threshold bounds logic
+        // Act
         await checkpointService.StartAsync(CancellationToken.None);
-
-        // Provide enough time to trigger the periodic check-pointing background tick (1 second configured interval)
         await Task.Delay(1500);
-
-        // Stop the service gracefully natively dropping active loops
         await checkpointService.StopAsync(CancellationToken.None);
 
-        // Assert - The mechanism detects unbounded lists exceeding the threshold and drops trailing limits natively
+        // Assert
         var trimmedJournalOps = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
         
         trimmedJournalOps.Count.ShouldBeLessThan(initialJournalOps.Count);
-        
-        // Since there is only one localized node tracking this global structural matrix natively, the overarching GMVV
-        // evaluates exclusively up to the local logical head clock. Meaning it strictly forces aggressive log truncation
-        // fully dropping limits to or below the enforced capacity thresholds efficiently correctly.
         trimmedJournalOps.Count.ShouldBeLessThanOrEqualTo(5);
     }
 }

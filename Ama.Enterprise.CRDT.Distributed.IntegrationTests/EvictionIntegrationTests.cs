@@ -12,6 +12,7 @@ using Ama.CRDT.Services;
 using Ama.CRDT.Services.Serialization;
 using Ama.CRDT.Services.Versioning;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
+using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.Project.Tests.Common.Attributes;
@@ -20,18 +21,18 @@ using Microsoft.Extensions.Hosting;
 using Moq;
 using Shouldly;
 
-[CrdtAotType(typeof(EvictionEdgeCasesIntegrationTests.TestState))]
-public sealed partial class EvictionEdgeCasesTestAotContext : CrdtAotContext
+[CrdtAotType(typeof(EvictionIntegrationTests.TestState))]
+public sealed partial class EvictionIntegrationTestAotContext : CrdtAotContext
 {
 }
 
-[JsonSerializable(typeof(EvictionEdgeCasesIntegrationTests.TestState))]
-[JsonSerializable(typeof(CrdtDocument<EvictionEdgeCasesIntegrationTests.TestState>))]
-public sealed partial class EvictionEdgeCasesTestJsonContext : JsonSerializerContext
+[JsonSerializable(typeof(EvictionIntegrationTests.TestState))]
+[JsonSerializable(typeof(CrdtDocument<EvictionIntegrationTests.TestState>))]
+public sealed partial class EvictionIntegrationTestJsonContext : JsonSerializerContext
 {
 }
 
-public class EvictionEdgeCasesIntegrationTests
+public class EvictionIntegrationTests
 {
     public class TestState
     {
@@ -52,10 +53,9 @@ public class EvictionEdgeCasesIntegrationTests
 
         services.AddDistributedCrdtReplica(replicaId);
 
-        // Register the AOT contexts for our custom test models to satisfy the AOT pipeline requirements
         services.AddCrdt()
-                .AddCrdtAotContext(new EvictionEdgeCasesTestAotContext())
-                .AddCrdtJsonTypeInfoResolver(EvictionEdgeCasesTestJsonContext.Default);
+                .AddCrdtAotContext(new EvictionIntegrationTestAotContext())
+                .AddCrdtJsonTypeInfoResolver(EvictionIntegrationTestJsonContext.Default);
 
         services.AddDistributedDocumentType<TestState>("test-doc");
         services.AddSingleton(Mock.Of<IP2pAlgorithm>());
@@ -76,7 +76,30 @@ public class EvictionEdgeCasesIntegrationTests
     }
 
     [IntegrationFact]
-    public void EdgeCase1_TombstonesAreEphemeral_UnlessPersisted()
+    public async Task CrdtEvictionService_EvictsPeers_UpdatesGlobalVersionVector()
+    {
+        // Arrange
+        var sp = BuildNode("NodeA");
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("NodeA");
+        
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        
+        var context = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+        var evictionService = scope.ServiceProvider.GetRequiredService<ICrdtEvictionService>();
+
+        context.GlobalVersionVector.Versions["RemoteReplica1"] = 50;
+
+        // Act
+        await evictionService.EvictPeersAsync(new[] { "RemoteReplica1" }, CancellationToken.None);
+
+        // Assert
+        context.GlobalVersionVector.Versions.ContainsKey("RemoteReplica1").ShouldBeFalse();
+    }
+
+    [IntegrationFact]
+    public void TombstonesAreEphemeral_UnlessPersisted()
     {
         // Arrange - Initial Node Run
         var sp1 = BuildNode("NodeA");
@@ -86,25 +109,24 @@ public class EvictionEdgeCasesIntegrationTests
         
         tracker1.UpdatePeerState("NodeB", "NetworkB", new DottedVersionVector());
         
-        // Act - Tombstone the peer
+        // Act
         tracker1.TombstoneReplica("NodeB");
         
-        // Assert - Correctly tombstoned in memory
+        // Assert
         tracker1.IsReplicaTombstoned("NodeB").ShouldBeTrue();
         
-        // Act - Simulate Node Restart (New DI container, representing process restart)
-        // Storage is usually injected/persisted, but tombstones are strictly in-memory (HashSet).
+        // Act - Simulate Node Restart
         var sp2 = BuildNode("NodeA");
         var scopeManager2 = sp2.GetRequiredService<DistributedCrdtScopeManager>();
         var scope2 = scopeManager2.GetOrCreateScope("NodeA");
         var tracker2 = scope2.ServiceProvider.GetRequiredService<IClusterStateTracker>();
         
-        // Assert - Tombstones are correctly cleared on restart unless persisted natively.
+        // Assert
         tracker2.IsReplicaTombstoned("NodeB").ShouldBeFalse();
     }
 
     [IntegrationFact]
-    public void EdgeCase2_NetworkDisconnects_PreserveState_ToPreventAmnesia()
+    public void NetworkDisconnects_PreserveState_ToPreventAmnesia()
     {
         // Arrange
         var sp = BuildNode("NodeA");
@@ -122,19 +144,18 @@ public class EvictionEdgeCasesIntegrationTests
         tracker.UpdatePeerState("NodeA", "NetworkA", nodeA_Dvv);
         tracker.UpdatePeerState("NodeB", "NetworkB", nodeB_Dvv);
         
-        // Act - Node B disconnects gracefully. TTL is 0 (disabled by default).
-        // RemovePeerByNetworkId ONLY removes network routing, keeping the state map for offline recovery.
+        // Act
         tracker.RemovePeerByNetworkId("NetworkB");
         
         var clusterStates = tracker.GetClusterStates();
         var gmvv = syncService.CalculateGlobalMinimumVersionVector(clusterStates);
         
-        // Assert - The disconnected peer state is intentionally preserved to mathematically avoid amnesia.
+        // Assert
         gmvv["NodeA"].ShouldBe(2);
     }
 
     [IntegrationFact]
-    public async Task EdgeCase3_RebootLocalIdentity_PreservesOfflineLocalData()
+    public async Task RebootLocalIdentity_PreservesOfflineLocalData()
     {
         // Arrange
         var sp = BuildNode("NodeA");
@@ -149,19 +170,18 @@ public class EvictionEdgeCasesIntegrationTests
         var docManager = orchestrator.GetDocument<TestState>("test-doc")!;
         var evictionService = scope.ServiceProvider.GetRequiredService<ICrdtEvictionService>();
         
-        // Simulate local offline edit by mutating the Document state directly
         var originalDoc = docManager.Document;
         docManager.Document.Data.Data = "Unsaved Offline Edit";
         
-        // Act - Receive Eviction Rejection (Cluster tombstoned us, forcing identity reboot)
+        // Act
         await evictionService.RebootLocalIdentityAsync(CancellationToken.None);
         
-        // Assert - The document state intentionally preserves offline local data safely
+        // Assert
         docManager.Document.Data.Data.ShouldBe("Unsaved Offline Edit");
     }
 
     [IntegrationFact]
-    public async Task EdgeCase4_SnapshotMerge_OverwritesPendingLocalEdits()
+    public async Task SnapshotMerge_OverwritesPendingLocalEdits()
     {
         // Arrange
         var sp = BuildNode("NodeA");
@@ -178,19 +198,16 @@ public class EvictionEdgeCasesIntegrationTests
         var metadataManager = scope.ServiceProvider.GetRequiredService<ICrdtMetadataManager>();
         var serializer = scope.ServiceProvider.GetRequiredService<ICrdtSerializer>();
         
-        // Local node has pending unsynced edits
         docManager.Document.Data.Data = "Local Pending Edit";
         
         var metadata = metadataManager.Initialize(new TestState());
         var snapshotDoc = new CrdtDocument<TestState>(new TestState { Id = "test-doc", Data = "Cluster Snapshot Data" }, metadata);
-        
-        // Utilize the real resolved AOT serializer context resolving real structured JSON boundaries correctly
         var snapshotData = serializer.SerializeToBytes(snapshotDoc);
             
-        // Act - Receive a snapshot message because we fell behind the journal bounds
+        // Act
         await docManager.MergeSnapshotAsync(snapshotData, new DottedVersionVector(), CancellationToken.None);
         
-        // Assert - The snapshot merge overwrites pending local edits, demonstrating the snapshot overwrite vulnerability
+        // Assert
         docManager.Document.Data.Data.ShouldBe("Cluster Snapshot Data");
     }
 }
