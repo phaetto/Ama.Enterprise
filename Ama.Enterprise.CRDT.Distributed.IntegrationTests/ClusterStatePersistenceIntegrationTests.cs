@@ -113,7 +113,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
         var capturedState = await tcs.Task;
         capturedState.ShouldNotBeNull();
         
-        capturedState.TombstonedReplicas.ShouldContain("ReplicaC");
+        capturedState.TombstonedReplicas.ShouldContainKey("ReplicaC");
         capturedState.NetworkIdToReplicaId.ShouldContainKeyAndValue("NetworkB", "ReplicaB");
         capturedState.PeerStates.ShouldContainKey("ReplicaB");
         capturedState.PeerStates["ReplicaB"].State.Versions["ReplicaB"].ShouldBe(15);
@@ -124,7 +124,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
     {
         // Arrange
         var savedDto = new ClusterStateSnapshotDto();
-        savedDto.TombstonedReplicas.Add("ReplicaZOMBIE");
+        savedDto.TombstonedReplicas.Add("ReplicaZOMBIE", DateTime.UtcNow);
         savedDto.NetworkIdToReplicaId["NetworkD"] = "ReplicaD";
 
         var dvv = new DottedVersionVector();

@@ -89,6 +89,12 @@ public sealed class CrdtMaintenanceService : BackgroundService
                         }
                     }
 
+                    if (options.Value.PeerTombstoneCooldownSeconds > 0)
+                    {
+                        var cooldown = TimeSpan.FromSeconds(options.Value.PeerTombstoneCooldownSeconds);
+                        scope.ClusterTracker.CleanupExpiredTombstones(cooldown);
+                    }
+
                     var sourceDvv = replicaContext.GlobalVersionVector;
                     var copiedVersions = new Dictionary<string, long>();
                     var copiedDots = new Dictionary<string, ISet<long>>();

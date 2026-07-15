@@ -46,7 +46,7 @@ public sealed record ClusterStateSnapshotDto : IEquatable<ClusterStateSnapshotDt
     
     public Dictionary<string, ClusterPeerStateDto> PeerStates { get; init; } = new();
     
-    public HashSet<string> TombstonedReplicas { get; init; } = new();
+    public Dictionary<string, DateTime> TombstonedReplicas { get; init; } = new();
 
     /// <inheritdoc />
     [JsonExtensionData]
@@ -84,9 +84,12 @@ public sealed record ClusterStateSnapshotDto : IEquatable<ClusterStateSnapshotDt
             }
         }
 
-        if (!TombstonedReplicas.SetEquals(other.TombstonedReplicas))
+        foreach (var kvp in TombstonedReplicas)
         {
-            return false;
+            if (!other.TombstonedReplicas.TryGetValue(kvp.Key, out var otherVal) || kvp.Value != otherVal)
+            {
+                return false;
+            }
         }
 
         return true;

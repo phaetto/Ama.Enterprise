@@ -44,6 +44,13 @@ public sealed class DistributedCrdtOptions
     public int PeerEvictionTtlSeconds { get; set; } = 0;
 
     /// <summary>
+    /// Gets or sets the cooldown duration in seconds before a tombstoned replica is entirely purged from the cluster state tracking maps.
+    /// This allows its structural bounds to be safely forgotten avoiding endless scaling journal bloat.
+    /// Defaults to 0 (disabled, meaning tombstones remain indefinitely until manually removed or the process restarts without persistence).
+    /// </summary>
+    public int PeerTombstoneCooldownSeconds { get; set; } = 0;
+
+    /// <summary>
     /// Gets or sets the threshold limit for the total number of operations kept in the background journal.
     /// When this limit is exceeded, an aggressive trim is forced utilizing the local version vector,
     /// seamlessly offloading lagging peer synchronization entirely to fallback Snapshot mechanisms.

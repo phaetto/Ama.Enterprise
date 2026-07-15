@@ -233,6 +233,104 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         }
     }
 
+    [IntegrationFact]
+    public async Task TwoReplicas_EvictionAndCooldown_ShouldCompletelyPurgeOfflinePeer()
+    {
+        // Arrange
+        var nodeA = BuildNode("ReplicaA", opt => 
+        {
+            opt.AntiEntropyIntervalSeconds = 1;
+            opt.MaintenanceIntervalSeconds = 1;
+            opt.PeerEvictionTtlSeconds = 3;
+            opt.PeerTombstoneCooldownSeconds = 1;
+        });
+        
+        var nodeB = BuildNode("ReplicaB");
+
+        WireMesh(nodeA, nodeB);
+
+        var scopeA = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeA.ReplicaId);
+        var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var trackerA = scopeA.ServiceProvider.GetRequiredService<IClusterStateTracker>();
+        await orchA.InitializeAsync(CancellationToken.None);
+
+        var scopeB = nodeB.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeB.ReplicaId);
+        var orchB = scopeB.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchB.InitializeAsync(CancellationToken.None);
+
+        // Node A creates the document explicitly
+        await orchA.CreateDocumentAsync("doc-evict", "shared-doc", CancellationToken.None);
+        await Task.Delay(1000); // Allow Gossip of the registry update to propagate natively
+
+        await orchB.SyncDocumentsAsync(CancellationToken.None);
+
+        // Act - Manually trigger Anti-Entropy from B to A so A tracks B seamlessly
+        var serializerB = nodeB.Sp.GetRequiredService<ICrdtSerializer>();
+        var replicaContextB = scopeB.ServiceProvider.GetRequiredService<ReplicaContext>();
+        
+        var syncMsgB = new CrdtStateSyncMessage(nodeB.ReplicaId, replicaContextB.GlobalVersionVector);
+        var syncBytesB = serializerB.SerializeToBytes(syncMsgB);
+        var wrapperB = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytesB);
+        var wrapperBytesB = serializerB.SerializeToBytes(wrapperB);
+
+        var handlerA = nodeA.Sp.GetRequiredKeyedService<IApplicationPayloadHandler>("TestMesh");
+        await handlerA.HandlePayloadAsync("TestMesh", nodeB.PeerId, wrapperBytesB, CancellationToken.None);
+
+        // Verify tracker A now explicitly knows about Node B
+        trackerA.GetClusterStates().Count.ShouldBeGreaterThan(0);
+
+        // Disconnect Node B natively simply by waiting and preventing further syncs.
+        // Node A's background maintenance service will tick every 1s inherently.
+        // After 3s -> TTL Eviction occurs, marking B as tombstoned safely.
+        // After 1s more -> Cooldown Cleanup executes dropping B entirely natively.
+        
+        // Wait 6 seconds total allowing all TTL timers + Background Cooldown ticks to execute reliably
+        await Task.Delay(6000);
+
+        // Assert - Node B should have been evicted AND completely forgotten from memory maps inherently
+        trackerA.IsReplicaTombstoned(nodeB.ReplicaId).ShouldBeFalse();
+        trackerA.GetClusterStates().ShouldBeEmpty();
+    }
+
+    [IntegrationFact]
+    public async Task NodeRestart_ShouldImmediatelyPurgeExpiredTombstones_DuringStateImport()
+    {
+        // Arrange
+        var nodeA = BuildNode("ReplicaA", opt => 
+        {
+            opt.PeerTombstoneCooldownSeconds = 5;
+        });
+
+        // Stop hosted services to securely simulate the node going offline maintaining persistence states.
+        foreach (var hs in nodeA.HostedServices)
+        {
+            await hs.StopAsync(CancellationToken.None);
+        }
+
+        var scopeManager = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope(nodeA.ReplicaId);
+        var storage = scope.Storage;
+        var tracker = scope.ClusterTracker;
+
+        // Forcefully inject mapped tracker histories into the persistence layer containing mixed expiration offsets natively.
+        var snapshot = new ClusterStateSnapshotDto();
+        var expiredTimestamp = DateTime.UtcNow.Subtract(TimeSpan.FromSeconds(10)); // Exceeds 5s cooldown
+        var activeTimestamp = DateTime.UtcNow; // Within 5s cooldown limits explicitly
+        
+        snapshot.TombstonedReplicas.Add("ReplicaExpired", expiredTimestamp);
+        snapshot.TombstonedReplicas.Add("ReplicaActive", activeTimestamp);
+
+        await storage.SaveClusterStateAsync(nodeA.ReplicaId, snapshot, CancellationToken.None);
+
+        // Act - Start initialization service explicitly simulating the standard node restart boot routines loading mapped tracking limits.
+        var initService = nodeA.HostedServices.OfType<CrdtInitializationService>().First();
+        await initService.StartAsync(CancellationToken.None);
+
+        // Assert - The expired tombstone should be explicitly pruned instantly out-of-the-gate, keeping active bounds safe.
+        tracker.IsReplicaTombstoned("ReplicaExpired").ShouldBeFalse();
+        tracker.IsReplicaTombstoned("ReplicaActive").ShouldBeTrue();
+    }
+
     private sealed record TestNode(
         IServiceProvider Sp, 
         Mock<IDirectMessageSender> Sender, 
@@ -241,7 +339,7 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         string ReplicaId,
         List<IHostedService> HostedServices);
 
-    private TestNode BuildNode(string replicaId)
+    private TestNode BuildNode(string replicaId, Action<DistributedCrdtOptions>? configureOptions = null)
     {
         var senderMock = new Mock<IDirectMessageSender>();
         var gossipMock = new Mock<IP2pAlgorithm>();
@@ -254,7 +352,9 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
             opt.ActiveSyncEnabled = true; // Enabled for real-time Gossip propagation natively
             opt.AntiEntropyIntervalSeconds = 60; // Explicitly delayed to prevent test interference natively
             opt.CheckpointIntervalSeconds = 60; // Increased to ensure trims don't intercept standard testing arrays natively
-            opt.PeerEvictionTtlSeconds = 0; // Disabled eviction to prevent validation errors
+            opt.PeerEvictionTtlSeconds = 0; // Disabled eviction to prevent validation errors by default
+            
+            configureOptions?.Invoke(opt);
         });
         services.AddDistributedCrdtReplica(replicaId);
         

@@ -60,6 +60,13 @@ public interface IClusterStateTracker
     IReadOnlyList<string> GetAndTombstoneExpiredPeers(TimeSpan ttl);
 
     /// <summary>
+    /// Purges tombstoned replicas entirely from the memory state matrices once they exceed the assigned cooldown.
+    /// Resolves global version vector storage bloat specifically when scaling multi-node networks constantly natively.
+    /// </summary>
+    /// <param name="cooldown">The required elapsed timespan duration before entirely forgiving an old tombstoned replica trace.</param>
+    void CleanupExpiredTombstones(TimeSpan cooldown);
+
+    /// <summary>
     /// Exports the full in-memory tracker state extracting structural maps explicitly preventing node restart amnesia inherently natively.
     /// </summary>
     /// <returns>The generated structured AOT representation.</returns>
@@ -69,5 +76,6 @@ public interface IClusterStateTracker
     /// Imports a previously exported tracker state inherently protecting the cluster topology constraints globally across initialization loops safely.
     /// </summary>
     /// <param name="state">The loaded structural state to directly apply mapped topologies across.</param>
-    void ImportState(ClusterStateSnapshotDto state);
+    /// <param name="cooldown">The required elapsed timespan duration used to evaluate and purge expired tombstones immediately upon loading.</param>
+    void ImportState(ClusterStateSnapshotDto state, TimeSpan cooldown);
 }

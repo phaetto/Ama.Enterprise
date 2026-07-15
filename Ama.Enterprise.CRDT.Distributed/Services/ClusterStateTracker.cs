@@ -14,13 +14,14 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
 {
     private readonly Dictionary<string, PeerStateEntry> peerStates = new();
     private readonly Dictionary<string, string> networkIdToReplicaId = new();
-    private readonly HashSet<string> tombstonedReplicas = new();
+    private readonly Dictionary<string, DateTime> tombstonedReplicas = new();
     private readonly object syncRoot = new();
 
     private readonly Meter meter;
     private readonly Counter<long> stateUpdatesCounter;
     private readonly Counter<long> tombstonedPeersCounter;
     private readonly Counter<long> peerRemovalsCounter;
+    private readonly Counter<long> expiredTombstonesCounter;
 
     public ClusterStateTracker(IMeterFactory? meterFactory = null)
     {
@@ -28,6 +29,7 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
         this.stateUpdatesCounter = this.meter.CreateCounter<long>("crdt.cluster.state_updates", "updates", "Number of cluster state updates");
         this.tombstonedPeersCounter = this.meter.CreateCounter<long>("crdt.cluster.tombstoned_peers", "peers", "Number of explicitly tombstoned replicas");
         this.peerRemovalsCounter = this.meter.CreateCounter<long>("crdt.cluster.peer_removals", "peers", "Number of network peers intentionally disconnected preserving states");
+        this.expiredTombstonesCounter = this.meter.CreateCounter<long>("crdt.cluster.expired_tombstones", "peers", "Number of explicitly tombstoned replicas purged entirely after evaluating cooldown limits");
     }
 
     /// <inheritdoc />
@@ -84,7 +86,7 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
         
         lock (syncRoot)
         {
-            if (tombstonedReplicas.Add(replicaId))
+            if (tombstonedReplicas.TryAdd(replicaId, DateTime.UtcNow))
             {
                 tombstonedPeersCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaId));
             }
@@ -126,7 +128,7 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
 
         lock (syncRoot)
         {
-            return tombstonedReplicas.Contains(replicaId);
+            return tombstonedReplicas.ContainsKey(replicaId);
         }
     }
 
@@ -156,6 +158,30 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
     }
 
     /// <inheritdoc />
+    public void CleanupExpiredTombstones(TimeSpan cooldown)
+    {
+        var now = DateTime.UtcNow;
+
+        lock (syncRoot)
+        {
+            var keysToRemove = new List<string>();
+            foreach (var kvp in tombstonedReplicas)
+            {
+                if (now - kvp.Value > cooldown)
+                {
+                    keysToRemove.Add(kvp.Key);
+                }
+            }
+
+            foreach (var key in keysToRemove)
+            {
+                tombstonedReplicas.Remove(key);
+                expiredTombstonesCounter.Add(1, new KeyValuePair<string, object?>("replica_id", key));
+            }
+        }
+    }
+
+    /// <inheritdoc />
     public ClusterStateSnapshotDto ExportState()
     {
         lock (syncRoot)
@@ -169,7 +195,7 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
 
             foreach (var kvp in tombstonedReplicas)
             {
-                dto.TombstonedReplicas.Add(kvp);
+                dto.TombstonedReplicas.Add(kvp.Key, kvp.Value);
             }
 
             foreach (var kvp in peerStates)
@@ -190,7 +216,7 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
     }
 
     /// <inheritdoc />
-    public void ImportState(ClusterStateSnapshotDto state)
+    public void ImportState(ClusterStateSnapshotDto state, TimeSpan cooldown)
     {
         ArgumentNullException.ThrowIfNull(state);
 
@@ -203,9 +229,9 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
             }
 
             tombstonedReplicas.Clear();
-            foreach (var replicaId in state.TombstonedReplicas)
+            foreach (var kvp in state.TombstonedReplicas)
             {
-                tombstonedReplicas.Add(replicaId);
+                tombstonedReplicas[kvp.Key] = kvp.Value;
             }
 
             peerStates.Clear();
@@ -219,6 +245,9 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
                     kvp.Value.LastSeen);
             }
         }
+        
+        // Immediately purge tombstones that expired while offline evaluating limits.
+        CleanupExpiredTombstones(cooldown);
     }
 
     public void Dispose()

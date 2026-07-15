@@ -8,9 +8,11 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
 using Ama.CRDT.Services;
+using Ama.Enterprise.CRDT.Distributed.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Hosted service responsible for isolating uncoupled replicas sequentially natively dynamically binding their discrete initial persistence scopes.
@@ -49,6 +51,9 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
             {
                 var globalStorage = scope.Storage;
                 var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+                
+                var options = scope.ServiceProvider.GetRequiredService<IOptions<DistributedCrdtOptions>>().Value;
+                var tombstoneCooldown = TimeSpan.FromSeconds(options.PeerTombstoneCooldownSeconds);
 
                 // 1. Initialize the global Dotted Version Vector explicitly extracting persistent DVV naturally
                 var savedDvv = await globalStorage.LoadGlobalVersionVectorAsync(replicaContext.ReplicaId, cancellationToken).ConfigureAwait(false);
@@ -76,11 +81,11 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
                     logger.LogInformation("Successfully re-initialized in-place CRDT global Dotted Version Vector for replica {ReplicaId}.", replicaContext.ReplicaId);
                 }
 
-                // 2. Load globally preserved tracking matrices restoring isolated tracking states securely
+                // 2. Load globally preserved tracking matrices restoring isolated tracking states securely and pruning expired limits
                 var savedClusterState = await globalStorage.LoadClusterStateAsync(replicaContext.ReplicaId, cancellationToken).ConfigureAwait(false);
                 if (savedClusterState != null)
                 {
-                    scope.ClusterTracker.ImportState(savedClusterState);
+                    scope.ClusterTracker.ImportState(savedClusterState, tombstoneCooldown);
                     logger.LogInformation("Successfully re-initialized in-place cluster tracking state matrix for replica {ReplicaId}.", replicaContext.ReplicaId);
                 }
 

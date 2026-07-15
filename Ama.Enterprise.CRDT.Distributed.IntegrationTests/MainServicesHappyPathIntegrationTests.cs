@@ -106,6 +106,35 @@ public sealed class MainServicesHappyPathIntegrationTests
     }
 
     [IntegrationFact]
+    public async Task ClusterStateTracker_TombstoneCooldown_PurgesExpiredReplicas()
+    {
+        // Arrange
+        var sp = BuildNode("Replica1");
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var tracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
+
+        // Act - Tombstone the replica explicitly
+        tracker.TombstoneReplica("RemoteReplica1");
+
+        // Assert - Tracked as tombstoned safely
+        tracker.IsReplicaTombstoned("RemoteReplica1").ShouldBeTrue();
+
+        // Act - Attempt to clean up with a large cooldown (should not purge because time hasn't elapsed)
+        tracker.CleanupExpiredTombstones(TimeSpan.FromMinutes(5));
+
+        // Assert - Still tombstoned
+        tracker.IsReplicaTombstoned("RemoteReplica1").ShouldBeTrue();
+
+        // Act - Wait briefly and clean up with a zero/small cooldown boundary explicitly matching test delays
+        await Task.Delay(50);
+        tracker.CleanupExpiredTombstones(TimeSpan.FromMilliseconds(10));
+
+        // Assert - Purged
+        tracker.IsReplicaTombstoned("RemoteReplica1").ShouldBeFalse();
+    }
+
+    [IntegrationFact]
     public async Task CrdtEvictionService_EvictsPeers_UpdatesGlobalVersionVector_HappyPath()
     {
         // Arrange
@@ -127,6 +156,41 @@ public sealed class MainServicesHappyPathIntegrationTests
 
         // Assert - The remote peer's tracked state should be explicitly removed
         context.GlobalVersionVector.Versions.ContainsKey("RemoteReplica1").ShouldBeFalse();
+    }
+
+    [IntegrationFact]
+    public async Task CrdtMaintenanceService_TombstoneCooldown_HappyPath()
+    {
+        // Arrange
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.Configure<DistributedCrdtOptions>(opt =>
+            {
+                opt.MaintenanceIntervalSeconds = 1;
+                opt.PeerTombstoneCooldownSeconds = 1;
+            });
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var tracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
+
+        // Pre-tombstone a replica directly
+        tracker.TombstoneReplica("RemoteReplica1");
+        tracker.IsReplicaTombstoned("RemoteReplica1").ShouldBeTrue();
+
+        var maintenanceService = sp.GetServices<IHostedService>().OfType<CrdtMaintenanceService>().First();
+
+        // Act - Start background service
+        await maintenanceService.StartAsync(CancellationToken.None);
+
+        // Wait for cooldown (1s) + maintenance tick (1s) bounding overlaps comfortably
+        await Task.Delay(2500);
+
+        await maintenanceService.StopAsync(CancellationToken.None);
+
+        // Assert - The service should have purged the expired tombstone automatically
+        tracker.IsReplicaTombstoned("RemoteReplica1").ShouldBeFalse();
     }
 
     [IntegrationFact]
