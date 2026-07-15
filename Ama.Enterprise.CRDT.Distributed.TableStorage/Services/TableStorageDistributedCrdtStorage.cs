@@ -2,23 +2,28 @@ namespace Ama.Enterprise.CRDT.Distributed.TableStorage.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Azure;
 using Azure.Data.Tables;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Ama.CRDT.Models;
+using Ama.CRDT.Services;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.TableStorage.Models;
 
 /// <summary>
-/// A centralized unified Azure Table Storage implementation capturing overarching CRDT trees bounding asynchronously mapped DVV tracking bounds natively bypassing reflection.
+/// A unified Azure Table Storage implementation managing CRDT states, global version vectors, and operation journals explicitly without reflection to ensure AOT compatibility.
+/// Includes dynamic tenant isolation bounding to securely isolate node data when sharing a single Table Storage backend across multiple local replicas.
 /// </summary>
 public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage, IDisposable
 {
@@ -27,6 +32,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
     private const string ClusterStatePartitionKey = "ClusterState";
     private const string JournalPartitionPrefix = "Journal_";
 
+    private readonly IServiceProvider serviceProvider;
     private readonly TableServiceClient tableServiceClient;
     private readonly TableClient tableClient;
     private readonly ICrdtSerializer serializer;
@@ -38,26 +44,30 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
     private readonly Counter<long> operationsDeleteCounter;
     private readonly Histogram<long> payloadBytesHistogram;
 
+    static TableStorageDistributedCrdtStorage()
+    {
+        // Explicitly invoke the parameterless constructor to prevent the .NET AOT trimmer
+        // from stripping it, as the Azure Data Tables SDK relies on it internally via reflection constraints 
+        // during GetEntityAsync<T> and QueryAsync<T>.
+        _ = new TableEntity();
+    }
+
+    [DynamicDependency(DynamicallyAccessedMemberTypes.PublicConstructors, typeof(TableEntity))]
     public TableStorageDistributedCrdtStorage(
+        IServiceProvider serviceProvider,
         IOptions<TableStorageCrdtOptions> options,
         JsonCrdtSerializer textJsonSerializer,
         IEnumerable<ICrdtSerializer> availableSerializers,
         ILogger<TableStorageDistributedCrdtStorage> logger,
         IMeterFactory? meterFactory = null)
     {
+        this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         ArgumentNullException.ThrowIfNull(options);
 
         var storageOptions = options.Value ?? throw new ArgumentException("Options value cannot be null.", nameof(options));
 
-        if (string.IsNullOrEmpty(storageOptions.ConnectionString))
-        {
-            throw new ArgumentException("Table storage connection string cannot be null or empty.", nameof(options));
-        }
-
-        if (string.IsNullOrEmpty(storageOptions.TableName))
-        {
-            throw new ArgumentException("Table name cannot be null or empty.", nameof(options));
-        }
+        ArgumentException.ThrowIfNullOrEmpty(storageOptions.ConnectionString);
+        ArgumentException.ThrowIfNullOrEmpty(storageOptions.TableName);
 
         if (storageOptions.UseBinarySerialization)
         {
@@ -95,11 +105,11 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
     public async Task<DottedVersionVector?> LoadGlobalVersionVectorAsync(string replicaId, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
+        ArgumentException.ThrowIfNullOrEmpty(replicaId);
 
         try
         {
-            var response = await this.tableClient.GetEntityAsync<TableEntity>(GlobalDvvPartitionKey, replicaId, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var response = await this.tableClient.GetEntityAsync<TableEntity>(this.GetGlobalDvvPartitionKey(), replicaId, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (response?.Value != null)
             {
                 var tags = new KeyValuePair<string, object?>[] { new("type", "dvv") };
@@ -129,7 +139,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
     public async Task SaveGlobalVersionVectorAsync(string replicaId, DottedVersionVector globalVersionVector, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
+        ArgumentException.ThrowIfNullOrEmpty(replicaId);
         ArgumentNullException.ThrowIfNull(globalVersionVector);
 
         try
@@ -143,7 +153,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
                 this.payloadBytesHistogram.Record(payload.Length, tags);
             }
 
-            var entity = new TableEntity(GlobalDvvPartitionKey, replicaId);
+            var entity = new TableEntity(this.GetGlobalDvvPartitionKey(), replicaId);
             CrdtTableEntity.SetPayload(entity, payload);
 
             await this.tableClient.UpsertEntityAsync(entity, TableUpdateMode.Replace, cancellationToken).ConfigureAwait(false);
@@ -157,11 +167,11 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
     public async Task<ClusterStateSnapshotDto?> LoadClusterStateAsync(string replicaId, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
+        ArgumentException.ThrowIfNullOrEmpty(replicaId);
 
         try
         {
-            var response = await this.tableClient.GetEntityAsync<TableEntity>(ClusterStatePartitionKey, replicaId, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var response = await this.tableClient.GetEntityAsync<TableEntity>(this.GetClusterStatePartitionKey(), replicaId, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (response?.Value != null)
             {
                 var tags = new KeyValuePair<string, object?>[] { new("type", "cluster_state") };
@@ -191,7 +201,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
     public async Task SaveClusterStateAsync(string replicaId, ClusterStateSnapshotDto state, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
+        ArgumentException.ThrowIfNullOrEmpty(replicaId);
         ArgumentNullException.ThrowIfNull(state);
 
         try
@@ -205,7 +215,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
                 this.payloadBytesHistogram.Record(payload.Length, tags);
             }
 
-            var entity = new TableEntity(ClusterStatePartitionKey, replicaId);
+            var entity = new TableEntity(this.GetClusterStatePartitionKey(), replicaId);
             CrdtTableEntity.SetPayload(entity, payload);
 
             await this.tableClient.UpsertEntityAsync(entity, TableUpdateMode.Replace, cancellationToken).ConfigureAwait(false);
@@ -219,11 +229,11 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
     public async Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
     {
-        if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
+        ArgumentException.ThrowIfNullOrEmpty(documentId);
 
         try
         {
-            var response = await this.tableClient.GetEntityAsync<TableEntity>(DocumentStatePartitionKey, documentId, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var response = await this.tableClient.GetEntityAsync<TableEntity>(this.GetDocumentStatePartitionKey(), documentId, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (response?.Value != null)
             {
                 var tags = new KeyValuePair<string, object?>[] { new("type", "document") };
@@ -253,8 +263,8 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
     public async Task SaveDocumentAsync<TState>(string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new()
     {
-        if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
-        if (document == null) throw new ArgumentNullException(nameof(document));
+        ArgumentException.ThrowIfNullOrEmpty(documentId);
+        ArgumentNullException.ThrowIfNull(document);
 
         try
         {
@@ -267,7 +277,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
                 this.payloadBytesHistogram.Record(payload.Length, tags);
             }
 
-            var entity = new TableEntity(DocumentStatePartitionKey, documentId);
+            var entity = new TableEntity(this.GetDocumentStatePartitionKey(), documentId);
             CrdtTableEntity.SetPayload(entity, payload);
 
             await this.tableClient.UpsertEntityAsync(entity, TableUpdateMode.Replace, cancellationToken).ConfigureAwait(false);
@@ -281,11 +291,11 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
     public async Task DeleteDocumentAsync(string documentId, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
+        ArgumentException.ThrowIfNullOrEmpty(documentId);
 
         try
         {
-            await this.tableClient.DeleteEntityAsync(DocumentStatePartitionKey, documentId, cancellationToken: cancellationToken).ConfigureAwait(false);
+            await this.tableClient.DeleteEntityAsync(this.GetDocumentStatePartitionKey(), documentId, cancellationToken: cancellationToken).ConfigureAwait(false);
             
             var tags = new KeyValuePair<string, object?>[] { new("type", "document") };
             this.operationsDeleteCounter.Add(1, tags);
@@ -303,7 +313,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
     public void Append(string documentId, IReadOnlyList<CrdtOperation> operations)
     {
-        if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
+        ArgumentException.ThrowIfNullOrEmpty(documentId);
         ArgumentNullException.ThrowIfNull(operations);
         if (operations.Count == 0) return;
 
@@ -314,7 +324,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
         foreach (var group in groupedByReplica)
         {
-            var partitionKey = GetJournalPartitionKey(group.Key);
+            var partitionKey = this.GetJournalPartitionKey(group.Key);
             var batch = new List<TableTransactionAction>();
 
             foreach (var op in group)
@@ -349,7 +359,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
     public async Task AppendAsync(string documentId, IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
+        ArgumentException.ThrowIfNullOrEmpty(documentId);
         ArgumentNullException.ThrowIfNull(operations);
         if (operations.Count == 0) return;
 
@@ -360,7 +370,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
         foreach (var group in groupedByReplica)
         {
-            var partitionKey = GetJournalPartitionKey(group.Key);
+            var partitionKey = this.GetJournalPartitionKey(group.Key);
             var batch = new List<TableTransactionAction>();
 
             foreach (var op in group)
@@ -395,9 +405,9 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
     public async IAsyncEnumerable<JournaledOperation> GetOperationsByRangeAsync(string originReplicaId, long minGlobalClock, long maxGlobalClock, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(originReplicaId)) throw new ArgumentException("Origin replica ID cannot be null or empty.", nameof(originReplicaId));
+        ArgumentException.ThrowIfNullOrEmpty(originReplicaId);
 
-        var partitionKey = GetJournalPartitionKey(originReplicaId);
+        var partitionKey = this.GetJournalPartitionKey(originReplicaId);
         var minRowKey = GetJournalRowKey(minGlobalClock);
         var maxRowKey = GetJournalRowKey(maxGlobalClock);
 
@@ -406,7 +416,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         var query = this.tableClient.QueryAsync<TableEntity>(filter, cancellationToken: cancellationToken);
         var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
 
-        await foreach (var entity in query.WithCancellation(cancellationToken))
+        await foreach (var entity in query.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
             this.operationsReadCounter.Add(1, tags);
 
@@ -426,10 +436,10 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
     public async IAsyncEnumerable<JournaledOperation> GetOperationsByDotsAsync(string originReplicaId, IEnumerable<long> globalClocks, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(originReplicaId)) throw new ArgumentException("Origin replica ID cannot be null or empty.", nameof(originReplicaId));
+        ArgumentException.ThrowIfNullOrEmpty(originReplicaId);
         ArgumentNullException.ThrowIfNull(globalClocks);
 
-        var partitionKey = GetJournalPartitionKey(originReplicaId);
+        var partitionKey = this.GetJournalPartitionKey(originReplicaId);
         var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
 
         foreach (var clock in globalClocks)
@@ -469,8 +479,8 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
     public async Task<long> GetJournalCountAsync(CancellationToken cancellationToken = default)
     {
-        var startPartition = JournalPartitionPrefix;
-        var endPartition = JournalPartitionPrefix + "~";
+        var startPartition = this.GetJournalStartPartition();
+        var endPartition = this.GetJournalEndPartition();
 
         var filter = TableClient.CreateQueryFilter($"PartitionKey ge {startPartition} and PartitionKey le {endPartition}");
 
@@ -479,7 +489,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         long count = 0;
         var tags = new KeyValuePair<string, object?>[] { new("type", "journal_count") };
 
-        await foreach (var _ in query.WithCancellation(cancellationToken))
+        await foreach (var _ in query.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
             count++;
             this.operationsReadCounter.Add(1, tags);
@@ -490,15 +500,15 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
     public async IAsyncEnumerable<JournaledOperation> GetAllJournaledOperationsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var startPartition = JournalPartitionPrefix;
-        var endPartition = JournalPartitionPrefix + "~";
+        var startPartition = this.GetJournalStartPartition();
+        var endPartition = this.GetJournalEndPartition();
 
         var filter = TableClient.CreateQueryFilter($"PartitionKey ge {startPartition} and PartitionKey le {endPartition}");
 
         var query = this.tableClient.QueryAsync<TableEntity>(filter, cancellationToken: cancellationToken);
         var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
 
-        await foreach (var entity in query.WithCancellation(cancellationToken))
+        await foreach (var entity in query.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
             this.operationsReadCounter.Add(1, tags);
 
@@ -519,6 +529,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
     public async Task TrimAsync(IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(globalMinimumVersionVector);
+        if (globalMinimumVersionVector.Count == 0) return;
 
         var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
 
@@ -527,7 +538,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
             var replicaId = kvp.Key;
             var maxClock = kvp.Value;
 
-            var partitionKey = GetJournalPartitionKey(replicaId);
+            var partitionKey = this.GetJournalPartitionKey(replicaId);
             var maxRowKey = GetJournalRowKey(maxClock);
 
             var filter = TableClient.CreateQueryFilter($"PartitionKey eq {partitionKey} and RowKey le {maxRowKey}");
@@ -536,7 +547,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
             var batch = new List<TableTransactionAction>();
 
-            await foreach (var entity in query.WithCancellation(cancellationToken))
+            await foreach (var entity in query.WithCancellation(cancellationToken).ConfigureAwait(false))
             {
                 this.operationsDeleteCounter.Add(1, tags);
                 
@@ -559,12 +570,64 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         }
     }
 
-    private static string GetJournalPartitionKey(string replicaId) => $"{JournalPartitionPrefix}{replicaId}";
-    
-    private static string GetJournalRowKey(long globalClock) => globalClock.ToString("D20");
-
     public void Dispose()
     {
         this.meter.Dispose();
     }
+
+    private string? GetLocalReplicaId()
+    {
+        try
+        {
+            var context = this.serviceProvider.GetService<ReplicaContext>();
+            if (context != null && !string.IsNullOrWhiteSpace(context.ReplicaId))
+            {
+                return context.ReplicaId;
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // Ignore scope validation failures and return null, defaulting to non-prefixed partitions
+        }
+
+        return null;
+    }
+
+    private string GetGlobalDvvPartitionKey()
+    {
+        var localId = this.GetLocalReplicaId();
+        return localId != null ? $"{localId}_{GlobalDvvPartitionKey}" : GlobalDvvPartitionKey;
+    }
+
+    private string GetDocumentStatePartitionKey()
+    {
+        var localId = this.GetLocalReplicaId();
+        return localId != null ? $"{localId}_{DocumentStatePartitionKey}" : DocumentStatePartitionKey;
+    }
+
+    private string GetClusterStatePartitionKey()
+    {
+        var localId = this.GetLocalReplicaId();
+        return localId != null ? $"{localId}_{ClusterStatePartitionKey}" : ClusterStatePartitionKey;
+    }
+
+    private string GetJournalPartitionKey(string originReplicaId)
+    {
+        var localId = this.GetLocalReplicaId();
+        return localId != null ? $"{localId}_{JournalPartitionPrefix}{originReplicaId}" : $"{JournalPartitionPrefix}{originReplicaId}";
+    }
+
+    private string GetJournalStartPartition()
+    {
+        var localId = this.GetLocalReplicaId();
+        return localId != null ? $"{localId}_{JournalPartitionPrefix}" : JournalPartitionPrefix;
+    }
+
+    private string GetJournalEndPartition()
+    {
+        var localId = this.GetLocalReplicaId();
+        return localId != null ? $"{localId}_{JournalPartitionPrefix}~" : JournalPartitionPrefix + "~";
+    }
+    
+    private static string GetJournalRowKey(long globalClock) => globalClock.ToString("D20", CultureInfo.InvariantCulture);
 }
