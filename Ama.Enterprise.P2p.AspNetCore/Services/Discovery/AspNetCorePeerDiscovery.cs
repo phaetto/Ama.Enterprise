@@ -292,7 +292,7 @@ public sealed class AspNetCorePeerDiscovery : IPeerDiscovery, IDisposable
             }
             else
             {
-                context.Response.StatusCode = StatusCodes.Status409Conflict;
+                context.Response.StatusCode = StatusCodes.Status204NoContent;
             }
         }
         catch (Exception ex)
