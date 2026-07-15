@@ -73,10 +73,11 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Models/PooledDocumentCommand.cs` | Custom awaitable envelope implementing an IValueTaskSource object pool for the Single-Reader lock-free document channels, avoiding garbage blockages. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/PooledOrchestratorCommand.cs` | Custom awaitable envelope implementing an IValueTaskSource object pool for the lock-free Single-Reader orchestrator channel, executing commands sequentially and mapping constraints. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ClusterStateTracker.cs` | Implemented DTO export and import bindings resolving metric persistence structures to avoid restart amnesia. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtCheckpointService.cs` | Adjusted checkpointing journal trim logic to await the updated `IsPeerExpectedAsync` method. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtCheckpointService.cs` | Extracted trimming and eviction logic to enforce SRP, allowing strict persistence cycles avoiding stalling delays. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Updated anti-entropy limits and fallback sync boundaries to `await IsPeerExpectedAsync` extracting bounds against decoupled active network states. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtEvictionService.cs` | Implementation of `ICrdtEvictionService` extracting the eviction logic, avoiding duplication. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtInitializationService.cs` | Orchestrated explicit restoration of dynamic background matrix states bypassing default topologies to resolve zombie replication instances. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtMaintenanceService.cs` | Distinct background service orchestrating decoupled journal trimming algorithms and peer network evictions configured dynamically. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DefaultScopeTopologyProvider.cs` | Updated to implement the asynchronous `IsPeerExpectedAsync` method returning synchronous wrappers. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Refactored snapshot merge logic utilizing `IAsyncCrdtPatcher` to evaluate true CRDT structural patch diffs instead of destructive state overwrites, and appended `PatchGenerated` invocation to broadcast merged state intentions. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeFactory.cs` | Factory mapping internal ServiceProvider boundaries generating isolated persistent generic structural boundaries. |

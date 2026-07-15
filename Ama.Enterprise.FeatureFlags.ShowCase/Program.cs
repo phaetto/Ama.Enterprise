@@ -77,7 +77,7 @@ public static class Program
         services.AddDistributedCrdtCore(options =>
         {
             options.ActiveSyncEnabled = true;
-            options.CheckpointIntervalSeconds = (int)TimeSpan.FromHours(1).TotalSeconds;
+            options.CheckpointIntervalSeconds = 15;// (int)TimeSpan.FromHours(1).TotalSeconds;
             options.AntiEntropyIntervalSeconds = 1;
             options.AntiEntropyInitialDelaySeconds = 1;
         });

@@ -64,6 +64,7 @@ public sealed class ScopeTopologyProviderIntegrationTests
         services.AddDistributedCrdtCore(opt =>
         {
             opt.CheckpointIntervalSeconds = 1; // Fast for testing
+            opt.MaintenanceIntervalSeconds = 1; // Fast for testing
             opt.AntiEntropyIntervalSeconds = 15;
             opt.ActiveSyncEnabled = true;
         });
@@ -119,13 +120,13 @@ public sealed class ScopeTopologyProviderIntegrationTests
         // Act - Request snapshot for unexpected peer
         await orchestrator.ProvideSnapshotAsync("topo-doc", "RemoteReplica", new PeerId(unexpectedPeerGuid), CancellationToken.None);
 
-        // Assert - The orchestrator must drop the request gracefully preventing state leaks
+        // Assert - The orchestrator must drop the request preventing state leaks
         mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never());
 
         // Act - Request snapshot for expected peer
         await orchestrator.ProvideSnapshotAsync("topo-doc", "RemoteReplica", new PeerId(expectedPeerGuid), CancellationToken.None);
 
-        // Assert - Expected peer receives the payload correctly natively
+        // Assert - Expected peer receives the payload
         mockSender.Verify(p => p.SendDirectAsync(It.Is<PeerId>(id => id.Value == expectedPeerGuid), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
     }
 
@@ -170,7 +171,7 @@ public sealed class ScopeTopologyProviderIntegrationTests
     }
 
     [IntegrationFact]
-    public async Task CrdtCheckpointService_ShouldCalculateGMVV_ExcludingUnexpectedPeers()
+    public async Task CrdtMaintenanceService_ShouldCalculateGMVV_ExcludingUnexpectedPeers()
     {
         // Arrange
         var topologyProvider = new TestTopologyProvider();
@@ -209,7 +210,7 @@ public sealed class ScopeTopologyProviderIntegrationTests
         var opsBeforeCheckpoint = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
         opsBeforeCheckpoint.Count.ShouldBeGreaterThanOrEqualTo(5); // Including registry ops
 
-        // Dynamically extract the overarching global clock directly mapped securely natively identifying absolute boundaries explicitly.
+        // Extract the overarching global clock identifying absolute boundaries.
         var context = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
         long currentClock = 0;
         lock (context.GlobalVersionVector)
@@ -217,7 +218,7 @@ public sealed class ScopeTopologyProviderIntegrationTests
             currentClock = context.GlobalVersionVector.Versions["Replica1"];
         }
 
-        // The expected peer has fully synced and matches our local state preventing amnesia limits naturally natively explicitly successfully rationally natively elegantly perfectly.
+        // The expected peer has fully synced and matches our local state preventing amnesia limits.
         var expectedDvv = new DottedVersionVector();
         expectedDvv.Versions["Replica1"] = currentClock;
         clusterTracker.UpdatePeerState("ReplicaB", expectedPeerGuid.ToString(), expectedDvv);
@@ -226,21 +227,21 @@ public sealed class ScopeTopologyProviderIntegrationTests
         var unexpectedDvv = new DottedVersionVector();
         clusterTracker.UpdatePeerState("ReplicaC", unexpectedPeerGuid.ToString(), unexpectedDvv);
 
-        var checkpointService = sp.GetServices<IHostedService>().OfType<CrdtCheckpointService>().First();
+        var maintenanceService = sp.GetServices<IHostedService>().OfType<CrdtMaintenanceService>().First();
 
-        // Act - Trigger checkpoint cycle natively evaluating GMVV math bounds
-        await checkpointService.StartAsync(CancellationToken.None);
+        // Act - Trigger maintenance cycle evaluating GMVV math bounds
+        await maintenanceService.StartAsync(CancellationToken.None);
         await Task.Delay(1500); // Wait for the 1-second interval
-        await checkpointService.StopAsync(CancellationToken.None);
+        await maintenanceService.StopAsync(CancellationToken.None);
 
         // Assert - If GMVV included ReplicaC, GMVV would be 0 and no operations would trim.
         // Because the TopologyProvider explicitly limits the causal matrix to expected peers (ReplicaB and Local),
-        // the GMVV securely evaluates correctly trimming the journal aggressively natively explicitly matching limits accurately effortlessly.
+        // the GMVV evaluates trimming the journal matching limits.
         var opsAfterCheckpoint = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
         
         opsAfterCheckpoint.Count.ShouldBeLessThan(opsBeforeCheckpoint.Count);
         
-        // Ensure the data operations directly evaluated structurally were safely dynamically cleanly correctly efficiently collected implicitly securely rationally natively actively properly completely explicitly
+        // Ensure the data operations were collected
         opsAfterCheckpoint.Any(o => o.DocumentId == "topo-doc").ShouldBeFalse();
     }
 }

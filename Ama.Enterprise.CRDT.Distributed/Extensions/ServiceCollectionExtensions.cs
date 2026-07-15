@@ -37,14 +37,16 @@ public static class ServiceCollectionExtensions
         optionsBuilder
             .Validate(options => options.CheckpointIntervalSeconds > 0, 
                 "CheckpointIntervalSeconds must be greater than zero.")
+            .Validate(options => options.MaintenanceIntervalSeconds > 0, 
+                "MaintenanceIntervalSeconds must be greater than zero.")
             .Validate(options => options.AntiEntropyIntervalSeconds > 0, 
                 "AntiEntropyIntervalSeconds must be greater than zero.")
             .Validate(options => options.AntiEntropyInitialDelaySeconds >= 0, 
                 "AntiEntropyInitialDelaySeconds cannot be negative.")
             .Validate(options => options.PeerEvictionTtlSeconds == 0 || options.PeerEvictionTtlSeconds >= options.AntiEntropyIntervalSeconds * 3, 
                 "PeerEvictionTtlSeconds must be at least 3 times the AntiEntropyIntervalSeconds to prevent peer topology oscillation.")
-            .Validate(options => options.PeerEvictionTtlSeconds == 0 || options.PeerEvictionTtlSeconds >= options.CheckpointIntervalSeconds, 
-                "PeerEvictionTtlSeconds must be greater than or equal to the CheckpointIntervalSeconds as evictions are processed during checkpoint cycles.")
+            .Validate(options => options.PeerEvictionTtlSeconds == 0 || options.PeerEvictionTtlSeconds >= options.MaintenanceIntervalSeconds, 
+                "PeerEvictionTtlSeconds must be greater than or equal to the MaintenanceIntervalSeconds as evictions are processed during maintenance cycles.")
             .Validate(options => options.JournalTrimThreshold >= 0, 
                 "JournalTrimThreshold cannot be negative.")
             .Validate(options => options.CompactionTtlSeconds >= 0, 
@@ -91,6 +93,7 @@ public static class ServiceCollectionExtensions
 
         services.AddHostedService<CrdtInitializationService>();
         services.AddHostedService<CrdtCheckpointService>();
+        services.AddHostedService<CrdtMaintenanceService>();
 
         return services;
     }
