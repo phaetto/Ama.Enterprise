@@ -77,8 +77,8 @@ public static class Program
                 .AddCrdtSystemTextJson(useBrotliCompression: true);
 
         services.AddCrdtMessagePack(
-            MessagePack.Formatters.Ama_Enterprise_CRDT_MessagePack_MessagePackResolver.Instance,
-            MessagePack.Formatters.Ama_Enterprise_CRDT_Distributed_ShowCase_MessagePackResolver.Instance
+            MessagePack.Resolvers.Ama_Enterprise_CRDT_MessagePack_MessagePackResolver.Instance,
+            MessagePack.Resolvers.Ama_Enterprise_CRDT_Distributed_ShowCase_MessagePackResolver.Instance
         );
 
         // Register document types into the orchestrator and expose generic interfaces via explicit transparent forwarders

@@ -283,7 +283,7 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
         sb.AppendLine("using MessagePack;");
         sb.AppendLine("using MessagePack.Formatters;");
         sb.AppendLine();
-        sb.AppendLine("namespace Ama.Enterprise.CRDT.MessagePack.Formatters");
+        sb.AppendLine("namespace Ama.Enterprise.CRDT.MessagePack.Resolvers");
         sb.AppendLine("{");
         
         sb.AppendLine($"    public sealed class {resolverName} : global::MessagePack.IFormatterResolver");
@@ -346,7 +346,7 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
             else
             {
                 var formatterName = GetFormatterClassName(type);
-                sb.AppendLine($"                if (type == typeof({typeFullName})) formatter = new CustomFormatterWrapper<{typeFullName}>(new {formatterName}());");
+                sb.AppendLine($"                if (type == typeof({typeFullName})) formatter = new CustomFormatterWrapper<{typeFullName}>(new global::Ama.Enterprise.CRDT.MessagePack.Formatters.{formatterName}());");
             }
         }
 
@@ -380,6 +380,11 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
 
         sb.AppendLine("        }");
         sb.AppendLine("    }");
+        sb.AppendLine("}");
+
+        sb.AppendLine();
+        sb.AppendLine("namespace Ama.Enterprise.CRDT.MessagePack.Formatters");
+        sb.AppendLine("{");
 
         foreach (var type in sortedCustoms)
         {
@@ -537,7 +542,7 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
         var formatterName = GetFormatterClassName(typeSymbol);
         
         sb.AppendLine();
-        sb.AppendLine($"    public sealed class {formatterName} : {resolverName}.ICustomFormatter<{typeFullName}>");
+        sb.AppendLine($"    public sealed class {formatterName} : global::Ama.Enterprise.CRDT.MessagePack.Resolvers.{resolverName}.ICustomFormatter<{typeFullName}>");
         sb.AppendLine("    {");
 
         // Guarantee a flawless, highly reliable deterministic constraint bounding overriding AST evaluation bugs.
@@ -796,7 +801,7 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
         }
 
         sb.AppendLine();
-        sb.AppendLine($"    public sealed class {formatterName} : {resolverName}.ICustomFormatter<{typeFullName}>");
+        sb.AppendLine($"    public sealed class {formatterName} : global::Ama.Enterprise.CRDT.MessagePack.Resolvers.{resolverName}.ICustomFormatter<{typeFullName}>");
         sb.AppendLine("    {");
         
         // Serialize
@@ -866,7 +871,7 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
         }
 
         sb.AppendLine();
-        sb.AppendLine($"    public sealed class {formatterName} : {resolverName}.ICustomFormatter<{typeFullName}>");
+        sb.AppendLine($"    public sealed class {formatterName} : global::Ama.Enterprise.CRDT.MessagePack.Resolvers.{resolverName}.ICustomFormatter<{typeFullName}>");
         sb.AppendLine("    {");
 
         // Serialize

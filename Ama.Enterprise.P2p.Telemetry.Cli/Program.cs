@@ -69,8 +69,8 @@ internal sealed class Program
                 .AddCrdtSystemTextJson(useBrotliCompression: true);
 
         services.AddCrdtMessagePack(
-            CRDT.MessagePack.Formatters.Ama_Enterprise_CRDT_MessagePack_MessagePackResolver.Instance,
-            CRDT.MessagePack.Formatters.Ama_Enterprise_P2p_Telemetry_Cli_MessagePackResolver.Instance
+            CRDT.MessagePack.Resolvers.Ama_Enterprise_CRDT_MessagePack_MessagePackResolver.Instance,
+            CRDT.MessagePack.Resolvers.Ama_Enterprise_P2p_Telemetry_Cli_MessagePackResolver.Instance
         );
 
         services.AddSingleton(TimeProvider.System);

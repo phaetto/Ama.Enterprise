@@ -4,7 +4,7 @@ using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.TableStorage.Extensions;
 using Ama.Enterprise.CRDT.MessagePack.Extensions;
-using Ama.Enterprise.CRDT.MessagePack.Formatters;
+using Ama.Enterprise.CRDT.MessagePack.Resolvers;
 using Ama.Enterprise.FeatureFlags.Extensions;
 using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Services;

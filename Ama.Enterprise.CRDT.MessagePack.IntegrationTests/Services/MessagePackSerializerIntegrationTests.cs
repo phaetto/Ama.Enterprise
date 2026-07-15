@@ -2,7 +2,7 @@ namespace Ama.Enterprise.CRDT.MessagePack.IntegrationTests.Services;
 
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.MessagePack.Extensions;
-using Ama.Enterprise.CRDT.MessagePack.Formatters;
+using Ama.Enterprise.CRDT.MessagePack.Resolvers;
 using Ama.Enterprise.CRDT.MessagePack.UnitTests.Models;
 using Ama.Enterprise.P2p.Models.Core;
 using Microsoft.Extensions.DependencyInjection;
