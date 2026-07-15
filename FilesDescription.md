@@ -65,7 +65,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtSnapshotDataDto.cs` | DTO representing a serialized snapshot payload, avoiding tuple usage across generic bounds. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtSnapshotMessage.cs` | Message payload containing a complete materialized CRDT document snapshot, used as a fallback synchronization mechanism when log truncation gaps are detected. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtStateSyncMessage.cs` | Structure carrying generic synchronization states formatted across anti-entropy operations representing document DVV. |
-| `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtOptions.cs` | Added `PeerTombstoneCooldownSeconds` configuring the exact cooldown duration before entirely purging a tombstoned replica from the cluster state tracking. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtOptions.cs` | Added `AvoidBlindCheckpointWrites` setting to enable last-known state caching for performance optimization. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtP2pJsonContext.cs` | JSON serialization context mapping AOT bindings resolving eviction message constraints. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtReplicaRegistration.cs` | Represents a dynamically registered Replica ID enforcing discrete CRDT multi-mesh state architectures. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtSystemAotContext.cs` | AOT contextual reflection mapping for internal orchestrator registry CRDT scopes, bridging models. |
@@ -73,7 +73,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Models/PooledDocumentCommand.cs` | Custom awaitable envelope implementing an IValueTaskSource object pool for the Single-Reader lock-free document channels, avoiding garbage blockages. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/PooledOrchestratorCommand.cs` | Custom awaitable envelope implementing an IValueTaskSource object pool for the lock-free Single-Reader orchestrator channel, executing commands sequentially and mapping constraints. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ClusterStateTracker.cs` | Updated `ImportState` and `CleanupExpiredTombstones` to bypass tombstone cleanup completely if `cooldown` is less than or equal to `TimeSpan.Zero`, treating the feature as explicitly disabled. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtCheckpointService.cs` | Extracted trimming and eviction logic to enforce SRP, allowing strict persistence cycles avoiding stalling delays. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtCheckpointService.cs` | Introduced a last-known state cache for global version vectors and cluster states to eliminate unnecessary blind storage writes when enabled. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Updated anti-entropy limits and fallback sync boundaries to `await IsPeerExpectedAsync` extracting bounds against decoupled active network states. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtEvictionService.cs` | Implementation of `ICrdtEvictionService` extracting the eviction logic, avoiding duplication. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtInitializationService.cs` | Updated extracting `DistributedCrdtOptions` propagating dynamic `tombstoneCooldown` durations directly feeding immediate startup evaluation tracking. |

@@ -64,4 +64,12 @@ public sealed class DistributedCrdtOptions
     /// Defaults to 0 (compaction disabled).
     /// </summary>
     public int CompactionTtlSeconds { get; set; } = 0;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether to avoid blind checkpoint writes to storage.
+    /// When enabled, the checkpoint service will maintain an in-memory last-known state cache 
+    /// and skip storage saves if the payload has not mutated.
+    /// Defaults to false.
+    /// </summary>
+    public bool AvoidBlindCheckpointWrites { get; set; } = false;
 }
