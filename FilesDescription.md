@@ -3,7 +3,7 @@
 | `$/.editorconfig` | No description provided. |
 | `$/.github/workflows/ci.yml` | GitHub Actions workflow for building and testing the solution on PRs and non-master branch pushes. |
 | `$/.github/workflows/publish-nuget-manual.yml` | Removed `Ama.Enterprise.P2p.Telemetry.Cli` from manual packing and automated pre-release cleanup arrays to halt its distribution temporarily. |
-| `$/.github/workflows/publish-nuget.yml` | Reverted deployment steps for `Ama.Enterprise.P2p.Telemetry.Cli` removing it from active publication pipelines. |
+| `$/.github/workflows/publish-nuget.yml` | Added the unlist previous prerelease versions step to clean up CI-generated previews on NuGet automatically. |
 | `$/.gitignore` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/Ama.Enterprise.CRDT.Distributed.IntegrationTests.csproj` | Updated reference from `Ama.Enterprise.UnitTests` to the renamed `Ama.Enterprise.Project.Tests.Common`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/AntiEntropyStateSyncIntegrationTests.cs` | Reorganized to include all active state sync, gossip payload handling, and peer topology join behaviors. |
