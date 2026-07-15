@@ -37,13 +37,13 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\Ama.Enterprise.CRDT.MessagePack.SourceGenerators\Ama.Enterprise.CRDT.MessagePack.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+		<ProjectReference Include="..\Ama.Enterprise.CRDT.MessagePack.SourceGenerators\Ama.Enterprise.CRDT.MessagePack.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" PrivateAssets="all" />
 		<ProjectReference Include="..\Ama.Enterprise.Licensing\Ama.Enterprise.Licensing.csproj" />
-		<ProjectReference Include="..\Ama.Enterprise.Project.Analyzers\Ama.Enterprise.Project.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+		<ProjectReference Include="..\Ama.Enterprise.Project.Analyzers\Ama.Enterprise.Project.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" PrivateAssets="all" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<None Include="$(TargetDir)..\Ama.Enterprise.CRDT.MessagePack.SourceGenerators\bin\Release\netstandard2.0\*" pack="true" PackagePath="analyzers/dotnet/cs"></None>
+		<None Include="..\Ama.Enterprise.CRDT.MessagePack.SourceGenerators\bin\$(Configuration)\netstandard2.0\*.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
 		<None Include="..\README.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
 
