@@ -40,7 +40,8 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
     public TableStorageDistributedCrdtStorage(
         IOptions<TableStorageCrdtOptions> options,
-        ICrdtSerializer serializer,
+        JsonCrdtSerializer textJsonSerializer,
+        IEnumerable<ICrdtSerializer> availableSerializers,
         ILogger<TableStorageDistributedCrdtStorage> logger,
         IMeterFactory? meterFactory = null)
     {
@@ -58,7 +59,16 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
             throw new ArgumentException("Table name cannot be null or empty.", nameof(options));
         }
 
-        this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+        if (storageOptions.UseBinarySerialization)
+        {
+            this.serializer = availableSerializers.FirstOrDefault(s => s.GetType() != typeof(JsonCrdtSerializer)) 
+                ?? throw new InvalidOperationException("Binary serialization was requested for Table Storage, but no alternative ICrdtSerializer (e.g., MessagePack) was found in the DI container.");
+        }
+        else
+        {
+            this.serializer = textJsonSerializer ?? throw new ArgumentNullException(nameof(textJsonSerializer));
+        }
+
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         this.tableServiceClient = new TableServiceClient(storageOptions.ConnectionString);
