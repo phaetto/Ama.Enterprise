@@ -3,6 +3,8 @@ namespace Ama.Enterprise.FeatureFlags.ShowCase;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.TableStorage.Extensions;
+using Ama.Enterprise.CRDT.MessagePack.Extensions;
+using Ama.Enterprise.CRDT.MessagePack.Formatters;
 using Ama.Enterprise.FeatureFlags.Extensions;
 using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Services;
@@ -69,6 +71,7 @@ public static class Program
         // Register Showcase tablestorage persistence provider
         services.AddDistributedCrdtTableStorage(options => {
             options.ConnectionString = "UseDevelopmentStorage=true";
+            options.UseBinarySerialization = true;
         });
 
         // 1. Explicitly register the distributed CRDT topological core bounds
@@ -124,6 +127,11 @@ public static class Program
                     options.IsEncryptionEnabled = true;
                     options.EncryptionKeyBase64 = encryptionKey;
                 });
+
+        services.AddCrdtMessagePack(
+            Ama_Enterprise_CRDT_MessagePack_MessagePackResolver.Instance,
+            Ama_Enterprise_FeatureFlags_ShowCase_MessagePackResolver.Instance
+        );
 
         await using var provider = services.BuildServiceProvider();
         var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("ShowCase");

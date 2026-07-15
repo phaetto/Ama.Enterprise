@@ -12,7 +12,9 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+		<ProjectReference Include="..\Ama.Enterprise.CRDT.MessagePack.SourceGenerators\Ama.Enterprise.CRDT.MessagePack.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 		<ProjectReference Include="..\Ama.Enterprise.CRDT.Distributed.TableStorage\Ama.Enterprise.CRDT.Distributed.TableStorage.csproj" />
+		<ProjectReference Include="..\Ama.Enterprise.CRDT.MessagePack\Ama.Enterprise.CRDT.MessagePack.csproj" />
 		<ProjectReference Include="..\Ama.Enterprise.FeatureFlags\Ama.Enterprise.FeatureFlags.csproj" />
 	</ItemGroup>
 

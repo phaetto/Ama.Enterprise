@@ -24,6 +24,6 @@ using System.Text.Json.Serialization;
 [JsonSerializable(typeof(CrdtDocument<CrdtSignalingState>))]
 [JsonSerializable(typeof(List<JournaledOperation>))]
 [JsonSerializable(typeof(DottedVersionVector))]
-public sealed partial class DistributedSignalingAotContext : JsonSerializerContext
+public sealed partial class DistributedSignalingJsonContext : JsonSerializerContext
 {
 }

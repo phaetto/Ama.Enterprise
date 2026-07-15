@@ -29,7 +29,7 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
         "Ama.Enterprise.P2p.WebRTC.Models.WebRtcJsonContext",
         "Ama.Enterprise.CRDT.Distributed.Models.DistributedCrdtP2pJsonContext",
         "Ama.Enterprise.P2p.Services.Discovery.UdpDiscoveryJsonContext",
-        "Ama.Enterprise.P2p.WebRTC.DistributedSignaling.Models.DistributedSignalingAotContext",
+        "Ama.Enterprise.P2p.WebRTC.DistributedSignaling.Models.DistributedSignalingJsonContext",
     };
 
     private static readonly SymbolDisplayFormat DefinitionFormat = new SymbolDisplayFormat(

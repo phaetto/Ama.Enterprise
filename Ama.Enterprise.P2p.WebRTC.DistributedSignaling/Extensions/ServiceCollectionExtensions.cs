@@ -62,7 +62,7 @@ public static class ServiceCollectionExtensions
     private static IServiceCollection AddSharedSerializationBindings(this IServiceCollection services)
     {
         services.AddCrdt()
-                .AddCrdtJsonTypeInfoResolver(DistributedSignalingAotContext.Default)
+                .AddCrdtJsonTypeInfoResolver(DistributedSignalingJsonContext.Default)
                 .AddCrdtAotContext<DistributedSignalingCrdtAotContext>();
 
         services.AddCrdtSerializableType<WebRtcInvitationOffer>("webrtc-offer");
