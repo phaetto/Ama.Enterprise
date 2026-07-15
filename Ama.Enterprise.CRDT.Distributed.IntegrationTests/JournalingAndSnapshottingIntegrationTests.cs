@@ -57,6 +57,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
             opt.CheckpointIntervalSeconds = 30;
             opt.AntiEntropyIntervalSeconds = 15;
             opt.ActiveSyncEnabled = true;
+            opt.MaintenanceIntervalSeconds = 120;
         });
 
         services.AddDistributedCrdtReplica(replicaId);

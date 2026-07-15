@@ -114,13 +114,14 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
                 return this.serializer.DeserializeFromBytes<DottedVersionVector>(payload);
             }
         }
-        catch (RequestFailedException ex) when (ex.Status == 404)
+        catch (RequestFailedException ex) when (ex.Status == 404 && ex.ErrorCode != "TableNotFound")
         {
             return null;
         }
         catch (Exception ex)
         {
-            this.logger.LogError(ex, "Failed to load global DVV.");
+            this.logger.LogError(ex, "Storage connection failed during LoadGlobalVersionVectorAsync. Failing fast to prevent state corruption.");
+            throw;
         }
 
         return null;
@@ -149,7 +150,8 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         }
         catch (Exception ex)
         {
-            this.logger.LogError(ex, "Failed to save global DVV.");
+            this.logger.LogError(ex, "Storage connection failed during SaveGlobalVersionVectorAsync.");
+            throw;
         }
     }
 
@@ -174,13 +176,14 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
                 return this.serializer.DeserializeFromBytes<ClusterStateSnapshotDto>(payload);
             }
         }
-        catch (RequestFailedException ex) when (ex.Status == 404)
+        catch (RequestFailedException ex) when (ex.Status == 404 && ex.ErrorCode != "TableNotFound")
         {
             return null;
         }
         catch (Exception ex)
         {
-            this.logger.LogError(ex, "Failed to actively fetch the cluster state tracking parameters explicitly matching remote node matrices natively.");
+            this.logger.LogError(ex, "Storage connection failed during LoadClusterStateAsync. Failing fast to prevent state corruption.");
+            throw;
         }
 
         return null;
@@ -209,7 +212,8 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         }
         catch (Exception ex)
         {
-            this.logger.LogError(ex, "Failed to actively preserve and structure complex tracking parameters inherently avoiding topology amnesia globally safely.");
+            this.logger.LogError(ex, "Storage connection failed during SaveClusterStateAsync.");
+            throw;
         }
     }
 
@@ -234,13 +238,14 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
                 return this.serializer.DeserializeFromBytes<CrdtDocument<TState>>(payload);
             }
         }
-        catch (RequestFailedException ex) when (ex.Status == 404)
+        catch (RequestFailedException ex) when (ex.Status == 404 && ex.ErrorCode != "TableNotFound")
         {
             return null;
         }
         catch (Exception ex)
         {
-            this.logger.LogError(ex, "Failed to load document.");
+            this.logger.LogError(ex, "Storage connection failed during LoadDocumentAsync. Failing fast to prevent state corruption.");
+            throw;
         }
 
         return null;
@@ -269,7 +274,8 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         }
         catch (Exception ex)
         {
-            this.logger.LogError(ex, "Failed to save document.");
+            this.logger.LogError(ex, "Storage connection failed during SaveDocumentAsync.");
+            throw;
         }
     }
 
@@ -290,7 +296,8 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         }
         catch (Exception ex)
         {
-            this.logger.LogError(ex, "Failed to delete document state.");
+            this.logger.LogError(ex, "Storage connection failed during DeleteDocumentAsync.");
+            throw;
         }
     }
 
@@ -435,7 +442,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
             {
                 response = await this.tableClient.GetEntityAsync<TableEntity>(partitionKey, rowKey, cancellationToken: cancellationToken).ConfigureAwait(false);
             }
-            catch (RequestFailedException ex) when (ex.Status == 404)
+            catch (RequestFailedException ex) when (ex.Status == 404 && ex.ErrorCode != "TableNotFound")
             {
                 // Unregistered dot bypassed.
                 continue;
