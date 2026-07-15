@@ -208,7 +208,7 @@ public sealed class AspNetCorePeerHandshaker : IPeerHandshaker, IDisposable
             content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
 
             using var response = await client.PostAsync(uri, content, timeoutCts.Token).ConfigureAwait(false);
-            if (response.IsSuccessStatusCode)
+            if (response.IsSuccessStatusCode && response.StatusCode != HttpStatusCode.NoContent)
             {
                 var responseBytes = await response.Content.ReadAsByteArrayAsync(timeoutCts.Token).ConfigureAwait(false);
                 var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };

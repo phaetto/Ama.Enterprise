@@ -218,7 +218,7 @@ public sealed class AspNetCorePeerDiscovery : IPeerDiscovery, IDisposable
             var response = await client.PostAsync(uri, content, timeoutCts.Token).ConfigureAwait(false);
             discoveryRequestsSentCounter.Add(1, tags);
 
-            if (response.IsSuccessStatusCode)
+            if (response.IsSuccessStatusCode && response.StatusCode != HttpStatusCode.NoContent)
             {
                 var responseBytes = await response.Content.ReadAsByteArrayAsync(timeoutCts.Token).ConfigureAwait(false);
                 var remotePayload = serializer.DeserializeFromBytes<PeerHandshakePayload>(responseBytes);
