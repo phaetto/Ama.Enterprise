@@ -376,14 +376,14 @@
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/JsonSerializableExtensiblePayloadAnalyzerTests.cs` | Unit tests evaluating diagnostic scenarios verifying constraints validating generic enumerations, nested custom list structures, explicit system exclusions, and strictly tracked options bounds avoiding validation storms. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/PropertyInfoUsageAnalyzerTests.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/SystemConvertUsageAnalyzerTests.cs` | No description provided. |
-| `$/Ama.Enterprise.Project.Analyzers.UnitTests/TaskDelayWithoutOptionsAnalyzerTests.cs` | Unit tests evaluating diagnostic evaluation scenarios for `TaskDelayWithoutOptionsAnalyzer`. |
+| `$/Ama.Enterprise.Project.Analyzers.UnitTests/TaskDelayWithoutOptionsAnalyzerTests.cs` | Added explicit test cases verifying the correct analyzer behavior for dynamic configuration variables used alongside `TimeSpan` structural factories. Adjusted test assertions to accurately expect `DiagnosticSeverity.Error` to align with configured rule. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/ThreadSleepUsageAnalyzerTests.cs` | Unit tests evaluating diagnostic evaluation scenarios for `ThreadSleepUsageAnalyzer`. |
 | `$/Ama.Enterprise.Project.Analyzers/Ama.Enterprise.Project.Analyzers.csproj` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers/DirectSerializationUsageAnalyzer.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers/JsonSerializableExtensiblePayloadAnalyzer.cs` | Roslyn diagnostic analyzer enforcing that all models injected into P2P `JsonSerializerContext` classes correctly implement the `IExtensibleDistributedPayload` interface, identifying options structures erroneously injected into AOT mapping arrays explicitly. |
 | `$/Ama.Enterprise.Project.Analyzers/PropertyInfoUsageAnalyzer.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers/SystemConvertUsageAnalyzer.cs` | No description provided. |
-| `$/Ama.Enterprise.Project.Analyzers/TaskDelayWithoutOptionsAnalyzer.cs` | Roslyn diagnostic analyzer enforcing configurable options instead of hardcoded intervals within `Task.Delay` invocations. |
+| `$/Ama.Enterprise.Project.Analyzers/TaskDelayWithoutOptionsAnalyzer.cs` | Fixed a bug where `TimeSpan` static methods (like `FromSeconds`) parameterized with dynamically bound variables (e.g. nested calls like `Math.Max` acting on options) were incorrectly flagged as hardcoded constants. |
 | `$/Ama.Enterprise.Project.Analyzers/ThreadSleepUsageAnalyzer.cs` | Roslyn diagnostic analyzer enforcing the prohibition of synchronous `Thread.Sleep` invocations to prevent thread starvation and poor asynchronous performance. |
 | `$/Ama.Enterprise.Project.Tests.Common/Ama.Enterprise.Project.Tests.Common.csproj` | No description provided. |
 | `$/Ama.Enterprise.Project.Tests.Common/Attributes/IntegrationFactAttribute.cs` | No description provided. |

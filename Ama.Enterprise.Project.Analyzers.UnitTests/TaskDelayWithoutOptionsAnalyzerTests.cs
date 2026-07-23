@@ -22,7 +22,7 @@ public class TestClass
     }
 }
 ";
-        var expected = new DiagnosticResult("CRDTPROJ0004", DiagnosticSeverity.Warning)
+        var expected = new DiagnosticResult("CRDTPROJ0004", DiagnosticSeverity.Error)
             .WithLocation(8, 15);
 
         var test = CreateTest(source);
@@ -45,7 +45,7 @@ public class TestClass
     }
 }
 ";
-        var expected = new DiagnosticResult("CRDTPROJ0004", DiagnosticSeverity.Warning)
+        var expected = new DiagnosticResult("CRDTPROJ0004", DiagnosticSeverity.Error)
             .WithLocation(9, 15);
 
         var test = CreateTest(source);
@@ -70,7 +70,7 @@ public class TestClass
     }
 }
 ";
-        var expected = new DiagnosticResult("CRDTPROJ0004", DiagnosticSeverity.Warning)
+        var expected = new DiagnosticResult("CRDTPROJ0004", DiagnosticSeverity.Error)
             .WithLocation(11, 15);
 
         var test = CreateTest(source);
@@ -120,6 +120,70 @@ public class ConfigOptions
     public async Task WaitAsync()
     {
         await Task.Delay(1000);
+    }
+}
+";
+        var test = CreateTest(source);
+        await test.RunAsync();
+    }
+
+    [Fact]
+    public async Task WhenTaskDelayUsesOptionsPropertyWithTimeSpanFromSeconds_ShouldNotReportDiagnostic()
+    {
+        var source = @"
+using System;
+using System.Threading.Tasks;
+
+public class MyOptions
+{
+    public int DelayInterval { get; set; }
+}
+
+public class TestClass
+{
+    private readonly MyOptions options;
+
+    public TestClass(MyOptions options)
+    {
+        this.options = options;
+    }
+
+    public async Task DoWork()
+    {
+        await Task.Delay(TimeSpan.FromSeconds(options.DelayInterval));
+    }
+}
+";
+        var test = CreateTest(source);
+        await test.RunAsync();
+    }
+
+    [Fact]
+    public async Task WhenTaskDelayUsesMathMaxWithOptions_ShouldNotReportDiagnostic()
+    {
+        var source = @"
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+
+public class MyOptions
+{
+    public int AntiEntropyInitialDelaySeconds { get; set; }
+}
+
+public class TestClass
+{
+    private readonly MyOptions options;
+
+    public TestClass(MyOptions options)
+    {
+        this.options = options;
+    }
+
+    public async Task DoWork(CancellationToken stoppingToken)
+    {
+        var initialDelay = TimeSpan.FromSeconds(Math.Max(0, options.AntiEntropyInitialDelaySeconds));
+        await Task.Delay(initialDelay, stoppingToken).ConfigureAwait(false);
     }
 }
 ";

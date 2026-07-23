@@ -118,7 +118,7 @@ public sealed class TaskDelayWithoutOptionsAnalyzer : DiagnosticAnalyzer
                     }
                 }
 
-                return invocation.Arguments.Length > 0;
+                return false;
             }
         }
 
