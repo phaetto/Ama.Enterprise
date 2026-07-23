@@ -376,7 +376,8 @@ public sealed class MqttPeerDiscovery : IPeerDiscovery, IDisposable
 
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            var options = discoveryOptionsMonitor.Get(meshId);
+            await Task.Delay(options.ReconnectDelay).ConfigureAwait(false);
 
             if (backgroundTaskCancellationSource?.IsCancellationRequested == false)
             {

@@ -150,7 +150,8 @@ public sealed class MqttClientManager : IMqttClientManager, IDisposable
     {
         logger.LogWarning("[{MeshId}] Standard mapped MQTT connection lost. Reason: {Reason}", meshId, args.Reason);
         
-        await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false); // TODO: Add/Use to options
+        var options = optionsMonitor.Get(meshId);
+        await Task.Delay(options.ReconnectDelay).ConfigureAwait(false);
 
         try
         {

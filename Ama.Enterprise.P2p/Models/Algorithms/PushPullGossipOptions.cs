@@ -37,6 +37,11 @@ public sealed class PushPullGossipOptions : IEquatable<PushPullGossipOptions>
     /// </summary>
     public int MaxDigestSize { get; set; } = 100;
 
+    /// <summary>
+    /// Gets or sets the delay applied within the loop when push-pull operations are disabled.
+    /// </summary>
+    public TimeSpan PushPullDisabledDelay { get; set; } = TimeSpan.FromSeconds(5);
+
     /// <inheritdoc />
     public bool Equals(PushPullGossipOptions? other)
     {
@@ -48,7 +53,8 @@ public sealed class PushPullGossipOptions : IEquatable<PushPullGossipOptions>
                DefaultTimeToLive == other.DefaultTimeToLive &&
                EnablePushPull == other.EnablePushPull &&
                PushPullInterval.Equals(other.PushPullInterval) &&
-               MaxDigestSize == other.MaxDigestSize;
+               MaxDigestSize == other.MaxDigestSize &&
+               PushPullDisabledDelay.Equals(other.PushPullDisabledDelay);
     }
 
     /// <inheritdoc />
@@ -60,7 +66,8 @@ public sealed class PushPullGossipOptions : IEquatable<PushPullGossipOptions>
             DefaultTimeToLive,
             EnablePushPull,
             PushPullInterval,
-            MaxDigestSize);
+            MaxDigestSize,
+            PushPullDisabledDelay);
     }
 
     /// <inheritdoc />

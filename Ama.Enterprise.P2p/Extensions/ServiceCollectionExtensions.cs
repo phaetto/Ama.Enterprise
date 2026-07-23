@@ -47,6 +47,8 @@ public static class ServiceCollectionExtensions
             services.Configure(meshId, configureNodeOptions);
         }
 
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<P2pNodeOptions>, P2pNodeOptionsValidator>());
+
         services.AddAmaEnterpriseLicense();
 
         if (!services.Any(s => s.ImplementationType == typeof(P2pHostedService)))

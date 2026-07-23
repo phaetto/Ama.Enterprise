@@ -3,6 +3,7 @@ namespace Ama.Enterprise.P2p.Services;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -259,12 +260,12 @@ public sealed class P2pHostedService(
 
     private async Task HealthCheckLoopAsync(string meshId, MeshState state, CancellationToken cancellationToken)
     {
-        var checkInterval = TimeSpan.FromSeconds(5); // TODO: Add/Use to options
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await Task.Delay(checkInterval, cancellationToken).ConfigureAwait(false);
+                var options = nodeOptionsMonitor.Get(meshId);
+                await Task.Delay(options.HealthCheckInterval, cancellationToken).ConfigureAwait(false);
                 
                 var peers = await state.PeerRegistry.GetAllPeersAsync(meshId, cancellationToken).ConfigureAwait(false);
                 foreach (var peer in peers)
@@ -301,15 +302,20 @@ public sealed class P2pHostedService(
     {
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+            var options = nodeOptionsMonitor.Get(meshId);
+            await Task.Delay(options.InitialDiscoveryDelay, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
             return;
         }
 
+        var currentInterval = discovery.DiscoveryInterval;
+
         while (!cancellationToken.IsCancellationRequested)
         {
+            var baseInterval = discovery.DiscoveryInterval;
+
             try
             {
                 var discoveredPeers = await discovery.DiscoverPeersAsync(cancellationToken).ConfigureAwait(false);
@@ -317,6 +323,28 @@ public sealed class P2pHostedService(
                 foreach (var peer in discoveredPeers)
                 {
                     await state.PeerRegistry.AddOrUpdatePeerAsync(meshId, peer, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
+                }
+
+                var options = nodeOptionsMonitor.Get(meshId);
+                var activePeers = await state.PeerRegistry.GetPeersByStatusAsync(meshId, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
+                var activeCount = activePeers.Count();
+
+                if (activeCount < options.MinActivePeers)
+                {
+                    currentInterval = baseInterval;
+                }
+                else if (activeCount >= options.MaxActivePeers)
+                {
+                    currentInterval = TimeSpan.FromMilliseconds(Math.Min(currentInterval.TotalMilliseconds * 2, options.MaxDiscoveryInterval.TotalMilliseconds));
+                }
+                else
+                {
+                    currentInterval = TimeSpan.FromMilliseconds(Math.Min(currentInterval.TotalMilliseconds * 1.5, options.MaxDiscoveryInterval.TotalMilliseconds));
+                }
+
+                if (currentInterval < baseInterval)
+                {
+                    currentInterval = baseInterval;
                 }
             }
             catch (OperationCanceledException) { }
@@ -329,7 +357,7 @@ public sealed class P2pHostedService(
 
             try
             {
-                await Task.Delay(discovery.DiscoveryInterval, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(currentInterval, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) { }
         }

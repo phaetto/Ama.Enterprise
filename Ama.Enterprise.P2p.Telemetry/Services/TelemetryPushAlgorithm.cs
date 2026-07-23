@@ -206,12 +206,12 @@ public sealed class TelemetryPushAlgorithm : IDisposable
             return;
         }
 
-        var checkInterval = TimeSpan.FromSeconds(5); // TODO: Add/Use to options
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await Task.Delay(checkInterval, cancellationToken).ConfigureAwait(false);
+                var options = telemetryOptionsMonitor.CurrentValue;
+                await Task.Delay(options.HealthCheckInterval, cancellationToken).ConfigureAwait(false);
 
                 var peers = await peerRegistry.GetAllPeersAsync(meshId, cancellationToken).ConfigureAwait(false);
                 foreach (var peer in peers)

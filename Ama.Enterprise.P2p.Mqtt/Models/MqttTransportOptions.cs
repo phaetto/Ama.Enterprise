@@ -37,6 +37,11 @@ public sealed class MqttTransportOptions : IEquatable<MqttTransportOptions>
     /// </summary>
     public bool UseTls { get; set; }
 
+    /// <summary>
+    /// Gets or sets the delay before attempting to reconnect to the MQTT broker after a disconnection.
+    /// </summary>
+    public TimeSpan ReconnectDelay { get; set; } = TimeSpan.FromSeconds(5);
+
     /// <inheritdoc />
     public bool Equals(MqttTransportOptions? other)
     {
@@ -48,7 +53,8 @@ public sealed class MqttTransportOptions : IEquatable<MqttTransportOptions>
                string.Equals(TopicPrefix, other.TopicPrefix, StringComparison.Ordinal) &&
                string.Equals(Username, other.Username, StringComparison.Ordinal) &&
                string.Equals(Password, other.Password, StringComparison.Ordinal) &&
-               UseTls == other.UseTls;
+               UseTls == other.UseTls &&
+               ReconnectDelay.Equals(other.ReconnectDelay);
     }
 
     /// <inheritdoc />
@@ -57,6 +63,6 @@ public sealed class MqttTransportOptions : IEquatable<MqttTransportOptions>
     /// <inheritdoc />
     public override int GetHashCode()
     {
-        return HashCode.Combine(Host, Port, TopicPrefix, Username, Password, UseTls);
+        return HashCode.Combine(Host, Port, TopicPrefix, Username, Password, UseTls, ReconnectDelay);
     }
 }

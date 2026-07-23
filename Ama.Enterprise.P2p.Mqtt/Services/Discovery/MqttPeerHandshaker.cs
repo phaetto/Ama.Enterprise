@@ -317,7 +317,8 @@ public sealed class MqttPeerHandshaker : IPeerHandshaker, IDisposable
 
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            var options = optionsMonitor.Get(meshId);
+            await Task.Delay(options.ReconnectDelay).ConfigureAwait(false);
 
             if (backgroundTaskCancellationSource?.IsCancellationRequested == false)
             {

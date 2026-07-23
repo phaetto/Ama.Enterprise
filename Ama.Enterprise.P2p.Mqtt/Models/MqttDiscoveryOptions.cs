@@ -52,6 +52,11 @@ public sealed class MqttDiscoveryOptions : IEquatable<MqttDiscoveryOptions>
     /// </summary>
     public string DiscoveryTopicSuffix { get; set; } = "discovery";
 
+    /// <summary>
+    /// Gets or sets the delay before attempting to reconnect the discovery client after a disconnection.
+    /// </summary>
+    public TimeSpan ReconnectDelay { get; set; } = TimeSpan.FromSeconds(5);
+
     /// <inheritdoc />
     public bool Equals(MqttDiscoveryOptions? other)
     {
@@ -66,7 +71,8 @@ public sealed class MqttDiscoveryOptions : IEquatable<MqttDiscoveryOptions>
                UseTls == other.UseTls &&
                DiscoveryInterval.Equals(other.DiscoveryInterval) &&
                DiscoveryTimeout.Equals(other.DiscoveryTimeout) &&
-               string.Equals(DiscoveryTopicSuffix, other.DiscoveryTopicSuffix, StringComparison.Ordinal);
+               string.Equals(DiscoveryTopicSuffix, other.DiscoveryTopicSuffix, StringComparison.Ordinal) &&
+               ReconnectDelay.Equals(other.ReconnectDelay);
     }
 
     /// <inheritdoc />
@@ -85,6 +91,7 @@ public sealed class MqttDiscoveryOptions : IEquatable<MqttDiscoveryOptions>
         hash.Add(DiscoveryInterval);
         hash.Add(DiscoveryTimeout);
         hash.Add(DiscoveryTopicSuffix);
+        hash.Add(ReconnectDelay);
         return hash.ToHashCode();
     }
 }

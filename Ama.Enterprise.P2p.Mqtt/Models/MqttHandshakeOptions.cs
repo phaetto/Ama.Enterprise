@@ -52,6 +52,11 @@ public sealed class MqttHandshakeOptions : IEquatable<MqttHandshakeOptions>
     /// </summary>
     public int HandshakePort { get; set; }
 
+    /// <summary>
+    /// Gets or sets the delay before attempting to reconnect the handshaker client after a disconnection.
+    /// </summary>
+    public TimeSpan ReconnectDelay { get; set; } = TimeSpan.FromSeconds(5);
+
     /// <inheritdoc />
     public bool Equals(MqttHandshakeOptions? other)
     {
@@ -66,7 +71,8 @@ public sealed class MqttHandshakeOptions : IEquatable<MqttHandshakeOptions>
                UseTls == other.UseTls &&
                HandshakeTimeout.Equals(other.HandshakeTimeout) &&
                string.Equals(HandshakeTopicSuffix, other.HandshakeTopicSuffix, StringComparison.Ordinal) &&
-               HandshakePort == other.HandshakePort;
+               HandshakePort == other.HandshakePort &&
+               ReconnectDelay.Equals(other.ReconnectDelay);
     }
 
     /// <inheritdoc />
@@ -85,6 +91,7 @@ public sealed class MqttHandshakeOptions : IEquatable<MqttHandshakeOptions>
         hash.Add(HandshakeTimeout);
         hash.Add(HandshakeTopicSuffix, StringComparer.Ordinal);
         hash.Add(HandshakePort);
+        hash.Add(ReconnectDelay);
         return hash.ToHashCode();
     }
 }
