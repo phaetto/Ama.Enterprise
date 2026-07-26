@@ -42,6 +42,57 @@ High-level features utilizing the CRDT Orchestrator to provide instant business 
 - `Ama.Enterprise.FeatureFlags`: A decentralized, masterless feature flag system.
 - `Ama.Enterprise.P2p.WebRTC.DistributedSignaling`: Decentralized, masterless signaling state that allows P2P WebRTC connections grouped in "rooms".
 
+## Showcases
+
+This repository includes highly interactive console applications demonstrating the framework across dynamically spawned nodes:
+
+- [**Distributed CRDT Showcase**](Ama.Enterprise.CRDT.Distributed.ShowCase) (`Ama.Enterprise.CRDT.Distributed.ShowCase`): Demonstrates the `ICrdtDocumentOrchestrator` managing multiple generic CRDT collections (Task Lists and IoT Fleet Statuses) simultaneously. Features local file-based storage, Native MessagePack binary serialization, out-of-band admin telemetry forwarding, and a `hammer` load-testing mode that pumps thousands of concurrent operations into the mesh.
+- [**Distributed CRDT Topology Showcase**](Ama.Enterprise.CRDT.Distributed.Topology.ShowCase) (`Ama.Enterprise.CRDT.Distributed.Topology.ShowCase`): Demonstrates advanced Multi-Mesh architectures using isolated network topologies (Server TCP/UDP meshes and User WebRTC out-of-band signaling meshes) bridged by decoupled Zero-Trust RBAC routing policies. Features dynamic multi-role session capabilities, WebRTC signaling bridging, and region-based generic clustering.
+- [**Feature Flags Showcase**](Ama.Enterprise.FeatureFlags.ShowCase) (`Ama.Enterprise.FeatureFlags.ShowCase`): A masterless P2P Feature Flag management console. Demonstrates extracting high-level applications backed by CRDT synchronization, Azure Table Storage persistence, strict X.509 Certificate mutual authentication, and E2E AES-GCM data-in-transit wire encryption.
+
+*Tip: While running any showcase, type `clone` into the console. This will automatically spawn a brand-new node process on a new port that instantly discovers and syncs with your primary node.*
+
+For additional advanced scenarios, tutorials, and complete sample projects, please check out the [Ama.Enterprise.Examples](https://github.com/amuste/Ama.Enterprise.Examples) repository.
+
+## Applications Provided Out-Of-The-Box
+
+This repository includes ready-to-use tooling designed to integrate seamlessly into your decentralized environments:
+
+- **P2P Telemetry CLI** (`Ama.Enterprise.P2p.Telemetry.Cli`): A terminal-based real-time UI built with `Terminal.Gui`. It connects to the mesh as a passive observer to aggregate and display decentralized cluster metrics, time-series histories, and hardware utilization across the distributed topology.
+
+## Prerequisites
+
+- [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) or later.
+- A compatible IDE such as Visual Studio 2022 (latest preview), JetBrains Rider, or VS Code.
+- *(Optional)* Azurite / Azure Storage Emulator if you plan to use the Azure Table Storage persistence backend locally.
+
+## Installation
+
+The toolkit is highly modular. You only need to install the specific packages required for your node architecture. 
+
+To get started with the core P2P network and the distributed CRDT orchestrator, install the primary packages via the .NET CLI:
+
+```bash
+# Core P2P Mesh Networking
+dotnet add package Ama.Enterprise.P2p
+
+# Distributed CRDT Orchestrator
+dotnet add package Ama.Enterprise.CRDT.Distributed
+```
+
+Depending on your environment, you may also want to install specific transports or persistence mechanisms to extend the capabilities of your mesh:
+
+```bash
+# ASP.NET Core HTTP/Kestrel Transport integration
+dotnet add package Ama.Enterprise.P2p.AspNetCore
+
+# Azure Table Storage backend for CRDT persistence
+dotnet add package Ama.Enterprise.CRDT.Distributed.TableStorage
+
+# MessagePack AOT serialization support
+dotnet add package Ama.Enterprise.CRDT.MessagePack
+```
+
 ## Quick Start
 
 ### 1. Setup AOT Contexts & DI
@@ -113,21 +164,6 @@ await orchestrator.CreateDocumentAsync("dev-team-list", "task-list", cancellatio
 await taskManager.SetTaskAsync("dev-team-list", "task-1", "Review PR", isDone: false, cancellationToken);
 ```
 
-## Showcases
-
-This repository includes highly interactive console applications demonstrating the framework across dynamically spawned nodes:
-
-- [**Distributed CRDT Showcase**](Ama.Enterprise.CRDT.Distributed.ShowCase/README.md) (`Ama.Enterprise.CRDT.Distributed.ShowCase`): Demonstrates the `ICrdtDocumentOrchestrator` managing multiple generic CRDT collections (Task Lists and IoT Fleet Statuses) simultaneously. Features local SQLite storage, Native MessagePack binary serialization, and a `hammer` load-testing mode that pumps thousands of concurrent operations into the mesh.
-- [**Feature Flags Showcase**](Ama.Enterprise.FeatureFlags.ShowCase/README.md) (`Ama.Enterprise.FeatureFlags.ShowCase`): A masterless P2P Feature Flag management console. Demonstrates extracting high-level applications backed by CRDT synchronization and dynamic UDP cluster discovery.
-
-*Tip: While running either showcase, type `clone` into the console. This will automatically spawn a brand-new node process on a new port that instantly discovers and syncs with your primary node.*
-
-## Applications that provided Out-Of-The-Box
-
-This repository includes highly interactive console applications demonstrating the framework across dynamically spawned nodes:
-
-- **P2P Telemetry CLI** (`Ama.Enterprise.P2p.Telemetry.Cli`): A terminal-based real-time UI built with `Terminal.Gui`. It connects to the mesh as a passive observer to aggregate and display decentralized cluster metrics, time-series histories, and hardware utilization across the distributed topology.
-
 ## Building and Testing
 
 To build the project:
@@ -172,6 +208,9 @@ When you purchase an Enterprise License, you are paying for three things:
 1. Legal Compliance & Risk Mitigation: A commercial Enterprise EULA that clears your legal department. The base Community License is provided strictly "AS IS" with an absolute limitation of liability protecting the author. The Enterprise tier provides the explicit commercial agreements and risk mitigation required by corporate compliance teams.
 2. Guaranteed Support SLAs: Direct access to the author for architectural guidance, debugging, and prioritized bug fixes.
 3. The Sustainability of the Toolkit: Ensuring the P2P mesh and CRDT engine you rely on continues to receive updates, security patches, and new features.
+
+#### Contact
+Do you have any inquiries or questions? Feel free to contact me on my [LinkedIn](https://www.linkedin.com/in/alexandermantzoukas).
 
 ### How the "Honor-Based" System Works
 Developers despise DRM, and so do I. License servers introduce single points of failure that have no place in a masterless P2P mesh.
