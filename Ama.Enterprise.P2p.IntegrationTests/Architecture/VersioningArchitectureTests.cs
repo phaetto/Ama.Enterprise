@@ -18,14 +18,14 @@ public sealed class VersioningArchitectureTests
     public void DeployedYamlVersion_MustHaveExplicitTestCoverage()
     {
         var yamlPath = FindPublishNugetYaml();
-        yamlPath.ShouldNotBeNull("Could not locate .github/workflows/publish-nuget.yml. Ensure the test is running within the repository structure.");
+        yamlPath.ShouldNotBeNull("Could not locate .github/workflows/publish-preview-to-nuget.yml. Ensure the test is running within the repository structure.");
 
         var yamlContent = File.ReadAllText(yamlPath);
         var majorMatch = Regex.Match(yamlContent, @"MAJOR_VERSION:\s*(\d+)");
         var minorMatch = Regex.Match(yamlContent, @"MINOR_VERSION:\s*(\d+)");
 
-        majorMatch.Success.ShouldBeTrue("MAJOR_VERSION not found in publish-nuget.yml");
-        minorMatch.Success.ShouldBeTrue("MINOR_VERSION not found in publish-nuget.yml");
+        majorMatch.Success.ShouldBeTrue("MAJOR_VERSION not found in publish-preview-to-nuget.yml");
+        minorMatch.Success.ShouldBeTrue("MINOR_VERSION not found in publish-preview-to-nuget.yml");
 
         var major = int.Parse(majorMatch.Groups[1].Value);
         var minor = int.Parse(minorMatch.Groups[1].Value);
@@ -37,7 +37,7 @@ public sealed class VersioningArchitectureTests
             .Any(attr => attr.Major == major && attr.Minor == minor);
 
         hasTestForVersion.ShouldBeTrue(
-            $"Architectural constraint violated: Version {major}.{minor} is targeted for deployment in publish-nuget.yml, " +
+            $"Architectural constraint violated: Version {major}.{minor} is targeted for deployment in publish-preview-to-nuget.yml, " +
             $"but no test method is marked with [TestedProtocolVersion({major}, {minor})]. " +
             $"You must write an explicit test for version {major}.{minor} to prevent deploying untested protocol versions.");
     }
@@ -48,7 +48,7 @@ public sealed class VersioningArchitectureTests
         
         while (directory != null)
         {
-            var path = Path.Combine(directory.FullName, ".github", "workflows", "publish-nuget.yml");
+            var path = Path.Combine(directory.FullName, ".github", "workflows", "publish-preview-to-nuget.yml");
             if (File.Exists(path))
             {
                 return path;

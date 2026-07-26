@@ -28,8 +28,8 @@
   <Folder Name="/Solution Items/">
     <File Path=".editorconfig" />
     <File Path=".github/workflows/ci.yml" />
-    <File Path=".github/workflows/publish-nuget-manual.yml" />
-    <File Path=".github/workflows/publish-nuget.yml" />
+    <File Path=".github/workflows/publish-preview-to-nuget.yml" />
+    <File Path=".github/workflows/publish-release-to-nuget-manual.yml" />
     <File Path=".gitignore" />
     <File Path="CodingStandards.md" />
     <File Path="LICENSE" />
