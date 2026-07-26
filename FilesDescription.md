@@ -2,8 +2,8 @@
 | --- | --- |
 | `$/.editorconfig` | No description provided. |
 | `$/.github/workflows/ci.yml` | GitHub Actions workflow for building and testing the solution on PRs and non-master branch pushes. |
-| `$/.github/workflows/publish-nuget-manual.yml` | Removed `Ama.Enterprise.P2p.Telemetry.Cli` from manual packing and automated pre-release cleanup arrays to halt its distribution temporarily. |
-| `$/.github/workflows/publish-nuget.yml` | Added the unlist previous prerelease versions step to clean up CI-generated previews on NuGet automatically. |
+| `$/.github/workflows/publish-preview-to-nuget.yml` | No description provided. |
+| `$/.github/workflows/publish-release-to-nuget-manual.yml` | No description provided. |
 | `$/.gitignore` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/Ama.Enterprise.CRDT.Distributed.IntegrationTests.csproj` | Updated reference from `Ama.Enterprise.UnitTests` to the renamed `Ama.Enterprise.Project.Tests.Common`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/AntiEntropyStateSyncIntegrationTests.cs` | Reorganized to include all active state sync, gossip payload handling, and peer topology join behaviors. |
@@ -144,6 +144,7 @@
 | `$/Ama.Enterprise.Licensing/Services/ICertificateLoader.cs` | Interface for loading X.509 certificates from various origins. |
 | `$/Ama.Enterprise.Licensing/Services/ILicenseManager.cs` | Interface separating generic honor-based logic capabilities avoiding tightly coupled bounds. |
 | `$/Ama.Enterprise.Licensing/Services/LicenseStartupService.cs` | Starts up evaluations executing internal generic licensing checks. |
+| `$/Ama.Enterprise.Monitoring.Cli/Ama.Enterprise.Monitoring.Cli.csproj` | No description provided. |
 | `$/Ama.Enterprise.Monitoring.Cli/Program.cs` | Refactored internal architecture mapping UI generation explicitly bounded to modular distinct generic boundaries decoupled from program setups cleanly traversing dependencies explicitly safely optimally securely properly cleanly intelligently intelligently. |
 | `$/Ama.Enterprise.Monitoring.Cli/Services/IUserInterfaceOrchestrator.cs` | Contract decoupling terminal GUI orchestrations avoiding inline Program allocations and generic boundaries securely correctly cleanly flexibly. |
 | `$/Ama.Enterprise.Monitoring.Cli/Services/UserInterfaceOrchestrator.cs` | Implements CLI user interface initializations managing standard generic window layouts cleanly cleanly cleanly correctly properly. |
@@ -403,6 +404,9 @@
 | `$/Ama.Enterprise.slnx` | Updated solution structure definitions tracking explicitly configured bounds explicitly modifying renamed structural instances naturally. |
 | `$/CodingStandards.md` | No description provided. |
 | `$/FilesDescription.md` | No description provided. |
+| `$/Images/Enterprise CRDTs - Distributed CRDTs.png` | No description provided. |
+| `$/Images/Enterprise CRDTs - End Products Overview.png` | No description provided. |
+| `$/Images/Enterprise CRDTs - P2P.png` | No description provided. |
 | `$/LICENSE` | Dual-license agreement detailing the revenue-capped Community and Enterprise honor-based terms, updated to enforce strictly constrained GPLv3 or standard license bounds for forks and derivative works. |
 | `$/README.md` | Primary introduction documentation explaining the core architecture, capabilities, getting started guide, and repository structure for the decentralized P2P toolkit. |
 | `$/apps-todo.txt` | No description provided. |

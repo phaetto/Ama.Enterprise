@@ -19,28 +19,38 @@ A .NET 10 enterprise-grade toolkit for building decentralized, masterless Peer-t
 - **Storage Backends**: Persist distributed states safely using ephemeral Memory, scalable Azure Table Storage (with unified bounds tracking), or easily connect your own backend (`Ama.Enterprise.CRDT.Distributed.ShowCase` has its own implementation of AOT SQLite).
 - **Built-in Telemetry**: Natively integrated with `System.Diagnostics.Metrics`. It includes a P2P metric aggregator utilizing magic-byte binary slicing that pushes time-series hardware and mesh statistics across isolated nodes dynamically.
 
-## Project Structure & Architecture
+## Architecture Overview
 
-To understand the repository in 60 seconds, the architecture is divided into three primary layers:
+The architecture of `Ama.Enterprise` is strictly layered to provide a clean separation of concerns, ensuring that high-level business logic remains decoupled from the complexities of decentralized network routing and state synchronization.
 
-### 1. The Network Layer (`Ama.Enterprise.P2p.*`)
-The foundation of the system. It handles decentralized node discovery, failure detection, transport routing, and payload delivery (Gossip/Anti-Entropy).
-- `Ama.Enterprise.P2p`: Core interfaces, base generic algorithms, multi-mesh tracking, and UDP/TCP/QUIC/DNS implementations.
-- `Ama.Enterprise.P2p.AspNetCore`: HTTP/Kestrel integration.
-- `Ama.Enterprise.P2p.Mqtt`: MQTT integration and JSON polymorphism bounds.
-- `Ama.Enterprise.P2p.WebRTC`: WebRTC data channels and distributed out-of-band signaling.
-- `Ama.Enterprise.P2p.Telemetry`: P2P cluster metrics aggregation and real-time computation.
+### High-Level Ecosystem & Layering
 
-### 2. The Distributed Orchestration Layer (`Ama.Enterprise.CRDT.Distributed.*`)
-Built on top of the P2P layer and `Ama.CRDT`. It manages the global registry of instantiated CRDT documents across the mesh, evaluating version vectors, syncing states, and abstracting data storage.
-- `Ama.Enterprise.CRDT.Distributed`: Core async orchestrator, background sync workers, and scope managers mapping distinct replica boundaries.
-- `Ama.Enterprise.CRDT.Distributed.TableStorage`: Azure Table backend replica persistence.
-- `Ama.Enterprise.CRDT.MessagePack`: Binary serialization formatters.
+![End Products Overview](./Images/Enterprise%20CRDTs%20-%20End%20Products%20Overview.png)
 
-### 3. Application Domain Layer (`Ama.Enterprise.FeatureFlags`)
-High-level features utilizing the CRDT Orchestrator to provide instant business value.
-- `Ama.Enterprise.FeatureFlags`: A decentralized, masterless feature flag system.
-- `Ama.Enterprise.P2p.WebRTC.DistributedSignaling`: Decentralized, masterless signaling state that allows P2P WebRTC connections grouped in "rooms".
+At the macro level, the ecosystem is built upon three foundational pillars:
+1. **The P2P Mesh Layer**: The lowest level handling raw byte distribution, node discovery, transport streams, and cryptographic boundaries.
+2. **The CRDT Distributed Layer**: The orchestration engine sitting on top of the mesh. It abstracts the network away entirely, treating the mesh as a medium to synchronize local replica storage mathematical structures via Version Vectors.
+3. **The End Products & Applications**: The top-level domain. Applications like the Feature Flags module, the P2P Telemetry CLI, or your own custom services consume the CRDT layer. They simply read and mutate standard .NET objects, and the underlying layers guarantee that those mutations are eventually consistent across the entire global cluster.
+
+### The P2P Mesh Networking Layer
+
+![P2P Architecture](./Images/Enterprise%20CRDTs%20-%20P2P.png)
+
+The Peer-to-Peer layer (`Ama.Enterprise.P2p.*`) is designed to be completely masterless and highly adaptable to different infrastructure environments.
+- **Discovery**: Nodes bootstrap into the network dynamically. Depending on the environment, they can discover each other via UDP Multicast (for local networks), DNS resolution (for Kubernetes/Cloud environments), or HTTP polling.
+- **Security & Authentication**: Before accepting any topology connections, nodes must pass strict Zero-Trust boundaries. This is handled either by mutual TLS (mTLS) X.509 Certificates or dynamic token-based Session Authenticators. Data-in-transit is secured via AES-GCM wire encoders preventing eavesdropping.
+- **Transports**: The routing dispatcher is transport-agnostic. Packets can be seamlessly multiplexed over TCP, UDP, QUIC, ASP.NET Core Kestrel, or WebRTC data channels depending on the configured Multi-Mesh bindings.
+- **Algorithms**: Network states are replicated via push-pull Gossip algorithms for rapid epidemic payload dissemination and targeted Anti-Entropy background loops to heal partitioned network islands silently.
+
+### The Distributed CRDT Orchestration Layer
+
+![Distributed CRDTs Architecture](./Images/Enterprise%20CRDTs%20-%20Distributed%20CRDTs.png)
+
+The Orchestration layer (`Ama.Enterprise.CRDT.Distributed.*`) bridges the gap between your data models and the raw P2P mesh.
+- **Local Replica Scopes**: Every node acts as an independent replica holding a localized state of a document. Modifications are applied instantly to the local scope without waiting for network locks.
+- **Storage & Journaling**: Mutations are captured mathematically as structural patches and journaled into a pluggable storage backend. This could be high-performance Ephemeral Memory, a local SQLite database, or highly scalable Azure Table Storage.
+- **Mesh Synchronization**: The `ICrdtDocumentOrchestrator` runs continuous maintenance loops. It leverages Dotted Version Vectors (DVV) to track exact causality across nodes. When an Anti-Entropy sync triggers, nodes evaluate their version vectors and exchange only the missing mathematical patches (or fallback to full snapshots if log truncation has occurred).
+- **Tombstoning & Eviction**: The orchestrator inherently handles the lifecycle of dynamic objects, safely tombstoning deleted documents, rejecting zombie states (amnesia), and cooling down evicted nodes before pruning them from the global cluster registry.
 
 ## Showcases
 
@@ -164,20 +174,6 @@ await orchestrator.CreateDocumentAsync("dev-team-list", "task-list", cancellatio
 await taskManager.SetTaskAsync("dev-team-list", "task-1", "Review PR", isDone: false, cancellationToken);
 ```
 
-## Building and Testing
-
-To build the project:
-
-```bash
-dotnet build
-```
-
-To run the unit and integration tests (which spin up isolated P2P meshes in memory and on local loopbacks):
-
-```bash
-dotnet test
-```
-
 ## AI Coding Assistance
 
 To maintain full transparency, please note that AI coding assistants and Large Language Models (LLMs) were actively used in the design, development, testing, and documentation of this repository. While AI tools significantly accelerated the generation of code and ideas, all output was rigorously reviewed, steered, tested, and refined by human developers (me). I believe in leveraging these tools to enhance productivity while taking complete responsibility for the library's architecture, security, and mathematical correctness.
@@ -210,7 +206,7 @@ When you purchase an Enterprise License, you are paying for three things:
 3. The Sustainability of the Toolkit: Ensuring the P2P mesh and CRDT engine you rely on continues to receive updates, security patches, and new features.
 
 #### Contact
-Do you have any inquiries or questions? Feel free to contact me on my [LinkedIn](https://www.linkedin.com/in/alexandermantzoukas).
+Do you have any inquiries or questions? Feel free to contact me on my [LinkedIn](https://www.linkedin.com/in/alexandermantzoukas)
 
 ### How the "Honor-Based" System Works
 Developers despise DRM, and so do I. License servers introduce single points of failure that have no place in a masterless P2P mesh.
