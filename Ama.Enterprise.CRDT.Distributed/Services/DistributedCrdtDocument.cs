@@ -103,11 +103,24 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         var metadata = metadataManager.Initialize(initialState);
         Document = new CrdtDocument<TState>(initialState, metadata);
 
-        this.commandChannel = Channel.CreateUnbounded<PooledDocumentCommand<TState>>(new UnboundedChannelOptions 
-        { 
-            SingleReader = true, 
-            SingleWriter = false 
-        });
+        var capacity = options.Value.ChannelCapacity;
+        if (capacity > 0)
+        {
+            this.commandChannel = Channel.CreateBounded<PooledDocumentCommand<TState>>(new BoundedChannelOptions(capacity)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.Wait
+            });
+        }
+        else
+        {
+            this.commandChannel = Channel.CreateUnbounded<PooledDocumentCommand<TState>>(new UnboundedChannelOptions 
+            { 
+                SingleReader = true, 
+                SingleWriter = false 
+            });
+        }
 
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.DistributedCrdtDocument") ?? new Meter("Ama.Enterprise.CRDT.Distributed.DistributedCrdtDocument");
         this.patchAppliedCounter = this.meter.CreateCounter<long>("crdt.document.patches_applied", "patches", "Total local patches natively applied mapping intentions");
@@ -205,10 +218,10 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         cmd.Type = DocumentCommandType.Initialize;
         cmd.CancellationToken = cancellationToken;
 
-        commandChannel.Writer.TryWrite(cmd);
-        commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         try
         {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
             await cmd.ExecuteAsync().ConfigureAwait(false);
         }
         finally
@@ -253,10 +266,10 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         cmd.Patch = patch;
         cmd.CancellationToken = cancellationToken;
 
-        commandChannel.Writer.TryWrite(cmd);
-        commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         try
         {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
             await cmd.ExecuteAsync().ConfigureAwait(false);
         }
         finally
@@ -308,10 +321,10 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         cmd.Operations = operations;
         cmd.CancellationToken = cancellationToken;
 
-        commandChannel.Writer.TryWrite(cmd);
-        commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         try
         {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
             await cmd.ExecuteAsync().ConfigureAwait(false);
         }
         finally
@@ -353,10 +366,10 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         cmd.Type = DocumentCommandType.GetSnapshotData;
         cmd.CancellationToken = cancellationToken;
 
-        commandChannel.Writer.TryWrite(cmd);
-        commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         try
         {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
             await cmd.ExecuteAsync().ConfigureAwait(false);
             return new CrdtSnapshotDataDto(cmd.ResultSnapshotData!, cmd.ResultGlobalState!);
         }
@@ -388,10 +401,10 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         cmd.GlobalState = globalState;
         cmd.CancellationToken = cancellationToken;
 
-        commandChannel.Writer.TryWrite(cmd);
-        commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         try
         {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
             await cmd.ExecuteAsync().ConfigureAwait(false);
         }
         finally
@@ -450,10 +463,10 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         cmd.Type = DocumentCommandType.Checkpoint;
         cmd.CancellationToken = cancellationToken;
 
-        commandChannel.Writer.TryWrite(cmd);
-        commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         try
         {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
             await cmd.ExecuteAsync().ConfigureAwait(false);
         }
         finally
@@ -515,10 +528,10 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         cmd.ReplicaIdToEvict = replicaId;
         cmd.CancellationToken = cancellationToken;
 
-        commandChannel.Writer.TryWrite(cmd);
-        commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         try
         {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
             await cmd.ExecuteAsync().ConfigureAwait(false);
         }
         finally
@@ -545,10 +558,10 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         cmd.OldReplicaId = oldReplicaId;
         cmd.CancellationToken = cancellationToken;
 
-        commandChannel.Writer.TryWrite(cmd);
-        commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         try
         {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
             await cmd.ExecuteAsync().ConfigureAwait(false);
         }
         finally

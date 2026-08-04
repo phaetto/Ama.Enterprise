@@ -72,4 +72,12 @@ public sealed class DistributedCrdtOptions
     /// Defaults to false.
     /// </summary>
     public bool AvoidBlindCheckpointWrites { get; set; } = false;
+
+    /// <summary>
+    /// Gets or sets the maximum capacity of the lock-free document and orchestrator channels.
+    /// When set to 0 or negative, the channel is unbounded.
+    /// When set to a positive value, the channel is bounded to prevent unbounded memory growth under heavy load.
+    /// Defaults to 0 (unbounded).
+    /// </summary>
+    public int ChannelCapacity { get; set; } = 0;
 }

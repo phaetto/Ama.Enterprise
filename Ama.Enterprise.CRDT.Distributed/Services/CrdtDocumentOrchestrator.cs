@@ -16,6 +16,7 @@ using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Centralized generic orchestrator managing global active P2P CRDT document bindings.
@@ -57,19 +58,35 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         IServiceProvider serviceProvider,
         IDistributedCrdtStorage storage,
         IAsyncCrdtPatcher patcher,
+        IOptions<DistributedCrdtOptions> options,
         ILogger<CrdtDocumentOrchestrator> logger,
         IMeterFactory? meterFactory = null)
     {
+        ArgumentNullException.ThrowIfNull(options);
+
         this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
         this.patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        this.commandChannel = Channel.CreateUnbounded<PooledOrchestratorCommand>(new UnboundedChannelOptions 
-        { 
-            SingleReader = true, 
-            SingleWriter = false 
-        });
+        var capacity = options.Value.ChannelCapacity;
+        if (capacity > 0)
+        {
+            this.commandChannel = Channel.CreateBounded<PooledOrchestratorCommand>(new BoundedChannelOptions(capacity)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.Wait
+            });
+        }
+        else
+        {
+            this.commandChannel = Channel.CreateUnbounded<PooledOrchestratorCommand>(new UnboundedChannelOptions 
+            { 
+                SingleReader = true, 
+                SingleWriter = false 
+            });
+        }
 
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.CrdtDocumentOrchestrator") ?? new Meter("Ama.Enterprise.CRDT.Distributed.CrdtDocumentOrchestrator");
         this.documentCreatedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.documents_created", "documents", "Total CRDT documents mapped dynamically");
@@ -149,10 +166,10 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         cmd.Type = OrchestratorCommandType.Initialize;
         cmd.CancellationToken = cancellationToken;
 
-        commandChannel.Writer.TryWrite(cmd);
-        commandsEnqueuedCounter.Add(1);
         try
         {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1);
             await cmd.ExecuteAsync().ConfigureAwait(false);
         }
         finally
@@ -194,10 +211,10 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         cmd.Type = OrchestratorCommandType.SyncDocuments;
         cmd.CancellationToken = cancellationToken;
 
-        commandChannel.Writer.TryWrite(cmd);
-        commandsEnqueuedCounter.Add(1);
         try
         {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1);
             await cmd.ExecuteAsync().ConfigureAwait(false);
         }
         finally
@@ -296,10 +313,10 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         cmd.TypeAlias = typeAlias;
         cmd.CancellationToken = cancellationToken;
 
-        commandChannel.Writer.TryWrite(cmd);
-        commandsEnqueuedCounter.Add(1);
         try
         {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1);
             await cmd.ExecuteAsync().ConfigureAwait(false);
         }
         finally
@@ -324,10 +341,10 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         cmd.DocumentId = documentId;
         cmd.CancellationToken = cancellationToken;
 
-        commandChannel.Writer.TryWrite(cmd);
-        commandsEnqueuedCounter.Add(1);
         try
         {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1);
             await cmd.ExecuteAsync().ConfigureAwait(false);
         }
         finally
