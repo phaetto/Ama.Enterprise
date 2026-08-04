@@ -29,6 +29,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly IDistributedCrdtStorage storage;
     private readonly ILogger<DistributedCrdtDocument<TState>> logger;
     private readonly bool activeSyncEnabled;
+    private readonly bool avoidBlindWrites;
     private readonly TState initialState;
     
     // Fast synchronous lock for atomic reference/flag swapping against torn struct reads exclusively.
@@ -41,6 +42,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly Task processingTask;
     
     private volatile bool isDirty;
+    private CrdtDocument<TState>? lastSavedDocument;
 
     private readonly Meter meter;
     private readonly Counter<long> patchAppliedCounter;
@@ -93,6 +95,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         this.activeSyncEnabled = options.Value.ActiveSyncEnabled;
+        this.avoidBlindWrites = options.Value.AvoidBlindCheckpointWrites;
         this.initialState = initialState;
 
         DocumentId = documentIdProvider.GetDocumentId(initialState);
@@ -224,6 +227,11 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 lock (syncRoot)
                 {
                     Document = storedDoc.Value;
+
+                    if (avoidBlindWrites)
+                    {
+                        lastSavedDocument = storedDoc.Value;
+                    }
                 }
 
                 StateChanged?.Invoke(this, EventArgs.Empty);
@@ -456,12 +464,22 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
     private async Task ProcessCheckpointInternalAsync(PooledDocumentCommand<TState> cmd)
     {
-        if (!isDirty) return;
-
         CrdtDocument<TState> currentDoc;
         lock (syncRoot)
         {
+            if (avoidBlindWrites && !isDirty) return;
+
             currentDoc = Document;
+
+            if (avoidBlindWrites && lastSavedDocument.HasValue)
+            {
+                if (EqualityComparer<CrdtDocument<TState>>.Default.Equals(lastSavedDocument.Value, currentDoc))
+                {
+                    isDirty = false;
+                    return; // Avoid blind structural write matching the exact identical local sequence
+                }
+            }
+
             isDirty = false; 
         }
 
@@ -469,6 +487,14 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         {
             await storage.SaveDocumentAsync(DocumentId, currentDoc, cmd.CancellationToken).ConfigureAwait(false);
             
+            if (avoidBlindWrites)
+            {
+                lock (syncRoot)
+                {
+                    lastSavedDocument = currentDoc;
+                }
+            }
+
             checkPointSavedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
             logger.LogDebug("Successfully saved checkpoint to persistent storage for document {DocumentId}.", DocumentId);
         }
