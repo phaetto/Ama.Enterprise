@@ -52,13 +52,17 @@ The Orchestration layer (`Ama.Enterprise.CRDT.Distributed.*`) bridges the gap be
 - **Mesh Synchronization**: The `ICrdtDocumentOrchestrator` runs continuous maintenance loops. It leverages Dotted Version Vectors (DVV) to track exact causality across nodes. When an Anti-Entropy sync triggers, nodes evaluate their version vectors and exchange only the missing mathematical patches (or fallback to full snapshots if log truncation has occurred).
 - **Tombstoning & Eviction**: The orchestrator inherently handles the lifecycle of dynamic objects, safely tombstoning deleted documents, rejecting zombie states (amnesia), and cooling down evicted nodes before pruning them from the global cluster registry.
 
+## Load tests
+
+[Check the azure load tests for a performance overview.](performance.md)
+
 ## Showcases
 
 This repository includes highly interactive console applications demonstrating the framework across dynamically spawned nodes:
 
-- [**Distributed CRDT Showcase**](Ama.Enterprise.CRDT.Distributed.ShowCase) (`Ama.Enterprise.CRDT.Distributed.ShowCase`): Demonstrates the `ICrdtDocumentOrchestrator` managing multiple generic CRDT collections (Task Lists and IoT Fleet Statuses) simultaneously. Features local file-based storage, Native MessagePack binary serialization, out-of-band admin telemetry forwarding, and a `hammer` load-testing mode that pumps thousands of concurrent operations into the mesh.
-- [**Distributed CRDT Topology Showcase**](Ama.Enterprise.CRDT.Distributed.Topology.ShowCase) (`Ama.Enterprise.CRDT.Distributed.Topology.ShowCase`): Demonstrates advanced Multi-Mesh architectures using isolated network topologies (Server TCP/UDP meshes and User WebRTC out-of-band signaling meshes) bridged by decoupled Zero-Trust RBAC routing policies. Features dynamic multi-role session capabilities, WebRTC signaling bridging, and region-based generic clustering.
-- [**Feature Flags Showcase**](Ama.Enterprise.FeatureFlags.ShowCase) (`Ama.Enterprise.FeatureFlags.ShowCase`): A masterless P2P Feature Flag management console. Demonstrates extracting high-level applications backed by CRDT synchronization, Azure Table Storage persistence, strict X.509 Certificate mutual authentication, and E2E AES-GCM data-in-transit wire encryption.
+- [Distributed CRDT Showcase](Ama.Enterprise.CRDT.Distributed.ShowCase) (`Ama.Enterprise.CRDT.Distributed.ShowCase`): Demonstrates the `ICrdtDocumentOrchestrator` managing multiple generic CRDT collections (Task Lists and IoT Fleet Statuses) simultaneously. Features local file-based storage, Native MessagePack binary serialization, out-of-band admin telemetry forwarding, and a `hammer` load-testing mode that pumps thousands of concurrent operations into the mesh.
+- [Distributed CRDT Topology Showcase](Ama.Enterprise.CRDT.Distributed.Topology.ShowCase) (`Ama.Enterprise.CRDT.Distributed.Topology.ShowCase`): Demonstrates advanced Multi-Mesh architectures using isolated network topologies (Server TCP/UDP meshes and User WebRTC out-of-band signaling meshes) bridged by decoupled Zero-Trust RBAC routing policies. Features dynamic multi-role session capabilities, WebRTC signaling bridging, and region-based generic clustering.
+- [Feature Flags Showcase](Ama.Enterprise.FeatureFlags.ShowCase) (`Ama.Enterprise.FeatureFlags.ShowCase`): A masterless P2P Feature Flag management console. Demonstrates extracting high-level applications backed by CRDT synchronization, Azure Table Storage persistence, strict X.509 Certificate mutual authentication, and E2E AES-GCM data-in-transit wire encryption.
 
 *Tip: While running any showcase, type `clone` into the console. This will automatically spawn a brand-new node process on a new port that instantly discovers and syncs with your primary node.*
 

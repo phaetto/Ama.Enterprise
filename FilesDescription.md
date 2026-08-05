@@ -407,8 +407,17 @@
 | `$/Images/Enterprise CRDTs - Distributed CRDTs.png` | No description provided. |
 | `$/Images/Enterprise CRDTs - End Products Overview.png` | No description provided. |
 | `$/Images/Enterprise CRDTs - P2P.png` | No description provided. |
+| `$/Images/ReadFF_B1_Run_Pipelining_Msgpack_Encrypt_Http_01.png` | No description provided. |
+| `$/Images/ReadFF_B1_Run_Pipelining_Msgpack_Encrypt_Http_02.png` | No description provided. |
+| `$/Images/ReadFF_P0V3_Run_Pipelining_Msgpack_Encrypt_Http_01.png` | No description provided. |
+| `$/Images/ReadFF_P0V3_Run_Pipelining_Msgpack_Encrypt_Http_02.png` | No description provided. |
+| `$/Images/SetFF_B1_Run_Pipelining_Msgpack_Encrypt_Http_01.png` | No description provided. |
+| `$/Images/SetFF_B1_Run_Pipelining_Msgpack_Encrypt_Http_02.png` | No description provided. |
+| `$/Images/SetFF_P0V3_Run_Pipelining_Msgpack_Encrypt_Http_01.png` | No description provided. |
+| `$/Images/SetFF_P0V3_Run_Pipelining_Msgpack_Encrypt_Http_02.png` | No description provided. |
 | `$/LICENSE` | Dual-license agreement detailing the revenue-capped Community and Enterprise honor-based terms, updated to enforce strictly constrained GPLv3 or standard license bounds for forks and derivative works. |
 | `$/README.md` | Primary introduction documentation explaining the core architecture, capabilities, getting started guide, and repository structure for the decentralized P2P toolkit. |
 | `$/apps-todo.txt` | No description provided. |
 | `$/p2p-mesh-architectures.md` | No description provided. |
+| `$/performance.md` | Contains comprehensive load testing scenarios, architecture setups, and performance metrics validating the system's resilience and throughput under different Azure App Service plans. |
 | `$/solution.settings.json` | No description provided. |

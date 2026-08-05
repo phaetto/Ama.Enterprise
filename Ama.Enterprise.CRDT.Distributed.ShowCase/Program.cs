@@ -64,6 +64,7 @@ public static class Program
             options.AntiEntropyIntervalSeconds = 15;
             options.CheckpointIntervalSeconds = 120;
             options.JournalTrimThreshold = 15000;
+            options.ChannelCapacity = 1;
         });
 
         services.AddDistributedCrdtReplica(replicaId);

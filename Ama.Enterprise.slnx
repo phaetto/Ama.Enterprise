@@ -33,6 +33,7 @@
     <File Path=".gitignore" />
     <File Path="CodingStandards.md" />
     <File Path="LICENSE" />
+    <File Path="performance.md" />
     <File Path="README.md" />
   </Folder>
   <Folder Name="/Tooling/">
