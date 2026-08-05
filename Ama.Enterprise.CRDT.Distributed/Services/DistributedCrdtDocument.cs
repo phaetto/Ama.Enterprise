@@ -27,6 +27,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly ICrdtMetadataManager metadataManager;
     private readonly ICrdtSerializer serializer;
     private readonly IDistributedCrdtStorage storage;
+    private readonly ICrdtTimestampProvider timestampProvider;
     private readonly ILogger<DistributedCrdtDocument<TState>> logger;
     private readonly bool activeSyncEnabled;
     private readonly bool avoidBlindWrites;
@@ -34,6 +35,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     
     // Fast synchronous lock for atomic reference/flag swapping against torn struct reads exclusively.
     private readonly object syncRoot = new();
+    private CrdtDocument<TState> currentDocument;
     
     // Single-reader channel completely eliminating Thread locks allocating non-thread-safe applicator sequential streams
     private readonly Channel<PooledDocumentCommand<TState>> commandChannel;
@@ -61,7 +63,13 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     public string DocumentId { get; }
 
     /// <inheritdoc />
-    public CrdtDocument<TState> Document { get; private set; }
+    public CrdtDocument<TState> Document
+    {
+        get
+        {
+            lock (syncRoot) return currentDocument;
+        }
+    }
 
     /// <inheritdoc />
     public event EventHandler? StateChanged;
@@ -80,6 +88,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         IDistributedCrdtStorage storage,
         ILogger<DistributedCrdtDocument<TState>> logger,
         IDocumentIdProvider documentIdProvider,
+        ICrdtTimestampProvider timestampProvider,
         IMeterFactory? meterFactory = null)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -92,6 +101,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         this.metadataManager = metadataManager ?? throw new ArgumentNullException(nameof(metadataManager));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
+        this.timestampProvider = timestampProvider ?? throw new ArgumentNullException(nameof(timestampProvider));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         this.activeSyncEnabled = options.Value.ActiveSyncEnabled;
@@ -101,7 +111,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         DocumentId = documentIdProvider.GetDocumentId(initialState);
         
         var metadata = metadataManager.Initialize(initialState);
-        Document = new CrdtDocument<TState>(initialState, metadata);
+        currentDocument = new CrdtDocument<TState>(initialState, metadata);
 
         var capacity = options.Value.ChannelCapacity;
         if (capacity > 0)
@@ -239,7 +249,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             {
                 lock (syncRoot)
                 {
-                    Document = storedDoc.Value;
+                    currentDocument = storedDoc.Value;
 
                     if (avoidBlindWrites)
                     {
@@ -281,13 +291,13 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private async Task ProcessApplyPatchInternalAsync(PooledDocumentCommand<TState> cmd)
     {
         CrdtDocument<TState> currentDoc;
-        lock (syncRoot) { currentDoc = Document; }
+        lock (syncRoot) { currentDoc = currentDocument; }
 
         var result = await applicator.ApplyPatchAsync(currentDoc, cmd.Patch!.Value).ConfigureAwait(false);
 
         lock (syncRoot)
         {
-            Document = result.Document;
+            currentDocument = result.Document;
             isDirty = true;
         }
 
@@ -336,7 +346,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private async Task ProcessApplyOperationsInternalAsync(PooledDocumentCommand<TState> cmd)
     {
         CrdtDocument<TState> currentDoc;
-        lock (syncRoot) { currentDoc = Document; }
+        lock (syncRoot) { currentDoc = currentDocument; }
 
         async IAsyncEnumerable<JournaledOperation> GetStreamAsync()
         {
@@ -351,7 +361,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         lock (syncRoot)
         {
-            Document = result.Document;
+            currentDocument = result.Document;
             isDirty = true;
         }
 
@@ -382,7 +392,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private void ProcessGetSnapshotDataInternal(PooledDocumentCommand<TState> cmd)
     {
         CrdtDocument<TState> currentDoc;
-        lock (syncRoot) { currentDoc = Document; }
+        lock (syncRoot) { currentDoc = currentDocument; }
         
         var globalState = GetLocalState(); 
 
@@ -397,6 +407,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         var cmd = GetCommand();
         cmd.Type = DocumentCommandType.MergeSnapshot;
+        cmd.ExplicitTimestamp = timestampProvider.Now(); // Capture pre-queue clock preventing DVV amnesia
         cmd.SnapshotData = snapshotData;
         cmd.GlobalState = globalState;
         cmd.CancellationToken = cancellationToken;
@@ -420,17 +431,17 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             var snapshotDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(cmd.SnapshotData!);
 
             CrdtDocument<TState> currentDoc;
-            lock (syncRoot) { currentDoc = Document; }
+            lock (syncRoot) { currentDoc = currentDocument; }
 
             // Evaluate the differences needed to transform the current local state into the incoming snapshot state.
-            // This computes operations that represent missing cluster data and removes invalidated local branches.
-            var patch = await patcher.GeneratePatchAsync(currentDoc, snapshotDoc.Data, cmd.CancellationToken).ConfigureAwait(false);
+            // Using ExplicitTimestamp strictly avoids queue-induced DVV inflations against subsequent operations natively.
+            var patch = await patcher.GeneratePatchAsync(currentDoc, snapshotDoc.Data, cmd.ExplicitTimestamp!, cmd.CancellationToken).ConfigureAwait(false);
 
             var result = await applicator.ApplyPatchAsync(currentDoc, patch, cmd.CancellationToken).ConfigureAwait(false);
 
             lock (syncRoot)
             {
-                Document = result.Document;
+                currentDocument = result.Document;
                 isDirty = true;
             }
 
@@ -482,7 +493,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         {
             if (avoidBlindWrites && !isDirty) return;
 
-            currentDoc = Document;
+            currentDoc = currentDocument;
 
             if (avoidBlindWrites && lastSavedDocument.HasValue)
             {
@@ -544,7 +555,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     {
         lock (syncRoot)
         {
-            metadataManager.EvictReplica(Document, cmd.ReplicaIdToEvict!);
+            metadataManager.EvictReplica(currentDocument, cmd.ReplicaIdToEvict!);
             isDirty = true;
         }
         StateChanged?.Invoke(this, EventArgs.Empty);
@@ -575,7 +586,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         lock (syncRoot)
         {
             var metadata = metadataManager.Initialize(initialState);
-            Document = new CrdtDocument<TState>(initialState, metadata);
+            currentDocument = new CrdtDocument<TState>(initialState, metadata);
             isDirty = true;
         }
         StateChanged?.Invoke(this, EventArgs.Empty);

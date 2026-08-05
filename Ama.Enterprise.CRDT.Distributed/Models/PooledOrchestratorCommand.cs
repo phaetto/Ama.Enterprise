@@ -5,17 +5,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Threading.Tasks.Sources;
 using Ama.CRDT.Models;
-using Ama.Enterprise.P2p.Models.Core;
+using Ama.CRDT.Services.Providers;
 
 internal enum OrchestratorCommandType
 {
     Initialize,
     SyncDocuments,
     CreateDocument,
-    DeleteDocument,
-    DispatchAntiEntropyState,
-    ProvideSnapshot,
-    BroadcastPatch
+    DeleteDocument
 }
 
 /// <summary>
@@ -36,9 +33,7 @@ internal sealed class PooledOrchestratorCommand : IValueTaskSource
     public OrchestratorCommandType Type { get; set; }
     public string? DocumentId { get; set; }
     public string? TypeAlias { get; set; }
-    public string? TargetReplicaId { get; set; }
-    public PeerId? TargetPeerId { get; set; }
-    public CrdtPatch? Patch { get; set; }
+    public ICrdtTimestamp? ExplicitTimestamp { get; set; }
     public CancellationToken CancellationToken { get; set; }
 
     public void Reset()
@@ -47,9 +42,7 @@ internal sealed class PooledOrchestratorCommand : IValueTaskSource
         Type = default;
         DocumentId = null;
         TypeAlias = null;
-        TargetReplicaId = null;
-        TargetPeerId = null;
-        Patch = null;
+        ExplicitTimestamp = null;
         CancellationToken = default;
     }
 

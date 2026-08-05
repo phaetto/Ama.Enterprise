@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Threading.Tasks.Sources;
 using Ama.CRDT.Models;
+using Ama.CRDT.Services.Providers;
 
 internal enum DocumentCommandType
 {
@@ -39,6 +40,7 @@ internal sealed class PooledDocumentCommand<TState> : IValueTaskSource where TSt
     public IReadOnlyList<CrdtOperation>? Operations { get; set; }
     public byte[]? SnapshotData { get; set; }
     public DottedVersionVector? GlobalState { get; set; }
+    public ICrdtTimestamp? ExplicitTimestamp { get; set; }
     public string? ReplicaIdToEvict { get; set; }
     public string? OldReplicaId { get; set; }
     public CancellationToken CancellationToken { get; set; }
@@ -54,6 +56,7 @@ internal sealed class PooledDocumentCommand<TState> : IValueTaskSource where TSt
         Operations = null;
         SnapshotData = null;
         GlobalState = null;
+        ExplicitTimestamp = null;
         ReplicaIdToEvict = null;
         OldReplicaId = null;
         CancellationToken = default;

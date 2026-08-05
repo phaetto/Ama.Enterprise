@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Ama.CRDT.Models;
 using Ama.CRDT.Models.Intents;
 using Ama.CRDT.Services;
+using Ama.CRDT.Services.Providers;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.P2p.Models.Core;
@@ -26,6 +27,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     private readonly IServiceProvider serviceProvider;
     private readonly IDistributedCrdtStorage storage;
     private readonly IAsyncCrdtPatcher patcher;
+    private readonly ICrdtTimestampProvider timestampProvider;
     private readonly ILogger<CrdtDocumentOrchestrator> logger;
     private readonly ConcurrentDictionary<string, IDistributedCrdtDocument> activeDocuments = new(StringComparer.Ordinal);
     
@@ -60,6 +62,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         IAsyncCrdtPatcher patcher,
         IOptions<DistributedCrdtOptions> options,
         ILogger<CrdtDocumentOrchestrator> logger,
+        ICrdtTimestampProvider timestampProvider,
         IMeterFactory? meterFactory = null)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -67,6 +70,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
         this.patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
+        this.timestampProvider = timestampProvider ?? throw new ArgumentNullException(nameof(timestampProvider));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         var capacity = options.Value.ChannelCapacity;
@@ -311,6 +315,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         cmd.Type = OrchestratorCommandType.CreateDocument;
         cmd.DocumentId = documentId;
         cmd.TypeAlias = typeAlias;
+        cmd.ExplicitTimestamp = timestampProvider.Now(); // Capture timestamp BEFORE enqueuing preventing DVV queue inflations
         cmd.CancellationToken = cancellationToken;
 
         try
@@ -328,7 +333,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     private async Task ProcessCreateDocumentInternalAsync(PooledOrchestratorCommand cmd)
     {
         var intent = new MapSetIntent(cmd.DocumentId!, new CrdtRegistryEntry(cmd.DocumentId!, cmd.TypeAlias!, false));
-        var operation = await patcher.GenerateOperationAsync(Registry.Document, x => x.Documents, intent, cmd.CancellationToken).ConfigureAwait(false);
+        var operation = await patcher.GenerateOperationAsync(Registry.Document, x => x.Documents, intent, cmd.ExplicitTimestamp!, cmd.CancellationToken).ConfigureAwait(false);
         var patch = new CrdtPatch(new[] { operation });
         
         await Registry.ApplyPatchAsync(patch, cmd.CancellationToken).ConfigureAwait(false);
@@ -339,6 +344,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         var cmd = GetCommand();
         cmd.Type = OrchestratorCommandType.DeleteDocument;
         cmd.DocumentId = documentId;
+        cmd.ExplicitTimestamp = timestampProvider.Now(); // Capture timestamp BEFORE enqueuing preventing DVV queue inflations
         cmd.CancellationToken = cancellationToken;
 
         try
@@ -358,7 +364,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         if (Registry.Document.Data.Documents.TryGetValue(cmd.DocumentId!, out var existing))
         {
             var intent = new MapSetIntent(cmd.DocumentId!, existing with { IsDeleted = true });
-            var operation = await patcher.GenerateOperationAsync(Registry.Document, x => x.Documents, intent, cmd.CancellationToken).ConfigureAwait(false);
+            var operation = await patcher.GenerateOperationAsync(Registry.Document, x => x.Documents, intent, cmd.ExplicitTimestamp!, cmd.CancellationToken).ConfigureAwait(false);
             var patch = new CrdtPatch(new[] { operation });
             
             await Registry.ApplyPatchAsync(patch, cmd.CancellationToken).ConfigureAwait(false);

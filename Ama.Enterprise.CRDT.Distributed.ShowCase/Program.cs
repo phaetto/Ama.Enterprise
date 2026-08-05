@@ -60,10 +60,10 @@ public static class Program
         {
             options.ActiveSyncEnabled = true;
             options.PeerEvictionTtlSeconds = 0;
-            options.AntiEntropyInitialDelaySeconds = 2;
-            options.AntiEntropyIntervalSeconds = 15;
+            options.AntiEntropyInitialDelaySeconds = 5;
+            options.AntiEntropyIntervalSeconds = 30;
             options.CheckpointIntervalSeconds = 120;
-            options.JournalTrimThreshold = 15000;
+            options.JournalTrimThreshold = 500;
             options.ChannelCapacity = 1;
         });
 
