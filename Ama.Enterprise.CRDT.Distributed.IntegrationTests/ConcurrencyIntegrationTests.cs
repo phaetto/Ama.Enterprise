@@ -218,7 +218,7 @@ public sealed class ConcurrencyIntegrationTests
 
         // Assert - Specific invocation correctly throws
         exception.ShouldNotBeNull();
-        exception.ShouldBeOfType<OperationCanceledException>();
+        exception.ShouldBeOfType<TaskCanceledException>();
 
         // Act - Prove the overarching long-lived channel processor loop did NOT crash
         await orchestrator.CreateDocumentAsync("success-doc", "concurrent-doc", CancellationToken.None);

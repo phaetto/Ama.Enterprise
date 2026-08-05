@@ -158,7 +158,7 @@ public partial class MyContext : JsonSerializerContext { }
     {
         var test = new CSharpAnalyzerTest<JsonSerializableExtensiblePayloadAnalyzer, DefaultVerifier>
         {
-            ReferenceAssemblies = ReferenceAssemblies.Net.Net100,
+            ReferenceAssemblies = ReferenceAssemblies.Net.Net90,
             CompilerDiagnostics = CompilerDiagnostics.None 
         };
 

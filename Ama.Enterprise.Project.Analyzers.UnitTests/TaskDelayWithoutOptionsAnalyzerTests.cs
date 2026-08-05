@@ -196,7 +196,7 @@ public class TestClass
         var test = new CSharpAnalyzerTest<TaskDelayWithoutOptionsAnalyzer, DefaultVerifier>
         {
             TestCode = source,
-            ReferenceAssemblies = ReferenceAssemblies.Net.Net100
+            ReferenceAssemblies = ReferenceAssemblies.Net.Net90
         };
 
         return test;
