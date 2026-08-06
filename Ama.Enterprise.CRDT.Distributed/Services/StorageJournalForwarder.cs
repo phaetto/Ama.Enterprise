@@ -30,9 +30,12 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
     private readonly Counter<long> appendedOperationsCounter;
     private readonly Counter<long> aggressiveTrimsCounter;
     private readonly Counter<long> trimFailuresCounter;
+    private readonly Counter<long> backpressureBlocksCounter;
 
     private long estimatedJournalCount;
     private int isTrimming;
+    private int activeHardTrims;
+    private CancellationTokenSource? softTrimCts;
 
     public StorageJournalForwarder(
         IDistributedCrdtStorage storage,
@@ -50,6 +53,7 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         this.appendedOperationsCounter = this.meter.CreateCounter<long>("crdt.journal.forwarded_operations", "operations", "Total operations effectively forwarded towards explicit backend configurations naturally");
         this.aggressiveTrimsCounter = this.meter.CreateCounter<long>("crdt.journal.aggressive_trims", "trims", "Total reactive aggressive trims executed bypassing standard checkpoint bounds natively");
         this.trimFailuresCounter = this.meter.CreateCounter<long>("crdt.journal.aggressive_trim_failures", "failures", "Total failures encountered during reactive aggressive journal trims natively");
+        this.backpressureBlocksCounter = this.meter.CreateCounter<long>("crdt.journal.backpressure_blocks", "blocks", "Total times the hard threshold applied natural backpressure yielding the active threads natively");
 
         _ = Task.Run(async () =>
         {
@@ -72,10 +76,10 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
             throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
         }
 
-        storage.Append(documentId, operationsList);
-        appendedOperationsCounter.Add(operationsList.Count, new KeyValuePair<string, object?>("document_id", documentId));
+        this.storage.Append(documentId, operationsList);
+        this.appendedOperationsCounter.Add(operationsList.Count, new KeyValuePair<string, object?>("document_id", documentId));
         
-        TrackAndTriggerTrim(operationsList.Count);
+        this.EvaluateTriggersAndApplyBackpressureSync(operationsList.Count);
     }
 
     public async Task AppendAsync(string documentId, IReadOnlyList<CrdtOperation> operationsList, CancellationToken cancellationToken = default)
@@ -85,86 +89,295 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
             throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
         }
 
-        await storage.AppendAsync(documentId, operationsList, cancellationToken).ConfigureAwait(false);
-        appendedOperationsCounter.Add(operationsList.Count, new KeyValuePair<string, object?>("document_id", documentId));
+        await this.storage.AppendAsync(documentId, operationsList, cancellationToken).ConfigureAwait(false);
+        this.appendedOperationsCounter.Add(operationsList.Count, new KeyValuePair<string, object?>("document_id", documentId));
         
-        TrackAndTriggerTrim(operationsList.Count);
+        await this.EvaluateTriggersAndApplyBackpressureAsync(operationsList.Count, cancellationToken).ConfigureAwait(false);
     }
 
     public IAsyncEnumerable<JournaledOperation> GetOperationsByRangeAsync(string originReplicaId, long minGlobalClock, long maxGlobalClock, CancellationToken cancellationToken = default) 
-        => storage.GetOperationsByRangeAsync(originReplicaId, minGlobalClock, maxGlobalClock, cancellationToken);
+        => this.storage.GetOperationsByRangeAsync(originReplicaId, minGlobalClock, maxGlobalClock, cancellationToken);
 
     public IAsyncEnumerable<JournaledOperation> GetOperationsByDotsAsync(string originReplicaId, IEnumerable<long> globalClocks, CancellationToken cancellationToken = default) 
-        => storage.GetOperationsByDotsAsync(originReplicaId, globalClocks, cancellationToken);
+        => this.storage.GetOperationsByDotsAsync(originReplicaId, globalClocks, cancellationToken);
 
     public void Dispose()
     {
-        meter.Dispose();
+        this.meter.Dispose();
+        this.CancelSoftTrim();
     }
 
-    private void TrackAndTriggerTrim(int count)
+    private void EvaluateTriggersAndApplyBackpressureSync(int count)
     {
-        var threshold = options.Value.JournalTrimThreshold;
-        if (threshold <= 0) return;
-
-        var newCount = Interlocked.Add(ref estimatedJournalCount, count);
-        if (newCount >= threshold)
+        var softThreshold = this.options.Value.JournalSoftTrimThreshold;
+        var hardThreshold = this.options.Value.JournalHardTrimThreshold;
+        
+        if (softThreshold <= 0 && hardThreshold <= 0)
         {
-            if (Interlocked.CompareExchange(ref isTrimming, 1, 0) == 0)
+            return;
+        }
+
+        var newCount = Interlocked.Add(ref this.estimatedJournalCount, count);
+        
+        bool isHard = hardThreshold > 0 && newCount >= hardThreshold;
+        bool isSoft = softThreshold > 0 && newCount >= softThreshold;
+
+        if (isHard)
+        {
+            this.CancelSoftTrim();
+
+            // To avoid deadlocks associated with sync-over-async (.GetAwaiter().GetResult()),
+            // we spawn the hard trim in a background task for synchronous calls,
+            // but we apply backpressure by synchronously waiting on the SemaphoreSlim 
+            // with a timeout. This safely throttles the synchronous thread ingestion.
+            if (Volatile.Read(ref this.activeHardTrims) == 0 && Interlocked.CompareExchange(ref this.isTrimming, 1, 0) == 0)
             {
-                var countAtTrimStart = Volatile.Read(ref estimatedJournalCount);
-
-                _ = Task.Run(async () =>
+                if (Volatile.Read(ref this.activeHardTrims) > 0)
                 {
-                    try
-                    {
-                        await ExecuteAggressiveTrimAsync().ConfigureAwait(false);
-                        
-                        // Deduct the operations we effectively just trimmed, safely preserving the ones appended concurrently during the trim
-                        Interlocked.Add(ref estimatedJournalCount, -countAtTrimStart);
+                    Interlocked.Exchange(ref this.isTrimming, 0);
+                }
+                else
+                {
+                    this.StartBackgroundHardTrim();
+                }
+            }
 
-                        // Safeguard against going negative due to extreme concurrency edge cases
-                        if (Volatile.Read(ref estimatedJournalCount) < 0)
-                        {
-                            Interlocked.Exchange(ref estimatedJournalCount, 0);
-                        }
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        // Ignored during application shutdown natively
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Failed to execute reactive aggressive journal trim.");
+            this.backpressureBlocksCounter.Add(1);
+            bool entered = false;
+            try
+            {
+                // Wait up to 2 seconds to yield the caller, naturally throttling ingestion.
+                entered = CrdtTrimCoordinator.GlobalTrimLock.Wait(TimeSpan.FromSeconds(2));
+            }
+            catch (Exception)
+            {
+                // Ignore thread interruptions safely natively
+            }
+            finally
+            {
+                if (entered)
+                {
+                    CrdtTrimCoordinator.GlobalTrimLock.Release();
+                }
+            }
+        }
+        else if (isSoft)
+        {
+            // If a hard trim is actively running or queued to run, do not queue a new soft trim
+            if (Volatile.Read(ref this.activeHardTrims) > 0)
+            {
+                return;
+            }
 
-                        string? replicaId = null;
-                        try
-                        {
-                            replicaId = serviceProvider.GetService<ReplicaContext>()?.ReplicaId;
-                        }
-                        catch
-                        {
-                            // Ignore DI resolution errors during fallback exception logging
-                        }
-
-                        trimFailuresCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaId ?? "unknown"));
-
-                        // Force clearing lock conditions on failures avoiding perpetual backpressure limits
-                        Interlocked.Exchange(ref estimatedJournalCount, 0);
-                    }
-                    finally
-                    {
-                        Interlocked.Exchange(ref isTrimming, 0);
-                    }
-                });
+            if (Interlocked.CompareExchange(ref this.isTrimming, 1, 0) == 0)
+            {
+                // Double check active hard trims after taking soft trim assignment lock
+                if (Volatile.Read(ref this.activeHardTrims) > 0)
+                {
+                    Interlocked.Exchange(ref this.isTrimming, 0);
+                    return;
+                }
+                
+                this.StartBackgroundSoftTrim();
             }
         }
     }
 
-    private async Task ExecuteAggressiveTrimAsync()
+    private async ValueTask EvaluateTriggersAndApplyBackpressureAsync(int count, CancellationToken cancellationToken)
     {
-        var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
-        var orchestrator = serviceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var softThreshold = this.options.Value.JournalSoftTrimThreshold;
+        var hardThreshold = this.options.Value.JournalHardTrimThreshold;
+        
+        if (softThreshold <= 0 && hardThreshold <= 0)
+        {
+            return;
+        }
+
+        var newCount = Interlocked.Add(ref this.estimatedJournalCount, count);
+        
+        bool isHard = hardThreshold > 0 && newCount >= hardThreshold;
+        bool isSoft = softThreshold > 0 && newCount >= softThreshold;
+
+        if (isHard)
+        {
+            this.backpressureBlocksCounter.Add(1);
+            
+            // Execute inline async to apply direct backpressure preventing IO overrun cleanly natively
+            await this.ExecuteHardTrimInlineAsync(cancellationToken).ConfigureAwait(false);
+        }
+        else if (isSoft)
+        {
+            // If a hard trim is actively running or queued to run, do not queue a new soft trim
+            if (Volatile.Read(ref this.activeHardTrims) > 0)
+            {
+                return;
+            }
+
+            if (Interlocked.CompareExchange(ref this.isTrimming, 1, 0) == 0)
+            {
+                // Double check active hard trims after taking soft trim assignment lock
+                if (Volatile.Read(ref this.activeHardTrims) > 0)
+                {
+                    Interlocked.Exchange(ref this.isTrimming, 0);
+                    return;
+                }
+
+                this.StartBackgroundSoftTrim();
+            }
+        }
+    }
+
+    private void CancelSoftTrim()
+    {
+        var currentCts = Interlocked.Exchange(ref this.softTrimCts, null);
+        if (currentCts != null)
+        {
+            try 
+            {
+                currentCts.Cancel();
+                currentCts.Dispose();
+            } 
+            catch 
+            { 
+                // Ignore disposal issues during active cancellation bounds natively
+            }
+        }
+    }
+
+    private void StartBackgroundHardTrim()
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await this.ExecuteHardTrimInlineAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                this.logger.LogWarning(ex, "Background hard trim encountered an exception executing constraints.");
+            }
+            finally
+            {
+                Interlocked.Exchange(ref this.isTrimming, 0);
+            }
+        });
+    }
+
+    private async Task ExecuteHardTrimInlineAsync(CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref this.activeHardTrims);
+        try
+        {
+            this.CancelSoftTrim();
+
+            // Wait on the global lock to ensure only one hard trim happens at a time across all active threads
+            await CrdtTrimCoordinator.GlobalTrimLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var hardThreshold = this.options.Value.JournalHardTrimThreshold;
+                
+                // Double-check if the count is still above threshold since another queued thread might have just trimmed it
+                if (hardThreshold > 0 && Volatile.Read(ref this.estimatedJournalCount) < hardThreshold)
+                {
+                    return;
+                }
+
+                var countAtTrimStart = Volatile.Read(ref this.estimatedJournalCount);
+                
+                await this.ExecuteAggressiveTrimAsync(cancellationToken).ConfigureAwait(false);
+                
+                Interlocked.Add(ref this.estimatedJournalCount, -countAtTrimStart);
+                if (Volatile.Read(ref this.estimatedJournalCount) < 0)
+                {
+                    Interlocked.Exchange(ref this.estimatedJournalCount, 0);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Caller cancelled, propagate safely natively
+                throw;
+            }
+            catch (Exception ex)
+            {
+                this.logger.LogError(ex, "Failed to execute inline aggressive journal trim.");
+                this.TrackTrimFailure();
+                Interlocked.Exchange(ref this.estimatedJournalCount, 0);
+            }
+            finally
+            {
+                CrdtTrimCoordinator.GlobalTrimLock.Release();
+            }
+        }
+        finally
+        {
+            Interlocked.Decrement(ref this.activeHardTrims);
+        }
+    }
+
+    private void StartBackgroundSoftTrim()
+    {
+        var cts = new CancellationTokenSource();
+        this.softTrimCts = cts;
+
+        var countAtTrimStart = Volatile.Read(ref this.estimatedJournalCount);
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // Wait for global lock, but respect cancellation if a hard trim preempts us and needs to jump the queue
+                await CrdtTrimCoordinator.GlobalTrimLock.WaitAsync(cts.Token).ConfigureAwait(false);
+                try
+                {
+                    if (cts.Token.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
+                    await this.ExecuteAggressiveTrimAsync(cts.Token).ConfigureAwait(false);
+                    
+                    Interlocked.Add(ref this.estimatedJournalCount, -countAtTrimStart);
+                    if (Volatile.Read(ref this.estimatedJournalCount) < 0)
+                    {
+                        Interlocked.Exchange(ref this.estimatedJournalCount, 0);
+                    }
+                }
+                finally
+                {
+                    CrdtTrimCoordinator.GlobalTrimLock.Release();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Soft trim was cancelled and preempted by an inline hard trim. Expected behavior.
+            }
+            catch (ObjectDisposedException)
+            {
+                // Ignored natively during shutdown
+            }
+            catch (Exception ex)
+            {
+                this.logger.LogError(ex, "Failed to execute background soft journal trim.");
+                this.TrackTrimFailure();
+                Interlocked.Exchange(ref this.estimatedJournalCount, 0);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref this.isTrimming, 0);
+                
+                var oldCts = Interlocked.CompareExchange(ref this.softTrimCts, null, cts);
+                if (oldCts == cts)
+                {
+                    cts.Dispose();
+                }
+            }
+        }, CancellationToken.None);
+    }
+
+    private async Task ExecuteAggressiveTrimAsync(CancellationToken cancellationToken)
+    {
+        var replicaContext = this.serviceProvider.GetRequiredService<ReplicaContext>();
+        var orchestrator = this.serviceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         
         var sourceDvv = replicaContext.GlobalVersionVector;
         var copiedVersions = new Dictionary<string, long>();
@@ -187,18 +400,39 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         
         var safelyPersistedDvv = new DottedVersionVector(copiedVersions, copiedDots);
         
-        var documents = orchestrator.GetActiveDocuments();
-        foreach (var document in documents)
+        // Parallelize checkpointing across active documents to drastically reduce the trim duration lock time
+        var documents = orchestrator.GetActiveDocuments().ToList();
+        var chunks = documents.Chunk(Environment.ProcessorCount);
+        
+        foreach (var chunk in chunks)
         {
-            await document.CheckpointAsync(CancellationToken.None).ConfigureAwait(false);
+            await Task.WhenAll(chunk.Select(document => document.CheckpointAsync(cancellationToken))).ConfigureAwait(false);
         }
 
-        await storage.SaveGlobalVersionVectorAsync(replicaContext.ReplicaId, safelyPersistedDvv, CancellationToken.None).ConfigureAwait(false);
+        await this.storage.SaveGlobalVersionVectorAsync(replicaContext.ReplicaId, safelyPersistedDvv, cancellationToken).ConfigureAwait(false);
 
-        await storage.TrimAsync(safelyPersistedDvv.Versions.ToDictionary(k => k.Key, v => v.Value), CancellationToken.None).ConfigureAwait(false);
+        await this.storage.TrimAsync(safelyPersistedDvv.Versions.ToDictionary(k => k.Key, v => v.Value), cancellationToken).ConfigureAwait(false);
         
-        aggressiveTrimsCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
+        this.aggressiveTrimsCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
 
-        logger.LogWarning("[{ReplicaId}] Journal dynamically crossed real-time threshold ({Threshold}). Reactively executed immediate aggressive trim explicitly offloading constraints to snapshots.", replicaContext.ReplicaId, options.Value.JournalTrimThreshold);
+        var thresholdUsed = (this.options.Value.JournalSoftTrimThreshold > 0 && Volatile.Read(ref this.estimatedJournalCount) >= this.options.Value.JournalSoftTrimThreshold) 
+            ? this.options.Value.JournalSoftTrimThreshold 
+            : this.options.Value.JournalHardTrimThreshold;
+
+        this.logger.LogWarning("[{ReplicaId}] Journal dynamically crossed real-time threshold ({Threshold}). Reactively executed immediate aggressive trim explicitly offloading constraints to snapshots.", replicaContext.ReplicaId, thresholdUsed);
+    }
+
+    private void TrackTrimFailure()
+    {
+        string? replicaId = null;
+        try
+        {
+            replicaId = this.serviceProvider.GetService<ReplicaContext>()?.ReplicaId;
+        }
+        catch
+        {
+            // Ignore resolution errors during fallback exception logging natively
+        }
+        this.trimFailuresCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaId ?? "unknown"));
     }
 }

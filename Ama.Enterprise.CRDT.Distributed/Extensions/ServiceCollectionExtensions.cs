@@ -47,8 +47,10 @@ public static class ServiceCollectionExtensions
                 "PeerEvictionTtlSeconds must be at least 3 times the AntiEntropyIntervalSeconds to prevent peer topology oscillation.")
             .Validate(options => options.PeerEvictionTtlSeconds == 0 || options.PeerEvictionTtlSeconds >= options.MaintenanceIntervalSeconds, 
                 "PeerEvictionTtlSeconds must be greater than or equal to the MaintenanceIntervalSeconds as evictions are processed during maintenance cycles.")
-            .Validate(options => options.JournalTrimThreshold >= 0, 
-                "JournalTrimThreshold cannot be negative.")
+            .Validate(options => options.JournalSoftTrimThreshold >= 0,
+                "JournalSoftTrimThreshold cannot be negative.")
+            .Validate(options => options.JournalHardTrimThreshold >= 0,
+                "JournalHardTrimThreshold cannot be negative.")
             .Validate(options => options.CompactionTtlSeconds >= 0, 
                 "CompactionTtlSeconds cannot be negative.")
             .ValidateOnStart();

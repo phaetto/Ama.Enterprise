@@ -117,21 +117,35 @@ public sealed class CrdtMaintenanceService : BackgroundService
                     var currentLocalDvv = new DottedVersionVector(copiedVersions, copiedDots);
 
                     long journalCount = 0;
-                    if (options.Value.JournalTrimThreshold > 0)
+                    var softThreshold = options.Value.JournalSoftTrimThreshold;
+                    var hardThreshold = options.Value.JournalHardTrimThreshold;
+
+                    if (softThreshold > 0 || hardThreshold > 0)
                     {
                         journalCount = await scope.Storage.GetJournalCountAsync(stoppingToken).ConfigureAwait(false);
                     }
 
-                    bool trimThresholdExceeded = options.Value.JournalTrimThreshold > 0 && journalCount >= options.Value.JournalTrimThreshold;
+                    bool trimThresholdExceeded = (softThreshold > 0 && journalCount >= softThreshold) ||
+                                                 (hardThreshold > 0 && journalCount >= hardThreshold);
 
                     if (trimThresholdExceeded)
                     {
                         // Force a journal trim up to the local logical bounds, intentionally dropping lagging peers to fallback snapshots
                         if (currentLocalDvv.Versions.Count > 0)
                         {
-                            await scope.Storage.TrimAsync(currentLocalDvv.Versions.ToDictionary(), stoppingToken).ConfigureAwait(false);
-                            trimmedJournalsCounter.Add(1, tag);
-                            logger.LogWarning("[{ReplicaId}] Journal size ({Count}) exceeded threshold ({Threshold}). Forced an aggressive journal trim up to the local logical bounds.", scope.ReplicaId, journalCount, options.Value.JournalTrimThreshold);
+                            await CrdtTrimCoordinator.GlobalTrimLock.WaitAsync(stoppingToken).ConfigureAwait(false);
+                            try
+                            {
+                                await scope.Storage.TrimAsync(currentLocalDvv.Versions.ToDictionary(), stoppingToken).ConfigureAwait(false);
+                                trimmedJournalsCounter.Add(1, tag);
+                                
+                                var exceededThreshold = (softThreshold > 0 && journalCount >= softThreshold) ? softThreshold : hardThreshold;
+                                logger.LogWarning("[{ReplicaId}] Journal size ({Count}) exceeded threshold ({Threshold}). Forced an aggressive journal trim up to the local logical bounds.", scope.ReplicaId, journalCount, exceededThreshold);
+                            }
+                            finally
+                            {
+                                CrdtTrimCoordinator.GlobalTrimLock.Release();
+                            }
                         }
                     }
                     else
@@ -158,9 +172,17 @@ public sealed class CrdtMaintenanceService : BackgroundService
 
                             if (gmvv.Count > 0)
                             {
-                                await scope.Storage.TrimAsync(gmvv.ToDictionary(), stoppingToken).ConfigureAwait(false);
-                                trimmedJournalsCounter.Add(1, tag);
-                                logger.LogTrace("[{ReplicaId}] Executed background journal trim matching Global Minimum Version Vector bounds across expected topology peers.", scope.ReplicaId);
+                                await CrdtTrimCoordinator.GlobalTrimLock.WaitAsync(stoppingToken).ConfigureAwait(false);
+                                try
+                                {
+                                    await scope.Storage.TrimAsync(gmvv.ToDictionary(), stoppingToken).ConfigureAwait(false);
+                                    trimmedJournalsCounter.Add(1, tag);
+                                    logger.LogTrace("[{ReplicaId}] Executed background journal trim matching Global Minimum Version Vector bounds across expected topology peers.", scope.ReplicaId);
+                                }
+                                finally
+                                {
+                                    CrdtTrimCoordinator.GlobalTrimLock.Release();
+                                }
                             }
                         }
                     }

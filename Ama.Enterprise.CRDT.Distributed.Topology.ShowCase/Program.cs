@@ -92,7 +92,7 @@ public static class Program
             options.AntiEntropyInitialDelaySeconds = 2;
             options.AntiEntropyIntervalSeconds = 15;
             options.CheckpointIntervalSeconds = 120;
-            options.JournalTrimThreshold = 15000;
+            options.JournalSoftTrimThreshold = 15000;
         });
 
         services.AddDistributedCrdtReplica(replicaId);

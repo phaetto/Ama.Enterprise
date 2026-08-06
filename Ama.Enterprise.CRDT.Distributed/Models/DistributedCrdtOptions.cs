@@ -51,12 +51,20 @@ public sealed class DistributedCrdtOptions
     public int PeerTombstoneCooldownSeconds { get; set; } = 0;
 
     /// <summary>
-    /// Gets or sets the threshold limit for the total number of operations kept in the background journal.
-    /// When this limit is exceeded, an aggressive trim is forced utilizing the local version vector,
+    /// Gets or sets the soft threshold limit for the total number of operations kept in the background journal.
+    /// When this limit is exceeded, an aggressive trim is forced utilizing the local version vector in the background,
     /// seamlessly offloading lagging peer synchronization entirely to fallback Snapshot mechanisms.
     /// Defaults to 5000. Set to 0 to disable forced limits (relying strictly on safe GMVV trims).
     /// </summary>
-    public int JournalTrimThreshold { get; set; } = 5000;
+    public int JournalSoftTrimThreshold { get; set; } = 5000;
+
+    /// <summary>
+    /// Gets or sets the hard threshold limit for the total number of operations kept in the background journal.
+    /// When this limit is exceeded, incoming operations will be actively throttled, yielding the thread 
+    /// to apply natural backpressure while the background trim processes, preventing memory death spirals.
+    /// Defaults to 10000. Set to 0 to disable hard limits.
+    /// </summary>
+    public int JournalHardTrimThreshold { get; set; } = 10000;
 
     /// <summary>
     /// Gets or sets the Time-To-Live (TTL) in seconds for CRDT metadata compaction.

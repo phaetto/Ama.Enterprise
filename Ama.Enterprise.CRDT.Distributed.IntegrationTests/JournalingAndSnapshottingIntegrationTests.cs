@@ -475,7 +475,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
             services.Configure<DistributedCrdtOptions>(opt =>
             {
                 opt.CheckpointIntervalSeconds = 1;
-                opt.JournalTrimThreshold = 5;
+                opt.JournalSoftTrimThreshold = 5;
             });
             services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(sharedStorage));
         });

@@ -63,7 +63,8 @@ public static class Program
             options.AntiEntropyInitialDelaySeconds = 5;
             options.AntiEntropyIntervalSeconds = 30;
             options.CheckpointIntervalSeconds = 120;
-            options.JournalTrimThreshold = 500;
+            options.JournalSoftTrimThreshold = 500;
+            options.JournalHardTrimThreshold = 11000;
             options.ChannelCapacity = 1;
         });
 
