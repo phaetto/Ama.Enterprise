@@ -261,6 +261,56 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         return null;
     }
 
+    public async Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        ArgumentException.ThrowIfNullOrEmpty(documentId);
+
+        try
+        {
+            // Query for any RowKey matching the documentId across all partitions
+            var filter = TableClient.CreateQueryFilter($"RowKey eq {documentId}");
+            var query = this.tableClient.QueryAsync<TableEntity>(filter, cancellationToken: cancellationToken);
+            
+            TableEntity? latestOrphan = null;
+            
+            await foreach (var entity in query.WithCancellation(cancellationToken).ConfigureAwait(false))
+            {
+                if (entity.PartitionKey != null && entity.PartitionKey.EndsWith(DocumentStatePartitionKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (latestOrphan == null || entity.Timestamp > latestOrphan.Timestamp)
+                    {
+                        latestOrphan = entity;
+                    }
+                }
+            }
+            
+            if (latestOrphan != null)
+            {
+                var tags = new KeyValuePair<string, object?>[] { new("type", "document_bootstrap") };
+                this.operationsReadCounter.Add(1, tags);
+                
+                var payload = CrdtTableEntity.GetPayload(latestOrphan);
+                if (payload != null)
+                {
+                    this.payloadBytesHistogram.Record(payload.Length, tags);
+                }
+                
+                var document = this.serializer.DeserializeFromBytes<CrdtDocument<TState>>(payload);
+                if (document != null)
+                {
+                    this.logger.LogInformation("Successfully bootstrapped orphaned document '{DocumentId}' from partition '{PartitionKey}'.", documentId, latestOrphan.PartitionKey);
+                    return document;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            this.logger.LogWarning(ex, "Failed to evaluate orphaned documents for '{DocumentId}'. Proceeding with empty initialization.", documentId);
+        }
+        
+        return null;
+    }
+
     public async Task SaveDocumentAsync<TState>(string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new()
     {
         ArgumentException.ThrowIfNullOrEmpty(documentId);

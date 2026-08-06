@@ -76,6 +76,13 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         return null;
     }
 
+    public Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        // Showcase SQLite storage maps databases explicitly to localized ReplicaId files. 
+        // Orphaned partitioned logic across shared storage mediums is not applicable here.
+        return Task.FromResult<CrdtDocument<TState>?>(null);
+    }
+
     public async Task SaveDocumentAsync<TState>(string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new()
     {
         if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));

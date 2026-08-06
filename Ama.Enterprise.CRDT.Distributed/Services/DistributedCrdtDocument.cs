@@ -245,6 +245,16 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         try
         {
             var storedDoc = await storage.LoadDocumentAsync<TState>(DocumentId, cancellationToken).ConfigureAwait(false);
+            
+            if (storedDoc == null)
+            {
+                storedDoc = await storage.LoadOrphanedDocumentAsync<TState>(DocumentId, cancellationToken).ConfigureAwait(false);
+                if (storedDoc != null)
+                {
+                    logger.LogInformation("Successfully bootstrapped orphaned state for document {DocumentId} from persistent storage.", DocumentId);
+                }
+            }
+
             if (storedDoc != null)
             {
                 lock (syncRoot)

@@ -57,6 +57,16 @@ public interface IDistributedCrdtStorage : ICrdtOperationJournal
     Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new();
 
     /// <summary>
+    /// Attempts to load an orphaned document state from previous replica identities. 
+    /// Used as a fallback during initialization to prevent state loss when dynamic node scaling occurs.
+    /// </summary>
+    /// <typeparam name="TState">The application state bounded by the document.</typeparam>
+    /// <param name="documentId">The globally unique identifier for this document type (Topic).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The bootstrapped orphaned document, or null if no orphaned state exists.</returns>
+    Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new();
+
+    /// <summary>
     /// Persists the updated CRDT document state after patches or remote operations are applied.
     /// </summary>
     /// <typeparam name="TState">The application state bounded by the document.</typeparam>

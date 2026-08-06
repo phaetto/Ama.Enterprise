@@ -203,6 +203,14 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     }
 
     /// <inheritdoc />
+    public Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        // In-memory storage is ephemeral and not shared across processes boundaries, 
+        // thus partitioned orphaned states logic is not applicable in this context.
+        return Task.FromResult<CrdtDocument<TState>?>(null);
+    }
+
+    /// <inheritdoc />
     public Task SaveDocumentAsync<TState>(string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new()
     {
         lock (syncRoot)
