@@ -258,21 +258,6 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             {
                 return;
             }
-
-            var syncService = scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
-            
-            DottedVersionVector safeLocalState;
-            lock (replicaContext.GlobalVersionVector)
-            {
-                safeLocalState = replicaContext.GlobalVersionVector.DeepClone();
-            }
-
-            var ourEditsNotIncluded = syncService.CalculateRequirement(resMsg.ReplicaId, resMsg.GlobalState, replicaContext.ReplicaId, safeLocalState);
-
-            if (ourEditsNotIncluded.IsBehind)
-            {
-                return;
-            }
             
             scope.ClusterTracker.UpdatePeerState(resMsg.ReplicaId, senderId.Value.ToString(), resMsg.GlobalState);
             

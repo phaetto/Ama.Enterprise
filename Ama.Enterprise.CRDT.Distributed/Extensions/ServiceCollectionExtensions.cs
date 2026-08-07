@@ -69,6 +69,7 @@ public static class ServiceCollectionExtensions
         services.AddCrdtApplicatorDecorator<JournalingApplicatorDecorator>(DecoratorBehavior.After);
         services.AddCrdtPatcherDecorator<JournalingPatcherDecorator>(DecoratorBehavior.After);
         services.AddCrdtApplicatorDecorator<CompactingApplicatorDecorator>(DecoratorBehavior.After);
+        services.AddCrdtMergerDecorator<CompactingMergerDecorator>(DecoratorBehavior.After);
 
         services.AddCrdtCompactionPolicyFactory(sp =>
         {
