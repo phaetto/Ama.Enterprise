@@ -13,6 +13,7 @@ internal enum DocumentCommandType
     Initialize,
     ApplyPatch,
     ApplyOperations,
+    ApplyJournaledOperations,
     GetSnapshotData,
     MergeSnapshot,
     Checkpoint,

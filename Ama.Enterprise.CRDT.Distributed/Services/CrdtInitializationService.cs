@@ -114,7 +114,7 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
                     
                     if (operationsByDoc.TryGetValue(orchestrator.Registry.DocumentId, out var registryOps))
                     {
-                        await orchestrator.Registry.ApplyOperationsAsync(registryOps, cancellationToken).ConfigureAwait(false);
+                        await orchestrator.Registry.ApplyJournaledOperationsAsync(registryOps, cancellationToken).ConfigureAwait(false);
                         await orchestrator.SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
                     }
 
@@ -124,7 +124,7 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
                     {
                         if (document.DocumentId != orchestrator.Registry.DocumentId && operationsByDoc.TryGetValue(document.DocumentId, out var docOps))
                         {
-                            await document.ApplyOperationsAsync(docOps, cancellationToken).ConfigureAwait(false);
+                            await document.ApplyJournaledOperationsAsync(docOps, cancellationToken).ConfigureAwait(false);
                         }
                     }
                 }

@@ -23,6 +23,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 {
     private readonly ReplicaContext replicaContext;
     private readonly IAsyncCrdtApplicator applicator;
+    private readonly ICrdtApplicator syncApplicator;
     private readonly IAsyncCrdtPatcher patcher;
     private readonly IAsyncCrdtMerger merger;
     private readonly ICrdtMetadataManager metadataManager;
@@ -88,6 +89,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         TState initialState,
         ReplicaContext replicaContext,
         IAsyncCrdtApplicator applicator,
+        ICrdtApplicator syncApplicator,
         IAsyncCrdtPatcher patcher,
         IAsyncCrdtMerger merger,
         ICrdtMetadataManager metadataManager,
@@ -105,6 +107,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         this.replicaContext = replicaContext ?? throw new ArgumentNullException(nameof(replicaContext));
         this.applicator = applicator ?? throw new ArgumentNullException(nameof(applicator));
+        this.syncApplicator = syncApplicator ?? throw new ArgumentNullException(nameof(syncApplicator));
         this.patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
         this.merger = merger ?? throw new ArgumentNullException(nameof(merger));
         this.metadataManager = metadataManager ?? throw new ArgumentNullException(nameof(metadataManager));
@@ -198,6 +201,9 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                             break;
                         case DocumentCommandType.ApplyOperations:
                             await ProcessApplyOperationsInternalAsync(cmd).ConfigureAwait(false);
+                            break;
+                        case DocumentCommandType.ApplyJournaledOperations:
+                            ProcessApplyJournaledOperationsInternal(cmd);
                             break;
                         case DocumentCommandType.GetSnapshotData:
                             ProcessGetSnapshotDataInternal(cmd);
@@ -414,6 +420,46 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
 
         var result = await applicator.ApplyOperationsAsync(currentDoc, GetStreamAsync()).ConfigureAwait(false);
+
+        lock (syncRoot)
+        {
+            currentDocument = result.Document;
+            isDirty = true;
+        }
+
+        operationsAppliedCounter.Add(cmd.Operations!.Count, new KeyValuePair<string, object?>("document_id", DocumentId));
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <inheritdoc />
+    public async Task ApplyJournaledOperationsAsync(IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(operations);
+        if (operations.Count == 0) return;
+
+        var cmd = GetCommand();
+        cmd.Type = DocumentCommandType.ApplyJournaledOperations;
+        cmd.Operations = operations;
+        cmd.CancellationToken = cancellationToken;
+
+        try
+        {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            await cmd.ExecuteAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            ReturnCommand(cmd);
+        }
+    }
+
+    private void ProcessApplyJournaledOperationsInternal(PooledDocumentCommand<TState> cmd)
+    {
+        CrdtDocument<TState> currentDoc;
+        lock (syncRoot) { currentDoc = currentDocument; }
+
+        var result = syncApplicator.ApplyPatch(currentDoc, new CrdtPatch(cmd.Operations!));
 
         lock (syncRoot)
         {

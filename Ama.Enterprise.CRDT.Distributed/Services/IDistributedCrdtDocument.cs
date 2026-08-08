@@ -44,6 +44,11 @@ public interface IDistributedCrdtDocument
     /// Applies incoming operations retrieved from a remote replica to the local document state.
     /// </summary>
     Task ApplyOperationsAsync(IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Applies operations natively loaded from the storage journal explicitly avoiding asynchronous re-journaling and broadcast triggers.
+    /// </summary>
+    Task ApplyJournaledOperationsAsync(IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Applies a completely materialized snapshot payload superseding local structure dependencies alongside explicitly targeted overarching global bounds.
