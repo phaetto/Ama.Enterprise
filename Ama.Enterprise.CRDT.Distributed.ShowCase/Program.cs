@@ -380,7 +380,12 @@ public static class Program
                             break;
 
                         case "clone":
-                            CloneProcess(logger);
+                            int cloneCount = 1;
+                            if (parts.Length >= 2 && int.TryParse(parts[1], out var parsedCount) && parsedCount > 0)
+                            {
+                                cloneCount = parsedCount;
+                            }
+                            CloneProcess(logger, cloneCount);
                             break;
 
                         case "exit":
@@ -409,9 +414,8 @@ public static class Program
         }
     }
 
-    private static void CloneProcess(ILogger logger)
+    private static void CloneProcess(ILogger logger, int count)
     {
-        var nextPort = GetNextAvailablePort(currentPort + 1);
         var processPath = Environment.ProcessPath;
 
         if (string.IsNullOrEmpty(processPath))
@@ -420,14 +424,21 @@ public static class Program
             return;
         }
 
-        Process.Start(new ProcessStartInfo
+        var startPort = currentPort + 1;
+        for (var i = 0; i < count; i++)
         {
-            FileName = processPath,
-            Arguments = nextPort.ToString(),
-            UseShellExecute = true
-        });
+            var nextPort = GetNextAvailablePort(startPort);
 
-        logger.LogInformation("Cloned new cluster node on port {NextPort}.", nextPort);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = processPath,
+                Arguments = nextPort.ToString(),
+                UseShellExecute = true
+            });
+
+            logger.LogInformation("Cloned new cluster node on port {NextPort}.", nextPort);
+            startPort = nextPort + 1;
+        }
     }
 
     private static void DrawMenu()
@@ -446,7 +457,7 @@ public static class Program
             Console.WriteLine(" fset <docId> <deviceId> <true|false> <batt>    - Adds/Updates a fleet device");
             Console.WriteLine(" fdel <docId> <deviceId>                        - Removes a fleet device");
             Console.WriteLine(" hammer <cps>                                   - Pumps <cps> changes/sec into doc 'nail' (0 to stop)");
-            Console.WriteLine(" clone                                          - Spawns a new node process");
+            Console.WriteLine(" clone [count]                                  - Spawns new node process(es) (default 1)");
             Console.WriteLine(" exit                                           - Shuts down the node");
             Console.WriteLine("=================================================\n");
         }

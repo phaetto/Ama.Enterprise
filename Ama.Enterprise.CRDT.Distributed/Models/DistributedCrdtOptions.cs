@@ -13,6 +13,14 @@ public sealed class DistributedCrdtOptions
     public bool ActiveSyncEnabled { get; set; }
 
     /// <summary>
+    /// Gets or sets the debouncing window in milliseconds for Active Sync broadcasts.
+    /// When greater than 0, rapid successive operations are buffered and broadcasted as a single combined patch when the timer elapses.
+    /// This prevents network broadcast storms and socket saturation under massive throughput loads (e.g., 5000+ ops/sec).
+    /// Defaults to 50 milliseconds (yielding a maximum of 20 network broadcasts per second). Set to 0 for legacy immediate broadcasts.
+    /// </summary>
+    public int ActiveSyncDebounceMilliseconds { get; set; } = 50;
+
+    /// <summary>
     /// Gets or sets the interval in seconds at which the background checkpoint service periodically saves the in-memory state to persistent storage.
     /// Defaults to 30 seconds. Must be greater than 0.
     /// </summary>

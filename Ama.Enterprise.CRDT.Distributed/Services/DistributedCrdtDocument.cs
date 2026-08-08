@@ -31,6 +31,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly ICrdtTimestampProvider timestampProvider;
     private readonly ILogger<DistributedCrdtDocument<TState>> logger;
     private readonly bool activeSyncEnabled;
+    private readonly int activeSyncDebounceMs;
     private readonly bool avoidBlindWrites;
     private readonly TState initialState;
     
@@ -44,6 +45,11 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly CancellationTokenSource disposeCts = new();
     private readonly Task processingTask;
     
+    // Active sync debouncing components
+    private readonly object debounceSyncRoot = new();
+    private readonly List<CrdtOperation>? debounceBuffer;
+    private readonly Timer? debounceTimer;
+
     private volatile bool isDirty;
     private CrdtDocument<TState>? lastSavedDocument;
 
@@ -108,6 +114,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         this.activeSyncEnabled = options.Value.ActiveSyncEnabled;
+        this.activeSyncDebounceMs = options.Value.ActiveSyncDebounceMilliseconds;
         this.avoidBlindWrites = options.Value.AvoidBlindCheckpointWrites;
         this.initialState = initialState;
 
@@ -115,6 +122,12 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         
         var metadata = metadataManager.Initialize(initialState);
         currentDocument = new CrdtDocument<TState>(initialState, metadata);
+
+        if (this.activeSyncEnabled && this.activeSyncDebounceMs > 0)
+        {
+            this.debounceBuffer = new List<CrdtOperation>();
+            this.debounceTimer = new Timer(OnDebounceTimerFired, null, Timeout.Infinite, Timeout.Infinite);
+        }
 
         var capacity = options.Value.ChannelCapacity;
         if (capacity > 0)
@@ -319,7 +332,37 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         if (activeSyncEnabled && cmd.Patch!.Value.Operations != null && cmd.Patch.Value.Operations.Count > 0)
         {
-            PatchGenerated?.Invoke(this, cmd.Patch.Value);
+            if (activeSyncDebounceMs > 0)
+            {
+                lock (debounceSyncRoot)
+                {
+                    debounceBuffer!.AddRange(cmd.Patch.Value.Operations);
+                    debounceTimer!.Change(activeSyncDebounceMs, Timeout.Infinite);
+                }
+            }
+            else
+            {
+                PatchGenerated?.Invoke(this, cmd.Patch.Value);
+            }
+        }
+    }
+
+    private void OnDebounceTimerFired(object? state)
+    {
+        List<CrdtOperation> opsToBroadcast;
+
+        lock (debounceSyncRoot)
+        {
+            if (debounceBuffer == null || debounceBuffer.Count == 0) return;
+            
+            opsToBroadcast = new List<CrdtOperation>(debounceBuffer);
+            debounceBuffer.Clear();
+        }
+
+        if (opsToBroadcast.Count > 0)
+        {
+            var batchedPatch = new CrdtPatch(opsToBroadcast);
+            PatchGenerated?.Invoke(this, batchedPatch);
         }
     }
 
@@ -599,6 +642,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// <inheritdoc />
     public void Dispose()
     {
+        debounceTimer?.Dispose();
         disposeCts.Cancel();
         commandChannel.Writer.TryComplete();
         disposeCts.Dispose();
