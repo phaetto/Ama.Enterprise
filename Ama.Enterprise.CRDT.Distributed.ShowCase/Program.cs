@@ -1,24 +1,24 @@
 namespace Ama.Enterprise.CRDT.Distributed.ShowCase;
 
-using System;
-using System.Diagnostics;
-using System.Linq;
-using System.Net.NetworkInformation;
-using System.Threading;
-using System.Threading.Tasks;
-using System.Collections.Generic;
 using Ama.CRDT.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 using Ama.Enterprise.CRDT.Distributed.ShowCase.Services;
 using Ama.Enterprise.CRDT.MessagePack.Extensions;
+using Ama.Enterprise.Licensing.Extensions;
 using Ama.Enterprise.P2p.Extensions;
+using Ama.Enterprise.P2p.Telemetry.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Ama.Enterprise.Licensing.Extensions;
-using Ama.Enterprise.P2p.Telemetry.Extensions;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Net.NetworkInformation;
+using System.Threading;
+using System.Threading.Tasks;
 
 /// <summary>
 /// Entry point for demonstrating Multiple Distributed CRDTs orchestrated via a global registry.
@@ -61,11 +61,9 @@ public static class Program
             options.ActiveSyncEnabled = true;
             options.PeerEvictionTtlSeconds = 0;
             options.AntiEntropyInitialDelaySeconds = 5;
-            options.AntiEntropyIntervalSeconds = 30;
-            options.CheckpointIntervalSeconds = 120;
-            options.JournalSoftTrimThreshold = 500;
-            options.JournalHardTrimThreshold = 11000;
-            options.ChannelCapacity = 1;
+            options.AntiEntropyIntervalSeconds = 60;
+            options.CheckpointIntervalSeconds = 90;
+            options.CompactionTtlSeconds = 5 * 60;
         });
 
         services.AddDistributedCrdtReplica(replicaId);
@@ -214,6 +212,7 @@ public static class Program
             }, cts.Token);
 
             CancellationTokenSource? hammerCts = null;
+            Task? hammerTask = null;
 
             DrawMenu();
             DrawState(orchestrator, taskManager, fleetManager);
@@ -287,10 +286,25 @@ public static class Program
                             {
                                 if (hammerCts is not null)
                                 {
+                                    logger.LogInformation("Stopping hammer mode... Please wait, draining pending operations (this may take a moment)...");
                                     await hammerCts.CancelAsync().ConfigureAwait(false);
+                                    
+                                    if (hammerTask is not null)
+                                    {
+                                        try
+                                        {
+                                            await hammerTask.ConfigureAwait(false);
+                                        }
+                                        catch
+                                        {
+                                            // Ignore expected task cancellation exceptions during unwinding
+                                        }
+                                    }
+                                    
                                     hammerCts.Dispose();
                                     hammerCts = null;
-                                    logger.LogInformation("Hammer mode stopped.");
+                                    hammerTask = null;
+                                    logger.LogInformation("Hammer mode stopped successfully.");
                                 }
 
                                 if (cps > 0)
@@ -298,7 +312,7 @@ public static class Program
                                     hammerCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
                                     var token = hammerCts.Token;
 
-                                    _ = Task.Run(async () =>
+                                    hammerTask = Task.Run(async () =>
                                     {
                                         try
                                         {
@@ -316,14 +330,22 @@ public static class Program
                                             // Helper for concurrent dispatch avoiding closure captures or ValueTask casting ambiguities
                                             async Task FirePayloadAsync(string tId, long index, bool done, bool delete, CancellationToken ct)
                                             {
-                                                if (delete)
+                                                if (ct.IsCancellationRequested) return;
+
+                                                try
                                                 {
-                                                    await taskManager.RemoveTaskAsync("nail", tId, ct).ConfigureAwait(false);
+                                                    if (delete)
+                                                    {
+                                                        await taskManager.RemoveTaskAsync("nail", tId, ct).ConfigureAwait(false);
+                                                    }
+                                                    else
+                                                    {
+                                                        await taskManager.SetTaskAsync("nail", tId, $"Hammered payload {index}", done, ct).ConfigureAwait(false);
+                                                    }
                                                 }
-                                                else
-                                                {
-                                                    await taskManager.SetTaskAsync("nail", tId, $"Hammered payload {index}", done, ct).ConfigureAwait(false);
-                                                }
+                                                // Suppress cancellation exceptions to avoid massive unwinding delays when stopping heavy loads
+                                                catch (TaskCanceledException) { }
+                                                catch (OperationCanceledException) { }
                                             }
 
                                             while (!token.IsCancellationRequested)
@@ -343,6 +365,8 @@ public static class Program
 
                                                     for (var i = 0; i < batch; i++)
                                                     {
+                                                        if (token.IsCancellationRequested) break;
+
                                                         var taskId = taskIds[Random.Shared.Next(taskIds.Length)];
                                                         var isDelete = Random.Shared.NextDouble() < 0.2; // 20% chance to delete
                                                         var isDone = (opsCompleted + i) % 2 == 0;
