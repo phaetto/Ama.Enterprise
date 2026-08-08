@@ -26,7 +26,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetManager.cs` | Replaced synchronous `ICrdtPatcher` interactions with `IAsyncCrdtPatcher`, updating operations and standardizing private method arrangements to comply with code boundaries. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/IFleetManager.cs` | Interface for managing the distributed fleet status CRDT document. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ITaskManager.cs` | Interface for managing the distributed task list CRDT document. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseCrdtStorage.cs` | Added explicit `LoadOrphanedDocumentAsync` dummy implementations to safely satisfy isolated structural requirements natively without shared mediums limits. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseCrdtStorage.cs` | Appended `throw;` statements in catch blocks preventing data corruption and amnesia bugs by explicitly surfacing SQLite lock errors instead of swallowing them natively. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/TaskManager.cs` | Replaced synchronous `ICrdtPatcher` interactions with `IAsyncCrdtPatcher`, awaiting generation requests and repositioning private evaluation logic below structural boundaries. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Ama.Enterprise.CRDT.Distributed.TableStorage.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Extensions/ServiceCollectionExtensions.cs` | Simplified Table Storage DI extensions to strictly register a single unified scoped storage using `TryAddSingleton` to register default AOT JSON fallbacks safely bridging implementations. |
@@ -48,7 +48,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/ITaskManager.cs` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/RbacMeshRoutingPolicy.cs` | Evaluates real-time P2P broadcast routing preventing Gossip payloads from leaking across multi-mesh bounds and enforcing Zero-Trust rules. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/RbacScopeTopologyProvider.cs` | Decoupled session evaluation boundaries executing structured `ShowCaseNodeContext`. |
-| `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/ShowCaseCrdtStorage.cs` | Added explicit `LoadOrphanedDocumentAsync` dummy implementations safely matching generic `IDistributedCrdtStorage` changes bounds natively. |
+| `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/ShowCaseCrdtStorage.cs` | Appended `throw;` statements in catch blocks preventing data corruption and amnesia bugs by explicitly surfacing SQLite lock errors instead of swallowing them natively. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/ShowCaseTokenValidator.cs` | Refactored token validator evaluating structured session constraints to resolve Keyed DI construction limits. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/TaskManager.cs` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
@@ -94,7 +94,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtAntiEntropyService.cs` | Implemented network traffic smoothing jitter algorithms, preventing UDP/HTTP overflow "Thundering Herd" payload storms. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtP2pPayloadHandler.cs` | Extracted explicit DVV dominance limits that incorrectly rejected concurrently merged snapshots evaluating LUB combinations natively explicitly safely. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtTopologyObserver.cs` | Observes network connections and hooks into the core P2P protocols. Refactored new peer join events to trigger targeted state syncs directly to the new peer. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/StorageJournalForwarder.cs` | Hooked the two-tier backpressure logic to utilize the newly added explicitly defined soft and hard threshold configuration bindings natively avoiding hardcoded multipliers. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/StorageJournalForwarder.cs` | Replaced inline async hard trims with decoupled background tasks and backpressure yields to prevent channel pipeline deadlocks. |
 | `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Ama.Enterprise.CRDT.MessagePack.IntegrationTests.csproj` | Switched references to newly renamed `.SourceGenerators` and `.Tests.Common` projects correctly mapping logic. |
 | `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Models/IntegrationTestModels.cs` | Included custom endpoint derivations evaluating `[JsonDerivedType]` bridges alongside convention fallback rules to extend STJ capabilities. |
 | `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Services/MessagePackSerializerIntegrationTests.cs` | Added comprehensive integration testing capabilities evaluating dynamic Source Generator topological bindings resolving cross-boundary polymorphic models. |

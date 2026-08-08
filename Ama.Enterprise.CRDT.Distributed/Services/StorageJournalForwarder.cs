@@ -126,10 +126,6 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         {
             this.CancelSoftTrim();
 
-            // To avoid deadlocks associated with sync-over-async (.GetAwaiter().GetResult()),
-            // we spawn the hard trim in a background task for synchronous calls,
-            // but we apply backpressure by synchronously waiting on the SemaphoreSlim 
-            // with a timeout. This safely throttles the synchronous thread ingestion.
             if (Volatile.Read(ref this.activeHardTrims) == 0 && Interlocked.CompareExchange(ref this.isTrimming, 1, 0) == 0)
             {
                 if (Volatile.Read(ref this.activeHardTrims) > 0)
@@ -143,23 +139,10 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
             }
 
             this.backpressureBlocksCounter.Add(1);
-            bool entered = false;
-            try
-            {
-                // Wait up to 2 seconds to yield the caller, naturally throttling ingestion.
-                entered = CrdtTrimCoordinator.GlobalTrimLock.Wait(TimeSpan.FromSeconds(2));
-            }
-            catch (Exception)
-            {
-                // Ignore thread interruptions safely natively
-            }
-            finally
-            {
-                if (entered)
-                {
-                    CrdtTrimCoordinator.GlobalTrimLock.Release();
-                }
-            }
+            
+            // Intentionally bypassing GlobalTrimLock wait here to prevent cyclic deadlocks with the single-reader channel.
+            // Blocking the active reader thread blocks CheckpointAsync operations required by the trimmer to complete,
+            // resulting in a complete standstill. Natural channel capacity throttling is sufficient backpressure.
         }
         else if (isSoft)
         {
@@ -200,10 +183,26 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
 
         if (isHard)
         {
+            this.CancelSoftTrim();
+
+            if (Volatile.Read(ref this.activeHardTrims) == 0 && Interlocked.CompareExchange(ref this.isTrimming, 1, 0) == 0)
+            {
+                if (Volatile.Read(ref this.activeHardTrims) > 0)
+                {
+                    Interlocked.Exchange(ref this.isTrimming, 0);
+                }
+                else
+                {
+                    this.StartBackgroundHardTrim();
+                }
+            }
+
             this.backpressureBlocksCounter.Add(1);
             
-            // Execute inline async to apply direct backpressure preventing IO overrun cleanly natively
-            await this.ExecuteHardTrimInlineAsync(cancellationToken).ConfigureAwait(false);
+            // Yield the caller to allow background tasks to initialize gracefully without deadlocking the pipeline natively.
+            // We strictly avoid awaiting the GlobalTrimLock here because this thread is the active channel reader,
+            // and the trim requires this reader to process CheckpointAsync channel commands to proceed, creating a cyclic deadlock.
+            await Task.Yield();
         }
         else if (isSoft)
         {

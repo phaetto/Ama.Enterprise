@@ -71,6 +71,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to load document '{DocumentId}' from SQLite", documentId);
+            throw;
         }
 
         return null;
@@ -102,6 +103,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to save document '{DocumentId}' to SQLite", documentId);
+            throw;
         }
         finally
         {
@@ -135,6 +137,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to completely actively delete mapped CRDT document '{DocumentId}' from SQLite", documentId);
+            throw;
         }
         finally
         {
@@ -164,6 +167,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to load global DVV for '{ReplicaId}' from SQLite", replicaId);
+            throw;
         }
 
         return null;
@@ -189,6 +193,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to save global DVV to SQLite");
+            throw;
         }
         finally
         {
@@ -218,6 +223,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to load explicit overarching cluster states structurally resolving amnesia limits safely natively.");
+            throw;
         }
 
         return null;
@@ -243,6 +249,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to explicitly persist complete cluster map matrices preventing zombie edge cases seamlessly natively.");
+            throw;
         }
         finally
         {
@@ -290,6 +297,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to append synchronously to SQLite journal");
+            throw;
         }
         finally
         {
@@ -337,6 +345,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to asynchronously save operations to SQLite journal");
+            throw;
         }
         finally
         {
@@ -444,7 +453,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to get SQLite journal count");
-            return 0;
+            throw;
         }
     }
 
@@ -488,6 +497,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to synchronously trim SQLite journal natively");
+            throw;
         }
         finally
         {
@@ -536,6 +546,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to asynchronously trim SQLite journal gracefully");
+            throw;
         }
         finally
         {

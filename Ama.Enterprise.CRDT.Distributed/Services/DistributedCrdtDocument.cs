@@ -592,7 +592,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 if (EqualityComparer<CrdtDocument<TState>>.Default.Equals(lastSavedDocument.Value, currentDoc))
                 {
                     isDirty = false;
-                    return; // Avoid blind structural write matching the exact identical local sequence
+                    return; 
                 }
             }
 
