@@ -39,10 +39,30 @@ public sealed class DistributedCrdtOptions
     public int AntiEntropyInitialDelaySeconds { get; set; } = 5;
 
     /// <summary>
+    /// Gets or sets the maximum jitter in milliseconds added to the initial delay before the anti-entropy background service starts broadcasting.
+    /// This prevents multiple nodes from simultaneously starting their synchronization loops avoiding network broadcast spikes.
+    /// Defaults to 1000 milliseconds. Must be non-negative.
+    /// </summary>
+    public int AntiEntropyInitialMaxJitterMilliseconds { get; set; } = 1000;
+
+    /// <summary>
     /// Gets or sets the interval in seconds between anti-entropy synchronization rounds.
     /// Defaults to 15 seconds. Must be greater than 0.
     /// </summary>
     public int AntiEntropyIntervalSeconds { get; set; } = 15;
+
+    /// <summary>
+    /// Gets or sets the duration in seconds for the initial startup fast-sync phase.
+    /// During this period, anti-entropy syncs operate at a more frequent interval to quickly converge with the network.
+    /// Defaults to 120 seconds. Set to 0 to disable the startup fast-sync phase.
+    /// </summary>
+    public int AntiEntropyStartupDurationSeconds { get; set; } = 120;
+
+    /// <summary>
+    /// Gets or sets the interval in seconds between anti-entropy synchronization rounds during the startup fast-sync phase.
+    /// Defaults to 2 seconds. Must be greater than 0.
+    /// </summary>
+    public int AntiEntropyStartupIntervalSeconds { get; set; } = 2;
 
     /// <summary>
     /// Gets or sets the Time-To-Live (TTL) in seconds before a peer is considered dead and its state is evicted from the local cluster map and document metadata.

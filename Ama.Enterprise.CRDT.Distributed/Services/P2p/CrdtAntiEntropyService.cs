@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services.P2p;
 
 using System;
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -39,12 +40,22 @@ public sealed class CrdtAntiEntropyService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var initialDelay = TimeSpan.FromSeconds(Math.Max(0, options.Value.AntiEntropyInitialDelaySeconds));
-        var interval = TimeSpan.FromSeconds(Math.Max(1, options.Value.AntiEntropyIntervalSeconds));
+        var jitterMs = Math.Max(0, options.Value.AntiEntropyInitialMaxJitterMilliseconds);
+        var normalInterval = TimeSpan.FromSeconds(Math.Max(1, options.Value.AntiEntropyIntervalSeconds));
+        var startupDuration = TimeSpan.FromSeconds(Math.Max(0, options.Value.AntiEntropyStartupDurationSeconds));
+        var startupInterval = TimeSpan.FromSeconds(Math.Max(1, options.Value.AntiEntropyStartupIntervalSeconds));
 
-        if (initialDelay > TimeSpan.Zero)
+        if (initialDelay > TimeSpan.Zero || jitterMs > 0)
         {
-            await Task.Delay(initialDelay, stoppingToken).ConfigureAwait(false);
+            var actualDelay = initialDelay;
+            if (jitterMs > 0)
+            {
+                actualDelay = actualDelay.Add(TimeSpan.FromMilliseconds(Random.Shared.Next(0, jitterMs + 1)));
+            }
+            await Task.Delay(actualDelay, stoppingToken).ConfigureAwait(false);
         }
+
+        var startTimestamp = Stopwatch.GetTimestamp();
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -69,7 +80,10 @@ public sealed class CrdtAntiEntropyService : BackgroundService
 
             try
             {
-                await Task.Delay(interval, stoppingToken).ConfigureAwait(false);
+                var elapsed = Stopwatch.GetElapsedTime(startTimestamp);
+                var currentInterval = elapsed < startupDuration ? startupInterval : normalInterval;
+
+                await Task.Delay(currentInterval, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

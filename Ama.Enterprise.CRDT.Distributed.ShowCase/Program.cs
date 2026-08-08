@@ -98,7 +98,10 @@ public static class Program
 
         // Network Layer bindings
         services
-            .AddP2pMesh("internal")
+            .AddP2pMesh("internal", options =>
+            {
+                options.MinActivePeers = 10;
+            })
             .AddGossipNetwork(options =>
             {
                 options.GossipInterval = TimeSpan.FromMilliseconds(500);
@@ -107,7 +110,6 @@ public static class Program
             {
                 options.ListenPort = currentPort;
                 options.ListenHost = "127.0.0.1";
-                options.MaxMessageSize = 100 * 1024 * 1024;
             })
             .AddUdpPeerDiscovery(options =>
             {
@@ -308,14 +310,20 @@ public static class Program
                                             long opsCompleted = 0;
                                             long lastReportedOps = 0;
 
-                                            // Bounded pool of 10 keys: keeps document state size small
-                                            // but exercises CRDT map updates visibly in the console UI
-                                            var taskIds = Enumerable.Range(1, 10).Select(i => $"nail-task-{i}").ToArray();
+                                            // Bounded pool of 20 keys: keeping ~80% alive ensures roughly 16 active items, satisfying the 10-20 active items boundary.
+                                            var taskIds = Enumerable.Range(1, 20).Select(i => $"nail-task-{i}").ToArray();
 
                                             // Helper for concurrent dispatch avoiding closure captures or ValueTask casting ambiguities
-                                            async Task FirePayloadAsync(string tId, long index, bool done, CancellationToken ct)
+                                            async Task FirePayloadAsync(string tId, long index, bool done, bool delete, CancellationToken ct)
                                             {
-                                                await taskManager.SetTaskAsync("nail", tId, $"Hammered payload {index}", done, ct).ConfigureAwait(false);
+                                                if (delete)
+                                                {
+                                                    await taskManager.RemoveTaskAsync("nail", tId, ct).ConfigureAwait(false);
+                                                }
+                                                else
+                                                {
+                                                    await taskManager.SetTaskAsync("nail", tId, $"Hammered payload {index}", done, ct).ConfigureAwait(false);
+                                                }
                                             }
 
                                             while (!token.IsCancellationRequested)
@@ -336,10 +344,11 @@ public static class Program
                                                     for (var i = 0; i < batch; i++)
                                                     {
                                                         var taskId = taskIds[Random.Shared.Next(taskIds.Length)];
+                                                        var isDelete = Random.Shared.NextDouble() < 0.2; // 20% chance to delete
                                                         var isDone = (opsCompleted + i) % 2 == 0;
                                                         
                                                         // Enqueue operation without awaiting immediately
-                                                        pendingTasks.Add(FirePayloadAsync(taskId, opsCompleted + i, isDone, token));
+                                                        pendingTasks.Add(FirePayloadAsync(taskId, opsCompleted + i, isDone, isDelete, token));
                                                     }
                                                     
                                                     // Await the entire batch concurrently, maximizing thread pool utilization and breaking the serial bottleneck
