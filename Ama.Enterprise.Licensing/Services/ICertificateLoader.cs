@@ -1,5 +1,6 @@
 namespace Ama.Enterprise.Licensing.Services;
 
+using System.Reflection;
 using System.Security.Cryptography.X509Certificates;
 
 /// <summary>
@@ -38,4 +39,12 @@ public interface ICertificateLoader
     /// <param name="storeLocation">The location of the store. Defaults to CurrentUser.</param>
     /// <returns>The loaded certificate, or null if it cannot be found.</returns>
     X509Certificate2? LoadFromStore(string thumbprint, StoreName storeName = StoreName.My, StoreLocation storeLocation = StoreLocation.CurrentUser);
+
+    /// <summary>
+    /// Loads a public certificate from an embedded resource in the specified assembly.
+    /// </summary>
+    /// <param name="assembly">The assembly containing the embedded resource.</param>
+    /// <param name="resourceName">The exact logical name of the embedded resource.</param>
+    /// <returns>The loaded public certificate, or null if it cannot be loaded.</returns>
+    X509Certificate2? LoadFromEmbeddedResource(Assembly assembly, string resourceName);
 }

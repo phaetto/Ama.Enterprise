@@ -53,6 +53,18 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore ${{ env.SOLUTION_FILE }}
 
+      - name: Inject License Certificate
+        env:
+          AMA_LICENSE_CERTIFICATE_BASE64: ${{ secrets.AMA_LICENSE_CERTIFICATE_BASE64 }}
+        run: |
+          if [ -n "$AMA_LICENSE_CERTIFICATE_BASE64" ]; then
+            echo "$AMA_LICENSE_CERTIFICATE_BASE64" | base64 --decode > Ama.Enterprise.Licensing/ama-license.cer
+            echo "License certificate injected."
+          else
+            echo "Error: No license certificate secret found. Hard failing."
+            exit 1
+          fi
+
       - name: Build
         run: dotnet build ${{ env.SOLUTION_FILE }} --configuration Release --no-restore -p:PackageVersion=${{ env.PACKAGE_VERSION }} -p:AssemblyVersion=${{ env.ASSEMBLY_VERSION }}
 

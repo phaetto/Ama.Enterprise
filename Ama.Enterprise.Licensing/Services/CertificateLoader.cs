@@ -2,6 +2,7 @@ namespace Ama.Enterprise.Licensing.Services;
 
 using System;
 using System.IO;
+using System.Reflection;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
 
@@ -151,6 +152,34 @@ public sealed class CertificateLoader : ICertificateLoader
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to load certificate using thumbprint: {Thumbprint}", thumbprint);
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
+    public X509Certificate2? LoadFromEmbeddedResource(Assembly assembly, string resourceName)
+    {
+        ArgumentNullException.ThrowIfNull(assembly);
+        ArgumentException.ThrowIfNullOrWhiteSpace(resourceName);
+
+        try
+        {
+            using var stream = assembly.GetManifestResourceStream(resourceName);
+            if (stream is null)
+            {
+                logger.LogDebug("Certificate resource {ResourceName} not found in assembly {AssemblyName}.", resourceName, assembly.FullName);
+                return null;
+            }
+
+            using var memoryStream = new MemoryStream();
+            stream.CopyTo(memoryStream);
+            var bytes = memoryStream.ToArray();
+
+            return X509CertificateLoader.LoadCertificate(bytes);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to load certificate from embedded resource: {ResourceName}", resourceName);
             return null;
         }
     }
