@@ -19,6 +19,12 @@ A .NET 10 enterprise-grade toolkit for building decentralized, masterless Peer-t
 - **Storage Backends**: Persist distributed states safely using ephemeral Memory, scalable Azure Table Storage (with unified bounds tracking), or easily connect your own backend (`Ama.Enterprise.CRDT.Distributed.ShowCase` has its own implementation of AOT SQLite).
 - **Built-in Telemetry**: Natively integrated with `System.Diagnostics.Metrics`. It includes a P2P metric aggregator utilizing magic-byte binary slicing that pushes time-series hardware and mesh statistics across isolated nodes dynamically.
 
+## State of the repo
+
+The repo is still in preview and I am woirking to reach 0.1 version. Until the version reaches 1.0 there will be frequent updates, fixes, but also _refactorings_ and that might break some things.
+
+The code is running on some PROD systems and is very stable. The main work now is to wrap up protocols, algorithms and tooling which I want to be plentiful out-of-the-box.
+
 ## Quickstart
 
 Check the [samples repo here](https://github.com/phaetto/Ama.Enterprise.Samples) if you just want to start using some code.
