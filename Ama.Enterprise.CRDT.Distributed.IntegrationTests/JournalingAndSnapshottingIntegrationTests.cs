@@ -58,6 +58,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
             opt.CheckpointIntervalSeconds = 30;
             opt.AntiEntropyIntervalSeconds = 15;
             opt.ActiveSyncEnabled = true;
+            opt.ActiveSyncDebounceMilliseconds = 0;
             opt.MaintenanceIntervalSeconds = 120;
         });
 
