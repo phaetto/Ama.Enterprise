@@ -344,7 +344,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     }
 
     [IntegrationFact]
-    public async Task MergeSnapshot_ShouldCalculateDiffPatch_AndBroadcastIntentions()
+    public async Task MergeSnapshot_ShouldExecuteTrueStateMerge_UnioningData()
     {
         // Arrange
         var sp = BuildNode("ReplicaA");
@@ -354,6 +354,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         var metadataManager = scope.ServiceProvider.GetRequiredService<ICrdtMetadataManager>();
         var patcher = scope.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
+        var applicator = scope.ServiceProvider.GetRequiredService<IAsyncCrdtApplicator>();
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
@@ -366,43 +367,34 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await docA.ApplyPatchAsync(new CrdtPatch(new[] { localOp }), CancellationToken.None);
 
         var remoteState = new JournalTestState { Id = "journal-doc" };
-        remoteState.DataMap["RemoteKey"] = "RemoteValue";
-        
         var remoteMetadata = metadataManager.Initialize(remoteState);
         var remoteDoc = new CrdtDocument<JournalTestState>(remoteState, remoteMetadata);
+        
+        var remoteIntent = new MapSetIntent("RemoteKey", "RemoteValue");
+        var remoteOp = await patcher.GenerateOperationAsync(remoteDoc, x => x.DataMap, remoteIntent, CancellationToken.None);
+        var remoteAppliedDoc = await applicator.ApplyPatchAsync(remoteDoc, new CrdtPatch(new[] { remoteOp }));
         
         var globalDvv = new DottedVersionVector();
         globalDvv.Versions["ReplicaB"] = 15;
 
-        var snapshotBytes = serializer.SerializeToBytes(remoteDoc);
+        var snapshotBytes = serializer.SerializeToBytes(remoteAppliedDoc.Document);
 
         CrdtPatch? broadcastedPatch = null;
-        var tcs = new TaskCompletionSource<CrdtPatch>();
-        
         docA.PatchGenerated += (s, p) => 
         {
             broadcastedPatch = p;
-            tcs.TrySetResult(p);
         };
 
         // Act
         await docA.MergeSnapshotAsync(snapshotBytes, globalDvv, CancellationToken.None);
-        await Task.WhenAny(tcs.Task, Task.Delay(2000));
+        await Task.Delay(500);
 
         // Assert
-        broadcastedPatch.ShouldNotBeNull();
-        broadcastedPatch.Value.Operations.ShouldNotBeEmpty();
+        // In a true state CRDT merge, it shouldn't generate diff patches as it directly merges state in place natively
+        broadcastedPatch.ShouldBeNull();
 
-        var ops = broadcastedPatch.Value.Operations;
-
-#pragma warning disable CS8602
-#pragma warning disable CS8605
-        ops.Any(o => ((KeyValuePair<object, object>)o.Value).Key.ToString().Contains("LocalKey") && o.Type == OperationType.Remove).ShouldBeTrue();
-        ops.Any(o => ((KeyValuePair<object, object>)o.Value).Key.ToString().Contains("RemoteKey") && o.Type == OperationType.Upsert).ShouldBeTrue();
-#pragma warning restore CS8605
-#pragma warning restore CS8602
-
-        docA.Document.Data.DataMap.ShouldNotContainKey("LocalKey");
+        // Both keys should exist as a true state merge unions divergent mapped states logically
+        docA.Document.Data.DataMap.ShouldContainKeyAndValue("LocalKey", "LocalValue");
         docA.Document.Data.DataMap.ShouldContainKeyAndValue("RemoteKey", "RemoteValue");
         
         var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();

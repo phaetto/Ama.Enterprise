@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.CRDT.Distributed.IntegrationTests;
 
 using System;
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,6 +9,7 @@ using Ama.CRDT.Attributes;
 using Ama.CRDT.Extensions;
 using Ama.CRDT.Models;
 using Ama.CRDT.Models.Aot;
+using Ama.CRDT.Models.Intents;
 using Ama.CRDT.Services;
 using Ama.CRDT.Services.Serialization;
 using Ama.CRDT.Services.Versioning;
@@ -21,6 +23,7 @@ using Moq;
 using Shouldly;
 
 [CrdtAotType(typeof(EvictionIntegrationTests.TestState))]
+[CrdtAotType(typeof(Dictionary<string, string>))]
 public sealed partial class EvictionIntegrationTestAotContext : CrdtAotContext
 {
 }
@@ -36,7 +39,7 @@ public class EvictionIntegrationTests
     public class TestState
     {
         public string Id { get; set; } = "test-doc";
-        public string Data { get; set; } = "initial";
+        public Dictionary<string, string> DataMap { get; set; } = new(StringComparer.Ordinal);
     }
 
     private IServiceProvider BuildNode(string replicaId, Action<IServiceCollection>? configureExtra = null)
@@ -170,13 +173,13 @@ public class EvictionIntegrationTests
         var evictionService = scope.ServiceProvider.GetRequiredService<ICrdtEvictionService>();
         
         var originalDoc = docManager.Document;
-        docManager.Document.Data.Data = "Unsaved Offline Edit";
+        docManager.Document.Data.DataMap["Key"] = "Unsaved Offline Edit";
         
         // Act
         await evictionService.RebootLocalIdentityAsync(CancellationToken.None);
         
         // Assert
-        docManager.Document.Data.Data.ShouldBe("Unsaved Offline Edit");
+        docManager.Document.Data.DataMap["Key"].ShouldBe("Unsaved Offline Edit");
     }
 
     [IntegrationFact]
@@ -196,17 +199,27 @@ public class EvictionIntegrationTests
         var docManager = orchestrator.GetDocument<TestState>("test-doc")!;
         var metadataManager = scope.ServiceProvider.GetRequiredService<ICrdtMetadataManager>();
         var serializer = scope.ServiceProvider.GetRequiredService<ICrdtSerializer>();
+        var patcher = scope.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
+        var applicator = scope.ServiceProvider.GetRequiredService<IAsyncCrdtApplicator>();
         
-        docManager.Document.Data.Data = "Local Pending Edit";
+        // Local pending edit (no metadata tracking)
+        docManager.Document.Data.DataMap["Key"] = "Local Pending Edit";
         
-        var metadata = metadataManager.Initialize(new TestState());
-        var snapshotDoc = new CrdtDocument<TestState>(new TestState { Id = "test-doc", Data = "Cluster Snapshot Data" }, metadata);
-        var snapshotData = serializer.SerializeToBytes(snapshotDoc);
+        var snapshotState = new TestState { Id = "test-doc" };
+        var metadata = metadataManager.Initialize(snapshotState);
+        var snapshotDoc = new CrdtDocument<TestState>(snapshotState, metadata);
+        
+        // Advance the CRDT clock on the snapshot to ensure it dominates during the true state merge
+        var intent = new MapSetIntent("Key", "Cluster Snapshot Data");
+        var op = await patcher.GenerateOperationAsync(snapshotDoc, x => x.DataMap, intent, CancellationToken.None);
+        var appliedDoc = await applicator.ApplyPatchAsync(snapshotDoc, new CrdtPatch(new[] { op }));
+        
+        var snapshotData = serializer.SerializeToBytes(appliedDoc.Document);
             
         // Act
         await docManager.MergeSnapshotAsync(snapshotData, new DottedVersionVector(), CancellationToken.None);
         
         // Assert
-        docManager.Document.Data.Data.ShouldBe("Cluster Snapshot Data");
+        docManager.Document.Data.DataMap["Key"].ShouldBe("Cluster Snapshot Data");
     }
 }
