@@ -72,7 +72,7 @@ public static class ServiceCollectionExtensions
 
         services.AddCrdtJournaling<StorageJournalForwarder>();
 
-        services.AddCrdtApplicatorDecorator<JournalingApplicatorDecorator>(DecoratorBehavior.After);
+        services.AddCrdtApplicatorDecorator<JournalingApplicatorDecorator>(DecoratorBehavior.Before);
         services.AddCrdtPatcherDecorator<JournalingPatcherDecorator>(DecoratorBehavior.After);
         services.AddCrdtApplicatorDecorator<CompactingApplicatorDecorator>(DecoratorBehavior.After);
         services.AddCrdtMergerDecorator<CompactingMergerDecorator>(DecoratorBehavior.After);

@@ -111,7 +111,6 @@ public class TestClass
     {
         var test = new CSharpAnalyzerTest<DirectSerializationUsageAnalyzer, DefaultVerifier>
         {
-            ReferenceAssemblies = ReferenceAssemblies.Net.Net90
         };
 
         return test;

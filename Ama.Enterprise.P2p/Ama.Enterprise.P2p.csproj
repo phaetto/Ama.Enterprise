@@ -36,8 +36,8 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Ama.CRDT" Version="5.0.260807-ci1727" />
-		<PackageReference Include="Microsoft.Extensions.Http" Version="10.0.10" />
+		<PackageReference Include="Ama.CRDT" Version="5.0.260812-ci1759" />
+		<PackageReference Include="Microsoft.Extensions.Http" Version="10.0.11" />
 	</ItemGroup>
 
 	<ItemGroup>

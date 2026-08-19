@@ -122,7 +122,7 @@ public static class Program
             })
             .ConfigureFailureDetector(options =>
             {
-                options.HeartbeatInterval = TimeSpan.FromSeconds(5);
+                options.HeartbeatInterval = TimeSpan.FromSeconds(30);
             });
 
         services
@@ -154,7 +154,7 @@ public static class Program
             })
             .ConfigureFailureDetector(options =>
             {
-                options.HeartbeatInterval = TimeSpan.FromSeconds(5);
+                options.HeartbeatInterval = TimeSpan.FromSeconds(30);
             });
 
         await using var provider = services.BuildServiceProvider();
