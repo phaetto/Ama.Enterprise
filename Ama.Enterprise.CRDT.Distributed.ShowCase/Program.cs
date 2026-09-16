@@ -60,9 +60,9 @@ public static class Program
         {
             options.ActiveSyncEnabled = true;
             options.PeerEvictionTtlSeconds = 0;
-            options.AntiEntropyInitialDelaySeconds = 5;
-            options.AntiEntropyIntervalSeconds = 60;
-            options.CheckpointIntervalSeconds = 90;
+            options.AntiEntropyInitialDelaySeconds = 0;
+            options.AntiEntropyIntervalSeconds = 5;
+            options.CheckpointIntervalSeconds = 5;
             options.CompactionTtlSeconds = 5 * 60;
         });
 
@@ -334,13 +334,14 @@ public static class Program
 
                                                 try
                                                 {
+                                                    // Do not use cancellation tokens here, because we will break the process in memory/journal
                                                     if (delete)
                                                     {
-                                                        await taskManager.RemoveTaskAsync("nail", tId, ct).ConfigureAwait(false);
+                                                        await taskManager.RemoveTaskAsync("nail", tId).ConfigureAwait(false);
                                                     }
                                                     else
                                                     {
-                                                        await taskManager.SetTaskAsync("nail", tId, $"Hammered payload {index}", done, ct).ConfigureAwait(false);
+                                                        await taskManager.SetTaskAsync("nail", tId, $"Hammered payload {index}", done).ConfigureAwait(false);
                                                     }
                                                 }
                                                 // Suppress cancellation exceptions to avoid massive unwinding delays when stopping heavy loads
