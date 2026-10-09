@@ -14,8 +14,6 @@ using Ama.CRDT.Models;
 [JsonSerializable(typeof(FeatureFlagState))]
 [JsonSerializable(typeof(CrdtDocument<FeatureFlagState>))]
 [JsonSerializable(typeof(Dictionary<string, FeatureFlag>))]
-[JsonSerializable(typeof(List<JournaledOperation>))]
-[JsonSerializable(typeof(DottedVersionVector))]
 public sealed partial class FeatureFlagsJsonContext : JsonSerializerContext
 {
 }

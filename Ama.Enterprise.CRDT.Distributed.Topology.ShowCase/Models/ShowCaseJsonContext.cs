@@ -14,8 +14,6 @@ using Ama.Enterprise.CRDT.Distributed.Topology.ShowCase.Models;
 [JsonSerializable(typeof(DeviceStatus))]
 [JsonSerializable(typeof(CrdtDocument<TaskListState>))]
 [JsonSerializable(typeof(CrdtDocument<FleetState>))]
-[JsonSerializable(typeof(List<JournaledOperation>))]
-[JsonSerializable(typeof(JournaledOperation))]
 public sealed partial class ShowCaseJsonContext : JsonSerializerContext
 {
 }

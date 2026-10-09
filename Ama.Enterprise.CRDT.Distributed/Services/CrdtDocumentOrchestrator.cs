@@ -189,15 +189,9 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         
         await Registry.InitializeAsync(cancellationToken).ConfigureAwait(false);
         
-        Registry.StateChanged += OnRegistryStateChanged;
         Registry.PatchGenerated += OnDocumentPatchGenerated;
         
         await ProcessSyncDocumentsInternalAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    private void OnRegistryStateChanged(object? sender, EventArgs e)
-    {
-        _ = SyncDocumentsAsync(CancellationToken.None);
     }
 
     private void OnDocumentPatchGenerated(object? sender, CrdtPatch patch)
@@ -337,6 +331,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         var patch = new CrdtPatch(new[] { operation });
         
         await Registry.ApplyPatchAsync(patch, cmd.CancellationToken).ConfigureAwait(false);
+        await ProcessSyncDocumentsInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
     }
 
     public async Task DeleteDocumentAsync(string documentId, CancellationToken cancellationToken = default)
@@ -368,6 +363,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             var patch = new CrdtPatch(new[] { operation });
             
             await Registry.ApplyPatchAsync(patch, cmd.CancellationToken).ConfigureAwait(false);
+            await ProcessSyncDocumentsInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -504,7 +500,6 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         if (Registry != null)
         {
-            Registry.StateChanged -= OnRegistryStateChanged;
             Registry.PatchGenerated -= OnDocumentPatchGenerated;
             if (Registry is IDisposable rd) rd.Dispose();
         }

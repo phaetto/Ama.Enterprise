@@ -207,6 +207,11 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             
             await targetDoc.ApplyOperationsAsync(opsMsg.Operations, cancellationToken).ConfigureAwait(false);
             operationsReceivedCounter.Add(opsMsg.Operations.Length, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
+            
+            if (targetDoc.DocumentId == scope.Orchestrator.Registry.DocumentId)
+            {
+                await scope.Orchestrator.SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (Exception ex)
         {
@@ -233,6 +238,11 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             
             await targetDoc.ApplyOperationsAsync([.. patchMsg.Patch.Operations], cancellationToken).ConfigureAwait(false);
             operationsReceivedCounter.Add(patchMsg.Patch.Operations.Count, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
+            
+            if (targetDoc.DocumentId == scope.Orchestrator.Registry.DocumentId)
+            {
+                await scope.Orchestrator.SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (Exception ex)
         {
@@ -263,6 +273,11 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             
             await targetDoc.MergeSnapshotAsync(resMsg.SnapshotData, resMsg.GlobalState, cancellationToken).ConfigureAwait(false);
             snapshotsMergedCounter.Add(1, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
+            
+            if (targetDoc.DocumentId == scope.Orchestrator.Registry.DocumentId)
+            {
+                await scope.Orchestrator.SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (Exception ex)
         {
