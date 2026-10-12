@@ -4,6 +4,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
+using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -469,10 +470,27 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
             var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
 
-            DottedVersionVector globalState;
-            lock (replicaContext.GlobalVersionVector)
+            ShardVersionVectorMap globalState;
+            lock (replicaContext.ShardVersionVectors)
             {
-                globalState = replicaContext.GlobalVersionVector.DeepClone();
+                globalState = new ShardVersionVectorMap();
+                foreach (var shardKvp in replicaContext.ShardVersionVectors)
+                {
+                    var copiedVersions = new Dictionary<string, long>();
+                    var copiedDots = new Dictionary<string, ISet<long>>();
+                    foreach (var kvp in shardKvp.Value.Versions)
+                    {
+                        copiedVersions[kvp.Key] = kvp.Value;
+                    }
+                    if (shardKvp.Value.Dots != null)
+                    {
+                        foreach (var kvp in shardKvp.Value.Dots)
+                        {
+                            copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
+                        }
+                    }
+                    globalState[shardKvp.Key] = new DottedVersionVector(copiedVersions, copiedDots);
+                }
             }
 
             var syncMsg = new CrdtStateSyncMessage(replicaContext.ReplicaId, globalState);

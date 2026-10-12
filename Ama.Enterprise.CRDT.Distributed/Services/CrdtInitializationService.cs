@@ -55,25 +55,30 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
                 var options = scope.ServiceProvider.GetRequiredService<IOptions<DistributedCrdtOptions>>().Value;
                 var tombstoneCooldown = TimeSpan.FromSeconds(options.PeerTombstoneCooldownSeconds);
 
-                // 1. Initialize the global Dotted Version Vector explicitly extracting persistent DVV naturally
-                var savedDvv = await globalStorage.LoadGlobalVersionVectorAsync(replicaContext.ReplicaId, cancellationToken).ConfigureAwait(false);
-                if (savedDvv != null)
+                // 1. Initialize the global Dotted Version Vector explicitly extracting persistent DVV natively
+                var savedMap = await globalStorage.LoadShardVersionVectorMapAsync(replicaContext.ReplicaId, cancellationToken).ConfigureAwait(false);
+                if (savedMap != null)
                 {
-                    lock (replicaContext.GlobalVersionVector)
+                    lock (replicaContext.ShardVersionVectors)
                     {
-                        replicaContext.GlobalVersionVector.Versions.Clear();
-                        foreach (var kvp in savedDvv.Versions)
+                        replicaContext.ShardVersionVectors.Clear();
+                        foreach (var kvp in savedMap)
                         {
-                            replicaContext.GlobalVersionVector.Versions[kvp.Key] = kvp.Value;
-                        }
-
-                        replicaContext.GlobalVersionVector.Dots.Clear();
-                        if (savedDvv.Dots != null)
-                        {
-                            foreach (var kvp in savedDvv.Dots)
+                            var dvv = new DottedVersionVector();
+                            foreach (var vKvp in kvp.Value.Versions)
                             {
-                                replicaContext.GlobalVersionVector.Dots[kvp.Key] = new HashSet<long>(kvp.Value);
+                                dvv.Versions[vKvp.Key] = vKvp.Value;
                             }
+                            
+                            if (kvp.Value.Dots != null)
+                            {
+                                foreach (var dKvp in kvp.Value.Dots)
+                                {
+                                    dvv.Dots[dKvp.Key] = new HashSet<long>(dKvp.Value);
+                                }
+                            }
+                            
+                            replicaContext.ShardVersionVectors[kvp.Key] = dvv;
                         }
                     }
                     
@@ -98,10 +103,11 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
                 
                 await foreach (var jOp in globalStorage.GetAllJournaledOperationsAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    if (!operationsByDoc.TryGetValue(jOp.DocumentId, out var opList))
+                    var docIdStr = jOp.DocumentId.ToString();
+                    if (!operationsByDoc.TryGetValue(docIdStr, out var opList))
                     {
                         opList = new List<CrdtOperation>();
-                        operationsByDoc[jOp.DocumentId] = opList;
+                        operationsByDoc[docIdStr] = opList;
                     }
                     opList.Add(jOp.Operation);
                 }

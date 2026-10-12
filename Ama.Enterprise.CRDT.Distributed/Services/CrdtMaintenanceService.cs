@@ -95,26 +95,34 @@ public sealed class CrdtMaintenanceService : BackgroundService
                         scope.ClusterTracker.CleanupExpiredTombstones(cooldown);
                     }
 
-                    var sourceDvv = replicaContext.GlobalVersionVector;
-                    var copiedVersions = new Dictionary<string, long>();
-                    var copiedDots = new Dictionary<string, ISet<long>>();
+                    var sourceMap = replicaContext.ShardVersionVectors;
+                    var safelyPersistedMap = new ShardVersionVectorMap();
                     
-                    lock (sourceDvv)
+                    lock (sourceMap)
                     {
-                        foreach (var kvp in sourceDvv.Versions)
+                        foreach (var shardKvp in sourceMap)
                         {
-                            copiedVersions[kvp.Key] = kvp.Value;
-                        }
-                        if (sourceDvv.Dots != null)
-                        {
-                            foreach (var kvp in sourceDvv.Dots)
+                            var copiedVersions = new Dictionary<string, long>();
+                            var copiedDots = new Dictionary<string, ISet<long>>();
+                            
+                            foreach (var kvp in shardKvp.Value.Versions)
                             {
-                                copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
+                                copiedVersions[kvp.Key] = kvp.Value;
                             }
+                            if (shardKvp.Value.Dots != null)
+                            {
+                                foreach (var kvp in shardKvp.Value.Dots)
+                                {
+                                    copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
+                                }
+                            }
+                            
+                            safelyPersistedMap[shardKvp.Key] = new DottedVersionVector(copiedVersions, copiedDots);
                         }
                     }
                     
-                    var currentLocalDvv = new DottedVersionVector(copiedVersions, copiedDots);
+                    var currentLocalMap = safelyPersistedMap;
+                    var defaultShardDvv = currentLocalMap.TryGetValue("", out var dvd) ? dvd : new DottedVersionVector();
 
                     long journalCount = 0;
                     var softThreshold = options.Value.JournalSoftTrimThreshold;
@@ -131,12 +139,12 @@ public sealed class CrdtMaintenanceService : BackgroundService
                     if (trimThresholdExceeded)
                     {
                         // Force a journal trim up to the local logical bounds, intentionally dropping lagging peers to fallback snapshots
-                        if (currentLocalDvv.Versions.Count > 0)
+                        if (defaultShardDvv.Versions.Count > 0)
                         {
                             await CrdtTrimCoordinator.GlobalTrimLock.WaitAsync(stoppingToken).ConfigureAwait(false);
                             try
                             {
-                                await scope.Storage.TrimAsync(currentLocalDvv.Versions.ToDictionary(), stoppingToken).ConfigureAwait(false);
+                                await scope.Storage.TrimAsync(defaultShardDvv.Versions.ToDictionary(k => k.Key, k => k.Value), stoppingToken).ConfigureAwait(false);
                                 trimmedJournalsCounter.Add(1, tag);
                                 
                                 var exceededThreshold = (softThreshold > 0 && journalCount >= softThreshold) ? softThreshold : hardThreshold;
@@ -151,7 +159,7 @@ public sealed class CrdtMaintenanceService : BackgroundService
                     else
                     {
                         var exportedClusterState = scope.ClusterTracker.ExportState();
-                        var validClusterStates = new List<DottedVersionVector> { currentLocalDvv };
+                        var validClusterStates = new List<DottedVersionVector> { defaultShardDvv };
 
                         foreach (var networkKvp in exportedClusterState.NetworkIdToReplicaId)
                         {
@@ -160,7 +168,7 @@ public sealed class CrdtMaintenanceService : BackgroundService
                             {
                                 if (exportedClusterState.PeerStates.TryGetValue(networkKvp.Value, out var peerStateDto))
                                 {
-                                    validClusterStates.Add(peerStateDto.State);
+                                    validClusterStates.Add(peerStateDto.State.TryGetValue("", out var pd) ? pd : new DottedVersionVector());
                                 }
                             }
                         }
@@ -175,7 +183,7 @@ public sealed class CrdtMaintenanceService : BackgroundService
                                 await CrdtTrimCoordinator.GlobalTrimLock.WaitAsync(stoppingToken).ConfigureAwait(false);
                                 try
                                 {
-                                    await scope.Storage.TrimAsync(gmvv.ToDictionary(), stoppingToken).ConfigureAwait(false);
+                                    await scope.Storage.TrimAsync(gmvv.ToDictionary(k => k.Key, k => k.Value), stoppingToken).ConfigureAwait(false);
                                     trimmedJournalsCounter.Add(1, tag);
                                     logger.LogTrace("[{ReplicaId}] Executed background journal trim matching Global Minimum Version Vector bounds across expected topology peers.", scope.ReplicaId);
                                 }

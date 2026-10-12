@@ -169,7 +169,7 @@ public sealed class ConcurrencyIntegrationTests
         const int TotalTasks = 600;
 
         // Register the target peer in the cluster tracker so DispatchAntiEntropyStateAsync actually routes targeted messages natively
-        clusterTracker.UpdatePeerState("RemoteRep", targetPeerId.ToString(), new DottedVersionVector());
+        clusterTracker.UpdatePeerState("RemoteRep", targetPeerId.ToString(), new ShardVersionVectorMap());
 
         // Act - Flood orchestrator channel with distinct network bound intent messages
         var broadcastTasks = Enumerable.Range(0, TotalTasks).Select(i => Task.Run(async () =>

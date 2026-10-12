@@ -103,7 +103,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
             "Size of payloads read or written");
     }
 
-    public async Task<DottedVersionVector?> LoadGlobalVersionVectorAsync(string replicaId, CancellationToken cancellationToken = default)
+    public async Task<ShardVersionVectorMap?> LoadShardVersionVectorMapAsync(string replicaId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(replicaId);
 
@@ -121,7 +121,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
                     this.payloadBytesHistogram.Record(payload.Length, tags);
                 }
 
-                return this.serializer.DeserializeFromBytes<DottedVersionVector>(payload);
+                return this.serializer.DeserializeFromBytes<ShardVersionVectorMap>(payload);
             }
         }
         catch (RequestFailedException ex) when (ex.Status == 404 && ex.ErrorCode != "TableNotFound")
@@ -130,24 +130,24 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         }
         catch (Exception ex)
         {
-            this.logger.LogError(ex, "Storage connection failed during LoadGlobalVersionVectorAsync. Failing fast to prevent state corruption.");
+            this.logger.LogError(ex, "Storage connection failed during LoadShardVersionVectorMapAsync. Failing fast to prevent state corruption.");
             throw;
         }
 
         return null;
     }
 
-    public async Task SaveGlobalVersionVectorAsync(string replicaId, DottedVersionVector globalVersionVector, CancellationToken cancellationToken = default)
+    public async Task SaveShardVersionVectorMapAsync(string replicaId, ShardVersionVectorMap shardVersionVectorMap, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(replicaId);
-        ArgumentNullException.ThrowIfNull(globalVersionVector);
+        ArgumentNullException.ThrowIfNull(shardVersionVectorMap);
 
         try
         {
             var tags = new KeyValuePair<string, object?>[] { new("type", "dvv") };
             this.operationsWriteCounter.Add(1, tags);
 
-            var payload = this.serializer.SerializeToBytes(globalVersionVector);
+            var payload = this.serializer.SerializeToBytes(shardVersionVectorMap);
             if (payload != null)
             {
                 this.payloadBytesHistogram.Record(payload.Length, tags);
@@ -160,7 +160,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         }
         catch (Exception ex)
         {
-            this.logger.LogError(ex, "Storage connection failed during SaveGlobalVersionVectorAsync.");
+            this.logger.LogError(ex, "Storage connection failed during SaveShardVersionVectorMapAsync.");
             throw;
         }
     }
@@ -361,26 +361,27 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         }
     }
 
-    public void Append(string documentId, IReadOnlyList<CrdtOperation> operations)
+    public void Append(IComparable documentId, IReadOnlyList<CrdtOperation> operations)
     {
-        ArgumentException.ThrowIfNullOrEmpty(documentId);
+        ArgumentNullException.ThrowIfNull(documentId);
         ArgumentNullException.ThrowIfNull(operations);
         if (operations.Count == 0) return;
 
+        var docIdStr = documentId.ToString()!;
         var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
         this.operationsWriteCounter.Add(operations.Count, tags);
 
-        var groupedByReplica = operations.GroupBy(op => op.ReplicaId);
+        var groupedByShard = operations.GroupBy(op => op.ShardId);
 
-        foreach (var group in groupedByReplica)
+        foreach (var group in groupedByShard)
         {
             var partitionKey = this.GetJournalPartitionKey(group.Key);
             var batch = new List<TableTransactionAction>();
 
             foreach (var op in group)
             {
-                var rowKey = GetJournalRowKey(op.GlobalClock);
-                var journaledOp = new JournaledOperation(documentId, op);
+                var rowKey = GetJournalRowKey(op.ShardClock, op.ReplicaId);
+                var journaledOp = new JournaledOperation(docIdStr, op);
                 var payload = this.serializer.SerializeToBytes(journaledOp);
 
                 if (payload != null)
@@ -407,26 +408,27 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         }
     }
 
-    public async Task AppendAsync(string documentId, IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default)
+    public async Task AppendAsync(IComparable documentId, IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrEmpty(documentId);
+        ArgumentNullException.ThrowIfNull(documentId);
         ArgumentNullException.ThrowIfNull(operations);
         if (operations.Count == 0) return;
 
+        var docIdStr = documentId.ToString()!;
         var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
         this.operationsWriteCounter.Add(operations.Count, tags);
 
-        var groupedByReplica = operations.GroupBy(op => op.ReplicaId);
+        var groupedByShard = operations.GroupBy(op => op.ShardId);
 
-        foreach (var group in groupedByReplica)
+        foreach (var group in groupedByShard)
         {
             var partitionKey = this.GetJournalPartitionKey(group.Key);
             var batch = new List<TableTransactionAction>();
 
             foreach (var op in group)
             {
-                var rowKey = GetJournalRowKey(op.GlobalClock);
-                var journaledOp = new JournaledOperation(documentId, op);
+                var rowKey = GetJournalRowKey(op.ShardClock, op.ReplicaId);
+                var journaledOp = new JournaledOperation(docIdStr, op);
                 var payload = this.serializer.SerializeToBytes(journaledOp);
 
                 if (payload != null)
@@ -453,13 +455,14 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         }
     }
 
-    public async IAsyncEnumerable<JournaledOperation> GetOperationsByRangeAsync(string originReplicaId, long minGlobalClock, long maxGlobalClock, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<JournaledOperation> GetOperationsByRangeAsync(string shardId, string originReplicaId, long minShardClock, long maxShardClock, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(shardId);
         ArgumentException.ThrowIfNullOrEmpty(originReplicaId);
 
-        var partitionKey = this.GetJournalPartitionKey(originReplicaId);
-        var minRowKey = GetJournalRowKey(minGlobalClock);
-        var maxRowKey = GetJournalRowKey(maxGlobalClock);
+        var partitionKey = this.GetJournalPartitionKey(shardId);
+        var minRowKey = GetJournalRowKey(minShardClock, "");
+        var maxRowKey = GetJournalRowKey(maxShardClock, "~");
 
         var filter = TableClient.CreateQueryFilter($"PartitionKey eq {partitionKey} and RowKey gt {minRowKey} and RowKey le {maxRowKey}");
 
@@ -477,25 +480,26 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
             }
 
             var op = this.serializer.DeserializeFromBytes<JournaledOperation>(payload);
-            if (op != null)
+            if (op != null && op.Operation.ReplicaId == originReplicaId)
             {
                 yield return op;
             }
         }
     }
 
-    public async IAsyncEnumerable<JournaledOperation> GetOperationsByDotsAsync(string originReplicaId, IEnumerable<long> globalClocks, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<JournaledOperation> GetOperationsByDotsAsync(string shardId, string originReplicaId, IEnumerable<long> shardClocks, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(shardId);
         ArgumentException.ThrowIfNullOrEmpty(originReplicaId);
-        ArgumentNullException.ThrowIfNull(globalClocks);
+        ArgumentNullException.ThrowIfNull(shardClocks);
 
-        var partitionKey = this.GetJournalPartitionKey(originReplicaId);
+        var partitionKey = this.GetJournalPartitionKey(shardId);
         var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
 
-        foreach (var clock in globalClocks)
+        foreach (var clock in shardClocks)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var rowKey = GetJournalRowKey(clock);
+            var rowKey = GetJournalRowKey(clock, originReplicaId);
 
             Response<TableEntity>? response = null;
             try
@@ -504,7 +508,6 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
             }
             catch (RequestFailedException ex) when (ex.Status == 404 && ex.ErrorCode != "TableNotFound")
             {
-                // Unregistered dot bypassed.
                 continue;
             }
 
@@ -585,11 +588,11 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
         foreach (var kvp in globalMinimumVersionVector)
         {
-            var replicaId = kvp.Key;
+            var shardId = kvp.Key;
             var maxClock = kvp.Value;
 
-            var partitionKey = this.GetJournalPartitionKey(replicaId);
-            var maxRowKey = GetJournalRowKey(maxClock);
+            var partitionKey = this.GetJournalPartitionKey(shardId);
+            var maxRowKey = GetJournalRowKey(maxClock, "~"); // Matches all replicas for the given maxClock
 
             var filter = TableClient.CreateQueryFilter($"PartitionKey eq {partitionKey} and RowKey le {maxRowKey}");
 
@@ -661,10 +664,10 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         return localId != null ? $"{localId}_{ClusterStatePartitionKey}" : ClusterStatePartitionKey;
     }
 
-    private string GetJournalPartitionKey(string originReplicaId)
+    private string GetJournalPartitionKey(string shardId)
     {
         var localId = this.GetLocalReplicaId();
-        return localId != null ? $"{localId}_{JournalPartitionPrefix}{originReplicaId}" : $"{JournalPartitionPrefix}{originReplicaId}";
+        return localId != null ? $"{localId}_{JournalPartitionPrefix}{shardId}" : $"{JournalPartitionPrefix}{shardId}";
     }
 
     private string GetJournalStartPartition()
@@ -679,5 +682,5 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         return localId != null ? $"{localId}_{JournalPartitionPrefix}~" : JournalPartitionPrefix + "~";
     }
     
-    private static string GetJournalRowKey(long globalClock) => globalClock.ToString("D20", CultureInfo.InvariantCulture);
+    private static string GetJournalRowKey(long shardClock, string replicaId) => $"{shardClock.ToString("D20", CultureInfo.InvariantCulture)}_{replicaId}";
 }

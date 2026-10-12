@@ -13,12 +13,13 @@ using Ama.Enterprise.CRDT.Distributed.Models;
 /// <summary>
 /// Thread-safe in-memory unified storage and journal for CRDT operations.
 /// Provides a default ephemeral implementation for systems not requiring persistent storage.
+/// Internally segregates data structures evaluating strictly isolated Shard definitions mapping dictionaries to List bounds dynamically tracking topologies cleanly.
 /// </summary>
 public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
 {
-    private readonly List<JournaledOperation> operations = new();
+    private readonly Dictionary<string, List<JournaledOperation>> shardedOperations = new();
     private readonly Dictionary<string, ClusterStateSnapshotDto> clusterStates = new();
-    private readonly Dictionary<string, DottedVersionVector> globalVersionVectors = new();
+    private readonly Dictionary<string, ShardVersionVectorMap> globalVersionVectors = new();
     private readonly Dictionary<string, object> documents = new();
     private readonly object syncRoot = new();
 
@@ -34,44 +35,59 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     }
 
     /// <inheritdoc />
-    public void Append(string documentId, IReadOnlyList<CrdtOperation> operationsList)
+    public void Append(IComparable documentId, IReadOnlyList<CrdtOperation> operationsList)
     {
-        if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
+        if (documentId is null) throw new ArgumentNullException(nameof(documentId));
         ArgumentNullException.ThrowIfNull(operationsList);
 
         lock (syncRoot)
         {
             foreach (var op in operationsList)
             {
-                if (!operations.Any(o => o.Operation.Id == op.Id))
+                var shardId = op.ShardId ?? "";
+                if (!shardedOperations.TryGetValue(shardId, out var shardList))
                 {
-                    operations.Add(new JournaledOperation(documentId, op));
+                    shardList = new List<JournaledOperation>();
+                    shardedOperations[shardId] = shardList;
+                }
+
+                if (!shardList.Any(o => o.Operation.Id == op.Id))
+                {
+                    shardList.Add(new JournaledOperation(documentId, op));
                 }
             }
         }
         
-        appendedOperationsCounter.Add(operationsList.Count, new KeyValuePair<string, object?>("document_id", documentId));
+        appendedOperationsCounter.Add(operationsList.Count, new KeyValuePair<string, object?>("document_id", documentId.ToString()));
     }
 
     /// <inheritdoc />
-    public Task AppendAsync(string documentId, IReadOnlyList<CrdtOperation> operationsList, CancellationToken cancellationToken = default)
+    public Task AppendAsync(IComparable documentId, IReadOnlyList<CrdtOperation> operationsList, CancellationToken cancellationToken = default)
     {
         Append(documentId, operationsList);
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<JournaledOperation> GetOperationsByRangeAsync(string originReplicaId, long minGlobalClock, long maxGlobalClock, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<JournaledOperation> GetOperationsByRangeAsync(string shardId, string originReplicaId, long minShardClock, long maxShardClock, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(shardId)) throw new ArgumentException("Shard ID cannot be null or empty.", nameof(shardId));
         if (string.IsNullOrWhiteSpace(originReplicaId)) throw new ArgumentException("Origin Replica ID cannot be null or empty.", nameof(originReplicaId));
 
         List<JournaledOperation> snapshot;
         lock (syncRoot) 
         { 
-            snapshot = operations.ToList(); 
+            if (shardedOperations.TryGetValue(shardId, out var shardList))
+            {
+                snapshot = shardList.ToList();
+            }
+            else
+            {
+                snapshot = new List<JournaledOperation>();
+            }
         }
 
-        foreach (var op in snapshot.Where(o => o.Operation.ReplicaId == originReplicaId && o.Operation.GlobalClock > minGlobalClock && o.Operation.GlobalClock <= maxGlobalClock))
+        foreach (var op in snapshot.Where(o => o.Operation.ReplicaId == originReplicaId && o.Operation.ShardClock > minShardClock && o.Operation.ShardClock <= maxShardClock))
         {
             cancellationToken.ThrowIfCancellationRequested();
             yield return op;
@@ -81,19 +97,27 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<JournaledOperation> GetOperationsByDotsAsync(string originReplicaId, IEnumerable<long> globalClocks, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<JournaledOperation> GetOperationsByDotsAsync(string shardId, string originReplicaId, IEnumerable<long> shardClocks, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(shardId)) throw new ArgumentException("Shard ID cannot be null or empty.", nameof(shardId));
         if (string.IsNullOrWhiteSpace(originReplicaId)) throw new ArgumentException("Origin Replica ID cannot be null or empty.", nameof(originReplicaId));
-        ArgumentNullException.ThrowIfNull(globalClocks);
+        ArgumentNullException.ThrowIfNull(shardClocks);
 
-        var clocks = globalClocks.ToHashSet();
+        var clockSet = shardClocks.ToHashSet();
         List<JournaledOperation> snapshot;
         lock (syncRoot) 
         { 
-            snapshot = operations.ToList(); 
+            if (shardedOperations.TryGetValue(shardId, out var shardList))
+            {
+                snapshot = shardList.ToList();
+            }
+            else
+            {
+                snapshot = new List<JournaledOperation>();
+            }
         }
 
-        foreach (var op in snapshot.Where(o => o.Operation.ReplicaId == originReplicaId && clocks.Contains(o.Operation.GlobalClock)))
+        foreach (var op in snapshot.Where(o => o.Operation.ReplicaId == originReplicaId && clockSet.Contains(o.Operation.ShardClock)))
         {
             cancellationToken.ThrowIfCancellationRequested();
             yield return op;
@@ -107,29 +131,32 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     {
         lock (syncRoot)
         {
-            return Task.FromResult((long)operations.Count);
+            return Task.FromResult(shardedOperations.Values.Sum(list => (long)list.Count));
         }
-    }
-
-    /// <inheritdoc />
-    public void Trim(IReadOnlyDictionary<string, long> gmvv)
-    {
-        ArgumentNullException.ThrowIfNull(gmvv);
-
-        lock (syncRoot)
-        {
-            operations.RemoveAll(op => 
-                !gmvv.TryGetValue(op.Operation.ReplicaId, out var minKnown) || 
-                op.Operation.GlobalClock <= minKnown);
-        }
-        
-        trimsExecutedCounter.Add(1);
     }
 
     /// <inheritdoc />
     public Task TrimAsync(IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default)
     {
-        Trim(globalMinimumVersionVector);
+        ArgumentNullException.ThrowIfNull(globalMinimumVersionVector);
+
+        lock (syncRoot)
+        {
+            foreach (var kvp in globalMinimumVersionVector)
+            {
+                if (shardedOperations.TryGetValue(kvp.Key, out var shardList))
+                {
+                    shardList.RemoveAll(op => op.Operation.ShardClock <= kvp.Value);
+                    if (shardList.Count == 0)
+                    {
+                        shardedOperations.Remove(kvp.Key);
+                    }
+                }
+            }
+        }
+        
+        trimsExecutedCounter.Add(1);
+        
         return Task.CompletedTask;
     }
 
@@ -139,7 +166,7 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
         List<JournaledOperation> snapshot;
         lock (syncRoot) 
         { 
-            snapshot = operations.ToList(); 
+            snapshot = shardedOperations.Values.SelectMany(x => x).ToList(); 
         }
 
         foreach (var op in snapshot)
@@ -152,7 +179,7 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     }
 
     /// <inheritdoc />
-    public Task<DottedVersionVector?> LoadGlobalVersionVectorAsync(string replicaId, CancellationToken cancellationToken = default)
+    public Task<ShardVersionVectorMap?> LoadShardVersionVectorMapAsync(string replicaId, CancellationToken cancellationToken = default)
     {
         lock (syncRoot)
         {
@@ -161,11 +188,11 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     }
 
     /// <inheritdoc />
-    public Task SaveGlobalVersionVectorAsync(string replicaId, DottedVersionVector globalVersionVector, CancellationToken cancellationToken = default)
+    public Task SaveShardVersionVectorMapAsync(string replicaId, ShardVersionVectorMap shardVersionVectorMap, CancellationToken cancellationToken = default)
     {
         lock (syncRoot)
         {
-            globalVersionVectors[replicaId] = globalVersionVector;
+            globalVersionVectors[replicaId] = shardVersionVectorMap;
         }
         return Task.CompletedTask;
     }
@@ -227,7 +254,10 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
 
         lock (syncRoot)
         {
-            operations.RemoveAll(op => op.DocumentId == documentId);
+            foreach (var list in shardedOperations.Values)
+            {
+                list.RemoveAll(op => op.DocumentId.ToString() == documentId);
+            }
             documents.Remove(documentId);
         }
 

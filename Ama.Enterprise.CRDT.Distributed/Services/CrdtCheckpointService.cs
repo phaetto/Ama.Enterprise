@@ -25,7 +25,7 @@ public sealed class CrdtCheckpointService : BackgroundService
     private readonly Meter meter;
     private readonly Counter<long> checkpointCyclesCounter;
 
-    private readonly Dictionary<string, DottedVersionVector> lastKnownDvvCache = new();
+    private readonly Dictionary<string, ShardVersionVectorMap> lastKnownMapCache = new();
     private readonly Dictionary<string, ClusterStateSnapshotDto> lastKnownClusterStateCache = new();
 
     public CrdtCheckpointService(
@@ -75,26 +75,32 @@ public sealed class CrdtCheckpointService : BackgroundService
                     var tag = new KeyValuePair<string, object?>("replica_id", scope.ReplicaId);
                     checkpointCyclesCounter.Add(1, tag);
 
-                    var sourceDvv = replicaContext.GlobalVersionVector;
-                    var copiedVersions = new Dictionary<string, long>();
-                    var copiedDots = new Dictionary<string, ISet<long>>();
+                    var sourceMap = replicaContext.ShardVersionVectors;
+                    var safelyPersistedMap = new ShardVersionVectorMap();
                     
-                    lock (sourceDvv)
+                    lock (sourceMap)
                     {
-                        foreach (var kvp in sourceDvv.Versions)
+                        foreach (var shardKvp in sourceMap)
                         {
-                            copiedVersions[kvp.Key] = kvp.Value;
-                        }
-                        if (sourceDvv.Dots != null)
-                        {
-                            foreach (var kvp in sourceDvv.Dots)
+                            var copiedVersions = new Dictionary<string, long>();
+                            var copiedDots = new Dictionary<string, ISet<long>>();
+                            
+                            foreach (var kvp in shardKvp.Value.Versions)
                             {
-                                copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
+                                copiedVersions[kvp.Key] = kvp.Value;
                             }
+                            if (shardKvp.Value.Dots != null)
+                            {
+                                foreach (var kvp in shardKvp.Value.Dots)
+                                {
+                                    copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
+                                }
+                            }
+                            
+                            safelyPersistedMap[shardKvp.Key] = new DottedVersionVector(copiedVersions, copiedDots);
                         }
                     }
                     
-                    var safelyPersistedDvv = new DottedVersionVector(copiedVersions, copiedDots);
                     var exportedClusterState = scope.ClusterTracker.ExportState();
 
                     var dvvChanged = true;
@@ -102,9 +108,9 @@ public sealed class CrdtCheckpointService : BackgroundService
 
                     if (avoidBlindWrites)
                     {
-                        if (lastKnownDvvCache.TryGetValue(scope.ReplicaId, out var cachedDvv))
+                        if (lastKnownMapCache.TryGetValue(scope.ReplicaId, out var cachedMap))
                         {
-                            dvvChanged = !AreDvvsEqual(cachedDvv, safelyPersistedDvv);
+                            dvvChanged = !AreMapsEqual(cachedMap, safelyPersistedMap);
                         }
 
                         if (lastKnownClusterStateCache.TryGetValue(scope.ReplicaId, out var cachedState))
@@ -120,10 +126,10 @@ public sealed class CrdtCheckpointService : BackgroundService
 
                     if (dvvChanged || !avoidBlindWrites)
                     {
-                        await scope.Storage.SaveGlobalVersionVectorAsync(scope.ReplicaId, safelyPersistedDvv, stoppingToken).ConfigureAwait(false);
+                        await scope.Storage.SaveShardVersionVectorMapAsync(scope.ReplicaId, safelyPersistedMap, stoppingToken).ConfigureAwait(false);
                         if (avoidBlindWrites)
                         {
-                            lastKnownDvvCache[scope.ReplicaId] = safelyPersistedDvv;
+                            lastKnownMapCache[scope.ReplicaId] = safelyPersistedMap;
                         }
                     }
 
@@ -150,34 +156,42 @@ public sealed class CrdtCheckpointService : BackgroundService
         base.Dispose();
     }
 
-    private static bool AreDvvsEqual(DottedVersionVector? a, DottedVersionVector? b)
+    private static bool AreMapsEqual(ShardVersionVectorMap? a, ShardVersionVectorMap? b)
     {
         if (ReferenceEquals(a, b)) return true;
         if (a is null || b is null) return false;
 
-        if (a.Versions.Count != b.Versions.Count) return false;
-        
-        foreach (var kvp in a.Versions)
-        {
-            if (!b.Versions.TryGetValue(kvp.Key, out var bVal) || kvp.Value != bVal)
-            {
-                return false;
-            }
-        }
+        if (a.Count != b.Count) return false;
 
-        if (a.Dots is null && b.Dots is null) return true;
-        if (a.Dots is null || b.Dots is null) return false;
-
-        if (a.Dots.Count != b.Dots.Count) return false;
-        
-        foreach (var kvp in a.Dots)
+        foreach (var kvp in a)
         {
-            if (!b.Dots.TryGetValue(kvp.Key, out var bSet)) return false;
-            if (kvp.Value.Count != bSet.Count) return false;
+            if (!b.TryGetValue(kvp.Key, out var bDvv)) return false;
             
-            foreach (var dot in kvp.Value)
+            var aDvv = kvp.Value;
+            if (aDvv.Versions.Count != bDvv.Versions.Count) return false;
+            
+            foreach (var vKvp in aDvv.Versions)
             {
-                if (!bSet.Contains(dot)) return false;
+                if (!bDvv.Versions.TryGetValue(vKvp.Key, out var bVal) || vKvp.Value != bVal)
+                {
+                    return false;
+                }
+            }
+
+            if (aDvv.Dots is null && bDvv.Dots is null) continue;
+            if (aDvv.Dots is null || bDvv.Dots is null) return false;
+
+            if (aDvv.Dots.Count != bDvv.Dots.Count) return false;
+            
+            foreach (var dKvp in aDvv.Dots)
+            {
+                if (!bDvv.Dots.TryGetValue(dKvp.Key, out var bSet)) return false;
+                if (dKvp.Value.Count != bSet.Count) return false;
+                
+                foreach (var dot in dKvp.Value)
+                {
+                    if (!bSet.Contains(dot)) return false;
+                }
             }
         }
 

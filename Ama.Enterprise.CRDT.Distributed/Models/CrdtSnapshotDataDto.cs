@@ -5,7 +5,7 @@ using System.Linq;
 using Ama.CRDT.Models;
 
 /// <summary>
-/// Data transfer object holding a serialized snapshot payload and its associated global state.
+/// Data transfer object holding a serialized snapshot payload and its associated global state partitioned by shards.
 /// </summary>
 public readonly record struct CrdtSnapshotDataDto : IEquatable<CrdtSnapshotDataDto>
 {
@@ -15,17 +15,17 @@ public readonly record struct CrdtSnapshotDataDto : IEquatable<CrdtSnapshotDataD
     public byte[] SnapshotData { get; }
 
     /// <summary>
-    /// Gets the global state version vector associated with the snapshot.
+    /// Gets the global state shard version vector map associated with the snapshot.
     /// </summary>
-    public DottedVersionVector GlobalState { get; }
+    public ShardVersionVectorMap GlobalState { get; }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CrdtSnapshotDataDto"/> struct.
     /// </summary>
     /// <param name="snapshotData">The serialized binary data of the snapshot.</param>
-    /// <param name="globalState">The associated global state version vector.</param>
+    /// <param name="globalState">The associated global state shard version vector map.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="globalState"/> is null.</exception>
-    public CrdtSnapshotDataDto(byte[] snapshotData, DottedVersionVector globalState)
+    public CrdtSnapshotDataDto(byte[] snapshotData, ShardVersionVectorMap globalState)
     {
         SnapshotData = snapshotData ?? Array.Empty<byte>();
         GlobalState = globalState ?? throw new ArgumentNullException(nameof(globalState));

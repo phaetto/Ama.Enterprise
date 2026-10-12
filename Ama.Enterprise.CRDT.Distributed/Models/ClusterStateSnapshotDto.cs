@@ -13,7 +13,7 @@ using Ama.Enterprise.P2p.Models.Core;
 /// </summary>
 public sealed record ClusterPeerStateDto : IEquatable<ClusterPeerStateDto>, IExtensibleDistributedPayload
 {
-    public DottedVersionVector State { get; init; } = new(new Dictionary<string, long>(), new Dictionary<string, ISet<long>>());
+    public ShardVersionVectorMap State { get; init; } = new();
     
     public DateTime LastSeen { get; init; }
 

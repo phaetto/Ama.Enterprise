@@ -194,6 +194,25 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
                         customTypes.Add(namedType);
                     }
 
+                    // Traverse generic arguments for implemented collections
+                    var dictInterface = namedType.AllInterfaces.FirstOrDefault(i => 
+                        i.IsGenericType && 
+                        i.OriginalDefinition.ToDisplayString(DefinitionFormat) == "System.Collections.Generic.IDictionary<TKey, TValue>");
+                    if (dictInterface != null)
+                    {
+                        foreach (var arg in dictInterface.TypeArguments) queue.Enqueue(arg);
+                    }
+                    else
+                    {
+                        var colInterface = namedType.AllInterfaces.FirstOrDefault(i => 
+                            i.IsGenericType && 
+                            i.OriginalDefinition.ToDisplayString(DefinitionFormat) == "System.Collections.Generic.ICollection<T>");
+                        if (colInterface != null)
+                        {
+                            queue.Enqueue(colInterface.TypeArguments[0]);
+                        }
+                    }
+
                     // Inspect for STJ polymorphic derived types to ensure AOT serializers are generated for all explicit subclasses
                     var derivedAttributes = namedType.GetAttributes().Where(a => 
                         a.AttributeClass?.Name == "JsonDerivedTypeAttribute" || 
@@ -540,33 +559,97 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
 
         var typeFullName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         var formatterName = GetFormatterClassName(typeSymbol);
-        
-        sb.AppendLine();
-        sb.AppendLine($"    public sealed class {formatterName} : global::Ama.Enterprise.CRDT.MessagePack.Resolvers.{resolverName}.ICustomFormatter<{typeFullName}>");
-        sb.AppendLine("    {");
 
-        // Guarantee a flawless, highly reliable deterministic constraint bounding overriding AST evaluation bugs.
-        var ctor = typeSymbol.Constructors
-            .Where(c => c.DeclaredAccessibility == Accessibility.Public)
-            .OrderByDescending(c => c.Parameters.Length)
-            .ThenBy(c => string.Join(",", c.Parameters.Select(p => p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))))
-            .ThenBy(c => string.Join(",", c.Parameters.Select(p => p.Name)))
-            .FirstOrDefault();
+        var dictInterface = typeSymbol.AllInterfaces.FirstOrDefault(i => 
+            i.IsGenericType && 
+            i.OriginalDefinition.ToDisplayString(DefinitionFormat) == "System.Collections.Generic.IDictionary<TKey, TValue>");
 
-        if (ctor == null && typeSymbol.TypeKind != TypeKind.Struct)
+        if (dictInterface != null)
         {
+            var keyType = dictInterface.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            var valueType = dictInterface.TypeArguments[1].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+            sb.AppendLine();
+            sb.AppendLine($"    public sealed class {formatterName} : global::Ama.Enterprise.CRDT.MessagePack.Resolvers.{resolverName}.ICustomFormatter<{typeFullName}>");
+            sb.AppendLine("    {");
             sb.AppendLine($"        public void Serialize(ref global::MessagePack.MessagePackWriter writer, {typeFullName} value, global::MessagePack.MessagePackSerializerOptions options)");
             sb.AppendLine("        {");
-            sb.AppendLine($"            throw new global::System.NotSupportedException(\"Cannot directly serialize parameterless type {typeFullName} missing a public constructor.\");");
+            sb.AppendLine($"            if (value == null) {{ writer.WriteNil(); return; }}");
+            sb.AppendLine($"            options.Resolver.GetFormatterWithVerify<global::System.Collections.Generic.IDictionary<{keyType}, {valueType}>>().Serialize(ref writer, value, options);");
             sb.AppendLine("        }");
             sb.AppendLine();
             sb.AppendLine($"        public {typeFullName} Deserialize(ref global::MessagePack.MessagePackReader reader, global::MessagePack.MessagePackSerializerOptions options)");
             sb.AppendLine("        {");
-            sb.AppendLine($"            throw new global::System.NotSupportedException(\"Cannot directly deserialize parameterless type {typeFullName} missing a public constructor.\");");
+            sb.AppendLine($"            if (reader.TryReadNil()) return default;");
+            sb.AppendLine($"            var dict = options.Resolver.GetFormatterWithVerify<global::System.Collections.Generic.IDictionary<{keyType}, {valueType}>>().Deserialize(ref reader, options);");
+            
+            var dictCtor = typeSymbol.Constructors.FirstOrDefault(c => 
+                c.Parameters.Length == 1 && 
+                (c.Parameters[0].Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == $"global::System.Collections.Generic.IDictionary<{keyType}, {valueType}>" || 
+                 c.Parameters[0].Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == $"global::System.Collections.Generic.IReadOnlyDictionary<{keyType}, {valueType}>"));
+                 
+            if (dictCtor != null)
+            {
+                sb.AppendLine($"            return new {typeFullName}(dict);");
+            }
+            else
+            {
+                sb.AppendLine($"            var result = new {typeFullName}();");
+                sb.AppendLine($"            foreach (var kvp in dict) result.Add(kvp.Key, kvp.Value);");
+                sb.AppendLine($"            return result;");
+            }
             sb.AppendLine("        }");
             sb.AppendLine("    }");
             return;
         }
+
+        var collectionInterface = typeSymbol.AllInterfaces.FirstOrDefault(i => 
+            i.IsGenericType && 
+            i.OriginalDefinition.ToDisplayString(DefinitionFormat) == "System.Collections.Generic.ICollection<T>");
+
+        if (collectionInterface != null)
+        {
+            var elemType = collectionInterface.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+            sb.AppendLine();
+            sb.AppendLine($"    public sealed class {formatterName} : global::Ama.Enterprise.CRDT.MessagePack.Resolvers.{resolverName}.ICustomFormatter<{typeFullName}>");
+            sb.AppendLine("    {");
+            sb.AppendLine($"        public void Serialize(ref global::MessagePack.MessagePackWriter writer, {typeFullName} value, global::MessagePack.MessagePackSerializerOptions options)");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            if (value == null) {{ writer.WriteNil(); return; }}");
+            sb.AppendLine($"            options.Resolver.GetFormatterWithVerify<global::System.Collections.Generic.ICollection<{elemType}>>().Serialize(ref writer, value, options);");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine($"        public {typeFullName} Deserialize(ref global::MessagePack.MessagePackReader reader, global::MessagePack.MessagePackSerializerOptions options)");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            if (reader.TryReadNil()) return default;");
+            sb.AppendLine($"            var list = options.Resolver.GetFormatterWithVerify<global::System.Collections.Generic.ICollection<{elemType}>>().Deserialize(ref reader, options);");
+            
+            var collCtor = typeSymbol.Constructors.FirstOrDefault(c => 
+                c.Parameters.Length == 1 && 
+                (c.Parameters[0].Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == $"global::System.Collections.Generic.IEnumerable<{elemType}>" ||
+                 c.Parameters[0].Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == $"global::System.Collections.Generic.ICollection<{elemType}>" ||
+                 c.Parameters[0].Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == $"global::System.Collections.Generic.IReadOnlyCollection<{elemType}>" ||
+                 c.Parameters[0].Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == $"global::System.Collections.Generic.IList<{elemType}>"));
+                 
+            if (collCtor != null)
+            {
+                sb.AppendLine($"            return new {typeFullName}(list);");
+            }
+            else
+            {
+                sb.AppendLine($"            var result = new {typeFullName}();");
+                sb.AppendLine($"            foreach (var item in list) result.Add(item);");
+                sb.AppendLine($"            return result;");
+            }
+            sb.AppendLine("        }");
+            sb.AppendLine("    }");
+            return;
+        }
+
+        sb.AppendLine();
+        sb.AppendLine($"    public sealed class {formatterName} : global::Ama.Enterprise.CRDT.MessagePack.Resolvers.{resolverName}.ICustomFormatter<{typeFullName}>");
+        sb.AppendLine("    {");
 
         var members = new List<SerializedMember>();
         var mappedProps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -579,13 +662,53 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
             currentType = currentType.BaseType;
         }
 
+        var allReadableProperties = allMembers.OfType<IPropertySymbol>()
+            .Where(p => p.DeclaredAccessibility == Accessibility.Public && !p.IsStatic && p.GetMethod != null)
+            .Where(p => p.Name == "BinaryExtensionData" || !p.GetAttributes().Any(a => a.AttributeClass?.Name.Contains("JsonIgnore") == true || a.AttributeClass?.Name.Contains("JsonExtensionData") == true))
+            .ToList();
+
+        // Guarantee a flawless, highly reliable deterministic constraint bounding overriding AST evaluation bugs.
+        var validConstructors = typeSymbol.Constructors
+            .Where(c => c.DeclaredAccessibility == Accessibility.Public)
+            .Where(c => c.Parameters.All(p => 
+            {
+                var matchName = GetMatchingPropertyName(typeSymbol, p.Name);
+                return allReadableProperties.Any(prop => prop.Name.Equals(matchName, StringComparison.OrdinalIgnoreCase));
+            }))
+            .ToList();
+
+        var ctor = validConstructors
+            .OrderByDescending(c => c.Parameters.Length)
+            .ThenBy(c => string.Join(",", c.Parameters.Select(p => p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))))
+            .ThenBy(c => string.Join(",", c.Parameters.Select(p => p.Name)))
+            .FirstOrDefault();
+
+        if (ctor == null)
+        {
+            ctor = typeSymbol.Constructors.FirstOrDefault(c => c.DeclaredAccessibility == Accessibility.Public && c.Parameters.Length == 0);
+        }
+
+        if (ctor == null && typeSymbol.TypeKind != TypeKind.Struct)
+        {
+            sb.AppendLine($"        public void Serialize(ref global::MessagePack.MessagePackWriter writer, {typeFullName} value, global::MessagePack.MessagePackSerializerOptions options)");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            throw new global::System.NotSupportedException(\"Cannot directly serialize type {typeFullName} missing a valid matching public constructor.\");");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine($"        public {typeFullName} Deserialize(ref global::MessagePack.MessagePackReader reader, global::MessagePack.MessagePackSerializerOptions options)");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            throw new global::System.NotSupportedException(\"Cannot directly deserialize type {typeFullName} missing a valid matching public constructor.\");");
+            sb.AppendLine("        }");
+            sb.AppendLine("    }");
+            return;
+        }
+
         // PERFECTLY DECOUPLED ALPHABETICAL MAPPING:
         // By entirely removing DeclaringSyntaxReferences span sorting, we eliminate unpredictable property index shifts!
         // A mapped property layout across standard SDK structures now resolves identically across local AST evaluations 
         // AND NuGet/Project assembly metadata references consistently safely efficiently.
-        var properties = allMembers.OfType<IPropertySymbol>()
-            .Where(p => p.DeclaredAccessibility == Accessibility.Public && !p.IsStatic && p.GetMethod != null && p.SetMethod != null)
-            .Where(p => p.Name == "BinaryExtensionData" || !p.GetAttributes().Any(a => a.AttributeClass?.Name.Contains("JsonIgnore") == true || a.AttributeClass?.Name.Contains("JsonExtensionData") == true))
+        var properties = allReadableProperties
+            .Where(p => p.SetMethod != null || p.Name == "BinaryExtensionData")
             .OrderBy(p => GetTypeDepth(p.ContainingType))
             .ThenBy(p => GetPropertyOrder(p))
             .ThenBy(p => p.Name)
@@ -603,7 +726,7 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
                 var propName = GetMatchingPropertyName(typeSymbol, param.Name);
                 mappedProps.Add(propName);
 
-                var propSymbol = properties.FirstOrDefault(p => p.Name.Equals(propName, StringComparison.OrdinalIgnoreCase));
+                var propSymbol = allReadableProperties.FirstOrDefault(p => p.Name.Equals(propName, StringComparison.OrdinalIgnoreCase));
                 var formatterAttr = propSymbol?.GetAttributes().FirstOrDefault(a => a.AttributeClass?.Name.Contains("MessagePackFormatter") == true);
                 
                 string customFormatter = null;

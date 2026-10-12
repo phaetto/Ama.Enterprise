@@ -121,7 +121,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         this.avoidBlindWrites = options.Value.AvoidBlindCheckpointWrites;
         this.initialState = initialState;
 
-        DocumentId = documentIdProvider.GetDocumentId(initialState);
+        DocumentId = documentIdProvider.GetDocumentId(initialState).ToString() ?? string.Empty;
         
         var metadata = metadataManager.Initialize(initialState);
         currentDocument = new CrdtDocument<TState>(initialState, metadata);
@@ -373,12 +373,30 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     }
 
     /// <inheritdoc />
-    public DottedVersionVector GetLocalState()
+    public ShardVersionVectorMap GetLocalState()
     {
-        var sourceDvv = replicaContext.GlobalVersionVector;
-        lock (sourceDvv)
+        var sourceMap = replicaContext.ShardVersionVectors;
+        lock (sourceMap)
         {
-            return sourceDvv.DeepClone();
+            var map = new ShardVersionVectorMap();
+            foreach (var shardKvp in sourceMap)
+            {
+                var copiedVersions = new Dictionary<string, long>();
+                var copiedDots = new Dictionary<string, ISet<long>>();
+                foreach (var kvp in shardKvp.Value.Versions)
+                {
+                    copiedVersions[kvp.Key] = kvp.Value;
+                }
+                if (shardKvp.Value.Dots != null)
+                {
+                    foreach (var kvp in shardKvp.Value.Dots)
+                    {
+                        copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
+                    }
+                }
+                map[shardKvp.Key] = new DottedVersionVector(copiedVersions, copiedDots);
+            }
+            return map;
         }
     }
 
@@ -503,9 +521,10 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     }
 
     /// <inheritdoc />
-    public async Task MergeSnapshotAsync(byte[] snapshotData, DottedVersionVector globalState, CancellationToken cancellationToken = default)
+    public async Task MergeSnapshotAsync(byte[] snapshotData, ShardVersionVectorMap globalState, CancellationToken cancellationToken = default)
     {
         if (snapshotData == null || snapshotData.Length == 0) return;
+        ArgumentNullException.ThrowIfNull(globalState);
 
         var cmd = GetCommand();
         cmd.Type = DocumentCommandType.MergeSnapshot;
@@ -542,9 +561,17 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 isDirty = true;
             }
 
-            lock (replicaContext.GlobalVersionVector)
+            lock (replicaContext.ShardVersionVectors)
             {
-                replicaContext.GlobalVersionVector.Merge(cmd.GlobalState!);
+                foreach (var shardKvp in cmd.GlobalState!)
+                {
+                    if (!replicaContext.ShardVersionVectors.TryGetValue(shardKvp.Key, out var dvv))
+                    {
+                        dvv = new DottedVersionVector();
+                        replicaContext.ShardVersionVectors[shardKvp.Key] = dvv;
+                    }
+                    dvv.Merge(shardKvp.Value);
+                }
             }
 
             snapshotsMergedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));

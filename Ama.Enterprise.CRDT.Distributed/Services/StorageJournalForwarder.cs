@@ -69,37 +69,59 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         });
     }
 
-    public void Append(string documentId, IReadOnlyList<CrdtOperation> operationsList)
+    public void Append(IComparable documentId, IReadOnlyList<CrdtOperation> operations)
     {
-        if (string.IsNullOrEmpty(documentId))
+        if (documentId is null)
+        {
+            throw new ArgumentNullException(nameof(documentId));
+        }
+
+        if (operations is null)
+        {
+            throw new ArgumentNullException(nameof(operations));
+        }
+
+        string docIdString = documentId.ToString() ?? string.Empty;
+        if (string.IsNullOrEmpty(docIdString))
         {
             throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
         }
 
-        this.storage.Append(documentId, operationsList);
-        this.appendedOperationsCounter.Add(operationsList.Count, new KeyValuePair<string, object?>("document_id", documentId));
+        this.storage.Append(documentId, operations);
+        this.appendedOperationsCounter.Add(operations.Count, new KeyValuePair<string, object?>("document_id", docIdString));
         
-        this.EvaluateTriggersAndApplyBackpressureSync(operationsList.Count);
+        this.EvaluateTriggersAndApplyBackpressureSync(operations.Count);
     }
 
-    public async Task AppendAsync(string documentId, IReadOnlyList<CrdtOperation> operationsList, CancellationToken cancellationToken = default)
+    public async Task AppendAsync(IComparable documentId, IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(documentId))
+        if (documentId is null)
+        {
+            throw new ArgumentNullException(nameof(documentId));
+        }
+
+        if (operations is null)
+        {
+            throw new ArgumentNullException(nameof(operations));
+        }
+
+        string docIdString = documentId.ToString() ?? string.Empty;
+        if (string.IsNullOrEmpty(docIdString))
         {
             throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
         }
 
-        await this.storage.AppendAsync(documentId, operationsList, cancellationToken).ConfigureAwait(false);
-        this.appendedOperationsCounter.Add(operationsList.Count, new KeyValuePair<string, object?>("document_id", documentId));
+        await this.storage.AppendAsync(documentId, operations, cancellationToken).ConfigureAwait(false);
+        this.appendedOperationsCounter.Add(operations.Count, new KeyValuePair<string, object?>("document_id", docIdString));
         
-        await this.EvaluateTriggersAndApplyBackpressureAsync(operationsList.Count, cancellationToken).ConfigureAwait(false);
+        await this.EvaluateTriggersAndApplyBackpressureAsync(operations.Count, cancellationToken).ConfigureAwait(false);
     }
 
-    public IAsyncEnumerable<JournaledOperation> GetOperationsByRangeAsync(string originReplicaId, long minGlobalClock, long maxGlobalClock, CancellationToken cancellationToken = default) 
-        => this.storage.GetOperationsByRangeAsync(originReplicaId, minGlobalClock, maxGlobalClock, cancellationToken);
+    public IAsyncEnumerable<JournaledOperation> GetOperationsByRangeAsync(string shardId, string originReplicaId, long minShardClock, long maxShardClock, CancellationToken cancellationToken = default) 
+        => this.storage.GetOperationsByRangeAsync(shardId, originReplicaId, minShardClock, maxShardClock, cancellationToken);
 
-    public IAsyncEnumerable<JournaledOperation> GetOperationsByDotsAsync(string originReplicaId, IEnumerable<long> globalClocks, CancellationToken cancellationToken = default) 
-        => this.storage.GetOperationsByDotsAsync(originReplicaId, globalClocks, cancellationToken);
+    public IAsyncEnumerable<JournaledOperation> GetOperationsByDotsAsync(string shardId, string originReplicaId, IEnumerable<long> shardClocks, CancellationToken cancellationToken = default) 
+        => this.storage.GetOperationsByDotsAsync(shardId, originReplicaId, shardClocks, cancellationToken);
 
     public void Dispose()
     {
@@ -378,26 +400,35 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         var replicaContext = this.serviceProvider.GetRequiredService<ReplicaContext>();
         var orchestrator = this.serviceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         
-        var sourceDvv = replicaContext.GlobalVersionVector;
-        var copiedVersions = new Dictionary<string, long>();
-        var copiedDots = new Dictionary<string, ISet<long>>();
+        var sourceMap = replicaContext.ShardVersionVectors;
+        var safelyPersistedMap = new ShardVersionVectorMap();
         
-        lock (sourceDvv)
+        lock (sourceMap)
         {
-            foreach (var kvp in sourceDvv.Versions)
+            foreach (var shardKvp in sourceMap)
             {
-                copiedVersions[kvp.Key] = kvp.Value;
-            }
-            if (sourceDvv.Dots != null)
-            {
-                foreach (var kvp in sourceDvv.Dots)
+                var dvv = shardKvp.Value;
+                var copiedVersions = new Dictionary<string, long>();
+                var copiedDots = new Dictionary<string, ISet<long>>();
+                
+                lock (dvv)
                 {
-                    copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
+                    foreach (var kvp in dvv.Versions)
+                    {
+                        copiedVersions[kvp.Key] = kvp.Value;
+                    }
+                    if (dvv.Dots != null)
+                    {
+                        foreach (var kvp in dvv.Dots)
+                        {
+                            copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
+                        }
+                    }
                 }
+                
+                safelyPersistedMap[shardKvp.Key] = new DottedVersionVector(copiedVersions, copiedDots);
             }
         }
-        
-        var safelyPersistedDvv = new DottedVersionVector(copiedVersions, copiedDots);
         
         // Parallelize checkpointing across active documents to drastically reduce the trim duration lock time
         var documents = orchestrator.GetActiveDocuments().ToList();
@@ -408,9 +439,21 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
             await Task.WhenAll(chunk.Select(document => document.CheckpointAsync(cancellationToken))).ConfigureAwait(false);
         }
 
-        await this.storage.SaveGlobalVersionVectorAsync(replicaContext.ReplicaId, safelyPersistedDvv, cancellationToken).ConfigureAwait(false);
+        await this.storage.SaveShardVersionVectorMapAsync(replicaContext.ReplicaId, safelyPersistedMap, cancellationToken).ConfigureAwait(false);
 
-        await this.storage.TrimAsync(safelyPersistedDvv.Versions.ToDictionary(k => k.Key, v => v.Value), cancellationToken).ConfigureAwait(false);
+        var trimVersions = new Dictionary<string, long>();
+        foreach (var dvv in safelyPersistedMap.Values)
+        {
+            foreach (var kvp in dvv.Versions)
+            {
+                if (!trimVersions.TryGetValue(kvp.Key, out var currentMin) || kvp.Value < currentMin)
+                {
+                    trimVersions[kvp.Key] = kvp.Value;
+                }
+            }
+        }
+
+        await this.storage.TrimAsync(trimVersions, cancellationToken).ConfigureAwait(false);
         
         this.aggressiveTrimsCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
 

@@ -33,7 +33,7 @@ public interface IDistributedCrdtDocument
     /// <summary>
     /// Gets the current local Dotted Version Vector representing the exact synchronization state.
     /// </summary>
-    DottedVersionVector GetLocalState();
+    ShardVersionVectorMap GetLocalState();
 
     /// <summary>
     /// Retrieves a completely materialized snapshot payload superseding local structure dependencies alongside explicitly targeted overarching global bounds.
@@ -53,7 +53,7 @@ public interface IDistributedCrdtDocument
     /// <summary>
     /// Applies a completely materialized snapshot payload superseding local structure dependencies alongside explicitly targeted overarching global bounds.
     /// </summary>
-    Task MergeSnapshotAsync(byte[] snapshotData, DottedVersionVector globalState, CancellationToken cancellationToken = default);
+    Task MergeSnapshotAsync(byte[] snapshotData, ShardVersionVectorMap globalState, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Asynchronously saves the current in-memory document state to persistent storage natively.

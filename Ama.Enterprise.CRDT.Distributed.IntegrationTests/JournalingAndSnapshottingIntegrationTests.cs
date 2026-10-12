@@ -88,9 +88,9 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         var ops = new List<CrdtOperation>
         {
-            default(CrdtOperation) with { Id = op1Id, ReplicaId = "ReplicaA", GlobalClock = 1 },
-            default(CrdtOperation) with { Id = op2Id, ReplicaId = "ReplicaA", GlobalClock = 2 },
-            default(CrdtOperation) with { Id = op3Id, ReplicaId = "ReplicaB", GlobalClock = 1 }
+            default(CrdtOperation) with { Id = op1Id, ReplicaId = "ReplicaA", ShardClock = 1 },
+            default(CrdtOperation) with { Id = op2Id, ReplicaId = "ReplicaA", ShardClock = 2 },
+            default(CrdtOperation) with { Id = op3Id, ReplicaId = "ReplicaB", ShardClock = 1 }
         };
 
         // Act - Append
@@ -152,7 +152,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await checkpointService.StopAsync(CancellationToken.None);
 
         // Assert
-        mockStorage.Verify(s => s.SaveGlobalVersionVectorAsync(It.IsAny<string>(), It.IsAny<DottedVersionVector>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        mockStorage.Verify(s => s.SaveShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<ShardVersionVectorMap>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
         mockStorage.Verify(s => s.SaveDocumentAsync(It.IsAny<string>(), It.IsAny<CrdtDocument<JournalTestState>>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
 
@@ -214,9 +214,16 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var globalDvv = new DottedVersionVector();
         globalDvv.Versions["RemoteA"] = 10;
         
-        lock (context.GlobalVersionVector)
+        var globalMap = new ShardVersionVectorMap { { "", globalDvv } };
+        
+        lock (context.ShardVersionVectors)
         {
-            globalDvv.Merge(context.GlobalVersionVector);
+            if (!context.ShardVersionVectors.TryGetValue("", out var dvv))
+            {
+                dvv = new DottedVersionVector();
+                context.ShardVersionVectors[""] = dvv;
+            }
+            dvv.Merge(globalDvv);
         }
         
         var docManager = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
@@ -229,7 +236,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var snapshotDoc = new CrdtDocument<JournalTestState>(snapshotState, metadata);
         var snapshotBytes = serializer.SerializeToBytes(snapshotDoc);
         
-        var snapshotMsg = new CrdtSnapshotMessage("RemoteA", snapshotBytes, globalDvv);
+        var snapshotMsg = new CrdtSnapshotMessage("RemoteA", snapshotBytes, globalMap);
         var payloadBytes = serializer.SerializeToBytes(snapshotMsg);
         var wrapper = new CrdtMessageWrapper("journal-doc", "CrdtSnapshot", payloadBytes);
         var wrapperBytes = serializer.SerializeToBytes(wrapper);
@@ -241,7 +248,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         // Assert
         docManager.Document.Data.DataMap.ShouldContainKeyAndValue("Field", "SnapshotData");
-        context.GlobalVersionVector.Versions["RemoteA"].ShouldBe(10);
+        context.ShardVersionVectors[""].Versions["RemoteA"].ShouldBe(10);
     }
 
     [IntegrationFact]
@@ -294,9 +301,11 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         var remoteDvv = new DottedVersionVector();
 
+        var targetVector = replicaContext.ShardVersionVectors.TryGetValue("", out var t) ? t : new DottedVersionVector();
+
         // Act
-        var requirement = syncService.CalculateRequirement("ReplicaB", remoteDvv, replicaContext.ReplicaId, replicaContext.GlobalVersionVector);
-        var missingOpsStream = journalManager.GetMissingOperationsAsync(requirement, CancellationToken.None);
+        var requirement = syncService.CalculateRequirement("ReplicaB", remoteDvv, replicaContext.ReplicaId, targetVector, "");
+        var missingOpsStream = journalManager.GetMissingOperationsAsync("", requirement, CancellationToken.None);
         var result = await syncService.EvaluateJournalCompletionAsync(missingOpsStream, requirement, CancellationToken.None);
 
         // Assert
@@ -334,9 +343,11 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         var remoteDvv = new DottedVersionVector();
         
+        var targetVector = replicaContext.ShardVersionVectors.TryGetValue("", out var t) ? t : new DottedVersionVector();
+
         // Act
-        var requirement = syncService.CalculateRequirement("ReplicaB", remoteDvv, replicaContext.ReplicaId, replicaContext.GlobalVersionVector);
-        var missingOpsStream = journalManager.GetMissingOperationsAsync(requirement, CancellationToken.None);
+        var requirement = syncService.CalculateRequirement("ReplicaB", remoteDvv, replicaContext.ReplicaId, targetVector, "");
+        var missingOpsStream = journalManager.GetMissingOperationsAsync("", requirement, CancellationToken.None);
         var result = await syncService.EvaluateJournalCompletionAsync(missingOpsStream, requirement, CancellationToken.None);
 
         // Assert
@@ -377,6 +388,8 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         
         var globalDvv = new DottedVersionVector();
         globalDvv.Versions["ReplicaB"] = 15;
+        
+        var globalMap = new ShardVersionVectorMap { { "", globalDvv } };
 
         var snapshotBytes = serializer.SerializeToBytes(remoteAppliedDoc.Document);
 
@@ -387,7 +400,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         };
 
         // Act
-        await docA.MergeSnapshotAsync(snapshotBytes, globalDvv, CancellationToken.None);
+        await docA.MergeSnapshotAsync(snapshotBytes, globalMap, CancellationToken.None);
         await Task.Delay(500);
 
         // Assert
@@ -399,7 +412,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         docA.Document.Data.DataMap.ShouldContainKeyAndValue("RemoteKey", "RemoteValue");
         
         var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
-        replicaContext.GlobalVersionVector.Versions["ReplicaB"].ShouldBe(15);
+        replicaContext.ShardVersionVectors[""].Versions["ReplicaB"].ShouldBe(15);
     }
 
     [IntegrationFact]

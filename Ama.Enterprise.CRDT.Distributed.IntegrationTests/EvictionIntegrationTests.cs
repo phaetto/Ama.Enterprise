@@ -2,6 +2,7 @@ namespace Ama.Enterprise.CRDT.Distributed.IntegrationTests;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
@@ -91,13 +92,14 @@ public class EvictionIntegrationTests
         var context = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
         var evictionService = scope.ServiceProvider.GetRequiredService<ICrdtEvictionService>();
 
-        context.GlobalVersionVector.Versions["RemoteReplica1"] = 50;
+        context.ShardVersionVectors["test-doc"] = new DottedVersionVector();
+        context.ShardVersionVectors["test-doc"].Versions["RemoteReplica1"] = 50;
 
         // Act
         await evictionService.EvictPeersAsync(new[] { "RemoteReplica1" }, CancellationToken.None);
 
         // Assert
-        context.GlobalVersionVector.Versions.ContainsKey("RemoteReplica1").ShouldBeFalse();
+        context.ShardVersionVectors["test-doc"].Versions.ContainsKey("RemoteReplica1").ShouldBeFalse();
     }
 
     [IntegrationFact]
@@ -109,7 +111,7 @@ public class EvictionIntegrationTests
         var scope1 = scopeManager1.GetOrCreateScope("NodeA");
         var tracker1 = scope1.ServiceProvider.GetRequiredService<IClusterStateTracker>();
         
-        tracker1.UpdatePeerState("NodeB", "NetworkB", new DottedVersionVector());
+        tracker1.UpdatePeerState("NodeB", "NetworkB", new ShardVersionVectorMap());
         
         // Act
         tracker1.TombstoneReplica("NodeB");
@@ -139,18 +141,21 @@ public class EvictionIntegrationTests
         
         var nodeA_Dvv = new DottedVersionVector();
         nodeA_Dvv.Versions["NodeA"] = 5;
+        var nodeA_Map = new ShardVersionVectorMap { ["test-doc"] = nodeA_Dvv };
         
         var nodeB_Dvv = new DottedVersionVector();
         nodeB_Dvv.Versions["NodeA"] = 2; // Node B is behind
+        var nodeB_Map = new ShardVersionVectorMap { ["test-doc"] = nodeB_Dvv };
         
-        tracker.UpdatePeerState("NodeA", "NetworkA", nodeA_Dvv);
-        tracker.UpdatePeerState("NodeB", "NetworkB", nodeB_Dvv);
+        tracker.UpdatePeerState("NodeA", "NetworkA", nodeA_Map);
+        tracker.UpdatePeerState("NodeB", "NetworkB", nodeB_Map);
         
         // Act
         tracker.RemovePeerByNetworkId("NetworkB");
         
         var clusterStates = tracker.GetClusterStates();
-        var gmvv = syncService.CalculateGlobalMinimumVersionVector(clusterStates);
+        var vectors = clusterStates.Select(s => s.TryGetValue("test-doc", out var v) ? v : new DottedVersionVector()).ToList();
+        var gmvv = syncService.CalculateGlobalMinimumVersionVector(vectors);
         
         // Assert
         gmvv["NodeA"].ShouldBe(2);
@@ -217,7 +222,7 @@ public class EvictionIntegrationTests
         var snapshotData = serializer.SerializeToBytes(appliedDoc.Document);
             
         // Act
-        await docManager.MergeSnapshotAsync(snapshotData, new DottedVersionVector(), CancellationToken.None);
+        await docManager.MergeSnapshotAsync(snapshotData, new ShardVersionVectorMap(), CancellationToken.None);
         
         // Assert
         docManager.Document.Data.DataMap["Key"].ShouldBe("Cluster Snapshot Data");

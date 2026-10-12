@@ -9,9 +9,9 @@ using Ama.CRDT.Models;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
-/// Message payload containing a complete materialized CRDT document snapshot and its associated global bounds, used as a fallback synchronization mechanism when log truncation gaps are detected.
+/// Message payload containing a complete materialized CRDT document snapshot and its associated global bounds partitioned by shard, used as a fallback synchronization mechanism when log truncation gaps are detected.
 /// </summary>
-public sealed record CrdtSnapshotMessage(string ReplicaId, byte[] SnapshotData, DottedVersionVector GlobalState) : IEquatable<CrdtSnapshotMessage>, IExtensibleDistributedPayload
+public sealed record CrdtSnapshotMessage(string ReplicaId, byte[] SnapshotData, ShardVersionVectorMap GlobalState) : IEquatable<CrdtSnapshotMessage>, IExtensibleDistributedPayload
 {
     /// <inheritdoc />
     [JsonExtensionData]

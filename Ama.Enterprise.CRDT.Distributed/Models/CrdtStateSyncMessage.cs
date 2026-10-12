@@ -8,9 +8,9 @@ using Ama.CRDT.Models;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
-/// Message containing the local state vector of a CRDT document to synchronize with remote peers.
+/// Message containing the local state vector of a CRDT document (partitioned by shards) to synchronize with remote peers.
 /// </summary>
-public sealed record CrdtStateSyncMessage(string? ReplicaId, DottedVersionVector? State) : IExtensibleDistributedPayload
+public sealed record CrdtStateSyncMessage(string? ReplicaId, ShardVersionVectorMap? State) : IExtensibleDistributedPayload
 {
     /// <inheritdoc />
     [JsonExtensionData]

@@ -39,14 +39,14 @@ internal sealed class PooledDocumentCommand<TState> : IValueTaskSource where TSt
     public CrdtPatch? Patch { get; set; }
     public IReadOnlyList<CrdtOperation>? Operations { get; set; }
     public byte[]? SnapshotData { get; set; }
-    public DottedVersionVector? GlobalState { get; set; }
+    public ShardVersionVectorMap? GlobalState { get; set; }
     public ICrdtTimestamp? ExplicitTimestamp { get; set; }
     public string? ReplicaIdToEvict { get; set; }
     public string? OldReplicaId { get; set; }
     public CancellationToken CancellationToken { get; set; }
 
     public byte[]? ResultSnapshotData { get; set; }
-    public DottedVersionVector? ResultGlobalState { get; set; }
+    public ShardVersionVectorMap? ResultGlobalState { get; set; }
 
     public void Reset()
     {

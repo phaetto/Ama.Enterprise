@@ -72,14 +72,16 @@ public sealed class ClusterStatePersistenceIntegrationTests
         var tracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
         var remoteDvv = new DottedVersionVector();
         remoteDvv.Versions["RemoteReplica1"] = 10;
+        
+        var remoteMap = new ShardVersionVectorMap { { "", remoteDvv } };
 
         // Act - Track a new peer
-        tracker.UpdatePeerState("RemoteReplica1", "NetworkId1", remoteDvv);
+        tracker.UpdatePeerState("RemoteReplica1", "NetworkId1", remoteMap);
 
         // Assert
         var states = tracker.GetClusterStates();
         states.Count.ShouldBe(1);
-        states[0].Versions["RemoteReplica1"].ShouldBe(10);
+        states[0][""].Versions["RemoteReplica1"].ShouldBe(10);
         tracker.IsReplicaTombstoned("RemoteReplica1").ShouldBeFalse();
 
         // Act - Unmap network
@@ -166,8 +168,10 @@ public sealed class ClusterStatePersistenceIntegrationTests
         var savedDvv = new DottedVersionVector();
         savedDvv.Versions["Replica1"] = 100;
         
-        mockStorage.Setup(s => s.LoadGlobalVersionVectorAsync("Replica1", It.IsAny<CancellationToken>()))
-                   .ReturnsAsync(savedDvv);
+        var savedMap = new ShardVersionVectorMap { { "", savedDvv } };
+        
+        mockStorage.Setup(s => s.LoadShardVersionVectorMapAsync("Replica1", It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(savedMap);
         
         mockStorage.Setup(s => s.GetAllJournaledOperationsAsync(It.IsAny<CancellationToken>()))
                    .Returns(EmptyJournalStream());
@@ -182,7 +186,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
         var scope = scopeManager.GetOrCreateScope("Replica1");
         var context = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
 
-        context.GlobalVersionVector.Versions["Replica1"].ShouldBe(100);
+        context.ShardVersionVectors[""].Versions["Replica1"].ShouldBe(100);
     }
 
     [IntegrationFact]
@@ -196,7 +200,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
                    .Callback<string, ClusterStateSnapshotDto, CancellationToken>((_, state, _) => tcs.TrySetResult(state))
                    .Returns(Task.CompletedTask);
 
-        storageMock.Setup(s => s.SaveGlobalVersionVectorAsync(It.IsAny<string>(), It.IsAny<DottedVersionVector>(), It.IsAny<CancellationToken>()))
+        storageMock.Setup(s => s.SaveShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<ShardVersionVectorMap>(), It.IsAny<CancellationToken>()))
                    .Returns(Task.CompletedTask);
                    
         storageMock.Setup(s => s.GetJournalCountAsync(It.IsAny<CancellationToken>()))
@@ -208,8 +212,8 @@ public sealed class ClusterStatePersistenceIntegrationTests
         storageMock.Setup(s => s.GetAllJournaledOperationsAsync(It.IsAny<CancellationToken>()))
                    .Returns(EmptyJournalStream());
 
-        storageMock.Setup(s => s.LoadGlobalVersionVectorAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                   .ReturnsAsync(new DottedVersionVector());
+        storageMock.Setup(s => s.LoadShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(new ShardVersionVectorMap());
 
         var sp = BuildNodeWithStorage("Replica1", storageMock.Object);
 
@@ -222,7 +226,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
 
         var dvv = new DottedVersionVector();
         dvv.Versions["ReplicaB"] = 15;
-        tracker.UpdatePeerState("ReplicaB", "NetworkB", dvv);
+        tracker.UpdatePeerState("ReplicaB", "NetworkB", new ShardVersionVectorMap { { "", dvv } });
         tracker.TombstoneReplica("ReplicaC");
 
         var checkpointService = sp.GetServices<IHostedService>().OfType<CrdtCheckpointService>().First();
@@ -241,7 +245,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
         capturedState.TombstonedReplicas.ShouldContainKey("ReplicaC");
         capturedState.NetworkIdToReplicaId.ShouldContainKeyAndValue("NetworkB", "ReplicaB");
         capturedState.PeerStates.ShouldContainKey("ReplicaB");
-        capturedState.PeerStates["ReplicaB"].State.Versions["ReplicaB"].ShouldBe(15);
+        capturedState.PeerStates["ReplicaB"].State[""].Versions["ReplicaB"].ShouldBe(15);
     }
 
     [IntegrationFact]
@@ -257,7 +261,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
         
         savedDto.PeerStates["ReplicaD"] = new ClusterPeerStateDto 
         { 
-            State = dvv, 
+            State = new ShardVersionVectorMap { { "", dvv } }, 
             LastSeen = DateTime.UtcNow 
         };
 
@@ -269,8 +273,8 @@ public sealed class ClusterStatePersistenceIntegrationTests
         storageMock.Setup(s => s.GetAllJournaledOperationsAsync(It.IsAny<CancellationToken>()))
                    .Returns(EmptyJournalStream());
                    
-        storageMock.Setup(s => s.LoadGlobalVersionVectorAsync("Replica1", It.IsAny<CancellationToken>()))
-                   .ReturnsAsync((DottedVersionVector?)null);
+        storageMock.Setup(s => s.LoadShardVersionVectorMapAsync("Replica1", It.IsAny<CancellationToken>()))
+                   .ReturnsAsync((ShardVersionVectorMap?)null);
 
         var sp = BuildNodeWithStorage("Replica1", storageMock.Object);
         var initService = sp.GetServices<IHostedService>().OfType<CrdtInitializationService>().First();
@@ -287,7 +291,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
         
         var states = tracker.GetClusterStates();
         states.Count.ShouldBe(1);
-        states[0].Versions.ShouldContainKeyAndValue("ReplicaD", 42);
+        states[0][""].Versions.ShouldContainKeyAndValue("ReplicaD", 42);
         
         var tombstonedPeer = tracker.TombstonePeerByNetworkId("NetworkD");
         tombstonedPeer.ShouldBe("ReplicaD");
@@ -308,7 +312,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
                    .Callback(() => Interlocked.Increment(ref saveClusterCount))
                    .Returns(Task.CompletedTask);
 
-        storageMock.Setup(s => s.SaveGlobalVersionVectorAsync(It.IsAny<string>(), It.IsAny<DottedVersionVector>(), It.IsAny<CancellationToken>()))
+        storageMock.Setup(s => s.SaveShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<ShardVersionVectorMap>(), It.IsAny<CancellationToken>()))
                    .Callback(() => 
                    {
                        Interlocked.Increment(ref saveDvvCount);
@@ -325,8 +329,8 @@ public sealed class ClusterStatePersistenceIntegrationTests
         storageMock.Setup(s => s.GetAllJournaledOperationsAsync(It.IsAny<CancellationToken>()))
                    .Returns(EmptyJournalStream());
 
-        storageMock.Setup(s => s.LoadGlobalVersionVectorAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                   .ReturnsAsync(new DottedVersionVector());
+        storageMock.Setup(s => s.LoadShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(new ShardVersionVectorMap());
 
         var sp = BuildNodeWithStorage("Replica1", storageMock.Object, services => 
         {
@@ -373,7 +377,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
                    })
                    .Returns(Task.CompletedTask);
 
-        storageMock.Setup(s => s.SaveGlobalVersionVectorAsync(It.IsAny<string>(), It.IsAny<DottedVersionVector>(), It.IsAny<CancellationToken>()))
+        storageMock.Setup(s => s.SaveShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<ShardVersionVectorMap>(), It.IsAny<CancellationToken>()))
                    .Callback(() => Interlocked.Increment(ref saveDvvCount))
                    .Returns(Task.CompletedTask);
                    
@@ -386,8 +390,8 @@ public sealed class ClusterStatePersistenceIntegrationTests
         storageMock.Setup(s => s.GetAllJournaledOperationsAsync(It.IsAny<CancellationToken>()))
                    .Returns(EmptyJournalStream());
 
-        storageMock.Setup(s => s.LoadGlobalVersionVectorAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                   .ReturnsAsync(new DottedVersionVector());
+        storageMock.Setup(s => s.LoadShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(new ShardVersionVectorMap());
 
         var sp = BuildNodeWithStorage("Replica1", storageMock.Object, services => 
         {
@@ -413,9 +417,14 @@ public sealed class ClusterStatePersistenceIntegrationTests
         scope.ClusterTracker.TombstoneReplica("ReplicaMutated");
         
         var context = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
-        lock (context.GlobalVersionVector)
+        lock (context.ShardVersionVectors)
         {
-            context.GlobalVersionVector.Versions["ReplicaMutated"] = 10;
+            if (!context.ShardVersionVectors.TryGetValue("", out var dvv))
+            {
+                dvv = new DottedVersionVector();
+                context.ShardVersionVectors[""] = dvv;
+            }
+            dvv.Versions["ReplicaMutated"] = 10;
         }
 
         await Task.WhenAny(tcsSecondWrite.Task, Task.Delay(5000));

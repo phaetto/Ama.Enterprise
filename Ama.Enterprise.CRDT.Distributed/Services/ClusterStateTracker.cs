@@ -33,7 +33,7 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
     }
 
     /// <inheritdoc />
-    public void UpdatePeerState(string peerReplicaId, string peerId, DottedVersionVector globalState)
+    public void UpdatePeerState(string peerReplicaId, string peerId, ShardVersionVectorMap globalState)
     {
         if (string.IsNullOrWhiteSpace(peerReplicaId)) throw new ArgumentException("Peer Replica ID cannot be null or empty.", nameof(peerReplicaId));
         if (string.IsNullOrWhiteSpace(peerId)) throw new ArgumentException("Peer ID cannot be null or empty.", nameof(peerId));
@@ -54,7 +54,7 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<DottedVersionVector> GetClusterStates()
+    public IReadOnlyList<ShardVersionVectorMap> GetClusterStates()
     {
         lock (syncRoot)
         {
@@ -205,13 +205,20 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
 
             foreach (var kvp in peerStates)
             {
-                var safeStateVersions = kvp.Value.State.Versions.ToDictionary(v => v.Key, v => v.Value);
-                var safeStateDots = kvp.Value.State.Dots?.ToDictionary(d => d.Key, d => (ISet<long>)new HashSet<long>(d.Value)) 
-                                    ?? new Dictionary<string, ISet<long>>();
+                var safeMap = new ShardVersionVectorMap();
+                
+                foreach (var shardKvp in kvp.Value.State)
+                {
+                    var safeStateVersions = shardKvp.Value.Versions.ToDictionary(v => v.Key, v => v.Value);
+                    var safeStateDots = shardKvp.Value.Dots?.ToDictionary(d => d.Key, d => (ISet<long>)new HashSet<long>(d.Value)) 
+                                        ?? new Dictionary<string, ISet<long>>();
+
+                    safeMap[shardKvp.Key] = new DottedVersionVector(safeStateVersions, safeStateDots);
+                }
 
                 dto.PeerStates[kvp.Key] = new ClusterPeerStateDto
                 {
-                    State = new DottedVersionVector(safeStateVersions, safeStateDots),
+                    State = safeMap,
                     LastSeen = kvp.Value.LastSeen
                 };
             }
@@ -242,11 +249,18 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
             peerStates.Clear();
             foreach (var kvp in state.PeerStates)
             {
-                var safeStateVersions = kvp.Value.State.Versions.ToDictionary(v => v.Key, v => v.Value);
-                var safeStateDots = kvp.Value.State.Dots?.ToDictionary(d => d.Key, d => (ISet<long>)new HashSet<long>(d.Value));
+                var safeMap = new ShardVersionVectorMap();
+                
+                foreach (var shardKvp in kvp.Value.State)
+                {
+                    var safeStateVersions = shardKvp.Value.Versions.ToDictionary(v => v.Key, v => v.Value);
+                    var safeStateDots = shardKvp.Value.Dots?.ToDictionary(d => d.Key, d => (ISet<long>)new HashSet<long>(d.Value));
+
+                    safeMap[shardKvp.Key] = new DottedVersionVector(safeStateVersions, safeStateDots);
+                }
 
                 peerStates[kvp.Key] = new PeerStateEntry(
-                    new DottedVersionVector(safeStateVersions, safeStateDots),
+                    safeMap,
                     kvp.Value.LastSeen);
             }
         }
@@ -265,10 +279,10 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
 
     private readonly record struct PeerStateEntry : IEquatable<PeerStateEntry>
     {
-        public DottedVersionVector State { get; }
+        public ShardVersionVectorMap State { get; }
         public DateTime LastSeen { get; }
 
-        public PeerStateEntry(DottedVersionVector state, DateTime lastSeen)
+        public PeerStateEntry(ShardVersionVectorMap state, DateTime lastSeen)
         {
             State = state ?? throw new ArgumentNullException(nameof(state));
             LastSeen = lastSeen;

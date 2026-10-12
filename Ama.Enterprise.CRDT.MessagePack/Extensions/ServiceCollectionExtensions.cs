@@ -1,7 +1,7 @@
 namespace Ama.Enterprise.CRDT.MessagePack.Extensions;
 
 using Ama.CRDT.Models;
-using Ama.CRDT.Models.Partitioning;
+using Ama.CRDT.Models.LargerThanMemory;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.MessagePack.Formatters;
 using Ama.Enterprise.Licensing.Extensions;
@@ -37,7 +37,7 @@ public static class ServiceCollectionExtensions
                 new CrdtPolymorphicMessagePackFormatter<object>(),
                 new CrdtPolymorphicMessagePackFormatter<IComparable>(),
                 new CrdtPolymorphicMessagePackFormatter<ICrdtTimestamp>(),
-                new CrdtPolymorphicMessagePackFormatter<IPartition>(),
+                new CrdtPolymorphicMessagePackFormatter<IChunk>(),
                 new CrdtPolymorphicMessagePackFormatter<ICrdtMetadataState>()
             };
 

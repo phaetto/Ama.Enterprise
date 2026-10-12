@@ -53,22 +53,25 @@ public sealed class CrdtEvictionService : ICrdtEvictionService, IDisposable
             }
         }
 
-        lock (replicaContext.GlobalVersionVector)
+        lock (replicaContext.ShardVersionVectors)
         {
-            var cleanedDvv = syncService.RemoveEvictedReplicas(replicaContext.GlobalVersionVector, replicaIds);
-            
-            replicaContext.GlobalVersionVector.Versions.Clear();
-            foreach (var kvp in cleanedDvv.Versions)
+            foreach (var kvp in replicaContext.ShardVersionVectors)
             {
-                replicaContext.GlobalVersionVector.Versions[kvp.Key] = kvp.Value;
-            }
-            
-            replicaContext.GlobalVersionVector.Dots.Clear();
-            if (cleanedDvv.Dots != null)
-            {
-                foreach (var kvp in cleanedDvv.Dots)
+                var cleanedDvv = syncService.RemoveEvictedReplicas(kvp.Value, replicaIds);
+                
+                kvp.Value.Versions.Clear();
+                foreach (var versionKvp in cleanedDvv.Versions)
                 {
-                    replicaContext.GlobalVersionVector.Dots[kvp.Key] = kvp.Value;
+                    kvp.Value.Versions[versionKvp.Key] = versionKvp.Value;
+                }
+                
+                kvp.Value.Dots.Clear();
+                if (cleanedDvv.Dots != null)
+                {
+                    foreach (var dotKvp in cleanedDvv.Dots)
+                    {
+                        kvp.Value.Dots[dotKvp.Key] = dotKvp.Value;
+                    }
                 }
             }
         }
@@ -99,14 +102,9 @@ public sealed class CrdtEvictionService : ICrdtEvictionService, IDisposable
             
         logger.LogCritical("CRITICAL: This replica is now internally routing active payloads mapped matching natively explicitly seamlessly utilizing logically identified inherently limits as: {ReplicaId}", replicaContext.ReplicaId);
         
-        lock (replicaContext.GlobalVersionVector)
+        lock (replicaContext.ShardVersionVectors)
         {
-            replicaContext.GlobalVersionVector.Versions.Clear();
-            
-            if (replicaContext.GlobalVersionVector.Dots != null)
-            {
-                replicaContext.GlobalVersionVector.Dots.Clear();
-            }
+            replicaContext.ShardVersionVectors.Clear();
         }
 
         foreach (var doc in documents)

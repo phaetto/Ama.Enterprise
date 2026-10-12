@@ -213,19 +213,22 @@ public sealed class ScopeTopologyProviderIntegrationTests
         // Extract the overarching global clock identifying absolute boundaries.
         var context = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
         long currentClock = 0;
-        lock (context.GlobalVersionVector)
+        lock (context.ShardVersionVectors)
         {
-            currentClock = context.GlobalVersionVector.Versions["Replica1"];
+            if (context.ShardVersionVectors.TryGetValue("", out var dvv))
+            {
+                currentClock = dvv.Versions.TryGetValue("Replica1", out var v) ? v : 0;
+            }
         }
 
         // The expected peer has fully synced and matches our local state preventing amnesia limits.
         var expectedDvv = new DottedVersionVector();
         expectedDvv.Versions["Replica1"] = currentClock;
-        clusterTracker.UpdatePeerState("ReplicaB", expectedPeerGuid.ToString(), expectedDvv);
+        clusterTracker.UpdatePeerState("ReplicaB", expectedPeerGuid.ToString(), new ShardVersionVectorMap { { "", expectedDvv } });
 
         // The unexpected peer has NOT synced and is entirely lagging (Clock 0)
         var unexpectedDvv = new DottedVersionVector();
-        clusterTracker.UpdatePeerState("ReplicaC", unexpectedPeerGuid.ToString(), unexpectedDvv);
+        clusterTracker.UpdatePeerState("ReplicaC", unexpectedPeerGuid.ToString(), new ShardVersionVectorMap { { "", unexpectedDvv } });
 
         var maintenanceService = sp.GetServices<IHostedService>().OfType<CrdtMaintenanceService>().First();
 

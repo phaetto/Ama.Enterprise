@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services.P2p;
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Threading;
@@ -135,25 +136,68 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
 
             scope.ClusterTracker.UpdatePeerState(syncMsg.ReplicaId, senderId.Value.ToString(), syncMsg.State);
 
-            DottedVersionVector safeLocalState;
-            lock (replicaContext.GlobalVersionVector)
+            ShardVersionVectorMap safeLocalState;
+            lock (replicaContext.ShardVersionVectors)
             {
-                safeLocalState = replicaContext.GlobalVersionVector.DeepClone();
+                safeLocalState = new ShardVersionVectorMap();
+                foreach (var shardKvp in replicaContext.ShardVersionVectors)
+                {
+                    var copiedVersions = new Dictionary<string, long>();
+                    var copiedDots = new Dictionary<string, ISet<long>>();
+                    foreach (var kvp in shardKvp.Value.Versions)
+                    {
+                        copiedVersions[kvp.Key] = kvp.Value;
+                    }
+                    if (shardKvp.Value.Dots != null)
+                    {
+                        foreach (var kvp in shardKvp.Value.Dots)
+                        {
+                            copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
+                        }
+                    }
+                    safeLocalState[shardKvp.Key] = new DottedVersionVector(copiedVersions, copiedDots);
+                }
             }
 
-            var requirement = syncService.CalculateRequirement(syncMsg.ReplicaId, syncMsg.State, replicaContext.ReplicaId, safeLocalState);
+            var requirements = new List<ReplicaSyncRequirement>();
+            var missingOpsStreams = new List<IAsyncEnumerable<JournaledOperation>>();
 
-            if (!requirement.IsBehind)
+            foreach (var kvp in syncMsg.State)
+            {
+                var shardId = kvp.Key;
+                var sourceVector = kvp.Value;
+                var targetVector = safeLocalState.TryGetValue(shardId, out var tv) ? tv : new DottedVersionVector();
+
+                var req = syncService.CalculateRequirement(syncMsg.ReplicaId, sourceVector, replicaContext.ReplicaId, targetVector, shardId);
+                if (req.IsBehind)
+                {
+                    requirements.Add(req);
+                    missingOpsStreams.Add(journalManager.GetMissingOperationsAsync(shardId, req, cancellationToken));
+                }
+            }
+
+            if (requirements.Count == 0)
             {
                 return;
             }
 
-            var missingOpsStream = journalManager.GetMissingOperationsAsync(requirement, cancellationToken);
-            var syncResult = await syncService.EvaluateJournalCompletionAsync(missingOpsStream, requirement, cancellationToken).ConfigureAwait(false);
+            var snapshotRequired = false;
+            var allOps = new List<JournaledOperation>();
+
+            for (int i = 0; i < requirements.Count; i++)
+            {
+                var syncResult = await syncService.EvaluateJournalCompletionAsync(missingOpsStreams[i], requirements[i], cancellationToken).ConfigureAwait(false);
+                if (syncResult.SnapshotRequired)
+                {
+                    snapshotRequired = true;
+                    break;
+                }
+                allOps.AddRange(syncResult.Operations);
+            }
 
             var documents = scope.Orchestrator.GetActiveDocuments();
 
-            if (syncResult.SnapshotRequired)
+            if (snapshotRequired)
             {
                 logger.LogWarning("[{ReplicaId}] Journal bounds trimmed or not available. Dispatching full snapshots natively.", replicaContext.ReplicaId);
                 foreach (var targetDoc in documents)
@@ -161,9 +205,9 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                     await scope.Orchestrator.ProvideSnapshotAsync(targetDoc.DocumentId, syncMsg.ReplicaId, senderId, cancellationToken).ConfigureAwait(false);
                 }
             }
-            else if (syncResult.Operations.Count > 0 && directSender != null)
+            else if (allOps.Count > 0 && directSender != null)
             {
-                var opsByDoc = syncResult.Operations
+                var opsByDoc = allOps
                     .GroupBy(x => x.DocumentId)
                     .ToDictionary(g => g.Key, g => g.Select(x => x.Operation).ToArray());
 

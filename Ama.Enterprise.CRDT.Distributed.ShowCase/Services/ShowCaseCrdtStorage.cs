@@ -145,7 +145,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         }
     }
 
-    public async Task<DottedVersionVector?> LoadGlobalVersionVectorAsync(string replicaId, CancellationToken cancellationToken = default)
+    public async Task<ShardVersionVectorMap?> LoadShardVersionVectorMapAsync(string replicaId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(replicaId)) throw new ArgumentException("Value cannot be null or empty.", nameof(replicaId));
 
@@ -161,7 +161,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
             if (result is byte[] bytes)
             {
-                return serializer.DeserializeFromBytes<DottedVersionVector>(bytes);
+                return serializer.DeserializeFromBytes<ShardVersionVectorMap>(bytes);
             }
         }
         catch (Exception ex)
@@ -173,12 +173,12 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         return null;
     }
 
-    public async Task SaveGlobalVersionVectorAsync(string replicaId, DottedVersionVector globalVersionVector, CancellationToken cancellationToken = default)
+    public async Task SaveShardVersionVectorMapAsync(string replicaId, ShardVersionVectorMap shardVersionVectorMap, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(replicaId)) throw new ArgumentException("Value cannot be null or empty.", nameof(replicaId));
-        ArgumentNullException.ThrowIfNull(globalVersionVector);
+        ArgumentNullException.ThrowIfNull(shardVersionVectorMap);
 
-        var bytes = serializer.SerializeToBytes(globalVersionVector);
+        var bytes = serializer.SerializeToBytes(shardVersionVectorMap);
 
         await writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -257,9 +257,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         }
     }
 
-    public void Append(string documentId, IReadOnlyList<CrdtOperation> operationsList)
+    public void Append(IComparable documentId, IReadOnlyList<CrdtOperation> operationsList)
     {
-        if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
+        var docIdStr = documentId?.ToString();
+        if (string.IsNullOrEmpty(docIdStr)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
         ArgumentNullException.ThrowIfNull(operationsList);
         if (operationsList.Count == 0) return;
 
@@ -283,9 +284,9 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             {
                 var journaled = new JournaledOperation(documentId, op);
                 pId.Value = op.Id;
-                pDoc.Value = documentId;
-                pRep.Value = op.ReplicaId;
-                pClock.Value = op.GlobalClock;
+                pDoc.Value = docIdStr;
+                pRep.Value = op.ShardId;
+                pClock.Value = op.ShardClock;
                 pInsertedAt.Value = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                 pPayload.Value = serializer.SerializeToBytes(journaled);
                 
@@ -305,9 +306,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         }
     }
 
-    public async Task AppendAsync(string documentId, IReadOnlyList<CrdtOperation> operationsList, CancellationToken cancellationToken = default)
+    public async Task AppendAsync(IComparable documentId, IReadOnlyList<CrdtOperation> operationsList, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
+        var docIdStr = documentId?.ToString();
+        if (string.IsNullOrEmpty(docIdStr)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
         ArgumentNullException.ThrowIfNull(operationsList);
         if (operationsList.Count == 0) return;
 
@@ -331,9 +333,9 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             {
                 var journaled = new JournaledOperation(documentId, op);
                 pId.Value = op.Id;
-                pDoc.Value = documentId;
-                pRep.Value = op.ReplicaId;
-                pClock.Value = op.GlobalClock;
+                pDoc.Value = docIdStr;
+                pRep.Value = op.ShardId;
+                pClock.Value = op.ShardClock;
                 pInsertedAt.Value = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                 pPayload.Value = serializer.SerializeToBytes(journaled);
                 
@@ -353,7 +355,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         }
     }
 
-    public async IAsyncEnumerable<JournaledOperation> GetOperationsByRangeAsync(string originReplicaId, long minGlobalClock, long maxGlobalClock, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<JournaledOperation> GetOperationsByRangeAsync(string shardId, string originReplicaId, long minShardClock, long maxShardClock, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(originReplicaId)) throw new ArgumentException("Value cannot be null or empty.", nameof(originReplicaId));
 
@@ -363,8 +365,8 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT Payload FROM Journal WHERE ReplicaId = @RepId AND GlobalClock > @Min AND GlobalClock <= @Max ORDER BY GlobalClock ASC";
         AddParameter(command, "@RepId", originReplicaId);
-        AddParameter(command, "@Min", minGlobalClock);
-        AddParameter(command, "@Max", maxGlobalClock);
+        AddParameter(command, "@Min", minShardClock);
+        AddParameter(command, "@Max", maxShardClock);
 
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -380,12 +382,12 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         }
     }
 
-    public async IAsyncEnumerable<JournaledOperation> GetOperationsByDotsAsync(string originReplicaId, IEnumerable<long> globalClocks, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<JournaledOperation> GetOperationsByDotsAsync(string shardId, string originReplicaId, IEnumerable<long> shardClocks, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(originReplicaId)) throw new ArgumentException("Value cannot be null or empty.", nameof(originReplicaId));
-        ArgumentNullException.ThrowIfNull(globalClocks);
+        ArgumentNullException.ThrowIfNull(shardClocks);
 
-        var clocksList = globalClocks.ToList();
+        var clocksList = shardClocks.ToList();
         if (clocksList.Count == 0) yield break;
 
         using var connection = new SqliteConnection(connectionString);
@@ -457,12 +459,12 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         }
     }
 
-    public void Trim(IReadOnlyDictionary<string, long> gmvv) => Trim(gmvv, null);
+    public void Trim(IReadOnlyDictionary<string, long> globalMinimumVersionVector) => Trim(globalMinimumVersionVector, null);
 
-    public void Trim(IReadOnlyDictionary<string, long> gmvv, DateTimeOffset? retainBufferTime)
+    public void Trim(IReadOnlyDictionary<string, long> globalMinimumVersionVector, DateTimeOffset? retainBufferTime)
     {
-        ArgumentNullException.ThrowIfNull(gmvv);
-        if (gmvv.Count == 0) return;
+        ArgumentNullException.ThrowIfNull(globalMinimumVersionVector);
+        if (globalMinimumVersionVector.Count == 0) return;
 
         writeLock.Wait();
         try
@@ -485,7 +487,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             var pRepId = command.CreateParameter(); pRepId.ParameterName = "@RepId"; command.Parameters.Add(pRepId);
             var pMax = command.CreateParameter(); pMax.ParameterName = "@MaxClock"; command.Parameters.Add(pMax);
 
-            foreach (var kvp in gmvv)
+            foreach (var kvp in globalMinimumVersionVector)
             {
                 pRepId.Value = kvp.Key;
                 pMax.Value = kvp.Value;

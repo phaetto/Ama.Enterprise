@@ -141,7 +141,7 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         var serializerA = nodeA.Sp.GetRequiredService<ICrdtSerializer>();
         var replicaContextA = scopeA.ServiceProvider.GetRequiredService<ReplicaContext>();
         
-        var syncMsgA = new CrdtStateSyncMessage(nodeA.ReplicaId, replicaContextA.GlobalVersionVector);
+        var syncMsgA = new CrdtStateSyncMessage(nodeA.ReplicaId, replicaContextA.ShardVersionVectors);
         var syncBytesA = serializerA.SerializeToBytes(syncMsgA);
         var wrapperA = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytesA);
         var wrapperBytesA = serializerA.SerializeToBytes(wrapperA);
@@ -153,7 +153,7 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         var serializerB = nodeB.Sp.GetRequiredService<ICrdtSerializer>();
         var replicaContextB = scopeB.ServiceProvider.GetRequiredService<ReplicaContext>();
         
-        var syncMsgB = new CrdtStateSyncMessage(nodeB.ReplicaId, replicaContextB.GlobalVersionVector);
+        var syncMsgB = new CrdtStateSyncMessage(nodeB.ReplicaId, replicaContextB.ShardVersionVectors);
         var syncBytesB = serializerB.SerializeToBytes(syncMsgB);
         var wrapperB = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytesB);
         var wrapperBytesB = serializerB.SerializeToBytes(wrapperB);
@@ -268,7 +268,7 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         var serializerB = nodeB.Sp.GetRequiredService<ICrdtSerializer>();
         var replicaContextB = scopeB.ServiceProvider.GetRequiredService<ReplicaContext>();
         
-        var syncMsgB = new CrdtStateSyncMessage(nodeB.ReplicaId, replicaContextB.GlobalVersionVector);
+        var syncMsgB = new CrdtStateSyncMessage(nodeB.ReplicaId, replicaContextB.ShardVersionVectors);
         var syncBytesB = serializerB.SerializeToBytes(syncMsgB);
         var wrapperB = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytesB);
         var wrapperBytesB = serializerB.SerializeToBytes(wrapperB);
