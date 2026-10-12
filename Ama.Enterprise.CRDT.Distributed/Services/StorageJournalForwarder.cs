@@ -59,8 +59,21 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         {
             try
             {
-                var count = await this.storage.GetJournalCountAsync(CancellationToken.None).ConfigureAwait(false);
-                Interlocked.Add(ref this.estimatedJournalCount, count);
+                var replicaContext = this.serviceProvider.GetRequiredService<ReplicaContext>();
+                long totalCount = 0;
+                
+                List<string> shardIds;
+                lock (replicaContext.ShardVersionVectors)
+                {
+                    shardIds = replicaContext.ShardVersionVectors.Keys.ToList();
+                }
+
+                foreach (var shardId in shardIds)
+                {
+                    totalCount += await this.storage.GetJournalCountAsync(shardId, CancellationToken.None).ConfigureAwait(false);
+                }
+                
+                Interlocked.Add(ref this.estimatedJournalCount, totalCount);
             }
             catch (Exception ex)
             {
@@ -441,19 +454,10 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
 
         await this.storage.SaveShardVersionVectorMapAsync(replicaContext.ReplicaId, safelyPersistedMap, cancellationToken).ConfigureAwait(false);
 
-        var trimVersions = new Dictionary<string, long>();
-        foreach (var dvv in safelyPersistedMap.Values)
+        foreach (var shardKvp in safelyPersistedMap)
         {
-            foreach (var kvp in dvv.Versions)
-            {
-                if (!trimVersions.TryGetValue(kvp.Key, out var currentMin) || kvp.Value < currentMin)
-                {
-                    trimVersions[kvp.Key] = kvp.Value;
-                }
-            }
+            await this.storage.TrimAsync(shardKvp.Key, shardKvp.Value.Versions.AsReadOnly(), cancellationToken).ConfigureAwait(false);
         }
-
-        await this.storage.TrimAsync(trimVersions, cancellationToken).ConfigureAwait(false);
         
         this.aggressiveTrimsCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
 

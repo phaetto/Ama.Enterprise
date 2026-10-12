@@ -124,6 +124,9 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         var serializer = sp.GetRequiredService<ICrdtSerializer>();
 
         var remoteState = new ShardVersionVectorMap();
+        remoteState["default"] = new DottedVersionVector();
+        remoteState[orchestrator.Registry.DocumentId] = new DottedVersionVector();
+
         var syncMsg = new CrdtStateSyncMessage("RemoteReplica", remoteState);
         var syncBytes = serializer.SerializeToBytes(syncMsg);
         var wrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytes);
@@ -263,7 +266,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         remoteDvv.Versions["Replica1"] = 10;
 
         var remoteState = new ShardVersionVectorMap();
-        remoteState[""] = remoteDvv;
+        remoteState[orchestrator.Registry.DocumentId] = remoteDvv;
         remoteState["sync-doc-1"] = remoteDvv;
 
         var syncMsg = new CrdtStateSyncMessage("RemoteReplica2", remoteState);
@@ -279,7 +282,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         var states = tracker.GetClusterStates();
         
         states.Count.ShouldBe(1);
-        states[0][""].Versions["RemoteReplica2"].ShouldBe(15);
+        states[0][orchestrator.Registry.DocumentId].Versions["RemoteReplica2"].ShouldBe(15);
         
         // Should not send direct payload because remote vector covered our local operations
         mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never());

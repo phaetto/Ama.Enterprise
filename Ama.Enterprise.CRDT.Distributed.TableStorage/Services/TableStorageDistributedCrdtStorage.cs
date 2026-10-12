@@ -530,12 +530,12 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         }
     }
 
-    public async Task<long> GetJournalCountAsync(CancellationToken cancellationToken = default)
+    public async Task<long> GetJournalCountAsync(string shardId, CancellationToken cancellationToken = default)
     {
-        var startPartition = this.GetJournalStartPartition();
-        var endPartition = this.GetJournalEndPartition();
-
-        var filter = TableClient.CreateQueryFilter($"PartitionKey ge {startPartition} and PartitionKey le {endPartition}");
+        ArgumentException.ThrowIfNullOrEmpty(shardId);
+        
+        var partitionKey = this.GetJournalPartitionKey(shardId);
+        var filter = TableClient.CreateQueryFilter($"PartitionKey eq {partitionKey}");
 
         var query = this.tableClient.QueryAsync<TableEntity>(filter, select: new[] { "PartitionKey", "RowKey" }, cancellationToken: cancellationToken);
         
@@ -579,47 +579,48 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         }
     }
 
-    public async Task TrimAsync(IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default)
+    public async Task TrimAsync(string shardId, IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(shardId);
         ArgumentNullException.ThrowIfNull(globalMinimumVersionVector);
         if (globalMinimumVersionVector.Count == 0) return;
 
         var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
+        var partitionKey = this.GetJournalPartitionKey(shardId);
+        
+        var maxClockOverall = globalMinimumVersionVector.Values.Max();
+        var maxRowKey = GetJournalRowKey(maxClockOverall, "~");
 
-        foreach (var kvp in globalMinimumVersionVector)
+        var filter = TableClient.CreateQueryFilter($"PartitionKey eq {partitionKey} and RowKey le {maxRowKey}");
+
+        var query = this.tableClient.QueryAsync<TableEntity>(filter, select: new[] { "PartitionKey", "RowKey" }, cancellationToken: cancellationToken);
+
+        var batch = new List<TableTransactionAction>();
+
+        await foreach (var entity in query.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
-            var shardId = kvp.Key;
-            var maxClock = kvp.Value;
-
-            var partitionKey = this.GetJournalPartitionKey(shardId);
-            var maxRowKey = GetJournalRowKey(maxClock, "~"); // Matches all replicas for the given maxClock
-
-            var filter = TableClient.CreateQueryFilter($"PartitionKey eq {partitionKey} and RowKey le {maxRowKey}");
-
-            var query = this.tableClient.QueryAsync<TableEntity>(filter, select: new[] { "PartitionKey", "RowKey" }, cancellationToken: cancellationToken);
-
-            var batch = new List<TableTransactionAction>();
-
-            await foreach (var entity in query.WithCancellation(cancellationToken).ConfigureAwait(false))
+            // Parse replicaId and clock from RowKey (Format: {shardClock:D20}_{replicaId})
+            var parts = entity.RowKey.Split('_', 2);
+            if (parts.Length == 2 && long.TryParse(parts[0], out var clock))
             {
-                this.operationsDeleteCounter.Add(1, tags);
-                
-                // Azure Table Storage requires an ETag for Delete operations. 
-                // Since we restrict the query with 'select', the entity's ETag is not populated. 
-                // We use ETag.All to bypass the check and force delete the entry safely.
-                batch.Add(new TableTransactionAction(TableTransactionActionType.Delete, entity, ETag.All));
-
-                if (batch.Count == 100)
+                var repId = parts[1];
+                if (globalMinimumVersionVector.TryGetValue(repId, out var maxClockForReplica) && clock <= maxClockForReplica)
                 {
-                    await this.tableClient.SubmitTransactionAsync(batch, cancellationToken).ConfigureAwait(false);
-                    batch.Clear();
+                    this.operationsDeleteCounter.Add(1, tags);
+                    batch.Add(new TableTransactionAction(TableTransactionActionType.Delete, entity, ETag.All));
+
+                    if (batch.Count == 100)
+                    {
+                        await this.tableClient.SubmitTransactionAsync(batch, cancellationToken).ConfigureAwait(false);
+                        batch.Clear();
+                    }
                 }
             }
+        }
 
-            if (batch.Count > 0)
-            {
-                await this.tableClient.SubmitTransactionAsync(batch, cancellationToken).ConfigureAwait(false);
-            }
+        if (batch.Count > 0)
+        {
+            await this.tableClient.SubmitTransactionAsync(batch, cancellationToken).ConfigureAwait(false);
         }
     }
 

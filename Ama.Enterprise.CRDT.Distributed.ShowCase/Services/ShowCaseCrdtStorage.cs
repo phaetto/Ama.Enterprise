@@ -271,11 +271,12 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             
             using var command = writeConnection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "INSERT OR IGNORE INTO Journal (Id, DocumentId, ReplicaId, GlobalClock, InsertedAt, Payload) VALUES (@Id, @DocId, @RepId, @Clock, @InsertedAt, @Payload)";
+            command.CommandText = "INSERT OR IGNORE INTO Journal (Id, DocumentId, ShardId, OriginReplicaId, ShardClock, InsertedAt, Payload) VALUES (@Id, @DocId, @ShardId, @OriginRepId, @Clock, @InsertedAt, @Payload)";
 
             var pId = command.CreateParameter(); pId.ParameterName = "@Id"; command.Parameters.Add(pId);
             var pDoc = command.CreateParameter(); pDoc.ParameterName = "@DocId"; command.Parameters.Add(pDoc);
-            var pRep = command.CreateParameter(); pRep.ParameterName = "@RepId"; command.Parameters.Add(pRep);
+            var pShard = command.CreateParameter(); pShard.ParameterName = "@ShardId"; command.Parameters.Add(pShard);
+            var pRep = command.CreateParameter(); pRep.ParameterName = "@OriginRepId"; command.Parameters.Add(pRep);
             var pClock = command.CreateParameter(); pClock.ParameterName = "@Clock"; command.Parameters.Add(pClock);
             var pInsertedAt = command.CreateParameter(); pInsertedAt.ParameterName = "@InsertedAt"; command.Parameters.Add(pInsertedAt);
             var pPayload = command.CreateParameter(); pPayload.ParameterName = "@Payload"; command.Parameters.Add(pPayload);
@@ -285,7 +286,8 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
                 var journaled = new JournaledOperation(documentId, op);
                 pId.Value = op.Id;
                 pDoc.Value = docIdStr;
-                pRep.Value = op.ShardId;
+                pShard.Value = op.ShardId;
+                pRep.Value = op.ReplicaId;
                 pClock.Value = op.ShardClock;
                 pInsertedAt.Value = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                 pPayload.Value = serializer.SerializeToBytes(journaled);
@@ -320,11 +322,12 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             
             using var command = writeConnection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "INSERT OR IGNORE INTO Journal (Id, DocumentId, ReplicaId, GlobalClock, InsertedAt, Payload) VALUES (@Id, @DocId, @RepId, @Clock, @InsertedAt, @Payload)";
+            command.CommandText = "INSERT OR IGNORE INTO Journal (Id, DocumentId, ShardId, OriginReplicaId, ShardClock, InsertedAt, Payload) VALUES (@Id, @DocId, @ShardId, @OriginRepId, @Clock, @InsertedAt, @Payload)";
 
             var pId = command.CreateParameter(); pId.ParameterName = "@Id"; command.Parameters.Add(pId);
             var pDoc = command.CreateParameter(); pDoc.ParameterName = "@DocId"; command.Parameters.Add(pDoc);
-            var pRep = command.CreateParameter(); pRep.ParameterName = "@RepId"; command.Parameters.Add(pRep);
+            var pShard = command.CreateParameter(); pShard.ParameterName = "@ShardId"; command.Parameters.Add(pShard);
+            var pRep = command.CreateParameter(); pRep.ParameterName = "@OriginRepId"; command.Parameters.Add(pRep);
             var pClock = command.CreateParameter(); pClock.ParameterName = "@Clock"; command.Parameters.Add(pClock);
             var pInsertedAt = command.CreateParameter(); pInsertedAt.ParameterName = "@InsertedAt"; command.Parameters.Add(pInsertedAt);
             var pPayload = command.CreateParameter(); pPayload.ParameterName = "@Payload"; command.Parameters.Add(pPayload);
@@ -334,7 +337,8 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
                 var journaled = new JournaledOperation(documentId, op);
                 pId.Value = op.Id;
                 pDoc.Value = docIdStr;
-                pRep.Value = op.ShardId;
+                pShard.Value = op.ShardId;
+                pRep.Value = op.ReplicaId;
                 pClock.Value = op.ShardClock;
                 pInsertedAt.Value = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                 pPayload.Value = serializer.SerializeToBytes(journaled);
@@ -357,13 +361,15 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
 
     public async IAsyncEnumerable<JournaledOperation> GetOperationsByRangeAsync(string shardId, string originReplicaId, long minShardClock, long maxShardClock, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrEmpty(shardId)) throw new ArgumentException("Value cannot be null or empty.", nameof(shardId));
         if (string.IsNullOrEmpty(originReplicaId)) throw new ArgumentException("Value cannot be null or empty.", nameof(originReplicaId));
 
         using var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Payload FROM Journal WHERE ReplicaId = @RepId AND GlobalClock > @Min AND GlobalClock <= @Max ORDER BY GlobalClock ASC";
+        command.CommandText = "SELECT Payload FROM Journal WHERE ShardId = @ShardId AND OriginReplicaId = @RepId AND ShardClock > @Min AND ShardClock <= @Max ORDER BY ShardClock ASC";
+        AddParameter(command, "@ShardId", shardId);
         AddParameter(command, "@RepId", originReplicaId);
         AddParameter(command, "@Min", minShardClock);
         AddParameter(command, "@Max", maxShardClock);
@@ -384,6 +390,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
 
     public async IAsyncEnumerable<JournaledOperation> GetOperationsByDotsAsync(string shardId, string originReplicaId, IEnumerable<long> shardClocks, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrEmpty(shardId)) throw new ArgumentException("Value cannot be null or empty.", nameof(shardId));
         if (string.IsNullOrEmpty(originReplicaId)) throw new ArgumentException("Value cannot be null or empty.", nameof(originReplicaId));
         ArgumentNullException.ThrowIfNull(shardClocks);
 
@@ -399,7 +406,8 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             var inClause = string.Join(",", chunk);
             
             using var command = connection.CreateCommand();
-            command.CommandText = $"SELECT Payload FROM Journal WHERE ReplicaId = @RepId AND GlobalClock IN ({inClause}) ORDER BY GlobalClock ASC";
+            command.CommandText = $"SELECT Payload FROM Journal WHERE ShardId = @ShardId AND OriginReplicaId = @RepId AND ShardClock IN ({inClause}) ORDER BY ShardClock ASC";
+            AddParameter(command, "@ShardId", shardId);
             AddParameter(command, "@RepId", originReplicaId);
 
             using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -423,7 +431,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Payload FROM Journal ORDER BY GlobalClock ASC";
+        command.CommandText = "SELECT Payload FROM Journal ORDER BY ShardId, ShardClock ASC";
 
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -439,15 +447,18 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         }
     }
 
-    public async Task<long> GetJournalCountAsync(CancellationToken cancellationToken = default)
+    public async Task<long> GetJournalCountAsync(string shardId, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(shardId);
+
         try
         {
             using var connection = new SqliteConnection(connectionString);
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
             
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT COUNT(*) FROM Journal";
+            command.CommandText = "SELECT COUNT(*) FROM Journal WHERE ShardId = @ShardId";
+            AddParameter(command, "@ShardId", shardId);
 
             var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
             return Convert.ToInt64(result);
@@ -459,12 +470,13 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         }
     }
 
-    public void Trim(IReadOnlyDictionary<string, long> globalMinimumVersionVector) => Trim(globalMinimumVersionVector, null);
+    public void Trim(string shardId, IReadOnlyDictionary<string, long> gmvv) => Trim(shardId, gmvv, null);
 
-    public void Trim(IReadOnlyDictionary<string, long> globalMinimumVersionVector, DateTimeOffset? retainBufferTime)
+    public void Trim(string shardId, IReadOnlyDictionary<string, long> gmvv, DateTimeOffset? retainBufferTime)
     {
-        ArgumentNullException.ThrowIfNull(globalMinimumVersionVector);
-        if (globalMinimumVersionVector.Count == 0) return;
+        ArgumentException.ThrowIfNullOrEmpty(shardId);
+        ArgumentNullException.ThrowIfNull(gmvv);
+        if (gmvv.Count == 0) return;
 
         writeLock.Wait();
         try
@@ -473,7 +485,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             
             using var command = writeConnection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "DELETE FROM Journal WHERE ReplicaId = @RepId AND GlobalClock <= @MaxClock";
+            command.CommandText = "DELETE FROM Journal WHERE ShardId = @ShardId AND OriginReplicaId = @OriginRepId AND ShardClock <= @MaxClock";
             
             if (retainBufferTime.HasValue)
             {
@@ -484,10 +496,12 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
                 command.Parameters.Add(pTime);
             }
 
-            var pRepId = command.CreateParameter(); pRepId.ParameterName = "@RepId"; command.Parameters.Add(pRepId);
+            var pShardId = command.CreateParameter(); pShardId.ParameterName = "@ShardId"; command.Parameters.Add(pShardId);
+            var pRepId = command.CreateParameter(); pRepId.ParameterName = "@OriginRepId"; command.Parameters.Add(pRepId);
             var pMax = command.CreateParameter(); pMax.ParameterName = "@MaxClock"; command.Parameters.Add(pMax);
 
-            foreach (var kvp in globalMinimumVersionVector)
+            pShardId.Value = shardId;
+            foreach (var kvp in gmvv)
             {
                 pRepId.Value = kvp.Key;
                 pMax.Value = kvp.Value;
@@ -507,11 +521,12 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         }
     }
 
-    public Task TrimAsync(IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default)
-        => TrimAsync(globalMinimumVersionVector, null, cancellationToken);
+    public Task TrimAsync(string shardId, IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default)
+        => TrimAsync(shardId, globalMinimumVersionVector, null, cancellationToken);
 
-    public async Task TrimAsync(IReadOnlyDictionary<string, long> globalMinimumVersionVector, DateTimeOffset? retainBufferTime, CancellationToken cancellationToken = default)
+    public async Task TrimAsync(string shardId, IReadOnlyDictionary<string, long> globalMinimumVersionVector, DateTimeOffset? retainBufferTime, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(shardId);
         ArgumentNullException.ThrowIfNull(globalMinimumVersionVector);
         if (globalMinimumVersionVector.Count == 0) return;
 
@@ -522,7 +537,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             
             using var command = writeConnection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "DELETE FROM Journal WHERE ReplicaId = @RepId AND GlobalClock <= @MaxClock";
+            command.CommandText = "DELETE FROM Journal WHERE ShardId = @ShardId AND OriginReplicaId = @OriginRepId AND ShardClock <= @MaxClock";
             
             if (retainBufferTime.HasValue)
             {
@@ -533,9 +548,11 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
                 command.Parameters.Add(pTime);
             }
 
-            var pRepId = command.CreateParameter(); pRepId.ParameterName = "@RepId"; command.Parameters.Add(pRepId);
+            var pShardId = command.CreateParameter(); pShardId.ParameterName = "@ShardId"; command.Parameters.Add(pShardId);
+            var pRepId = command.CreateParameter(); pRepId.ParameterName = "@OriginRepId"; command.Parameters.Add(pRepId);
             var pMax = command.CreateParameter(); pMax.ParameterName = "@MaxClock"; command.Parameters.Add(pMax);
 
+            pShardId.Value = shardId;
             foreach (var kvp in globalMinimumVersionVector)
             {
                 pRepId.Value = kvp.Key;
@@ -584,11 +601,12 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
                 CREATE TABLE IF NOT EXISTS Journal (
                     Id TEXT PRIMARY KEY,
                     DocumentId TEXT NOT NULL,
-                    ReplicaId TEXT NOT NULL,
-                    GlobalClock INTEGER NOT NULL,
+                    ShardId TEXT NOT NULL,
+                    OriginReplicaId TEXT NOT NULL,
+                    ShardClock INTEGER NOT NULL,
                     Payload BLOB NOT NULL
                 );
-                CREATE INDEX IF NOT EXISTS IDX_Journal_Replica_Clock ON Journal(ReplicaId, GlobalClock);
+                CREATE INDEX IF NOT EXISTS IDX_Journal_Shard_Clock ON Journal(ShardId, ShardClock);
             ";
             command.ExecuteNonQuery();
 
@@ -597,15 +615,29 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             checkCmd.CommandText = "PRAGMA table_info(Journal);";
             using var reader = checkCmd.ExecuteReader();
             bool hasInsertedAt = false;
+            bool hasShardId = false;
             while(reader.Read())
             {
-                if (reader["name"].ToString() == "InsertedAt") hasInsertedAt = true;
+                var colName = reader["name"].ToString();
+                if (colName == "InsertedAt") hasInsertedAt = true;
+                if (colName == "ShardId") hasShardId = true;
             }
 
             if (!hasInsertedAt)
             {
                 using var alterCmd = connection.CreateCommand();
                 alterCmd.CommandText = "ALTER TABLE Journal ADD COLUMN InsertedAt INTEGER NOT NULL DEFAULT 0;";
+                alterCmd.ExecuteNonQuery();
+            }
+
+            if (!hasShardId)
+            {
+                using var alterCmd = connection.CreateCommand();
+                alterCmd.CommandText = @"
+                    ALTER TABLE Journal ADD COLUMN ShardId TEXT NOT NULL DEFAULT '';
+                    ALTER TABLE Journal ADD COLUMN OriginReplicaId TEXT NOT NULL DEFAULT '';
+                    ALTER TABLE Journal ADD COLUMN ShardClock INTEGER NOT NULL DEFAULT 0;
+                ";
                 alterCmd.ExecuteNonQuery();
             }
         }

@@ -88,9 +88,9 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         var ops = new List<CrdtOperation>
         {
-            default(CrdtOperation) with { Id = op1Id, ReplicaId = "ReplicaA", ShardClock = 1 },
-            default(CrdtOperation) with { Id = op2Id, ReplicaId = "ReplicaA", ShardClock = 2 },
-            default(CrdtOperation) with { Id = op3Id, ReplicaId = "ReplicaB", ShardClock = 1 }
+            default(CrdtOperation) with { Id = op1Id, ReplicaId = "ReplicaA", ShardClock = 1, ShardId = "default" },
+            default(CrdtOperation) with { Id = op2Id, ReplicaId = "ReplicaA", ShardClock = 2, ShardId = "default" },
+            default(CrdtOperation) with { Id = op3Id, ReplicaId = "ReplicaB", ShardClock = 1, ShardId = "default" }
         };
 
         // Act - Append
@@ -106,7 +106,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
             { "ReplicaA", 1 }, // ReplicaA up to 1 is known by all, so op1 can be trimmed
             { "ReplicaB", 0 }  // ReplicaB 1 is not known by everyone, so op3 must be kept
         };
-        await storage.TrimAsync(gmvv, CancellationToken.None);
+        await storage.TrimAsync("default", gmvv, CancellationToken.None);
 
         // Assert
         var postTrimOps = await storage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
@@ -214,14 +214,14 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var globalDvv = new DottedVersionVector();
         globalDvv.Versions["RemoteA"] = 10;
         
-        var globalMap = new ShardVersionVectorMap { { "", globalDvv } };
+        var globalMap = new ShardVersionVectorMap { { "journal-doc", globalDvv } };
         
         lock (context.ShardVersionVectors)
         {
-            if (!context.ShardVersionVectors.TryGetValue("", out var dvv))
+            if (!context.ShardVersionVectors.TryGetValue("journal-doc", out var dvv))
             {
                 dvv = new DottedVersionVector();
-                context.ShardVersionVectors[""] = dvv;
+                context.ShardVersionVectors["journal-doc"] = dvv;
             }
             dvv.Merge(globalDvv);
         }
@@ -248,7 +248,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         // Assert
         docManager.Document.Data.DataMap.ShouldContainKeyAndValue("Field", "SnapshotData");
-        context.ShardVersionVectors[""].Versions["RemoteA"].ShouldBe(10);
+        context.ShardVersionVectors["journal-doc"].Versions["RemoteA"].ShouldBe(10);
     }
 
     [IntegrationFact]
@@ -301,11 +301,11 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         var remoteDvv = new DottedVersionVector();
 
-        var targetVector = replicaContext.ShardVersionVectors.TryGetValue("", out var t) ? t : new DottedVersionVector();
+        var targetVector = replicaContext.ShardVersionVectors.TryGetValue("default", out var t) ? t : new DottedVersionVector();
 
         // Act
-        var requirement = syncService.CalculateRequirement("ReplicaB", remoteDvv, replicaContext.ReplicaId, targetVector, "");
-        var missingOpsStream = journalManager.GetMissingOperationsAsync("", requirement, CancellationToken.None);
+        var requirement = syncService.CalculateRequirement("ReplicaB", remoteDvv, replicaContext.ReplicaId, targetVector, "journal-doc");
+        var missingOpsStream = journalManager.GetMissingOperationsAsync("default", requirement, CancellationToken.None);
         var result = await syncService.EvaluateJournalCompletionAsync(missingOpsStream, requirement, CancellationToken.None);
 
         // Assert
@@ -339,15 +339,15 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await docA.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
 
         var gmvv = new Dictionary<string, long> { { "ReplicaA", 10 } }; 
-        await storage.TrimAsync(gmvv, CancellationToken.None);
+        await storage.TrimAsync("default", gmvv, CancellationToken.None);
 
         var remoteDvv = new DottedVersionVector();
         
-        var targetVector = replicaContext.ShardVersionVectors.TryGetValue("", out var t) ? t : new DottedVersionVector();
+        var targetVector = replicaContext.ShardVersionVectors.TryGetValue("default", out var t) ? t : new DottedVersionVector();
 
         // Act
-        var requirement = syncService.CalculateRequirement("ReplicaB", remoteDvv, replicaContext.ReplicaId, targetVector, "");
-        var missingOpsStream = journalManager.GetMissingOperationsAsync("", requirement, CancellationToken.None);
+        var requirement = syncService.CalculateRequirement("ReplicaB", remoteDvv, replicaContext.ReplicaId, targetVector, "journal-doc");
+        var missingOpsStream = journalManager.GetMissingOperationsAsync("default", requirement, CancellationToken.None);
         var result = await syncService.EvaluateJournalCompletionAsync(missingOpsStream, requirement, CancellationToken.None);
 
         // Assert
@@ -389,7 +389,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var globalDvv = new DottedVersionVector();
         globalDvv.Versions["ReplicaB"] = 15;
         
-        var globalMap = new ShardVersionVectorMap { { "", globalDvv } };
+        var globalMap = new ShardVersionVectorMap { { "journal-doc", globalDvv } };
 
         var snapshotBytes = serializer.SerializeToBytes(remoteAppliedDoc.Document);
 
@@ -412,7 +412,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         docA.Document.Data.DataMap.ShouldContainKeyAndValue("RemoteKey", "RemoteValue");
         
         var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
-        replicaContext.ShardVersionVectors[""].Versions["ReplicaB"].ShouldBe(15);
+        replicaContext.ShardVersionVectors["journal-doc"].Versions["ReplicaB"].ShouldBe(15);
     }
 
     [IntegrationFact]
@@ -507,12 +507,12 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var initialJournalOps = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
         initialJournalOps.Count.ShouldBeGreaterThan(10);
 
-        var checkpointService = sp.GetServices<IHostedService>().OfType<CrdtCheckpointService>().First();
+        var maintenanceService = sp.GetServices<IHostedService>().OfType<CrdtMaintenanceService>().First();
         
         // Act
-        await checkpointService.StartAsync(CancellationToken.None);
+        await maintenanceService.StartAsync(CancellationToken.None);
         await Task.Delay(1500);
-        await checkpointService.StopAsync(CancellationToken.None);
+        await maintenanceService.StopAsync(CancellationToken.None);
 
         // Assert
         var trimmedJournalOps = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();

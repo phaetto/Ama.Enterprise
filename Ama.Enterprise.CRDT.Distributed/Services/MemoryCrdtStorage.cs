@@ -127,30 +127,37 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     }
 
     /// <inheritdoc />
-    public Task<long> GetJournalCountAsync(CancellationToken cancellationToken = default)
+    public Task<long> GetJournalCountAsync(string shardId, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(shardId);
+        
         lock (syncRoot)
         {
-            return Task.FromResult(shardedOperations.Values.Sum(list => (long)list.Count));
+            return Task.FromResult(shardedOperations.TryGetValue(shardId, out var shardList) ? (long)shardList.Count : 0L);
         }
     }
 
     /// <inheritdoc />
-    public Task TrimAsync(IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default)
+    public Task TrimAsync(string shardId, IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(shardId);
         ArgumentNullException.ThrowIfNull(globalMinimumVersionVector);
 
         lock (syncRoot)
         {
-            foreach (var kvp in globalMinimumVersionVector)
+            if (shardedOperations.TryGetValue(shardId, out var shardList))
             {
-                if (shardedOperations.TryGetValue(kvp.Key, out var shardList))
+                foreach (var kvp in globalMinimumVersionVector)
                 {
-                    shardList.RemoveAll(op => op.Operation.ShardClock <= kvp.Value);
-                    if (shardList.Count == 0)
-                    {
-                        shardedOperations.Remove(kvp.Key);
-                    }
+                    var originReplicaId = kvp.Key;
+                    var maxClock = kvp.Value;
+                    
+                    shardList.RemoveAll(op => op.Operation.ReplicaId == originReplicaId && op.Operation.ShardClock <= maxClock);
+                }
+                
+                if (shardList.Count == 0)
+                {
+                    shardedOperations.Remove(shardId);
                 }
             }
         }

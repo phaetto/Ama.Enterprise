@@ -203,7 +203,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
         storageMock.Setup(s => s.SaveShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<ShardVersionVectorMap>(), It.IsAny<CancellationToken>()))
                    .Returns(Task.CompletedTask);
                    
-        storageMock.Setup(s => s.GetJournalCountAsync(It.IsAny<CancellationToken>()))
+        storageMock.Setup(s => s.GetJournalCountAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                    .ReturnsAsync(0);
 
         storageMock.Setup(s => s.LoadClusterStateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -320,7 +320,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
                    })
                    .Returns(Task.CompletedTask);
                    
-        storageMock.Setup(s => s.GetJournalCountAsync(It.IsAny<CancellationToken>()))
+        storageMock.Setup(s => s.GetJournalCountAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                    .ReturnsAsync(0);
 
         storageMock.Setup(s => s.LoadClusterStateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -381,7 +381,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
                    .Callback(() => Interlocked.Increment(ref saveDvvCount))
                    .Returns(Task.CompletedTask);
                    
-        storageMock.Setup(s => s.GetJournalCountAsync(It.IsAny<CancellationToken>()))
+        storageMock.Setup(s => s.GetJournalCountAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                    .ReturnsAsync(0);
 
         storageMock.Setup(s => s.LoadClusterStateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))

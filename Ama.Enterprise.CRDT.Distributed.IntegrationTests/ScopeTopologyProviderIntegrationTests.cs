@@ -215,7 +215,7 @@ public sealed class ScopeTopologyProviderIntegrationTests
         long currentClock = 0;
         lock (context.ShardVersionVectors)
         {
-            if (context.ShardVersionVectors.TryGetValue("", out var dvv))
+            if (context.ShardVersionVectors.TryGetValue("default", out var dvv))
             {
                 currentClock = dvv.Versions.TryGetValue("Replica1", out var v) ? v : 0;
             }
@@ -224,11 +224,11 @@ public sealed class ScopeTopologyProviderIntegrationTests
         // The expected peer has fully synced and matches our local state preventing amnesia limits.
         var expectedDvv = new DottedVersionVector();
         expectedDvv.Versions["Replica1"] = currentClock;
-        clusterTracker.UpdatePeerState("ReplicaB", expectedPeerGuid.ToString(), new ShardVersionVectorMap { { "", expectedDvv } });
+        clusterTracker.UpdatePeerState("ReplicaB", expectedPeerGuid.ToString(), new ShardVersionVectorMap { { "default", expectedDvv } });
 
         // The unexpected peer has NOT synced and is entirely lagging (Clock 0)
         var unexpectedDvv = new DottedVersionVector();
-        clusterTracker.UpdatePeerState("ReplicaC", unexpectedPeerGuid.ToString(), new ShardVersionVectorMap { { "", unexpectedDvv } });
+        clusterTracker.UpdatePeerState("ReplicaC", unexpectedPeerGuid.ToString(), new ShardVersionVectorMap { { "default", unexpectedDvv } });
 
         var maintenanceService = sp.GetServices<IHostedService>().OfType<CrdtMaintenanceService>().First();
 

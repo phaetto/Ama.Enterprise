@@ -445,15 +445,18 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         }
     }
 
-    public async Task<long> GetJournalCountAsync(CancellationToken cancellationToken = default)
+    public async Task<long> GetJournalCountAsync(string shardId, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(shardId);
+
         try
         {
             using var connection = new SqliteConnection(connectionString);
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
             
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT COUNT(*) FROM Journal";
+            command.CommandText = "SELECT COUNT(*) FROM Journal WHERE ShardId = @ShardId";
+            AddParameter(command, "@ShardId", shardId);
 
             var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
             return Convert.ToInt64(result);
@@ -465,10 +468,11 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         }
     }
 
-    public void Trim(IReadOnlyDictionary<string, long> gmvv) => Trim(gmvv, null);
+    public void Trim(string shardId, IReadOnlyDictionary<string, long> gmvv) => Trim(shardId, gmvv, null);
 
-    public void Trim(IReadOnlyDictionary<string, long> gmvv, DateTimeOffset? retainBufferTime)
+    public void Trim(string shardId, IReadOnlyDictionary<string, long> gmvv, DateTimeOffset? retainBufferTime)
     {
+        ArgumentException.ThrowIfNullOrEmpty(shardId);
         ArgumentNullException.ThrowIfNull(gmvv);
         if (gmvv.Count == 0) return;
 
@@ -479,7 +483,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             
             using var command = writeConnection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "DELETE FROM Journal WHERE ShardId = @ShardId AND ShardClock <= @MaxClock";
+            command.CommandText = "DELETE FROM Journal WHERE ShardId = @ShardId AND OriginReplicaId = @OriginRepId AND ShardClock <= @MaxClock";
             
             if (retainBufferTime.HasValue)
             {
@@ -491,11 +495,13 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             }
 
             var pShardId = command.CreateParameter(); pShardId.ParameterName = "@ShardId"; command.Parameters.Add(pShardId);
+            var pRepId = command.CreateParameter(); pRepId.ParameterName = "@OriginRepId"; command.Parameters.Add(pRepId);
             var pMax = command.CreateParameter(); pMax.ParameterName = "@MaxClock"; command.Parameters.Add(pMax);
 
+            pShardId.Value = shardId;
             foreach (var kvp in gmvv)
             {
-                pShardId.Value = kvp.Key;
+                pRepId.Value = kvp.Key;
                 pMax.Value = kvp.Value;
                 command.ExecuteNonQuery();
             }
@@ -513,11 +519,12 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         }
     }
 
-    public Task TrimAsync(IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default)
-        => TrimAsync(globalMinimumVersionVector, null, cancellationToken);
+    public Task TrimAsync(string shardId, IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default)
+        => TrimAsync(shardId, globalMinimumVersionVector, null, cancellationToken);
 
-    public async Task TrimAsync(IReadOnlyDictionary<string, long> globalMinimumVersionVector, DateTimeOffset? retainBufferTime, CancellationToken cancellationToken = default)
+    public async Task TrimAsync(string shardId, IReadOnlyDictionary<string, long> globalMinimumVersionVector, DateTimeOffset? retainBufferTime, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(shardId);
         ArgumentNullException.ThrowIfNull(globalMinimumVersionVector);
         if (globalMinimumVersionVector.Count == 0) return;
 
@@ -528,7 +535,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             
             using var command = writeConnection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "DELETE FROM Journal WHERE ShardId = @ShardId AND ShardClock <= @MaxClock";
+            command.CommandText = "DELETE FROM Journal WHERE ShardId = @ShardId AND OriginReplicaId = @OriginRepId AND ShardClock <= @MaxClock";
             
             if (retainBufferTime.HasValue)
             {
@@ -540,11 +547,13 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             }
 
             var pShardId = command.CreateParameter(); pShardId.ParameterName = "@ShardId"; command.Parameters.Add(pShardId);
+            var pRepId = command.CreateParameter(); pRepId.ParameterName = "@OriginRepId"; command.Parameters.Add(pRepId);
             var pMax = command.CreateParameter(); pMax.ParameterName = "@MaxClock"; command.Parameters.Add(pMax);
 
+            pShardId.Value = shardId;
             foreach (var kvp in globalMinimumVersionVector)
             {
-                pShardId.Value = kvp.Key;
+                pRepId.Value = kvp.Key;
                 pMax.Value = kvp.Value;
                 await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }

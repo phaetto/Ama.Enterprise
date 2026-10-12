@@ -85,19 +85,21 @@ public interface IDistributedCrdtStorage : ICrdtOperationJournal
     Task DeleteDocumentAsync(string documentId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Retrieves the total number of journaled operations currently stored, evaluating limits efficiently.
+    /// Retrieves the total number of journaled operations currently stored for a specific shard, evaluating limits efficiently.
     /// </summary>
+    /// <param name="shardId">The identifier of the shard.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The total operation count natively.</returns>
-    Task<long> GetJournalCountAsync(CancellationToken cancellationToken = default);
+    Task<long> GetJournalCountAsync(string shardId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Asynchronously trims the underlying operation journal securely to remove obsolete operations strictly mapped across the background synchronized version vector bounds.
+    /// Asynchronously trims the underlying operation journal securely to remove obsolete operations strictly mapped across the background synchronized version vector bounds for a specific shard.
     /// </summary>
+    /// <param name="shardId">The identifier of the shard.</param>
     /// <param name="globalMinimumVersionVector">The mapped version vector boundaries resolving safe historic patch removal limits.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous trim operation.</returns>
-    Task TrimAsync(IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default);
+    Task TrimAsync(string shardId, IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Retrieves all currently persisted operations from the journal. 

@@ -121,75 +121,78 @@ public sealed class CrdtMaintenanceService : BackgroundService
                         }
                     }
                     
-                    var currentLocalMap = safelyPersistedMap;
-                    var defaultShardDvv = currentLocalMap.TryGetValue("", out var dvd) ? dvd : new DottedVersionVector();
-
-                    long journalCount = 0;
+                    var exportedClusterState = scope.ClusterTracker.ExportState();
                     var softThreshold = options.Value.JournalSoftTrimThreshold;
                     var hardThreshold = options.Value.JournalHardTrimThreshold;
 
-                    if (softThreshold > 0 || hardThreshold > 0)
+                    foreach (var shardKvp in safelyPersistedMap)
                     {
-                        journalCount = await scope.Storage.GetJournalCountAsync(stoppingToken).ConfigureAwait(false);
-                    }
+                        var shardId = shardKvp.Key;
+                        var shardDvv = shardKvp.Value;
+                        long journalCount = 0;
 
-                    bool trimThresholdExceeded = (softThreshold > 0 && journalCount >= softThreshold) ||
-                                                 (hardThreshold > 0 && journalCount >= hardThreshold);
-
-                    if (trimThresholdExceeded)
-                    {
-                        // Force a journal trim up to the local logical bounds, intentionally dropping lagging peers to fallback snapshots
-                        if (defaultShardDvv.Versions.Count > 0)
+                        if (softThreshold > 0 || hardThreshold > 0)
                         {
-                            await CrdtTrimCoordinator.GlobalTrimLock.WaitAsync(stoppingToken).ConfigureAwait(false);
-                            try
-                            {
-                                await scope.Storage.TrimAsync(defaultShardDvv.Versions.ToDictionary(k => k.Key, k => k.Value), stoppingToken).ConfigureAwait(false);
-                                trimmedJournalsCounter.Add(1, tag);
-                                
-                                var exceededThreshold = (softThreshold > 0 && journalCount >= softThreshold) ? softThreshold : hardThreshold;
-                                logger.LogWarning("[{ReplicaId}] Journal size ({Count}) exceeded threshold ({Threshold}). Forced an aggressive journal trim up to the local logical bounds.", scope.ReplicaId, journalCount, exceededThreshold);
-                            }
-                            finally
-                            {
-                                CrdtTrimCoordinator.GlobalTrimLock.Release();
-                            }
-                        }
-                    }
-                    else
-                    {
-                        var exportedClusterState = scope.ClusterTracker.ExportState();
-                        var validClusterStates = new List<DottedVersionVector> { defaultShardDvv };
-
-                        foreach (var networkKvp in exportedClusterState.NetworkIdToReplicaId)
-                        {
-                            var isExpected = await topologyProvider.IsPeerExpectedAsync(networkKvp.Key, stoppingToken).ConfigureAwait(false);
-                            if (isExpected)
-                            {
-                                if (exportedClusterState.PeerStates.TryGetValue(networkKvp.Value, out var peerStateDto))
-                                {
-                                    validClusterStates.Add(peerStateDto.State.TryGetValue("", out var pd) ? pd : new DottedVersionVector());
-                                }
-                            }
+                            journalCount = await scope.Storage.GetJournalCountAsync(shardId, stoppingToken).ConfigureAwait(false);
                         }
 
-                        if (validClusterStates.Count > 0)
-                        {
-                            var syncService = scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
-                            var gmvv = syncService.CalculateGlobalMinimumVersionVector(validClusterStates);
+                        bool trimThresholdExceeded = (softThreshold > 0 && journalCount >= softThreshold) ||
+                                                     (hardThreshold > 0 && journalCount >= hardThreshold);
 
-                            if (gmvv.Count > 0)
+                        if (trimThresholdExceeded)
+                        {
+                            // Force a journal trim up to the local logical bounds, intentionally dropping lagging peers to fallback snapshots
+                            if (shardDvv.Versions.Count > 0)
                             {
                                 await CrdtTrimCoordinator.GlobalTrimLock.WaitAsync(stoppingToken).ConfigureAwait(false);
                                 try
                                 {
-                                    await scope.Storage.TrimAsync(gmvv.ToDictionary(k => k.Key, k => k.Value), stoppingToken).ConfigureAwait(false);
+                                    await scope.Storage.TrimAsync(shardId, shardDvv.Versions.ToDictionary(k => k.Key, k => k.Value), stoppingToken).ConfigureAwait(false);
                                     trimmedJournalsCounter.Add(1, tag);
-                                    logger.LogTrace("[{ReplicaId}] Executed background journal trim matching Global Minimum Version Vector bounds across expected topology peers.", scope.ReplicaId);
+                                    
+                                    var exceededThreshold = (softThreshold > 0 && journalCount >= softThreshold) ? softThreshold : hardThreshold;
+                                    logger.LogWarning("[{ReplicaId}] Journal size ({Count}) for shard '{ShardId}' exceeded threshold ({Threshold}). Forced an aggressive journal trim up to the local logical bounds.", scope.ReplicaId, journalCount, shardId, exceededThreshold);
                                 }
                                 finally
                                 {
                                     CrdtTrimCoordinator.GlobalTrimLock.Release();
+                                }
+                            }
+                        }
+                        else
+                        {
+                            var validClusterStates = new List<DottedVersionVector> { shardDvv };
+
+                            foreach (var networkKvp in exportedClusterState.NetworkIdToReplicaId)
+                            {
+                                var isExpected = await topologyProvider.IsPeerExpectedAsync(networkKvp.Key, stoppingToken).ConfigureAwait(false);
+                                if (isExpected)
+                                {
+                                    if (exportedClusterState.PeerStates.TryGetValue(networkKvp.Value, out var peerStateDto))
+                                    {
+                                        validClusterStates.Add(peerStateDto.State.TryGetValue(shardId, out var pd) ? pd : new DottedVersionVector());
+                                    }
+                                }
+                            }
+
+                            if (validClusterStates.Count > 0)
+                            {
+                                var syncService = scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
+                                var gmvv = syncService.CalculateGlobalMinimumVersionVector(validClusterStates);
+
+                                if (gmvv.Count > 0)
+                                {
+                                    await CrdtTrimCoordinator.GlobalTrimLock.WaitAsync(stoppingToken).ConfigureAwait(false);
+                                    try
+                                    {
+                                        await scope.Storage.TrimAsync(shardId, gmvv.ToDictionary(k => k.Key, k => k.Value), stoppingToken).ConfigureAwait(false);
+                                        trimmedJournalsCounter.Add(1, tag);
+                                        logger.LogTrace("[{ReplicaId}] Executed background journal trim for shard '{ShardId}' matching Global Minimum Version Vector bounds across expected topology peers.", scope.ReplicaId, shardId);
+                                    }
+                                    finally
+                                    {
+                                        CrdtTrimCoordinator.GlobalTrimLock.Release();
+                                    }
                                 }
                             }
                         }
