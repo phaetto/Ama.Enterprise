@@ -49,7 +49,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         this.writeConnection.Open();
     }
 
-    public async Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    public async Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new()
     {
         if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
 
@@ -59,7 +59,8 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
             
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT Payload FROM Documents WHERE DocumentId = @DocId";
+            command.CommandText = "SELECT Payload FROM Documents WHERE ShardId = @ShardId AND DocumentId = @DocId";
+            AddParameter(command, "@ShardId", shardId);
             AddParameter(command, "@DocId", documentId);
 
             var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
@@ -77,14 +78,14 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         return null;
     }
 
-    public Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    public Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new()
     {
         // Showcase SQLite storage maps databases explicitly to localized ReplicaId files. 
         // Orphaned partitioned logic across shared storage mediums is not applicable here.
         return Task.FromResult<CrdtDocument<TState>?>(null);
     }
 
-    public async Task SaveDocumentAsync<TState>(string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new()
+    public async Task SaveDocumentAsync<TState>(string shardId, string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new()
     {
         if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
 
@@ -94,8 +95,9 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         try
         {
             using var command = writeConnection.CreateCommand();
-            command.CommandText = "INSERT OR REPLACE INTO Documents (DocumentId, Payload) VALUES (@DocId, @Payload)";
+            command.CommandText = "INSERT OR REPLACE INTO Documents (DocumentId, ShardId, Payload) VALUES (@DocId, @ShardId, @Payload)";
             AddParameter(command, "@DocId", documentId);
+            AddParameter(command, "@ShardId", shardId);
             AddParameter(command, "@Payload", bytes);
             
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -111,7 +113,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         }
     }
 
-    public async Task DeleteDocumentAsync(string documentId, CancellationToken cancellationToken = default)
+    public async Task DeleteDocumentAsync(string shardId, string documentId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(documentId)) return;
 
@@ -122,7 +124,8 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
 
             using var cmd1 = writeConnection.CreateCommand();
             cmd1.Transaction = transaction;
-            cmd1.CommandText = "DELETE FROM Documents WHERE DocumentId = @DocId";
+            cmd1.CommandText = "DELETE FROM Documents WHERE ShardId = @ShardId AND DocumentId = @DocId";
+            AddParameter(cmd1, "@ShardId", shardId);
             AddParameter(cmd1, "@DocId", documentId);
             await cmd1.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 
@@ -259,7 +262,8 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
 
     public void Append(IComparable documentId, IReadOnlyList<CrdtOperation> operationsList)
     {
-        if (documentId is null) throw new ArgumentNullException(nameof(documentId));
+        var docIdStr = documentId?.ToString();
+        if (string.IsNullOrEmpty(docIdStr)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
         ArgumentNullException.ThrowIfNull(operationsList);
         if (operationsList.Count == 0) return;
 
@@ -284,7 +288,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             {
                 var journaled = new JournaledOperation(documentId, op);
                 pId.Value = op.Id;
-                pDoc.Value = documentId.ToString()!;
+                pDoc.Value = docIdStr;
                 pShard.Value = op.ShardId;
                 pRep.Value = op.ReplicaId;
                 pClock.Value = op.ShardClock;
@@ -309,7 +313,8 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
 
     public async Task AppendAsync(IComparable documentId, IReadOnlyList<CrdtOperation> operationsList, CancellationToken cancellationToken = default)
     {
-        if (documentId is null) throw new ArgumentNullException(nameof(documentId));
+        var docIdStr = documentId?.ToString();
+        if (string.IsNullOrEmpty(docIdStr)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
         ArgumentNullException.ThrowIfNull(operationsList);
         if (operationsList.Count == 0) return;
 
@@ -334,7 +339,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             {
                 var journaled = new JournaledOperation(documentId, op);
                 pId.Value = op.Id;
-                pDoc.Value = documentId.ToString()!;
+                pDoc.Value = docIdStr;
                 pShard.Value = op.ShardId;
                 pRep.Value = op.ReplicaId;
                 pClock.Value = op.ShardClock;
@@ -607,6 +612,22 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
                 CREATE INDEX IF NOT EXISTS IDX_Journal_Shard_Clock ON Journal(ShardId, ShardClock);
             ";
             command.ExecuteNonQuery();
+            
+            using var checkDocCmd = connection.CreateCommand();
+            checkDocCmd.CommandText = "PRAGMA table_info(Documents);";
+            using var docReader = checkDocCmd.ExecuteReader();
+            bool docHasShardId = false;
+            while(docReader.Read())
+            {
+                if (docReader["name"].ToString() == "ShardId") docHasShardId = true;
+            }
+
+            if (!docHasShardId)
+            {
+                using var alterDocCmd = connection.CreateCommand();
+                alterDocCmd.CommandText = "ALTER TABLE Documents ADD COLUMN ShardId TEXT NOT NULL DEFAULT '';";
+                alterDocCmd.ExecuteNonQuery();
+            }
 
             // Safely migrate mapping bounds appending InsertedAt tracking explicitly for temporal delays gracefully
             using var checkCmd = connection.CreateCommand();

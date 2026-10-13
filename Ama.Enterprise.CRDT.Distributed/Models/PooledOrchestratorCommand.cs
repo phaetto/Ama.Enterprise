@@ -11,7 +11,8 @@ internal enum OrchestratorCommandType
     Initialize,
     SyncDocuments,
     CreateDocument,
-    DeleteDocument
+    DeleteDocument,
+    ReevaluateTopology
 }
 
 /// <summary>

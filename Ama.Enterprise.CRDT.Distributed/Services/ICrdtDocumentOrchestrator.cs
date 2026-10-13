@@ -54,6 +54,11 @@ public interface ICrdtDocumentOrchestrator
     Task SyncDocumentsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Manually triggers a re-evaluation of the document topology, promoting or demoting dynamically based on the current cluster map.
+    /// </summary>
+    Task ReevaluateTopologyAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Serializes the current local state and dispatches it directly as a targeted snapshot following an unrecoverable journal truncation gap.
     /// </summary>
     Task ProvideSnapshotAsync(string documentId, string targetReplicaId, PeerId targetPeerId, CancellationToken cancellationToken = default);

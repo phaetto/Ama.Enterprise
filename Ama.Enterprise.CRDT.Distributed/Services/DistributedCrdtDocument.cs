@@ -35,16 +35,20 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly int activeSyncDebounceMs;
     private readonly bool avoidBlindWrites;
     private readonly TState initialState;
+    private readonly bool isLocalShard;
     
     // Fast synchronous lock for atomic reference/flag swapping against torn struct reads exclusively.
     private readonly object syncRoot = new();
     private CrdtDocument<TState> currentDocument;
     
+    // Lightweight execution synchronization completely bypassing unbounded channel allocations for remote shards securely
+    private readonly SemaphoreSlim? lightweightLock;
+
     // Single-reader channel completely eliminating Thread locks allocating non-thread-safe applicator sequential streams
-    private readonly Channel<PooledDocumentCommand<TState>> commandChannel;
+    private readonly Channel<PooledDocumentCommand<TState>>? commandChannel;
     private readonly ConcurrentQueue<PooledDocumentCommand<TState>> commandPool = new();
     private readonly CancellationTokenSource disposeCts = new();
-    private readonly Task processingTask;
+    private readonly Task? processingTask;
     
     // Active sync debouncing components
     private readonly object debounceSyncRoot = new();
@@ -64,8 +68,11 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly Counter<long> commandsEnqueuedCounter;
     private readonly Counter<long> commandsProcessedCounter;
     private readonly Counter<long> commandFailuresCounter;
-    private readonly ObservableGauge<int> channelQueueLengthGauge;
-    private readonly ObservableGauge<int> commandPoolSizeGauge;
+    private ObservableGauge<int>? channelQueueLengthGauge;
+    private ObservableGauge<int>? commandPoolSizeGauge;
+
+    /// <inheritdoc />
+    public string ShardId { get; }
 
     /// <inheritdoc />
     public string DocumentId { get; }
@@ -98,12 +105,16 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         IDistributedCrdtStorage storage,
         ILogger<DistributedCrdtDocument<TState>> logger,
         IDocumentIdProvider documentIdProvider,
+        IShardIdProvider shardIdProvider,
         ICrdtTimestampProvider timestampProvider,
+        IShardDistributionManager distributionManager,
         IMeterFactory? meterFactory = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(initialState);
         ArgumentNullException.ThrowIfNull(documentIdProvider);
+        ArgumentNullException.ThrowIfNull(shardIdProvider);
+        ArgumentNullException.ThrowIfNull(distributionManager);
 
         this.replicaContext = replicaContext ?? throw new ArgumentNullException(nameof(replicaContext));
         this.applicator = applicator ?? throw new ArgumentNullException(nameof(applicator));
@@ -121,56 +132,66 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         this.avoidBlindWrites = options.Value.AvoidBlindCheckpointWrites;
         this.initialState = initialState;
 
-        DocumentId = documentIdProvider.GetDocumentId(initialState).ToString() ?? string.Empty;
-        
         var metadata = metadataManager.Initialize(initialState);
         currentDocument = new CrdtDocument<TState>(initialState, metadata);
 
-        if (this.activeSyncEnabled && this.activeSyncDebounceMs > 0)
-        {
-            this.debounceBuffer = new List<CrdtOperation>();
-            this.debounceTimer = new Timer(OnDebounceTimerFired, null, Timeout.Infinite, Timeout.Infinite);
-        }
-
-        var capacity = options.Value.ChannelCapacity;
-        if (capacity > 0)
-        {
-            this.commandChannel = Channel.CreateBounded<PooledDocumentCommand<TState>>(new BoundedChannelOptions(capacity)
-            {
-                SingleReader = true,
-                SingleWriter = false,
-                FullMode = BoundedChannelFullMode.Wait
-            });
-        }
-        else
-        {
-            this.commandChannel = Channel.CreateUnbounded<PooledDocumentCommand<TState>>(new UnboundedChannelOptions 
-            { 
-                SingleReader = true, 
-                SingleWriter = false 
-            });
-        }
+        DocumentId = documentIdProvider.GetDocumentId(initialState).ToString() ?? string.Empty;
+        ShardId = shardIdProvider.GetShardId(currentDocument) ?? string.Empty;
+        
+        this.isLocalShard = distributionManager.IsShardLocal(this.ShardId);
 
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.DistributedCrdtDocument") ?? new Meter("Ama.Enterprise.CRDT.Distributed.DistributedCrdtDocument");
         this.patchAppliedCounter = this.meter.CreateCounter<long>("crdt.document.patches_applied", "patches", "Total local patches natively applied mapping intentions");
         this.operationsAppliedCounter = this.meter.CreateCounter<long>("crdt.document.operations_applied", "operations", "Total remote operations synchronized locally successfully");
         this.snapshotsMergedCounter = this.meter.CreateCounter<long>("crdt.document.snapshots_merged", "snapshots", "Total incoming full snapshots superseding states");
         this.checkPointSavedCounter = this.meter.CreateCounter<long>("crdt.document.checkpoints_saved", "checkpoints", "Total underlying storage checkpoint alignments executed");
-
         this.commandsEnqueuedCounter = this.meter.CreateCounter<long>("crdt.document.channel.commands_enqueued", "commands", "Total document commands enqueued to the lock-free channel");
         this.commandsProcessedCounter = this.meter.CreateCounter<long>("crdt.document.channel.commands_processed", "commands", "Total document commands processed by the channel");
         this.commandFailuresCounter = this.meter.CreateCounter<long>("crdt.document.channel.command_failures", "errors", "Total document command processing failures");
-        
-        this.channelQueueLengthGauge = this.meter.CreateObservableGauge("crdt.document.channel.queue_length", 
-            () => new Measurement<int>(this.commandChannel.Reader.CanCount ? this.commandChannel.Reader.Count : 0, new KeyValuePair<string, object?>("document_id", this.DocumentId)), 
-            "commands", "Current number of pending document commands");
-            
-        this.commandPoolSizeGauge = this.meter.CreateObservableGauge("crdt.document.channel.pool_size", 
-            () => new Measurement<int>(this.commandPool.Count, new KeyValuePair<string, object?>("document_id", this.DocumentId)), 
-            "commands", "Current size of the document command object pool");
 
-        // Initiates the lock-free sequential execution loop immediately
-        this.processingTask = Task.Run(ProcessChannelAsync);
+        if (this.isLocalShard)
+        {
+            if (this.activeSyncEnabled && this.activeSyncDebounceMs > 0)
+            {
+                this.debounceBuffer = new List<CrdtOperation>();
+                this.debounceTimer = new Timer(OnDebounceTimerFired, null, Timeout.Infinite, Timeout.Infinite);
+            }
+
+            var capacity = options.Value.ChannelCapacity;
+            if (capacity > 0)
+            {
+                this.commandChannel = Channel.CreateBounded<PooledDocumentCommand<TState>>(new BoundedChannelOptions(capacity)
+                {
+                    SingleReader = true,
+                    SingleWriter = false,
+                    FullMode = BoundedChannelFullMode.Wait
+                });
+            }
+            else
+            {
+                this.commandChannel = Channel.CreateUnbounded<PooledDocumentCommand<TState>>(new UnboundedChannelOptions 
+                { 
+                    SingleReader = true, 
+                    SingleWriter = false 
+                });
+            }
+
+            this.channelQueueLengthGauge = this.meter.CreateObservableGauge("crdt.document.channel.queue_length", 
+                () => new Measurement<int>(this.commandChannel.Reader.CanCount ? this.commandChannel.Reader.Count : 0, new KeyValuePair<string, object?>("document_id", this.DocumentId)), 
+                "commands", "Current number of pending document commands");
+                
+            this.commandPoolSizeGauge = this.meter.CreateObservableGauge("crdt.document.channel.pool_size", 
+                () => new Measurement<int>(this.commandPool.Count, new KeyValuePair<string, object?>("document_id", this.DocumentId)), 
+                "commands", "Current size of the document command object pool");
+
+            // Initiates the lock-free sequential execution loop immediately
+            this.processingTask = Task.Run(ProcessChannelAsync);
+        }
+        else
+        {
+            // Initializes explicit simple state bounds avoiding costly channels optimizing natively completely smartly
+            this.lightweightLock = new SemaphoreSlim(1, 1);
+        }
     }
 
     private PooledDocumentCommand<TState> GetCommand() => commandPool.TryDequeue(out var cmd) ? cmd : new PooledDocumentCommand<TState>();
@@ -183,6 +204,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
     private async Task ProcessChannelAsync()
     {
+        if (commandChannel == null) return;
+        
         try
         {
             await foreach (var cmd in commandChannel.Reader.ReadAllAsync(disposeCts.Token).ConfigureAwait(false))
@@ -246,6 +269,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// <inheritdoc />
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
+        if (!isLocalShard || commandChannel == null) return;
+
         var cmd = GetCommand();
         cmd.Type = DocumentCommandType.Initialize;
         cmd.CancellationToken = cancellationToken;
@@ -266,11 +291,11 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     {
         try
         {
-            var storedDoc = await storage.LoadDocumentAsync<TState>(DocumentId, cancellationToken).ConfigureAwait(false);
+            var storedDoc = await storage.LoadDocumentAsync<TState>(ShardId, DocumentId, cancellationToken).ConfigureAwait(false);
             
             if (storedDoc == null)
             {
-                storedDoc = await storage.LoadOrphanedDocumentAsync<TState>(DocumentId, cancellationToken).ConfigureAwait(false);
+                storedDoc = await storage.LoadOrphanedDocumentAsync<TState>(ShardId, DocumentId, cancellationToken).ConfigureAwait(false);
                 if (storedDoc != null)
                 {
                     logger.LogInformation("Successfully bootstrapped orphaned state for document {DocumentId} from persistent storage.", DocumentId);
@@ -303,6 +328,29 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// <inheritdoc />
     public async Task ApplyPatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default)
     {
+        if (!isLocalShard || commandChannel == null)
+        {
+            // Optimizes footprint applying structurally mapped states in-memory directly tracking lightweight synchronization securely natively
+            await lightweightLock!.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var result = await applicator.ApplyPatchAsync(currentDocument, patch).ConfigureAwait(false);
+                lock (syncRoot)
+                {
+                    currentDocument = result.Document;
+                }
+            }
+            finally
+            {
+                lightweightLock.Release();
+            }
+
+            patchAppliedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            StateChanged?.Invoke(this, EventArgs.Empty);
+            PatchGenerated?.Invoke(this, patch);
+            return;
+        }
+
         var cmd = GetCommand();
         cmd.Type = DocumentCommandType.ApplyPatch;
         cmd.Patch = patch;
@@ -406,6 +454,33 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         ArgumentNullException.ThrowIfNull(operations);
         if (operations.Count == 0) return;
 
+        if (!isLocalShard || commandChannel == null)
+        {
+            await lightweightLock!.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                async IAsyncEnumerable<JournaledOperation> GetStreamAsync()
+                {
+                    foreach (var op in operations) yield return new JournaledOperation(DocumentId, op);
+                    await Task.CompletedTask;
+                }
+                
+                var result = await applicator.ApplyOperationsAsync(currentDocument, GetStreamAsync()).ConfigureAwait(false);
+                lock (syncRoot)
+                {
+                    currentDocument = result.Document;
+                }
+            }
+            finally
+            {
+                lightweightLock.Release();
+            }
+
+            operationsAppliedCounter.Add(operations.Count, new KeyValuePair<string, object?>("document_id", DocumentId));
+            StateChanged?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
         var cmd = GetCommand();
         cmd.Type = DocumentCommandType.ApplyOperations;
         cmd.Operations = operations;
@@ -455,6 +530,19 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         ArgumentNullException.ThrowIfNull(operations);
         if (operations.Count == 0) return;
 
+        if (!isLocalShard || commandChannel == null)
+        {
+            lock (syncRoot)
+            {
+                var result = syncApplicator.ApplyPatch(currentDocument, new CrdtPatch(operations));
+                currentDocument = result.Document;
+            }
+            
+            operationsAppliedCounter.Add(operations.Count, new KeyValuePair<string, object?>("document_id", DocumentId));
+            StateChanged?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
         var cmd = GetCommand();
         cmd.Type = DocumentCommandType.ApplyJournaledOperations;
         cmd.Operations = operations;
@@ -492,6 +580,14 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// <inheritdoc />
     public async Task<CrdtSnapshotDataDto> GetSnapshotDataAsync(CancellationToken cancellationToken = default)
     {
+        if (!isLocalShard || commandChannel == null)
+        {
+            CrdtDocument<TState> currentDoc;
+            lock (syncRoot) { currentDoc = currentDocument; }
+            var snapshotData = serializer.SerializeToBytes(currentDoc);
+            return new CrdtSnapshotDataDto(snapshotData, GetLocalState());
+        }
+
         var cmd = GetCommand();
         cmd.Type = DocumentCommandType.GetSnapshotData;
         cmd.CancellationToken = cancellationToken;
@@ -525,6 +621,38 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     {
         if (snapshotData == null || snapshotData.Length == 0) return;
         ArgumentNullException.ThrowIfNull(globalState);
+
+        if (!isLocalShard || commandChannel == null)
+        {
+            var snapshotDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(snapshotData);
+            
+            await lightweightLock!.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await merger.MergeStateAsync(currentDocument, snapshotDoc, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                lightweightLock.Release();
+            }
+
+            lock (replicaContext.ShardVersionVectors)
+            {
+                foreach (var shardKvp in globalState)
+                {
+                    if (!replicaContext.ShardVersionVectors.TryGetValue(shardKvp.Key, out var dvv))
+                    {
+                        dvv = new DottedVersionVector();
+                        replicaContext.ShardVersionVectors[shardKvp.Key] = dvv;
+                    }
+                    dvv.Merge(shardKvp.Value);
+                }
+            }
+
+            snapshotsMergedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            StateChanged?.Invoke(this, EventArgs.Empty);
+            return;
+        }
 
         var cmd = GetCommand();
         cmd.Type = DocumentCommandType.MergeSnapshot;
@@ -589,6 +717,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// <inheritdoc />
     public async Task CheckpointAsync(CancellationToken cancellationToken = default)
     {
+        if (!isLocalShard || commandChannel == null) return;
+
         var cmd = GetCommand();
         cmd.Type = DocumentCommandType.Checkpoint;
         cmd.CancellationToken = cancellationToken;
@@ -628,7 +758,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         try
         {
-            await storage.SaveDocumentAsync(DocumentId, currentDoc, cmd.CancellationToken).ConfigureAwait(false);
+            await storage.SaveDocumentAsync(ShardId, DocumentId, currentDoc, cmd.CancellationToken).ConfigureAwait(false);
             
             if (avoidBlindWrites)
             {
@@ -652,6 +782,16 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     public async Task EvictReplicaAsync(string replicaId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
+
+        if (!isLocalShard || commandChannel == null)
+        {
+            lock (syncRoot)
+            {
+                metadataManager.EvictReplica(currentDocument, replicaId);
+            }
+            StateChanged?.Invoke(this, EventArgs.Empty);
+            return;
+        }
 
         var cmd = GetCommand();
         cmd.Type = DocumentCommandType.EvictReplica;
@@ -683,6 +823,17 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// <inheritdoc />
     public async Task ResetLocalStateAsync(string oldReplicaId, CancellationToken cancellationToken = default)
     {
+        if (!isLocalShard || commandChannel == null)
+        {
+            lock (syncRoot)
+            {
+                var metadata = metadataManager.Initialize(initialState);
+                currentDocument = new CrdtDocument<TState>(initialState, metadata);
+            }
+            StateChanged?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
         var cmd = GetCommand();
         cmd.Type = DocumentCommandType.ResetLocalState;
         cmd.OldReplicaId = oldReplicaId;
@@ -715,10 +866,17 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// <inheritdoc />
     public void Dispose()
     {
-        debounceTimer?.Dispose();
-        disposeCts.Cancel();
-        commandChannel.Writer.TryComplete();
-        disposeCts.Dispose();
+        if (isLocalShard)
+        {
+            debounceTimer?.Dispose();
+            disposeCts.Cancel();
+            commandChannel?.Writer.TryComplete();
+            disposeCts.Dispose();
+        }
+        else
+        {
+            lightweightLock?.Dispose();
+        }
         meter.Dispose();
     }
 }

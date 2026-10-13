@@ -227,13 +227,13 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         }
     }
 
-    public async Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    public async Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new()
     {
         ArgumentException.ThrowIfNullOrEmpty(documentId);
 
         try
         {
-            var response = await this.tableClient.GetEntityAsync<TableEntity>(this.GetDocumentStatePartitionKey(), documentId, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var response = await this.tableClient.GetEntityAsync<TableEntity>(this.GetDocumentStatePartitionKey(shardId), documentId, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (response?.Value != null)
             {
                 var tags = new KeyValuePair<string, object?>[] { new("type", "document") };
@@ -261,7 +261,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         return null;
     }
 
-    public async Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    public async Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new()
     {
         ArgumentException.ThrowIfNullOrEmpty(documentId);
 
@@ -275,7 +275,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
             
             await foreach (var entity in query.WithCancellation(cancellationToken).ConfigureAwait(false))
             {
-                if (entity.PartitionKey != null && entity.PartitionKey.EndsWith(DocumentStatePartitionKey, StringComparison.OrdinalIgnoreCase))
+                if (entity.PartitionKey != null && entity.PartitionKey.Contains(DocumentStatePartitionKey, StringComparison.OrdinalIgnoreCase))
                 {
                     if (latestOrphan == null || entity.Timestamp > latestOrphan.Timestamp)
                     {
@@ -311,7 +311,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         return null;
     }
 
-    public async Task SaveDocumentAsync<TState>(string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new()
+    public async Task SaveDocumentAsync<TState>(string shardId, string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new()
     {
         ArgumentException.ThrowIfNullOrEmpty(documentId);
         ArgumentNullException.ThrowIfNull(document);
@@ -327,7 +327,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
                 this.payloadBytesHistogram.Record(payload.Length, tags);
             }
 
-            var entity = new TableEntity(this.GetDocumentStatePartitionKey(), documentId);
+            var entity = new TableEntity(this.GetDocumentStatePartitionKey(shardId), documentId);
             CrdtTableEntity.SetPayload(entity, payload);
 
             await this.tableClient.UpsertEntityAsync(entity, TableUpdateMode.Replace, cancellationToken).ConfigureAwait(false);
@@ -339,13 +339,13 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         }
     }
 
-    public async Task DeleteDocumentAsync(string documentId, CancellationToken cancellationToken = default)
+    public async Task DeleteDocumentAsync(string shardId, string documentId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(documentId);
 
         try
         {
-            await this.tableClient.DeleteEntityAsync(this.GetDocumentStatePartitionKey(), documentId, cancellationToken: cancellationToken).ConfigureAwait(false);
+            await this.tableClient.DeleteEntityAsync(this.GetDocumentStatePartitionKey(shardId), documentId, cancellationToken: cancellationToken).ConfigureAwait(false);
             
             var tags = new KeyValuePair<string, object?>[] { new("type", "document") };
             this.operationsDeleteCounter.Add(1, tags);
@@ -653,10 +653,10 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         return localId != null ? $"{localId}_{GlobalDvvPartitionKey}" : GlobalDvvPartitionKey;
     }
 
-    private string GetDocumentStatePartitionKey()
+    private string GetDocumentStatePartitionKey(string shardId)
     {
         var localId = this.GetLocalReplicaId();
-        return localId != null ? $"{localId}_{DocumentStatePartitionKey}" : DocumentStatePartitionKey;
+        return localId != null ? $"{localId}_{DocumentStatePartitionKey}_{shardId}" : $"{DocumentStatePartitionKey}_{shardId}";
     }
 
     private string GetClusterStatePartitionKey()

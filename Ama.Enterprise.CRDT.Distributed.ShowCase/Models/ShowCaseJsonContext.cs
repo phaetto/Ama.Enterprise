@@ -1,6 +1,5 @@
 namespace Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 
-using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using Ama.CRDT.Models;
 

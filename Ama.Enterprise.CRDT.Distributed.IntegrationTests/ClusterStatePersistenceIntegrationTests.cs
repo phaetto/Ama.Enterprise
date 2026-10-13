@@ -99,6 +99,66 @@ public sealed class ClusterStatePersistenceIntegrationTests
     }
 
     [IntegrationFact]
+    public async Task ClusterStateTracker_ShouldIsolateShards_InShardVersionVectorMap_WhenPersisting()
+    {
+        // Arrange
+        var storageMock = new Mock<IDistributedCrdtStorage>();
+        storageMock.SetReturnsDefault(Task.CompletedTask);
+        var tcs = new TaskCompletionSource<ShardVersionVectorMap>();
+
+        storageMock.Setup(s => s.SaveShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<ShardVersionVectorMap>(), It.IsAny<CancellationToken>()))
+                   .Callback<string, ShardVersionVectorMap, CancellationToken>((_, map, _) => tcs.TrySetResult(map))
+                   .Returns(Task.CompletedTask);
+
+        storageMock.Setup(s => s.SaveClusterStateAsync(It.IsAny<string>(), It.IsAny<ClusterStateSnapshotDto>(), It.IsAny<CancellationToken>()))
+                   .Returns(Task.CompletedTask);
+
+        storageMock.Setup(s => s.GetJournalCountAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(0);
+
+        storageMock.Setup(s => s.LoadClusterStateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                   .ReturnsAsync((ClusterStateSnapshotDto?)null);
+
+        storageMock.Setup(s => s.GetAllJournaledOperationsAsync(It.IsAny<CancellationToken>()))
+                   .Returns(EmptyJournalStream());
+
+        storageMock.Setup(s => s.LoadShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(new ShardVersionVectorMap());
+
+        var sp = BuildNodeWithStorage("Replica1", storageMock.Object);
+
+        // Initialize orchestrator natively prior to interacting with documents to avoid null reference exceptions.
+        var initService = sp.GetServices<IHostedService>().OfType<CrdtInitializationService>().First();
+        await initService.StartAsync(CancellationToken.None);
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var context = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+
+        lock (context.ShardVersionVectors)
+        {
+            var dvvA = new DottedVersionVector(); dvvA.Versions["Replica1"] = 5;
+            var dvvB = new DottedVersionVector(); dvvB.Versions["Replica1"] = 10;
+            context.ShardVersionVectors["shard-A"] = dvvA;
+            context.ShardVersionVectors["shard-B"] = dvvB;
+        }
+
+        var checkpointService = sp.GetServices<IHostedService>().OfType<CrdtCheckpointService>().First();
+
+        // Act
+        await checkpointService.StartAsync(CancellationToken.None);
+        var capturedMap = await tcs.Task;
+        await checkpointService.StopAsync(CancellationToken.None);
+
+        // Assert - Ensures persistence naturally isolates multi-shard matrices gracefully
+        capturedMap.ShouldNotBeNull();
+        capturedMap.ShouldContainKey("shard-A");
+        capturedMap.ShouldContainKey("shard-B");
+        capturedMap["shard-A"].Versions["Replica1"].ShouldBe(5);
+        capturedMap["shard-B"].Versions["Replica1"].ShouldBe(10);
+    }
+
+    [IntegrationFact]
     public async Task ClusterStateTracker_TombstoneCooldown_PurgesExpiredReplicas()
     {
         // Arrange
@@ -163,6 +223,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
     {
         // Arrange
         var mockStorage = new Mock<IDistributedCrdtStorage>();
+        mockStorage.SetReturnsDefault(Task.CompletedTask);
         var sp = BuildNodeWithStorage("Replica1", mockStorage.Object);
 
         var savedDvv = new DottedVersionVector();
@@ -194,6 +255,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
     {
         // Arrange
         var storageMock = new Mock<IDistributedCrdtStorage>();
+        storageMock.SetReturnsDefault(Task.CompletedTask);
         var tcs = new TaskCompletionSource<ClusterStateSnapshotDto>();
 
         storageMock.Setup(s => s.SaveClusterStateAsync(It.IsAny<string>(), It.IsAny<ClusterStateSnapshotDto>(), It.IsAny<CancellationToken>()))
@@ -266,6 +328,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
         };
 
         var storageMock = new Mock<IDistributedCrdtStorage>();
+        storageMock.SetReturnsDefault(Task.CompletedTask);
         
         storageMock.Setup(s => s.LoadClusterStateAsync("Replica1", It.IsAny<CancellationToken>()))
                    .ReturnsAsync(savedDto);
@@ -307,6 +370,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
         var tcsFirstWrite = new TaskCompletionSource();
 
         var storageMock = new Mock<IDistributedCrdtStorage>();
+        storageMock.SetReturnsDefault(Task.CompletedTask);
 
         storageMock.Setup(s => s.SaveClusterStateAsync(It.IsAny<string>(), It.IsAny<ClusterStateSnapshotDto>(), It.IsAny<CancellationToken>()))
                    .Callback(() => Interlocked.Increment(ref saveClusterCount))
@@ -367,6 +431,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
         var tcsSecondWrite = new TaskCompletionSource();
 
         var storageMock = new Mock<IDistributedCrdtStorage>();
+        storageMock.SetReturnsDefault(Task.CompletedTask);
 
         storageMock.Setup(s => s.SaveClusterStateAsync(It.IsAny<string>(), It.IsAny<ClusterStateSnapshotDto>(), It.IsAny<CancellationToken>()))
                    .Callback(() => 

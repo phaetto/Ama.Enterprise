@@ -14,6 +14,11 @@ using Ama.Enterprise.CRDT.Distributed.Models;
 public interface IDistributedCrdtDocument
 {
     /// <summary>
+    /// Gets the shard identifier grouping the causality boundaries for this document natively.
+    /// </summary>
+    string ShardId { get; }
+
+    /// <summary>
     /// Gets the globally unique identifier for this document type (Topic) within the P2P network.
     /// </summary>
     string DocumentId { get; }

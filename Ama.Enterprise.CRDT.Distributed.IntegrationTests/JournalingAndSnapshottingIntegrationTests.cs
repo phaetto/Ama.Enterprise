@@ -116,6 +116,40 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     }
 
     [IntegrationFact]
+    public async Task MemoryCrdtStorage_TrimAsync_ShouldOnlyTrimTargetShard_WithoutMixing()
+    {
+        // Arrange
+        var storage = new MemoryCrdtStorage();
+        var op1Id = Guid.NewGuid();
+        var op2Id = Guid.NewGuid();
+
+        var opsA = new List<CrdtOperation>
+        {
+            default(CrdtOperation) with { Id = op1Id, ReplicaId = "ReplicaA", ShardClock = 1, ShardId = "shard-A" }
+        };
+
+        var opsB = new List<CrdtOperation>
+        {
+            default(CrdtOperation) with { Id = op2Id, ReplicaId = "ReplicaA", ShardClock = 1, ShardId = "shard-B" }
+        };
+
+        await storage.AppendAsync("doc-A", opsA, CancellationToken.None);
+        await storage.AppendAsync("doc-B", opsB, CancellationToken.None);
+
+        var gmvv = new Dictionary<string, long> { { "ReplicaA", 1 } };
+
+        // Act - Trim only shard-A resolving tracking dependencies securely
+        await storage.TrimAsync("shard-A", gmvv, CancellationToken.None);
+
+        // Assert
+        var allOps = await storage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
+        allOps.Count.ShouldBe(1);
+        
+        allOps.Any(o => o.Operation.Id == op1Id).ShouldBeFalse(); // Trimmed
+        allOps.Any(o => o.Operation.Id == op2Id).ShouldBeTrue();  // Intact ensuring generic target bounds are safely mapped correctly
+    }
+
+    [IntegrationFact]
     public async Task CrdtCheckpointService_Executes_SavingBounds()
     {
         // Arrange
@@ -153,7 +187,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         // Assert
         mockStorage.Verify(s => s.SaveShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<ShardVersionVectorMap>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
-        mockStorage.Verify(s => s.SaveDocumentAsync(It.IsAny<string>(), It.IsAny<CrdtDocument<JournalTestState>>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        mockStorage.Verify(s => s.SaveDocumentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CrdtDocument<JournalTestState>>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
 
     [IntegrationFact]

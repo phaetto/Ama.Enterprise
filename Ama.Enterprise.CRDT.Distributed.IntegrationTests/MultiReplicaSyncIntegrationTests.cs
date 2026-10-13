@@ -99,6 +99,52 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
     }
 
     [IntegrationFact]
+    public async Task AntiEntropy_WithMultipleShards_ShouldSynchronizeCorrectlyWithoutMixing()
+    {
+        // Arrange
+        var nodeA = BuildNode("ReplicaA");
+        var nodeB = BuildNode("ReplicaB");
+
+        var scopeA = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeA.ReplicaId);
+        var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchA.InitializeAsync(CancellationToken.None);
+
+        var scopeB = nodeB.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeB.ReplicaId);
+        var orchB = scopeB.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchB.InitializeAsync(CancellationToken.None);
+
+        var contextB = scopeB.ServiceProvider.GetRequiredService<ReplicaContext>();
+        
+        // Inject multiple distinct shards in Node B explicitly executing correctly mapping bounds successfully natively
+        var dvv1 = new DottedVersionVector(); dvv1.Versions["ReplicaB"] = 15;
+        var dvv2 = new DottedVersionVector(); dvv2.Versions["ReplicaB"] = 25;
+        
+        contextB.ShardVersionVectors["shard-X"] = dvv1;
+        contextB.ShardVersionVectors["shard-Y"] = dvv2;
+
+        var serializerB = nodeB.Sp.GetRequiredService<ICrdtSerializer>();
+        var syncMsgB = new CrdtStateSyncMessage(nodeB.ReplicaId, contextB.ShardVersionVectors);
+        var syncBytesB = serializerB.SerializeToBytes(syncMsgB);
+        var wrapperB = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytesB);
+        var wrapperBytesB = serializerB.SerializeToBytes(wrapperB);
+
+        var handlerA = nodeA.Sp.GetRequiredKeyedService<IApplicationPayloadHandler>("TestMesh");
+
+        // Act - Node A receives Node B's multi-shard context
+        await handlerA.HandlePayloadAsync("TestMesh", nodeB.PeerId, wrapperBytesB, CancellationToken.None);
+
+        // Assert - Node A tracks Node B's state distinctively mapping shards
+        var trackerA = scopeA.ServiceProvider.GetRequiredService<IClusterStateTracker>();
+        var states = trackerA.GetClusterStates();
+        
+        states.Count.ShouldBe(1);
+        states[0].ShouldContainKey("shard-X");
+        states[0].ShouldContainKey("shard-Y");
+        states[0]["shard-X"].Versions["ReplicaB"].ShouldBe(15);
+        states[0]["shard-Y"].Versions["ReplicaB"].ShouldBe(25);
+    }
+
+    [IntegrationFact]
     public async Task TwoReplicas_AntiEntropy_ShouldRecoverMissingOperations_WhenOffline()
     {
         // Arrange

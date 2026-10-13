@@ -117,6 +117,15 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager, IDis
     public void Dispose()
     {
         orchestrator.DocumentsChanged -= OnOrchestratorDocumentsChanged;
+
+        lock (syncRoot)
+        {
+            if (globalDocument != null)
+            {
+                globalDocument.StateChanged -= OnGlobalDocumentStateChanged;
+                globalDocument = null;
+            }
+        }
     }
 
     private void OnOrchestratorDocumentsChanged(object? sender, EventArgs e)
@@ -127,25 +136,36 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager, IDis
         }
     }
 
+    private void OnGlobalDocumentStateChanged(object? sender, EventArgs e)
+    {
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     private bool TryAttachDocument()
     {
         lock (syncRoot)
         {
-            if (globalDocument != null)
+            var currentDoc = orchestrator.GetDocument<FeatureFlagState>(Constants.GlobalDocumentId);
+            
+            if (ReferenceEquals(globalDocument, currentDoc))
             {
                 return false;
             }
 
-            globalDocument = orchestrator.GetDocument<FeatureFlagState>(Constants.GlobalDocumentId);
+            if (globalDocument != null)
+            {
+                globalDocument.StateChanged -= OnGlobalDocumentStateChanged;
+            }
+
+            globalDocument = currentDoc;
 
             if (globalDocument != null)
             {
-                globalDocument.StateChanged += (sender, args) => StateChanged?.Invoke(this, args);
-                return true;
+                globalDocument.StateChanged += OnGlobalDocumentStateChanged;
             }
-        }
 
-        return false;
+            return true;
+        }
     }
 
     private IDistributedCrdtDocument<FeatureFlagState> GetRequiredDocument()

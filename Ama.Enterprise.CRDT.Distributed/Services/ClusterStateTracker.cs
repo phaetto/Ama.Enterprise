@@ -63,6 +63,15 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
     }
 
     /// <inheritdoc />
+    public IReadOnlyList<string> GetActiveReplicaIds()
+    {
+        lock (syncRoot)
+        {
+            return networkIdToReplicaId.Values.Distinct().ToList();
+        }
+    }
+
+    /// <inheritdoc />
     public void RemovePeerByNetworkId(string peerId)
     {
         if (string.IsNullOrWhiteSpace(peerId)) throw new ArgumentException("Peer ID cannot be null or empty.", nameof(peerId));

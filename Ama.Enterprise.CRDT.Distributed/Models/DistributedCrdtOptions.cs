@@ -116,4 +116,18 @@ public sealed class DistributedCrdtOptions
     /// Defaults to 0 (unbounded).
     /// </summary>
     public int ChannelCapacity { get; set; } = 0;
+
+    /// <summary>
+    /// Gets or sets the target replication factor determining how many active replica nodes should host a given isolated shard.
+    /// Used by the consistent hashing distribution manager to enforce data redundancy automatically across distributed networks.
+    /// Defaults to 3. Must be greater than 0.
+    /// </summary>
+    public int ShardReplicationFactor { get; set; } = 3;
+
+    /// <summary>
+    /// Gets or sets the number of virtual nodes (vnodes) to generate per active replica on the hash ring.
+    /// Higher values provide better uniform data distribution at the cost of slight memory overhead resolving data density naturally.
+    /// Defaults to 100. Must be greater than 0.
+    /// </summary>
+    public int VirtualNodesPerReplica { get; set; } = 100;
 }

@@ -51,38 +51,42 @@ public interface IDistributedCrdtStorage : ICrdtOperationJournal
     /// Loads the stored CRDT document state including its Dotted Version Vectors and metadata.
     /// </summary>
     /// <typeparam name="TState">The application state bounded by the document.</typeparam>
+    /// <param name="shardId">The shard identifier isolating document bounds.</param>
     /// <param name="documentId">The globally unique identifier for this document type (Topic).</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The stored document, or null if no previous state exists.</returns>
-    Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new();
+    Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new();
 
     /// <summary>
     /// Attempts to load an orphaned document state from previous replica identities. 
     /// Used as a fallback during initialization to prevent state loss when dynamic node scaling occurs.
     /// </summary>
     /// <typeparam name="TState">The application state bounded by the document.</typeparam>
+    /// <param name="shardId">The shard identifier isolating document bounds.</param>
     /// <param name="documentId">The globally unique identifier for this document type (Topic).</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The bootstrapped orphaned document, or null if no orphaned state exists.</returns>
-    Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new();
+    Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new();
 
     /// <summary>
     /// Persists the updated CRDT document state after patches or remote operations are applied.
     /// </summary>
     /// <typeparam name="TState">The application state bounded by the document.</typeparam>
+    /// <param name="shardId">The shard identifier isolating document bounds.</param>
     /// <param name="documentId">The globally unique identifier for this document type (Topic).</param>
     /// <param name="document">The full document containing the latest state and metadata tracking.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous save operation.</returns>
-    Task SaveDocumentAsync<TState>(string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new();
+    Task SaveDocumentAsync<TState>(string shardId, string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new();
 
     /// <summary>
     /// Permanently deletes the document state and unloads its specific journal operations.
     /// </summary>
+    /// <param name="shardId">The shard identifier isolating document bounds.</param>
     /// <param name="documentId">The specific identifier to tombstone.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous deletion.</returns>
-    Task DeleteDocumentAsync(string documentId, CancellationToken cancellationToken = default);
+    Task DeleteDocumentAsync(string shardId, string documentId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Retrieves the total number of journaled operations currently stored for a specific shard, evaluating limits efficiently.

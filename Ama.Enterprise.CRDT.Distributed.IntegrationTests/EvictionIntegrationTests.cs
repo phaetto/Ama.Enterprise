@@ -103,6 +103,40 @@ public class EvictionIntegrationTests
     }
 
     [IntegrationFact]
+    public async Task CrdtEvictionService_EvictsPeers_IsolatesShardClearing_WithoutCrossContamination()
+    {
+        // Arrange
+        var sp = BuildNode("NodeA");
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("NodeA");
+        
+        // Initialize orchestrator natively prior to interacting with documents to avoid null reference exceptions.
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        
+        var context = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+        var evictionService = scope.ServiceProvider.GetRequiredService<ICrdtEvictionService>();
+
+        context.ShardVersionVectors["shard-A"] = new DottedVersionVector();
+        context.ShardVersionVectors["shard-A"].Versions["TargetEvict"] = 50;
+        context.ShardVersionVectors["shard-A"].Versions["SafePeer"] = 100;
+
+        context.ShardVersionVectors["shard-B"] = new DottedVersionVector();
+        context.ShardVersionVectors["shard-B"].Versions["TargetEvict"] = 20;
+        context.ShardVersionVectors["shard-B"].Versions["SafePeer"] = 80;
+
+        // Act - Trigger generic structured bounds matching node constraints explicitly across bounds
+        await evictionService.EvictPeersAsync(new[] { "TargetEvict" }, CancellationToken.None);
+
+        // Assert - Evaluates correct isolated tracking constraints inherently
+        context.ShardVersionVectors["shard-A"].Versions.ContainsKey("TargetEvict").ShouldBeFalse();
+        context.ShardVersionVectors["shard-A"].Versions["SafePeer"].ShouldBe(100);
+
+        context.ShardVersionVectors["shard-B"].Versions.ContainsKey("TargetEvict").ShouldBeFalse();
+        context.ShardVersionVectors["shard-B"].Versions["SafePeer"].ShouldBe(80);
+    }
+
+    [IntegrationFact]
     public void TombstonesAreEphemeral_UnlessPersisted()
     {
         // Arrange - Initial Node Run

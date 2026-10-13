@@ -224,11 +224,12 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     }
 
     /// <inheritdoc />
-    public Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    public Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new()
     {
+        var key = $"{shardId}_{documentId}";
         lock (syncRoot)
         {
-            if (documents.TryGetValue(documentId, out var doc) && doc is CrdtDocument<TState> typedDoc)
+            if (documents.TryGetValue(key, out var doc) && doc is CrdtDocument<TState> typedDoc)
             {
                 return Task.FromResult<CrdtDocument<TState>?>(typedDoc);
             }
@@ -237,7 +238,7 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     }
 
     /// <inheritdoc />
-    public Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    public Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new()
     {
         // In-memory storage is ephemeral and not shared across processes boundaries, 
         // thus partitioned orphaned states logic is not applicable in this context.
@@ -245,27 +246,29 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     }
 
     /// <inheritdoc />
-    public Task SaveDocumentAsync<TState>(string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new()
+    public Task SaveDocumentAsync<TState>(string shardId, string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new()
     {
+        var key = $"{shardId}_{documentId}";
         lock (syncRoot)
         {
-            documents[documentId] = document;
+            documents[key] = document;
         }
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
-    public Task DeleteDocumentAsync(string documentId, CancellationToken cancellationToken = default)
+    public Task DeleteDocumentAsync(string shardId, string documentId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(documentId)) return Task.CompletedTask;
 
+        var key = $"{shardId}_{documentId}";
         lock (syncRoot)
         {
             foreach (var list in shardedOperations.Values)
             {
                 list.RemoveAll(op => op.DocumentId.ToString() == documentId);
             }
-            documents.Remove(documentId);
+            documents.Remove(key);
         }
 
         return Task.CompletedTask;

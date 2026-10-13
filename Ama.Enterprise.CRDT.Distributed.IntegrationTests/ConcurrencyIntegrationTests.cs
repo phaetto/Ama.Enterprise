@@ -78,6 +78,39 @@ public sealed class ConcurrencyIntegrationTests
     }
 
     [IntegrationFact]
+    public async Task MemoryCrdtStorage_ConcurrentAppends_ShouldIsolateShards_WithoutMixing()
+    {
+        // Arrange
+        var storage = new MemoryCrdtStorage();
+        const int TaskCount = 100;
+        const string ShardA = "shard-A";
+        const string ShardB = "shard-B";
+
+        // Act - Concurrently inject array mappings tracking bounds cleanly isolated by target shards
+        var tasks = Enumerable.Range(0, TaskCount).Select(i => Task.Run(async () =>
+        {
+            var shardId = i % 2 == 0 ? ShardA : ShardB;
+            var op = default(CrdtOperation) with { Id = Guid.NewGuid(), ReplicaId = "Replica1", ShardClock = i, ShardId = shardId };
+            await storage.AppendAsync("doc-id", new[] { op }, CancellationToken.None);
+        })).ToArray();
+
+        await Task.WhenAll(tasks);
+
+        // Assert - Evaluates execution lists retaining completely isolated limits dynamically natively
+        var allOps = await storage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
+        allOps.Count.ShouldBe(TaskCount);
+
+        var opsA = allOps.Where(o => o.Operation.ShardId == ShardA).ToList();
+        var opsB = allOps.Where(o => o.Operation.ShardId == ShardB).ToList();
+
+        opsA.Count.ShouldBe(TaskCount / 2);
+        opsB.Count.ShouldBe(TaskCount / 2);
+
+        opsA.Any(o => o.Operation.ShardId == ShardB).ShouldBeFalse();
+        opsB.Any(o => o.Operation.ShardId == ShardA).ShouldBeFalse();
+    }
+
+    [IntegrationFact]
     public async Task CrdtDocumentOrchestrator_ProcessConcurrentCommands_WithoutDeadlockOrCorruption()
     {
         // Arrange

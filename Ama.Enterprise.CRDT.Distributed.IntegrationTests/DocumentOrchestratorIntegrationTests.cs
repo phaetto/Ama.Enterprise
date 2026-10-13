@@ -56,6 +56,39 @@ public sealed class DocumentOrchestratorIntegrationTests
     }
 
     [IntegrationFact]
+    public async Task Orchestrator_ShouldIsolateShards_WhenDeletingDocuments()
+    {
+        // Arrange
+        var mockStorage = new Mock<IDistributedCrdtStorage>();
+        var sp = BuildNode(s => 
+        {
+            s.Replace(ServiceDescriptor.Singleton(mockStorage.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("ReplicaA");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        await orchestrator.CreateDocumentAsync("doc-shard-1", "dynamic-type", CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("doc-shard-2", "dynamic-type", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
+        // Act - Assume document Id represents its default shard isolation mapping bounds
+        await orchestrator.DeleteDocumentAsync("doc-shard-1", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
+        // Assert - Validates ShardID properties route target structures properly natively 
+        mockStorage.Verify(x => x.DeleteDocumentAsync(It.IsAny<string>(), "doc-shard-1", It.IsAny<CancellationToken>()), Times.Once);
+        mockStorage.Verify(x => x.DeleteDocumentAsync(It.IsAny<string>(), "doc-shard-2", It.IsAny<CancellationToken>()), Times.Never);
+        
+        var remainingDocs = orchestrator.GetActiveDocuments();
+        remainingDocs.Any(d => d.DocumentId == "doc-shard-1").ShouldBeFalse();
+        remainingDocs.Any(d => d.DocumentId == "doc-shard-2").ShouldBeTrue();
+    }
+
+    [IntegrationFact]
     public async Task Orchestrator_ShouldDynamicallyCreateAndTrackDocuments()
     {
         // Arrange
@@ -116,7 +149,7 @@ public sealed class DocumentOrchestratorIntegrationTests
         registryDocs.TryGetValue("doc-to-delete", out var entry).ShouldBeTrue();
         entry.IsDeleted.ShouldBeTrue();
 
-        mockStorage.Verify(x => x.DeleteDocumentAsync("doc-to-delete", It.IsAny<CancellationToken>()), Times.Once);
+        mockStorage.Verify(x => x.DeleteDocumentAsync(It.IsAny<string>(), "doc-to-delete", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [IntegrationFact]

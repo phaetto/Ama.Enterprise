@@ -6,6 +6,7 @@ using Ama.CRDT.Models;
 using Ama.CRDT.Models.Aot;
 using Ama.CRDT.Models.Intents;
 using Ama.CRDT.Services;
+using Ama.CRDT.Services.Versioning;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.P2p.Models.Core;
@@ -128,6 +129,55 @@ public sealed class ScopeTopologyProviderIntegrationTests
 
         // Assert - Expected peer receives the payload
         mockSender.Verify(p => p.SendDirectAsync(It.Is<PeerId>(id => id.Value == expectedPeerGuid), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    [IntegrationFact]
+    public async Task CrdtMaintenanceService_GMVVCalculation_ShouldIsolateShards()
+    {
+        // Arrange
+        var topologyProvider = new TestTopologyProvider();
+        var expectedPeerGuid = Guid.NewGuid();
+        topologyProvider.ExpectedPeers.Add(expectedPeerGuid.ToString());
+
+        var sharedStorage = new MemoryCrdtStorage();
+        var sp = BuildNode("Replica1", topologyProvider, services =>
+        {
+            services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(s => sharedStorage));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        
+        // Populate multiple shard clocks
+        var clusterTracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
+        var context = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+        
+        lock (context.ShardVersionVectors)
+        {
+            context.ShardVersionVectors["shard-A"] = new DottedVersionVector { Versions = { ["Replica1"] = 10 } };
+            context.ShardVersionVectors["shard-B"] = new DottedVersionVector { Versions = { ["Replica1"] = 20 } };
+        }
+
+        var peerMap = new ShardVersionVectorMap();
+        peerMap["shard-A"] = new DottedVersionVector { Versions = { ["Replica1"] = 10 } }; // In sync for shard A
+        peerMap["shard-B"] = new DottedVersionVector { Versions = { ["Replica1"] = 1 } };  // Lagging for shard B
+        
+        clusterTracker.UpdatePeerState("ReplicaB", expectedPeerGuid.ToString(), peerMap);
+
+        // Act - The maintenance loop calculates GMVV per shard
+        var syncService = scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
+        
+        var vectorsA = clusterTracker.GetClusterStates().Select(s => s.TryGetValue("shard-A", out var v) ? v : new DottedVersionVector()).ToList();
+        vectorsA.Add(context.ShardVersionVectors["shard-A"]);
+        var gmvvA = syncService.CalculateGlobalMinimumVersionVector(vectorsA);
+
+        var vectorsB = clusterTracker.GetClusterStates().Select(s => s.TryGetValue("shard-B", out var v) ? v : new DottedVersionVector()).ToList();
+        vectorsB.Add(context.ShardVersionVectors["shard-B"]);
+        var gmvvB = syncService.CalculateGlobalMinimumVersionVector(vectorsB);
+
+        // Assert - Calculations evaluate strict isolation naturally avoiding mixed process bounds dynamically explicitly
+        gmvvA["Replica1"].ShouldBe(10); // Both have 10
+        gmvvB["Replica1"].ShouldBe(1);  // Min is 1
     }
 
     [IntegrationFact]

@@ -152,6 +152,51 @@ public sealed class AntiEntropyStateSyncIntegrationTests
     }
 
     [IntegrationFact]
+    public async Task ProcessStateSyncAsync_ShouldIsolateDifferentShards_WhenSyncing()
+    {
+        // Arrange
+        var mockSender = new Mock<IDirectMessageSender>();
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var serializer = sp.GetRequiredService<ICrdtSerializer>();
+
+        var dvv1 = new DottedVersionVector(); dvv1.Versions["RemoteReplica"] = 10;
+        var dvv2 = new DottedVersionVector(); dvv2.Versions["RemoteReplica"] = 20;
+
+        var remoteState = new ShardVersionVectorMap();
+        remoteState["shard-1"] = dvv1;
+        remoteState["shard-2"] = dvv2;
+
+        var syncMsg = new CrdtStateSyncMessage("RemoteReplica", remoteState);
+        var syncBytes = serializer.SerializeToBytes(syncMsg);
+        var wrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytes);
+        var wrapperBytes = serializer.SerializeToBytes(wrapper);
+
+        // Act
+        await handler.HandlePayloadAsync(TestMeshId, new PeerId(Guid.NewGuid()), wrapperBytes, CancellationToken.None);
+
+        // Assert - Validates shards do not mix their vectors across tracking bounds
+        var tracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
+        var states = tracker.GetClusterStates();
+        states.Count.ShouldBe(1);
+        
+        var nodeState = states[0];
+        nodeState.ShouldContainKey("shard-1");
+        nodeState.ShouldContainKey("shard-2");
+        nodeState["shard-1"].Versions["RemoteReplica"].ShouldBe(10);
+        nodeState["shard-2"].Versions["RemoteReplica"].ShouldBe(20);
+    }
+
+    [IntegrationFact]
     public async Task CrdtTopologyObserver_HandlesPeerJoined_WithoutBroadcastStorms()
     {
         // Arrange

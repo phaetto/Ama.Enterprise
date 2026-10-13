@@ -84,6 +84,7 @@ public static class Program
             options.MaintenanceIntervalSeconds = (int)TimeSpan.FromHours(1).TotalSeconds;
             options.AntiEntropyIntervalSeconds = 1;
             options.AntiEntropyInitialDelaySeconds = 1;
+            options.ShardReplicationFactor = 1;
         });
 
         // 2. Delegate routing orchestrations and background services completely to the distributed core explicitly bounded
@@ -215,6 +216,11 @@ public static class Program
                             }
                             break;
 
+                        case "list":
+                            var currentFlags = clusterManager.GetFlags();
+                            DrawFlags(currentFlags);
+                            break;
+
                         case "clone":
                             CloneProcess(logger);
                             break;
@@ -279,6 +285,7 @@ public static class Program
             Console.WriteLine("Commands:");
             Console.WriteLine(" set <flagName> <true|false>  - Adds or Updates a flag");
             Console.WriteLine(" del <flagName>               - Removes a flag entirely");
+            Console.WriteLine(" list                        - Prints all currently known flags");
             Console.WriteLine(" clone                        - Spawns a new cluster node in a new window");
             Console.WriteLine(" exit                         - Shuts down this node gracefully");
             Console.WriteLine("=================================================\n");

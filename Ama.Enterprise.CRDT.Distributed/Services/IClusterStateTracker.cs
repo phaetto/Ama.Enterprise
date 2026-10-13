@@ -25,6 +25,13 @@ public interface IClusterStateTracker
     IReadOnlyList<ShardVersionVectorMap> GetClusterStates();
 
     /// <summary>
+    /// Retrieves the list of currently active remote replica identifiers explicitly tracked by the cluster matrix.
+    /// Enables dynamic discovery of topological shifts natively.
+    /// </summary>
+    /// <returns>A read-only list of active replica IDs.</returns>
+    IReadOnlyList<string> GetActiveReplicaIds();
+
+    /// <summary>
     /// Safely unmaps a disconnected network peer ID without causing CRDT amnesia. 
     /// The CRDT state remains preserved until the TTL expires allowing for safe offline recovery.
     /// </summary>

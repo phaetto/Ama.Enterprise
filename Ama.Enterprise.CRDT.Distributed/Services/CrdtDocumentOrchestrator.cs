@@ -4,7 +4,6 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
-using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -29,8 +28,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     private readonly IDistributedCrdtStorage storage;
     private readonly IAsyncCrdtPatcher patcher;
     private readonly ICrdtTimestampProvider timestampProvider;
+    private readonly IShardDistributionManager distributionManager;
     private readonly ILogger<CrdtDocumentOrchestrator> logger;
+    
     private readonly ConcurrentDictionary<string, IDistributedCrdtDocument> activeDocuments = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, IDistributedCrdtDocument> lightweightDocuments = new(StringComparer.Ordinal);
     
     // Completely replaces lock blockages allowing multi-threaded external awaiting bounds
     private readonly Channel<PooledOrchestratorCommand> commandChannel;
@@ -64,6 +66,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         IOptions<DistributedCrdtOptions> options,
         ILogger<CrdtDocumentOrchestrator> logger,
         ICrdtTimestampProvider timestampProvider,
+        IShardDistributionManager distributionManager,
         IMeterFactory? meterFactory = null)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -72,6 +75,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
         this.patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
         this.timestampProvider = timestampProvider ?? throw new ArgumentNullException(nameof(timestampProvider));
+        this.distributionManager = distributionManager ?? throw new ArgumentNullException(nameof(distributionManager));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         var capacity = options.Value.ChannelCapacity;
@@ -141,6 +145,9 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                             break;
                         case OrchestratorCommandType.DeleteDocument:
                             await ProcessDeleteDocumentInternalAsync(cmd).ConfigureAwait(false);
+                            break;
+                        case OrchestratorCommandType.ReevaluateTopology:
+                            await ProcessSyncDocumentsInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
                             break;
                     }
 
@@ -221,6 +228,24 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             ReturnCommand(cmd);
         }
     }
+    
+    public async Task ReevaluateTopologyAsync(CancellationToken cancellationToken = default)
+    {
+        var cmd = GetCommand();
+        cmd.Type = OrchestratorCommandType.ReevaluateTopology;
+        cmd.CancellationToken = cancellationToken;
+
+        try
+        {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1);
+            await cmd.ExecuteAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            ReturnCommand(cmd);
+        }
+    }
 
     private async Task ProcessSyncDocumentsInternalAsync(CancellationToken cancellationToken)
     {
@@ -231,30 +256,109 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
             foreach (var kvp in registryMap)
             {
-                if (!kvp.Value.IsDeleted && !activeDocuments.ContainsKey(kvp.Key))
+                if (!kvp.Value.IsDeleted)
                 {
-                    var factory = serviceProvider.GetKeyedService<IDocumentFactory>(kvp.Value.TypeAlias);
-                    if (factory != null)
+                    if (!activeDocuments.ContainsKey(kvp.Key) && !lightweightDocuments.ContainsKey(kvp.Key))
                     {
-                        var doc = factory.CreateDocument(serviceProvider, kvp.Key);
-                        await doc.InitializeAsync(cancellationToken).ConfigureAwait(false);
-                        
-                        if (activeDocuments.TryAdd(kvp.Key, doc))
+                        var factory = serviceProvider.GetKeyedService<IDocumentFactory>(kvp.Value.TypeAlias);
+                        if (factory != null)
                         {
-                            doc.PatchGenerated += OnDocumentPatchGenerated;
-                            changed = true;
-                            documentCreatedCounter.Add(1, new KeyValuePair<string, object?>("document_id", kvp.Key));
-                            logger.LogInformation("Orchestrator dynamically mapped new CRDT document: {DocumentId}", kvp.Key);
+                            var doc = factory.CreateDocument(serviceProvider, kvp.Key);
+                            
+                            // Consult the topology manager to determine explicit routing capabilities
+                            if (distributionManager.IsShardLocal(doc.ShardId))
+                            {
+                                await doc.InitializeAsync(cancellationToken).ConfigureAwait(false);
+                                
+                                if (activeDocuments.TryAdd(kvp.Key, doc))
+                                {
+                                    doc.PatchGenerated += OnDocumentPatchGenerated;
+                                    changed = true;
+                                    documentCreatedCounter.Add(1, new KeyValuePair<string, object?>("document_id", kvp.Key));
+                                    logger.LogInformation("Orchestrator dynamically mapped new active CRDT document: {DocumentId}", kvp.Key);
+                                }
+                                else
+                                {
+                                    if (doc is IDisposable d) d.Dispose();
+                                }
+                            }
+                            else
+                            {
+                                // Keeping locally unassigned shards lightweight, avoiding heavy database initializations
+                                if (lightweightDocuments.TryAdd(kvp.Key, doc))
+                                {
+                                    doc.PatchGenerated += OnDocumentPatchGenerated;
+                                    logger.LogDebug("Orchestrator mapped new lightweight locally unassigned CRDT document: {DocumentId}", kvp.Key);
+                                }
+                                else
+                                {
+                                    if (doc is IDisposable d) d.Dispose();
+                                }
+                            }
+                        }
+                        else
+                        {
+                            logger.LogWarning("Missing AOT explicit type factory for CRDT alias: {TypeAlias}", kvp.Value.TypeAlias);
                         }
                     }
-                    else
+                    else if (lightweightDocuments.TryGetValue(kvp.Key, out var lightDoc))
                     {
-                        logger.LogWarning("Missing AOT explicit type factory for CRDT alias: {TypeAlias}", kvp.Value.TypeAlias);
+                        // Dynamic topology shifts promoting lightweight shard mapping cleanly recreating explicit dependencies properly correctly safely
+                        if (distributionManager.IsShardLocal(lightDoc.ShardId))
+                        {
+                            if (lightweightDocuments.TryRemove(kvp.Key, out _))
+                            {
+                                lightDoc.PatchGenerated -= OnDocumentPatchGenerated;
+                                if (lightDoc is IDisposable d) d.Dispose();
+
+                                var factory = serviceProvider.GetKeyedService<IDocumentFactory>(kvp.Value.TypeAlias);
+                                if (factory != null)
+                                {
+                                    var newlyActiveDoc = factory.CreateDocument(serviceProvider, kvp.Key);
+                                    await newlyActiveDoc.InitializeAsync(cancellationToken).ConfigureAwait(false);
+                                    
+                                    if (activeDocuments.TryAdd(kvp.Key, newlyActiveDoc))
+                                    {
+                                        newlyActiveDoc.PatchGenerated += OnDocumentPatchGenerated;
+                                        changed = true;
+                                        documentCreatedCounter.Add(1, new KeyValuePair<string, object?>("document_id", kvp.Key));
+                                        logger.LogInformation("Orchestrator promoted lightweight CRDT document to active: {DocumentId}", kvp.Key);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else if (activeDocuments.TryGetValue(kvp.Key, out var activeDoc))
+                    {
+                        // Demoting shards transitioning away cleanly minimizing footprint
+                        if (!distributionManager.IsShardLocal(activeDoc.ShardId))
+                        {
+                            if (activeDocuments.TryRemove(kvp.Key, out _))
+                            {
+                                activeDoc.PatchGenerated -= OnDocumentPatchGenerated;
+                                if (activeDoc is IDisposable d) d.Dispose();
+
+                                var factory = serviceProvider.GetKeyedService<IDocumentFactory>(kvp.Value.TypeAlias);
+                                if (factory != null)
+                                {
+                                    var newlyLightDoc = factory.CreateDocument(serviceProvider, kvp.Key);
+                                    if (lightweightDocuments.TryAdd(kvp.Key, newlyLightDoc))
+                                    {
+                                        newlyLightDoc.PatchGenerated += OnDocumentPatchGenerated;
+                                    }
+                                }
+
+                                changed = true;
+                                logger.LogInformation("Orchestrator demoted active CRDT document to lightweight: {DocumentId}", kvp.Key);
+                            }
+                        }
                     }
                 }
             }
 
             var toRemove = new List<string>();
+            var toRemoveLight = new List<string>();
+
             foreach (var active in activeDocuments)
             {
                 if (!registryMap.TryGetValue(active.Key, out var entry) || entry.IsDeleted)
@@ -263,16 +367,37 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 }
             }
 
+            foreach (var light in lightweightDocuments)
+            {
+                if (!registryMap.TryGetValue(light.Key, out var entry) || entry.IsDeleted)
+                {
+                    toRemoveLight.Add(light.Key);
+                }
+            }
+
             foreach (var docId in toRemove)
             {
                 if (activeDocuments.TryRemove(docId, out var doc))
                 {
+                    var shardId = doc.ShardId;
                     doc.PatchGenerated -= OnDocumentPatchGenerated;
                     if (doc is IDisposable d) d.Dispose();
-                    await storage.DeleteDocumentAsync(docId, cancellationToken).ConfigureAwait(false);
+                    await storage.DeleteDocumentAsync(shardId, docId, cancellationToken).ConfigureAwait(false);
                     changed = true;
                     documentDeletedCounter.Add(1, new KeyValuePair<string, object?>("document_id", docId));
-                    logger.LogInformation("Orchestrator tombstoned CRDT document: {DocumentId}", docId);
+                    logger.LogInformation("Orchestrator tombstoned active CRDT document: {DocumentId}", docId);
+                }
+            }
+
+            foreach (var docId in toRemoveLight)
+            {
+                if (lightweightDocuments.TryRemove(docId, out var doc))
+                {
+                    var shardId = doc.ShardId;
+                    doc.PatchGenerated -= OnDocumentPatchGenerated;
+                    if (doc is IDisposable d) d.Dispose();
+                    await storage.DeleteDocumentAsync(shardId, docId, cancellationToken).ConfigureAwait(false);
+                    logger.LogInformation("Orchestrator tombstoned lightweight CRDT document: {DocumentId}", docId);
                 }
             }
 
@@ -301,6 +426,13 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         {
             return typedDoc;
         }
+
+        // Fix resolving seamless interoperability boundaries targeting unassigned structural matrices explicitly securely avoiding breaking domain mappings intelligently gracefully flexibly securely smoothly cleanly natively correctly safely seamlessly flawlessly
+        if (lightweightDocuments.TryGetValue(documentId, out var lightDoc) && lightDoc is IDistributedCrdtDocument<TState> typedLightDoc)
+        {
+            return typedLightDoc;
+        }
+
         return null;
     }
 
@@ -380,6 +512,12 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         if (!activeDocuments.TryGetValue(documentId, out var doc) && Registry.DocumentId != documentId)
         {
+            if (lightweightDocuments.ContainsKey(documentId))
+            {
+                logger.LogWarning("Rejected snapshot request for locally unassigned lightweight document {DocumentId} from peer {PeerId}.", documentId, targetPeerId.Value);
+                return;
+            }
+
             logger.LogWarning("Requested snapshot for unknown document {DocumentId}.", documentId);
             return;
         }
@@ -476,6 +614,12 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 globalState = new ShardVersionVectorMap();
                 foreach (var shardKvp in replicaContext.ShardVersionVectors)
                 {
+                    // Route specifically tracking strictly local shards avoiding network saturation limits
+                    if (!distributionManager.IsShardLocal(shardKvp.Key))
+                    {
+                        continue;
+                    }
+
                     var copiedVersions = new Dictionary<string, long>();
                     var copiedDots = new Dictionary<string, ISet<long>>();
                     foreach (var kvp in shardKvp.Value.Versions)
@@ -513,7 +657,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     public void Dispose()
     {
         disposeCts.Cancel();
-        commandChannel.Writer.TryComplete();
+        commandChannel?.Writer.TryComplete();
         disposeCts.Dispose();
 
         if (Registry != null)
@@ -527,8 +671,15 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             doc.PatchGenerated -= OnDocumentPatchGenerated;
             if (doc is IDisposable d) d.Dispose();
         }
-        
         activeDocuments.Clear();
+        
+        foreach (var doc in lightweightDocuments.Values)
+        {
+            doc.PatchGenerated -= OnDocumentPatchGenerated;
+            if (doc is IDisposable d) d.Dispose();
+        }
+        lightweightDocuments.Clear();
+        
         meter.Dispose();
     }
 }

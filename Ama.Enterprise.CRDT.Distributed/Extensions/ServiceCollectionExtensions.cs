@@ -59,6 +59,10 @@ public static class ServiceCollectionExtensions
                 "JournalHardTrimThreshold cannot be negative.")
             .Validate(options => options.CompactionTtlSeconds >= 0, 
                 "CompactionTtlSeconds cannot be negative.")
+            .Validate(options => options.ShardReplicationFactor > 0,
+                "ShardReplicationFactor must be greater than zero ensuring redundant data safety dynamically.")
+            .Validate(options => options.VirtualNodesPerReplica > 0,
+                "VirtualNodesPerReplica must be greater than zero to properly map the hash ring distribution limits naturally.")
             .ValidateOnStart();
 
         services.AddCrdt()
@@ -95,6 +99,9 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<DistributedCrdtScopeManager>();
 
         services.TryAddScoped<IScopeTopologyProvider, DefaultScopeTopologyProvider>();
+        
+        // Register standard Consistent Hashing Distribution mappings isolating logic correctly naturally
+        services.TryAddScoped<IShardDistributionManager, ConsistentHashShardDistributionManager>();
 
         services.AddScoped<ICrdtDocumentOrchestrator, CrdtDocumentOrchestrator>();
         services.AddScoped<IClusterStateTracker, ClusterStateTracker>();
@@ -157,8 +164,11 @@ public static class ServiceCollectionExtensions
         services.AddKeyedSingleton<IApplicationPayloadHandler>(meshId, (sp, key) => 
             ActivatorUtilities.CreateInstance<CrdtP2pPayloadHandler>(sp, replicaId));
             
-        services.AddKeyedSingleton<IPeerTopologyObserver>(meshId, (sp, key) => 
-            ActivatorUtilities.CreateInstance<CrdtTopologyObserver>(sp, replicaId));
+        services.AddSingleton<IPeerTopologyObserver>(sp => 
+            ActivatorUtilities.CreateInstance<CrdtTopologyObserver>(sp, meshId, replicaId));
+
+        services.AddSingleton<IPeerTopologyObserver>(sp => 
+            ActivatorUtilities.CreateInstance<OrchestratorTopologyObserver>(sp, meshId, replicaId));
             
         services.AddHostedService<CrdtAntiEntropyService>();
 
