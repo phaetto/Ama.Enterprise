@@ -1,6 +1,5 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services;
 
-using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,11 +21,6 @@ public interface IDistributedCrdtDocument
     /// Gets the globally unique identifier for this document type (Topic) within the P2P network.
     /// </summary>
     string DocumentId { get; }
-
-    /// <summary>
-    /// Fired when a new patch has been generated locally and is ready to be broadcasted to remote peers.
-    /// </summary>
-    event EventHandler<CrdtPatch>? PatchGenerated;
 
     /// <summary>
     /// Initializes the document, loading initial state from persistent storage if configured natively.
@@ -90,11 +84,6 @@ public interface IDistributedCrdtDocument
 /// </summary>
 public interface IDistributedCrdtDocument<TState> : IDistributedCrdtDocument where TState : class, new()
 {
-    /// <summary>
-    /// Triggered when the inner document state has structurally changed (either via local intent or remote operations).
-    /// </summary>
-    event EventHandler? StateChanged;
-
     /// <summary>
     /// Exposes the strictly typed underlying CRDT document containing the application state.
     /// </summary>

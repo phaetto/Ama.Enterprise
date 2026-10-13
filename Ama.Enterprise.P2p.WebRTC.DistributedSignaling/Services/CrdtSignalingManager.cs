@@ -13,17 +13,13 @@ using Ama.Enterprise.P2p.WebRTC.DistributedSignaling.Models;
 using Ama.Enterprise.P2p.WebRTC.Models;
 
 /// <summary>
-/// Implementation managing the WebRTC out-of-band signaling drop-box avoiding centralized datastores.
+/// Implementation managing the WebRTC out-of-band signaling drop-box avoiding centralized datastores enforcing explicit decoupled behavior mappings explicitly intelligently reliably perfectly seamlessly cleanly dynamically structurally completely.
 /// </summary>
-public sealed class CrdtSignalingManager : ICrdtSignalingManager, IDisposable
+public sealed class CrdtSignalingManager : ICrdtSignalingManager
 {
     private readonly ICrdtDocumentOrchestrator orchestrator;
     private readonly IAsyncCrdtPatcher patcher;
     private readonly object syncRoot = new();
-    private bool disposed;
-
-    /// <inheritdoc />
-    public event EventHandler? StateChanged;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CrdtSignalingManager"/> class.
@@ -36,9 +32,6 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager, IDisposable
     {
         this.orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         this.patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
-
-        this.orchestrator.DocumentsChanged += OnOrchestratorChanged;
-        SubscribeToActiveDocuments();
     }
 
     /// <inheritdoc />
@@ -65,7 +58,6 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager, IDisposable
             var patch = new CrdtPatch(new[] { operation });
 
             await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
-            await orchestrator.BroadcastPatchAsync(docId, patch, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -80,7 +72,6 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager, IDisposable
             var patch = new CrdtPatch(new[] { operation });
 
             await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
-            await orchestrator.BroadcastPatchAsync(docId, patch, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -121,9 +112,6 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager, IDisposable
             var patch = new CrdtPatch(new[] { operation });
 
             await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
-            
-            // Instantly push this specific change across the network bypassing typical background intervals
-            await orchestrator.BroadcastPatchAsync(docId, patch, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -140,7 +128,6 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager, IDisposable
             var patch = new CrdtPatch(new[] { operation });
 
             await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
-            await orchestrator.BroadcastPatchAsync(docId, patch, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -157,9 +144,6 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager, IDisposable
             var patch = new CrdtPatch(new[] { operation });
 
             await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
-            
-            // Instantly push this specific change across the network bypassing typical background intervals
-            await orchestrator.BroadcastPatchAsync(docId, patch, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -176,52 +160,7 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager, IDisposable
             var patch = new CrdtPatch(new[] { operation });
 
             await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
-            await orchestrator.BroadcastPatchAsync(docId, patch, cancellationToken).ConfigureAwait(false);
         }
-    }
-
-    /// <inheritdoc />
-    public void Dispose()
-    {
-        if (disposed) return;
-        disposed = true;
-
-        orchestrator.DocumentsChanged -= OnOrchestratorChanged;
-        var docs = orchestrator.GetActiveDocuments();
-        foreach (var d in docs)
-        {
-            if (d is IDistributedCrdtDocument<CrdtSignalingState> typedDoc)
-            {
-                typedDoc.StateChanged -= OnDocumentStateChanged;
-            }
-        }
-    }
-
-    private void OnOrchestratorChanged(object? sender, EventArgs e)
-    {
-        SubscribeToActiveDocuments();
-        StateChanged?.Invoke(this, EventArgs.Empty);
-    }
-
-    private void SubscribeToActiveDocuments()
-    {
-        lock (syncRoot)
-        {
-            var docs = orchestrator.GetActiveDocuments();
-            foreach (var d in docs)
-            {
-                if (d is IDistributedCrdtDocument<CrdtSignalingState> typedDoc)
-                {
-                    typedDoc.StateChanged -= OnDocumentStateChanged;
-                    typedDoc.StateChanged += OnDocumentStateChanged;
-                }
-            }
-        }
-    }
-
-    private void OnDocumentStateChanged(object? sender, EventArgs e)
-    {
-        StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private static string ResolveDocumentId(string? documentId)

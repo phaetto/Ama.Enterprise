@@ -2,6 +2,7 @@
 | --- | --- |
 | `$/.editorconfig` | No description provided. |
 | `$/.github/workflows/ci.yml` | GitHub Actions workflow for building and testing the solution on PRs and non-master branch pushes. |
+| `$/.github/workflows/codeql.yml` | No description provided. |
 | `$/.github/workflows/publish-preview-to-nuget.yml` | Added a step to inject base64 encoded certificate secrets directly into the licensing project prior to building. |
 | `$/.github/workflows/publish-release-to-nuget-manual.yml` | Added a step to inject base64 encoded certificate secrets directly into the licensing project prior to building. |
 | `$/.gitignore` | No description provided. |
@@ -52,7 +53,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/ShowCaseTokenValidator.cs` | Refactored token validator evaluating structured session constraints to resolve Keyed DI construction limits. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/TaskManager.cs` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
-| `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | Registered `OrchestratorTopologyObserver` to the multi-mesh dependency injection tracking. |
+| `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | Registered standard `CrdtPatchBroadcaster` as an explicitly resolved `IDocumentPatchObserver` decoupling orchestrator network pipelines. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/ClusterStateSnapshotDto.cs` | Updated to map tombstoned replicas to their eviction timestamp tracking the exact eviction moment for safe cooldown expirations. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtEvictionRejectionMessage.cs` | Message broadcasted to forcefully reject and re-bootstrap nodes that have been tombstoned by the cluster, preventing amnesia edge cases. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtMessageWrapper.cs` | Envelope wrapper mapping generic messages targeting specifically identified CRDT documents across the network topology. |
@@ -73,19 +74,19 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ClusterStateTracker.cs` | Updated `ImportState` and `CleanupExpiredTombstones` to bypass tombstone cleanup completely if `cooldown` is less than or equal to `TimeSpan.Zero`, treating the feature as explicitly disabled. Appended `GetActiveReplicaIds` enabling safe dynamic querying tracking topologies bypassing serialization bounds mapping array bounds explicitly. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ConsistentHashShardDistributionManager.cs` | Implementation evaluating decentralized target instances dynamically extracting structural arrays avoiding unneeded bounds utilizing `SHA256` hashing accurately ensuring redundant placements scaling massively. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtCheckpointService.cs` | Introduced a last-known state cache for global version vectors and cluster states to eliminate unnecessary blind storage writes when enabled. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Implemented `ReevaluateTopologyAsync` via lock-free channel explicitly separating peer-triggered topology reevaluations. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Replaced rigid `DocumentsChanged` C# events explicitly decoupling topology broadcasts evaluating robust injected DI observers avoiding memory leaks. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtEvictionService.cs` | Implementation of `ICrdtEvictionService` extracting the eviction logic, avoiding duplication. Updated to support sharded version vectors, clearing causal history per shard mapping. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtInitializationService.cs` | Replaced standard async application with direct synchronous journal applying, avoiding background thresholds and limits. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtMaintenanceService.cs` | Integrated the periodic tombstone cleanup invocation mapping directly tracking `PeerTombstoneCooldownSeconds`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtTrimCoordinator.cs` | Coordinates trimming operations across the entire node to ensure only one aggressive or maintenance trim runs at a time, preventing IO and memory saturation. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DefaultScopeTopologyProvider.cs` | Updated to implement the asynchronous `IsPeerExpectedAsync` method returning synchronous wrappers. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Refactored `DistributedCrdtDocument` directly evaluating `IShardDistributionManager` resolving `isLocalShard`. If remote, bypassed expensive channels, tasks, and timer bounding executing purely mapped structurally zero-overhead synchronization leveraging explicit fast-paths optimizing footprint. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Migrated standard event architecture replacing bounds executing tightly mapped `IDocumentStateObserver` enumerables respecting channel evaluation backpressure explicitly resolving race conditions implicitly tracking constraints smoothly perfectly natively structurally completely safely correctly elegantly properly precisely cleanly dynamically optimally strictly natively cleanly efficiently securely faultlessly logically safely. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeFactory.cs` | Factory mapping internal ServiceProvider boundaries generating isolated persistent generic structural boundaries. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeManager.cs` | Centralized singleton tracker managing long-lived background scopes per instantiated replica. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IClusterStateTracker.cs` | Updated `ImportState` signature explicitly passing the cooldown parameter ensuring accurate offline metric pruning dynamically mapping. Appended `GetActiveReplicaIds` exposing decoupled access matching topological queries structurally. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/ICrdtDocumentOrchestrator.cs` | Added `ReevaluateTopologyAsync` contract. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/ICrdtDocumentOrchestrator.cs` | Removed obsolete rigid C# event boundaries standardizing decoupled architecture targeting P2P evaluations smoothly natively explicitly properly explicitly properly explicitly. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ICrdtEvictionService.cs` | Interface for a dedicated service that orchestrates replica eviction and local identity re-bootstrapping across all CRDT documents. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtDocument.cs` | Added `ShardId` structural property to the standard tracking bounds mapping explicit causal isolation boundaries resolving targeted document storage structures. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtDocument.cs` | Refactored bounding contracts dropping rigid synchronous C# event boundaries enforcing multi-threaded observer injection patterns smoothly. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtScope.cs` | Encapsulates the long-lived structural boundaries for a strictly identified generic localized CRDT replica. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtScopeFactory.cs` | Factory interface tracking CRDT scope instantiations and resolving bounds. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtStorage.cs` | Updated `LoadDocumentAsync`, `SaveDocumentAsync`, `LoadOrphanedDocumentAsync` and `DeleteDocumentAsync` to enforce `shardId` boundaries matching localized causal document mappings. |
@@ -93,8 +94,12 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IScopeTopologyProvider.cs` | Converted `IsPeerExpected` to `IsPeerExpectedAsync` returning a `ValueTask<bool>` to allow asynchronous network and session lookups. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IShardDistributionManager.cs` | Contract decoupling generic calculation mechanisms targeting active data nodes mapping CRDT topology shard keys accurately resolving placement across scalable environments. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/MemoryCrdtStorage.cs` | Migrated document dictionary caching leveraging structured `${shardId}_{documentId}` isolating boundaries mapping explicitly. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/Observers/ICrdtOrchestratorObserver.cs` | Observer interface tracking global document matrix bounding topologies dynamically tracking generic promotions and explicit structural tombstones natively isolating logic seamlessly smoothly exactly smoothly intelligently. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/Observers/IDocumentPatchObserver.cs` | Observer contract bridging local patch intention generations natively enforcing P2P broadcasting bounds dynamically optimally. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/Observers/IDocumentStateObserver.cs` | Generic structural evaluation observer securely signaling document modifications bypassing legacy rigid event memory leak vulnerabilities explicitly efficiently safely gracefully successfully exactly securely. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtAntiEntropyService.cs` | Implemented adaptive polling interval evaluation during background looping utilizing `Stopwatch` boundaries to enforce faster initial startup sync phases avoiding long delays on load. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtP2pPayloadHandler.cs` | Injected declarative execution bindings explicitly syncing cross-mesh documents executing orchestrator updates bypassing background event handlers. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtPatchBroadcaster.cs` | Extracted explicit P2P patch broadcasting mechanisms tracking telemetry boundaries executing fully decoupled from the orchestrator logic intelligently safely reliably structurally logically rationally. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtTopologyObserver.cs` | Observes network connections and hooks into the core P2P protocols. Refactored new peer join events to trigger targeted state syncs directly to the new peer. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/OrchestratorTopologyObserver.cs` | Topology observer dynamically triggering the orchestrator to reevaluate and promote/demote active documents based on consistent hashing shard assignments when peer connections change. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/StorageJournalForwarder.cs` | Updated `StorageJournalForwarder` to implement the modified `ICrdtOperationJournal` interface boundaries mapping `IComparable` and `shardId` constraints. |
@@ -117,9 +122,9 @@
 | `$/Ama.Enterprise.CRDT.MessagePack/Formatters/CrdtPolymorphicMessagePackRegistry.cs` | Centralized registry caching typed AOT polymorphic serialization delegates for MessagePack. |
 | `$/Ama.Enterprise.CRDT.MessagePack/MessagePackCrdtSerializer.cs` | Implementation wrapping `ICrdtSerializer` targeting Native AOT structured MessagePack arrays and abstract Base64 fallbacks for string constraints. |
 | `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Ama.Enterprise.FeatureFlags.IntegrationTests.csproj` | Redirected shared tests project reference pointing to renamed `Ama.Enterprise.Project.Tests.Common`. |
-| `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Services/FeatureFlagDomainIntegrationTests.cs` | Integration tests verifying the single-node lifecycle, domain logic preservation, and CRDT bootstrapping capabilities of the Feature Flags module avoiding network sockets. |
+| `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Services/FeatureFlagDomainIntegrationTests.cs` | Replaced legacy C# event subscription assertions with decoupled testing observers mapping to the new async `IFeatureFlagStateObserver` architecture. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj` | Appended an MSBuild target to automatically execute the local native Azurite startup batch script during the build process. Added `DisableFastUpToDateCheck` to ensure Visual Studio always evaluates the pre-build Azurite checks even when C# files haven't changed. |
-| `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Updated application entry point substituting obsolete dummy declarations resolving Open Source configurations targeting mapped DI bindings. |
+| `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Refactored UI redraw logic, migrating from obsolete synchronous C# events to a decoupled async `IFeatureFlagStateObserver` implementation combined with a background UI render loop. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/start-azurite.bat` | Windows batch script that automatically discovers and executes natively installed Azurite instances (via Visual Studio or NPM) bypassing Docker requirements, explicitly detached via PowerShell to prevent MSBuild hangs. |
 | `$/Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
 | `$/Ama.Enterprise.FeatureFlags/Constants.cs` | Global constants for the Feature Flags module, defining common identifiers and document types. |
@@ -132,8 +137,9 @@
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsCrdtAotContext.cs` | AOT reflection context for the Feature Flags CRDT models. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsJsonContext.cs` | AOT-friendly JSON context for Feature Flags serialization. |
 | `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagBootstrapper.cs` | Background service initializing the singleton feature flags state across replica scopes. |
-| `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagClusterManager.cs` | Refactored internal document tracking to release and dynamically reconnect event bindings evaluating topology promotions mapping explicitly, avoiding closed channel leaks across detached Lightweight states. |
-| `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagClusterManager.cs` | Interface for managing distributed feature toggles, evaluating state modifications and observing remote updates. |
+| `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagClusterManager.cs` | Implemented direct `IDocumentStateObserver` executing native multi-mesh event triggers extracting structural dependencies dropping obsolete document reference caching mechanisms safely completely effortlessly cleanly dynamically intelligently flexibly correctly rationally reliably seamlessly safely. |
+| `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagClusterManager.cs` | Removed brittle generic `StateChanged` boundaries exposing native topological decoupled evaluation hooks safely gracefully accurately structurally seamlessly. |
+| `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagStateObserver.cs` | Dedicated Feature Flag domain observer contract enabling consumer systems explicitly routing decoupled tracking dynamically perfectly securely. |
 | `$/Ama.Enterprise.Licensing.UnitTests/Ama.Enterprise.Licensing.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.Licensing.UnitTests/Services/CertificateLoaderTests.cs` | Unit tests verifying certificate loading capabilities from multiple inputs evaluating null constraints and cryptographic formats. |
 | `$/Ama.Enterprise.Licensing.UnitTests/Services/HonorLicenseManagerTests.cs` | Evaluates generic honor checks mapping cryptography bounds. Updated constructor payloads mapping new structural bounds matching the expanded payload fields evaluating assertions. |
@@ -148,6 +154,7 @@
 | `$/Ama.Enterprise.Licensing/Services/ICertificateLoader.cs` | Removed password parameter from `LoadFromEmbeddedResource` to enforce public-only embedded certificates. |
 | `$/Ama.Enterprise.Licensing/Services/ILicenseManager.cs` | Interface separating generic honor-based logic capabilities avoiding tightly coupled bounds. Added explicit getters matching the expanded structured bounds. |
 | `$/Ama.Enterprise.Licensing/Services/LicenseStartupService.cs` | Starts up evaluations executing internal generic licensing checks. |
+| `$/Ama.Enterprise.Licensing/ama-license.cer` | No description provided. |
 | `$/Ama.Enterprise.Monitoring.Cli/Ama.Enterprise.Monitoring.Cli.csproj` | No description provided. |
 | `$/Ama.Enterprise.Monitoring.Cli/Program.cs` | Refactored internal architecture mapping UI generation explicitly bounded to modular distinct generic boundaries decoupled from program setups traversing dependencies explicitly. |
 | `$/Ama.Enterprise.Monitoring.Cli/Services/IUserInterfaceOrchestrator.cs` | Contract decoupling terminal GUI orchestrations avoiding inline Program allocations and generic boundaries. |
@@ -411,17 +418,26 @@
 | `$/Images/Enterprise CRDTs - Distributed CRDTs.png` | No description provided. |
 | `$/Images/Enterprise CRDTs - End Products Overview.png` | No description provided. |
 | `$/Images/Enterprise CRDTs - P2P.png` | No description provided. |
+| `$/Images/ReadFF_B1_Run_NoPipelining_Msgpack_Encrypt_Http_01.png` | No description provided. |
+| `$/Images/ReadFF_B1_Run_NoPipelining_Msgpack_Encrypt_Http_02.png` | No description provided. |
 | `$/Images/ReadFF_B1_Run_Pipelining_Msgpack_Encrypt_Http_01.png` | No description provided. |
 | `$/Images/ReadFF_B1_Run_Pipelining_Msgpack_Encrypt_Http_02.png` | No description provided. |
+| `$/Images/ReadFF_P0V3_Run_NoPipelining_Msgpack_Encrypt_Http_01.png` | No description provided. |
+| `$/Images/ReadFF_P0V3_Run_NoPipelining_Msgpack_Encrypt_Http_02.png` | No description provided. |
 | `$/Images/ReadFF_P0V3_Run_Pipelining_Msgpack_Encrypt_Http_01.png` | No description provided. |
 | `$/Images/ReadFF_P0V3_Run_Pipelining_Msgpack_Encrypt_Http_02.png` | No description provided. |
+| `$/Images/SetFF_B1_Run_NoPipelining_Msgpack_Encrypt_Http_01.png` | No description provided. |
+| `$/Images/SetFF_B1_Run_NoPipelining_Msgpack_Encrypt_Http_02.png` | No description provided. |
 | `$/Images/SetFF_B1_Run_Pipelining_Msgpack_Encrypt_Http_01.png` | No description provided. |
 | `$/Images/SetFF_B1_Run_Pipelining_Msgpack_Encrypt_Http_02.png` | No description provided. |
+| `$/Images/SetFF_P0V3_Run_NoPipelining_Msgpack_Encrypt_Http_01.png` | No description provided. |
+| `$/Images/SetFF_P0V3_Run_NoPipelining_Msgpack_Encrypt_Http_02.png` | No description provided. |
 | `$/Images/SetFF_P0V3_Run_Pipelining_Msgpack_Encrypt_Http_01.png` | No description provided. |
 | `$/Images/SetFF_P0V3_Run_Pipelining_Msgpack_Encrypt_Http_02.png` | No description provided. |
 | `$/LICENSE` | Dual-license agreement detailing the revenue-capped Community and Enterprise honor-based terms, updated to enforce strictly constrained GPLv3 or standard license bounds for forks and derivative works. |
 | `$/README.md` | Primary introduction documentation explaining the core architecture, capabilities, getting started guide, and repository structure for the decentralized P2P toolkit. |
 | `$/apps-todo.txt` | No description provided. |
+| `$/global.json` | No description provided. |
 | `$/p2p-mesh-architectures.md` | No description provided. |
 | `$/performance.md` | Contains comprehensive load testing scenarios, architecture setups, and performance metrics validating the system's resilience and throughput under different Azure App Service plans. |
 | `$/solution.settings.json` | No description provided. |

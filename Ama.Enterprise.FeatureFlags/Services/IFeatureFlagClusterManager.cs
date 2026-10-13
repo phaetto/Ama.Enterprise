@@ -1,6 +1,5 @@
 namespace Ama.Enterprise.FeatureFlags.Services;
 
-using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,11 +10,6 @@ using Ama.Enterprise.FeatureFlags.Models;
 /// </summary>
 public interface IFeatureFlagClusterManager
 {
-    /// <summary>
-    /// Event triggered when the state of the feature flags has been updated.
-    /// </summary>
-    event EventHandler? StateChanged;
-
     /// <summary>
     /// Gets the current read-only map of feature flags.
     /// </summary>

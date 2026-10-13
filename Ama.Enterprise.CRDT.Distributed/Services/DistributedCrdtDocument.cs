@@ -13,6 +13,7 @@ using Ama.CRDT.Services;
 using Ama.CRDT.Services.Providers;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Models;
+using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -31,6 +32,10 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly IDistributedCrdtStorage storage;
     private readonly ICrdtTimestampProvider timestampProvider;
     private readonly ILogger<DistributedCrdtDocument<TState>> logger;
+    
+    private readonly IEnumerable<IDocumentStateObserver<TState>> stateObservers;
+    private readonly IEnumerable<IDocumentPatchObserver> patchObservers;
+
     private readonly bool activeSyncEnabled;
     private readonly int activeSyncDebounceMs;
     private readonly bool avoidBlindWrites;
@@ -86,12 +91,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
     }
 
-    /// <inheritdoc />
-    public event EventHandler? StateChanged;
-
-    /// <inheritdoc />
-    public event EventHandler<CrdtPatch>? PatchGenerated;
-
     public DistributedCrdtDocument(
         TState initialState,
         ReplicaContext replicaContext,
@@ -108,6 +107,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         IShardIdProvider shardIdProvider,
         ICrdtTimestampProvider timestampProvider,
         IShardDistributionManager distributionManager,
+        IEnumerable<IDocumentStateObserver<TState>> stateObservers,
+        IEnumerable<IDocumentPatchObserver> patchObservers,
         IMeterFactory? meterFactory = null)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -126,6 +127,9 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
         this.timestampProvider = timestampProvider ?? throw new ArgumentNullException(nameof(timestampProvider));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        
+        this.stateObservers = stateObservers ?? throw new ArgumentNullException(nameof(stateObservers));
+        this.patchObservers = patchObservers ?? throw new ArgumentNullException(nameof(patchObservers));
 
         this.activeSyncEnabled = options.Value.ActiveSyncEnabled;
         this.activeSyncDebounceMs = options.Value.ActiveSyncDebounceMilliseconds;
@@ -193,6 +197,36 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             this.lightweightLock = new SemaphoreSlim(1, 1);
         }
     }
+    
+    private async Task NotifyStateChangedAsync(CancellationToken cancellationToken)
+    {
+        foreach (var observer in stateObservers)
+        {
+            try
+            {
+                await observer.OnStateChangedAsync(DocumentId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error notifying state observer for document {DocumentId}.", DocumentId);
+            }
+        }
+    }
+
+    private async Task NotifyPatchGeneratedAsync(CrdtPatch patch, CancellationToken cancellationToken)
+    {
+        foreach (var observer in patchObservers)
+        {
+            try
+            {
+                await observer.OnPatchGeneratedAsync(DocumentId, patch, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error notifying patch observer for document {DocumentId}.", DocumentId);
+            }
+        }
+    }
 
     private PooledDocumentCommand<TState> GetCommand() => commandPool.TryDequeue(out var cmd) ? cmd : new PooledDocumentCommand<TState>();
 
@@ -226,7 +260,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                             await ProcessApplyOperationsInternalAsync(cmd).ConfigureAwait(false);
                             break;
                         case DocumentCommandType.ApplyJournaledOperations:
-                            ProcessApplyJournaledOperationsInternal(cmd);
+                            await ProcessApplyJournaledOperationsInternalAsync(cmd).ConfigureAwait(false);
                             break;
                         case DocumentCommandType.GetSnapshotData:
                             ProcessGetSnapshotDataInternal(cmd);
@@ -238,10 +272,10 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                             await ProcessCheckpointInternalAsync(cmd).ConfigureAwait(false);
                             break;
                         case DocumentCommandType.EvictReplica:
-                            ProcessEvictReplicaInternal(cmd);
+                            await ProcessEvictReplicaInternalAsync(cmd).ConfigureAwait(false);
                             break;
                         case DocumentCommandType.ResetLocalState:
-                            ProcessResetLocalStateInternal();
+                            await ProcessResetLocalStateInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
                             break;
                     }
 
@@ -314,7 +348,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                     }
                 }
 
-                StateChanged?.Invoke(this, EventArgs.Empty);
+                await NotifyStateChangedAsync(cancellationToken).ConfigureAwait(false);
                 logger.LogInformation("Successfully loaded initial state for document {DocumentId} from persistent storage.", DocumentId);
             }
         }
@@ -346,8 +380,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             }
 
             patchAppliedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-            StateChanged?.Invoke(this, EventArgs.Empty);
-            PatchGenerated?.Invoke(this, patch);
+            await NotifyStateChangedAsync(cancellationToken).ConfigureAwait(false);
+            await NotifyPatchGeneratedAsync(patch, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -382,7 +416,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
 
         patchAppliedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-        StateChanged?.Invoke(this, EventArgs.Empty);
+        await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
 
         if (activeSyncEnabled && cmd.Patch!.Value.Operations != null && cmd.Patch.Value.Operations.Count > 0)
         {
@@ -396,7 +430,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             }
             else
             {
-                PatchGenerated?.Invoke(this, cmd.Patch.Value);
+                await NotifyPatchGeneratedAsync(cmd.Patch.Value, cmd.CancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -416,7 +450,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         if (opsToBroadcast.Count > 0)
         {
             var batchedPatch = new CrdtPatch(opsToBroadcast);
-            PatchGenerated?.Invoke(this, batchedPatch);
+            _ = Task.Run(() => NotifyPatchGeneratedAsync(batchedPatch, CancellationToken.None));
         }
     }
 
@@ -477,7 +511,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             }
 
             operationsAppliedCounter.Add(operations.Count, new KeyValuePair<string, object?>("document_id", DocumentId));
-            StateChanged?.Invoke(this, EventArgs.Empty);
+            await NotifyStateChangedAsync(cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -521,7 +555,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
 
         operationsAppliedCounter.Add(cmd.Operations!.Count, new KeyValuePair<string, object?>("document_id", DocumentId));
-        StateChanged?.Invoke(this, EventArgs.Empty);
+        await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -539,7 +573,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             }
             
             operationsAppliedCounter.Add(operations.Count, new KeyValuePair<string, object?>("document_id", DocumentId));
-            StateChanged?.Invoke(this, EventArgs.Empty);
+            await NotifyStateChangedAsync(cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -560,7 +594,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
     }
 
-    private void ProcessApplyJournaledOperationsInternal(PooledDocumentCommand<TState> cmd)
+    private async Task ProcessApplyJournaledOperationsInternalAsync(PooledDocumentCommand<TState> cmd)
     {
         CrdtDocument<TState> currentDoc;
         lock (syncRoot) { currentDoc = currentDocument; }
@@ -574,7 +608,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
 
         operationsAppliedCounter.Add(cmd.Operations!.Count, new KeyValuePair<string, object?>("document_id", DocumentId));
-        StateChanged?.Invoke(this, EventArgs.Empty);
+        await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -650,7 +684,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             }
 
             snapshotsMergedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-            StateChanged?.Invoke(this, EventArgs.Empty);
+            await NotifyStateChangedAsync(cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -703,7 +737,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             }
 
             snapshotsMergedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-            StateChanged?.Invoke(this, EventArgs.Empty);
+            await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
 
             logger.LogInformation("Successfully merged global state snapshot for document {DocumentId}.", DocumentId);
         }
@@ -789,7 +823,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             {
                 metadataManager.EvictReplica(currentDocument, replicaId);
             }
-            StateChanged?.Invoke(this, EventArgs.Empty);
+            await NotifyStateChangedAsync(cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -810,14 +844,14 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
     }
 
-    private void ProcessEvictReplicaInternal(PooledDocumentCommand<TState> cmd)
+    private async Task ProcessEvictReplicaInternalAsync(PooledDocumentCommand<TState> cmd)
     {
         lock (syncRoot)
         {
             metadataManager.EvictReplica(currentDocument, cmd.ReplicaIdToEvict!);
             isDirty = true;
         }
-        StateChanged?.Invoke(this, EventArgs.Empty);
+        await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -830,7 +864,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 var metadata = metadataManager.Initialize(initialState);
                 currentDocument = new CrdtDocument<TState>(initialState, metadata);
             }
-            StateChanged?.Invoke(this, EventArgs.Empty);
+            await NotifyStateChangedAsync(cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -851,7 +885,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
     }
 
-    private void ProcessResetLocalStateInternal()
+    private async Task ProcessResetLocalStateInternalAsync(CancellationToken cancellationToken)
     {
         lock (syncRoot)
         {
@@ -859,7 +893,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             currentDocument = new CrdtDocument<TState>(initialState, metadata);
             isDirty = true;
         }
-        StateChanged?.Invoke(this, EventArgs.Empty);
+        await NotifyStateChangedAsync(cancellationToken).ConfigureAwait(false);
         logger.LogInformation("Successfully performed a hard reset following identity re-bootstrap for document {DocumentId}.", DocumentId);
     }
 

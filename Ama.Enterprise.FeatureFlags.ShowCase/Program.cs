@@ -31,6 +31,7 @@ public static class Program
     private static readonly object ConsoleLock = new();
     private static int currentPort;
     private static int currentHandshakePort;
+    private static volatile bool needsRedraw;
 
     public static async Task Main(string[] args)
     {
@@ -67,6 +68,10 @@ public static class Program
 
         // Register licensing explicitly specifying Community mode natively matching explicit structural generic mappings
         services.ConfigureAmaCommunityLicense();
+
+        // Map central UI generic redraw observer tracking natively distributed states explicitly
+        services.AddSingleton<ConsoleRedrawObserver>();
+        services.AddSingleton<IFeatureFlagStateObserver>(sp => sp.GetRequiredService<ConsoleRedrawObserver>());
 
         // Register Showcase tablestorage persistence provider
         services.AddDistributedCrdtTableStorage(options => {
@@ -155,12 +160,27 @@ public static class Program
             cts.Cancel();
         };
 
-        // Wire up the event handler to react to cluster changes rather than polling
-        clusterManager.StateChanged += (sender, eventArgs) =>
+        // Background UI rendering task to decouple Console I/O from hot CRDT operations
+        _ = Task.Run(async () =>
         {
-            var flags = clusterManager.GetFlags();
-            DrawFlags(flags);
-        };
+            try
+            {
+                using var uiTimer = new PeriodicTimer(TimeSpan.FromMilliseconds(500));
+                while (await uiTimer.WaitForNextTickAsync(cts.Token).ConfigureAwait(false))
+                {
+                    if (needsRedraw)
+                    {
+                        needsRedraw = false;
+                        var flags = clusterManager.GetFlags();
+                        DrawFlags(flags);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Clean shutdown
+            }
+        }, cts.Token);
 
         try
         {
@@ -358,6 +378,15 @@ public static class Program
         
         File.WriteAllText(keyPath, base64Key);
         return base64Key;
+    }
+
+    private sealed class ConsoleRedrawObserver : IFeatureFlagStateObserver
+    {
+        public Task OnFeatureFlagsUpdatedAsync(CancellationToken cancellationToken = default)
+        {
+            needsRedraw = true;
+            return Task.CompletedTask;
+        }
     }
 
     // Custom lock-aware logger provider ensuring dependency injection traces format synchronously

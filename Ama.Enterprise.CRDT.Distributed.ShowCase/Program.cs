@@ -3,6 +3,7 @@ namespace Ama.Enterprise.CRDT.Distributed.ShowCase;
 using Ama.CRDT.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Services;
+using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 using Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 using Ama.Enterprise.CRDT.Distributed.ShowCase.Services;
 using Ama.Enterprise.CRDT.MessagePack.Extensions;
@@ -54,6 +55,12 @@ public static class Program
 
         // Register licensing
         services.ConfigureAmaCommunityLicense();
+
+        // Map central UI generic redraw observer tracking natively distributed states explicitly
+        services.AddSingleton<ConsoleRedrawObserver>();
+        services.AddSingleton<IDocumentStateObserver<TaskListState>>(sp => sp.GetRequiredService<ConsoleRedrawObserver>());
+        services.AddSingleton<IDocumentStateObserver<FleetState>>(sp => sp.GetRequiredService<ConsoleRedrawObserver>());
+        services.AddSingleton<ICrdtOrchestratorObserver>(sp => sp.GetRequiredService<ConsoleRedrawObserver>());
 
         // Add core CRDT distributed services and resolve the orchestrator
         services.AddDistributedCrdtCore(options =>
@@ -185,10 +192,6 @@ public static class Program
             var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
             var taskManager = scope.ServiceProvider.GetRequiredService<ITaskManager>();
             var fleetManager = scope.ServiceProvider.GetRequiredService<IFleetManager>();
-
-            // UI refresh bindings via a debounced dirty flag instead of synchronous drawing
-            taskManager.StateChanged += (sender, eventArgs) => _needsRedraw = true;
-            fleetManager.StateChanged += (sender, eventArgs) => _needsRedraw = true;
 
             // Background UI rendering task to decouple Console I/O from hot CRDT operations
             _ = Task.Run(async () =>
@@ -583,6 +586,21 @@ public static class Program
         }
 
         return port;
+    }
+
+    private sealed class ConsoleRedrawObserver : IDocumentStateObserver<TaskListState>, IDocumentStateObserver<FleetState>, ICrdtOrchestratorObserver
+    {
+        public Task OnStateChangedAsync(string documentId, CancellationToken cancellationToken = default)
+        {
+            _needsRedraw = true;
+            return Task.CompletedTask;
+        }
+
+        public Task OnTopologyChangedAsync(CancellationToken cancellationToken = default)
+        {
+            _needsRedraw = true;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class LockedConsoleLoggerProvider : ILoggerProvider

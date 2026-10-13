@@ -12,16 +12,13 @@ using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.Topology.ShowCase.Models;
 
 /// <summary>
-/// Implementation handling intentions and queries for the task list document.
+/// Implementation handling intentions and queries for the task list document decoupled from standard rigid events successfully gracefully natively.
 /// </summary>
-public sealed class TaskManager : ITaskManager, IDisposable
+public sealed class TaskManager : ITaskManager
 {
     private readonly ICrdtDocumentOrchestrator orchestrator;
     private readonly IAsyncCrdtPatcher patcher;
     private readonly object syncRoot = new();
-
-    /// <inheritdoc />
-    public event EventHandler? StateChanged;
 
     public TaskManager(
         ICrdtDocumentOrchestrator orchestrator,
@@ -29,9 +26,6 @@ public sealed class TaskManager : ITaskManager, IDisposable
     {
         this.orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         this.patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
-
-        this.orchestrator.DocumentsChanged += OnOrchestratorChanged;
-        SubscribeToActiveDocuments();
     }
 
     /// <inheritdoc />
@@ -77,46 +71,5 @@ public sealed class TaskManager : ITaskManager, IDisposable
 
             await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
         }
-    }
-
-    public void Dispose()
-    {
-        orchestrator.DocumentsChanged -= OnOrchestratorChanged;
-        var docs = orchestrator.GetActiveDocuments();
-        foreach (var d in docs)
-        {
-            if (d is IDistributedCrdtDocument<TaskListState> typedDoc)
-            {
-                typedDoc.StateChanged -= OnDocumentStateChanged;
-            }
-        }
-    }
-
-    private void OnOrchestratorChanged(object? sender, EventArgs e)
-    {
-        SubscribeToActiveDocuments();
-        StateChanged?.Invoke(this, EventArgs.Empty);
-    }
-
-    private void SubscribeToActiveDocuments()
-    {
-        lock (syncRoot)
-        {
-            var docs = orchestrator.GetActiveDocuments();
-            foreach (var d in docs)
-            {
-                if (d is IDistributedCrdtDocument<TaskListState> typedDoc)
-                {
-                    // To avoid multiple subscriptions
-                    typedDoc.StateChanged -= OnDocumentStateChanged;
-                    typedDoc.StateChanged += OnDocumentStateChanged;
-                }
-            }
-        }
-    }
-
-    private void OnDocumentStateChanged(object? sender, EventArgs e)
-    {
-        StateChanged?.Invoke(this, EventArgs.Empty);
     }
 }

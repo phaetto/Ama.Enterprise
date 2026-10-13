@@ -9,6 +9,7 @@ using Ama.CRDT.Services.GarbageCollection;
 using Ama.CRDT.Services.Providers;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
+using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 using Ama.Enterprise.CRDT.Distributed.Services.P2p;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -106,6 +107,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICrdtDocumentOrchestrator, CrdtDocumentOrchestrator>();
         services.AddScoped<IClusterStateTracker, ClusterStateTracker>();
         services.AddScoped<ICrdtEvictionService, CrdtEvictionService>();
+        
+        // Register decoupled explicit broadcast evaluations
+        services.TryAddScoped<IDocumentPatchObserver, CrdtPatchBroadcaster>();
 
         services.AddHostedService<CrdtInitializationService>();
         services.AddHostedService<CrdtCheckpointService>();

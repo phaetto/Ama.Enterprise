@@ -12,16 +12,13 @@ using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.Topology.ShowCase.Models;
 
 /// <summary>
-/// Implementation handling intentions and queries for the Fleet document.
+/// Implementation handling intentions and queries for the Fleet document decoupled safely avoiding legacy event loops natively explicitly.
 /// </summary>
-public sealed class FleetManager : IFleetManager, IDisposable
+public sealed class FleetManager : IFleetManager
 {
     private readonly ICrdtDocumentOrchestrator orchestrator;
     private readonly IAsyncCrdtPatcher patcher;
     private readonly object syncRoot = new();
-
-    /// <inheritdoc />
-    public event EventHandler? StateChanged;
 
     public FleetManager(
         ICrdtDocumentOrchestrator orchestrator,
@@ -29,9 +26,6 @@ public sealed class FleetManager : IFleetManager, IDisposable
     {
         this.orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         this.patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
-
-        this.orchestrator.DocumentsChanged += OnOrchestratorChanged;
-        SubscribeToActiveDocuments();
     }
 
     /// <inheritdoc />
@@ -77,45 +71,5 @@ public sealed class FleetManager : IFleetManager, IDisposable
 
             await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
         }
-    }
-
-    public void Dispose()
-    {
-        orchestrator.DocumentsChanged -= OnOrchestratorChanged;
-        var docs = orchestrator.GetActiveDocuments();
-        foreach (var d in docs)
-        {
-            if (d is IDistributedCrdtDocument<FleetState> typedDoc)
-            {
-                typedDoc.StateChanged -= OnDocumentStateChanged;
-            }
-        }
-    }
-
-    private void OnOrchestratorChanged(object? sender, EventArgs e)
-    {
-        SubscribeToActiveDocuments();
-        StateChanged?.Invoke(this, EventArgs.Empty);
-    }
-
-    private void SubscribeToActiveDocuments()
-    {
-        lock (syncRoot)
-        {
-            var docs = orchestrator.GetActiveDocuments();
-            foreach (var d in docs)
-            {
-                if (d is IDistributedCrdtDocument<FleetState> typedDoc)
-                {
-                    typedDoc.StateChanged -= OnDocumentStateChanged;
-                    typedDoc.StateChanged += OnDocumentStateChanged;
-                }
-            }
-        }
-    }
-
-    private void OnDocumentStateChanged(object? sender, EventArgs e)
-    {
-        StateChanged?.Invoke(this, EventArgs.Empty);
     }
 }

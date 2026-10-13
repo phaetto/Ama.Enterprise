@@ -59,13 +59,14 @@ public sealed class FeatureFlagDomainIntegrationTests
         var scopeFactory = provider.GetRequiredService<DistributedCrdtScopeManager>();
         var crdtScope = scopeFactory.GetOrCreateScope("integration-replica-1");
         var manager = crdtScope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
+        var observer = provider.GetRequiredService<TestStateObserver>();
 
         await StartAllHostedServicesAsync(provider);
 
         var initialMetadata = new FeatureFlagMetadata { ProductId = "EnterpriseERP", TenantId = "Tenant-XYZ" };
         var initialOwnership = new FeatureFlagOwnership { Owner = "BackendTeam", ContactInfo = "backend@ama.com" };
 
-        await WaitForStateChangeAsync(manager, () => 
+        await observer.WaitForStateChangeAsync(() => 
             manager.SetFlagAsync("BetaFeature", true, "Admin", initialMetadata, initialOwnership, CancellationToken.None));
 
         var initialFlag = manager.GetFlags()["BetaFeature"];
@@ -74,7 +75,7 @@ public sealed class FeatureFlagDomainIntegrationTests
         await Task.Delay(10);
 
         // Act - Partial Update dropping specific fields
-        await WaitForStateChangeAsync(manager, () => 
+        await observer.WaitForStateChangeAsync(() => 
             manager.SetFlagAsync("BetaFeature", false, "SystemAuto", metadata: null, ownership: null, CancellationToken.None));
 
         // Assert
@@ -97,16 +98,17 @@ public sealed class FeatureFlagDomainIntegrationTests
         var scopeFactory = provider.GetRequiredService<DistributedCrdtScopeManager>();
         var crdtScope = scopeFactory.GetOrCreateScope("integration-replica-1");
         var manager = crdtScope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
+        var observer = provider.GetRequiredService<TestStateObserver>();
 
         await StartAllHostedServicesAsync(provider);
 
-        await WaitForStateChangeAsync(manager, () => 
+        await observer.WaitForStateChangeAsync(() => 
             manager.SetFlagAsync("ObsoleteFeature", true, "Admin", null, null, CancellationToken.None));
 
         manager.GetFlags().ShouldContainKey("ObsoleteFeature");
 
         // Act
-        await WaitForStateChangeAsync(manager, () => 
+        await observer.WaitForStateChangeAsync(() => 
             manager.RemoveFlagAsync("ObsoleteFeature", CancellationToken.None));
 
         // Assert
@@ -159,6 +161,10 @@ public sealed class FeatureFlagDomainIntegrationTests
         // Bootstrap the feature flags exactly as a real application would natively
         services.AddFeatureFlags();
 
+        // Map test observer explicit tracker validating decoupled state events securely
+        services.AddSingleton<TestStateObserver>();
+        services.AddSingleton<IFeatureFlagStateObserver>(sp => sp.GetRequiredService<TestStateObserver>());
+
         return services.BuildServiceProvider();
     }
 
@@ -171,21 +177,22 @@ public sealed class FeatureFlagDomainIntegrationTests
         }
     }
 
-    private async Task WaitForStateChangeAsync(IFeatureFlagClusterManager manager, Func<Task> action, int timeoutMs = 5000)
+    private sealed class TestStateObserver : IFeatureFlagStateObserver
     {
-        var tcs = new TaskCompletionSource();
-        
-        void Handler(object? sender, EventArgs e) => tcs.TrySetResult();
-        
-        manager.StateChanged += Handler;
-        try
+        private TaskCompletionSource? tcs;
+
+        public Task OnFeatureFlagsUpdatedAsync(CancellationToken cancellationToken = default)
         {
-            await action();
-            await tcs.Task.WaitAsync(TimeSpan.FromMilliseconds(timeoutMs));
+            tcs?.TrySetResult();
+            return Task.CompletedTask;
         }
-        finally
+
+        public async Task WaitForStateChangeAsync(Func<Task> action, int timeoutMs = 5000)
         {
-            manager.StateChanged -= Handler;
+            tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            await action().ConfigureAwait(false);
+            await tcs.Task.WaitAsync(TimeSpan.FromMilliseconds(timeoutMs)).ConfigureAwait(false);
+            tcs = null;
         }
     }
 }

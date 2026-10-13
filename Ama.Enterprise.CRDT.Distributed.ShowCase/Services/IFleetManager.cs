@@ -12,11 +12,6 @@ using Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 public interface IFleetManager
 {
     /// <summary>
-    /// Event triggered when the fleet state changes.
-    /// </summary>
-    event EventHandler? StateChanged;
-
-    /// <summary>
     /// Retrieves the read-only dictionary of active devices for the specified document.
     /// </summary>
     IReadOnlyDictionary<string, DeviceStatus> GetDevices(string documentId);

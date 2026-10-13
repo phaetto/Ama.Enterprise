@@ -58,6 +58,8 @@ public sealed class ConcurrencyIntegrationTests
         {
             opt.CheckpointIntervalSeconds = 30;
             opt.AntiEntropyIntervalSeconds = 15;
+            opt.ActiveSyncEnabled = true;
+            opt.ActiveSyncDebounceMilliseconds = 0; // Disable debouncing for immediate observer broadcast tracking in tests
         });
 
         services.AddDistributedCrdtReplica(replicaId);
@@ -197,6 +199,9 @@ public sealed class ConcurrencyIntegrationTests
         // Map an initial target document natively
         await orchestrator.CreateDocumentAsync("doc-msg-1", "concurrent-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+        
+        var targetDoc = orchestrator.GetDocument<ConcurrencyTestState>("doc-msg-1");
+        targetDoc.ShouldNotBeNull();
 
         var targetPeerId = new PeerId(Guid.NewGuid());
         const int TotalTasks = 600;
@@ -210,7 +215,8 @@ public sealed class ConcurrencyIntegrationTests
             // Evenly distribute 3 distinct concurrent pipeline commands
             if (i % 3 == 0)
             {
-                await orchestrator.BroadcastPatchAsync("doc-msg-1", It.IsAny<CrdtPatch>(), CancellationToken.None);
+                var dummyOp = default(CrdtOperation) with { Id = Guid.NewGuid(), ReplicaId = "Replica1" };
+                await targetDoc!.ApplyPatchAsync(new CrdtPatch(new[] { dummyOp }), CancellationToken.None);
             }
             else if (i % 3 == 1)
             {

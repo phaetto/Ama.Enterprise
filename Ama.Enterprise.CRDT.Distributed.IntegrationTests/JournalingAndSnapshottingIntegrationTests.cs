@@ -18,6 +18,7 @@ using Ama.CRDT.Services.Versioning;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
+using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 using Ama.Enterprise.P2p.Models.Algorithms;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
@@ -393,7 +394,13 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     public async Task MergeSnapshot_ShouldExecuteTrueStateMerge_UnioningData()
     {
         // Arrange
-        var sp = BuildNode("ReplicaA");
+        var patchObserverMock = new Mock<IDocumentPatchObserver>();
+        
+        var sp = BuildNode("ReplicaA", services =>
+        {
+            services.AddSingleton(patchObserverMock.Object);
+        });
+        
         var serializer = sp.GetRequiredService<ICrdtSerializer>();
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
         var scope = scopeManager.GetOrCreateScope("ReplicaA");
@@ -427,11 +434,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         var snapshotBytes = serializer.SerializeToBytes(remoteAppliedDoc.Document);
 
-        CrdtPatch? broadcastedPatch = null;
-        docA.PatchGenerated += (s, p) => 
-        {
-            broadcastedPatch = p;
-        };
+        patchObserverMock.Invocations.Clear();
 
         // Act
         await docA.MergeSnapshotAsync(snapshotBytes, globalMap, CancellationToken.None);
@@ -439,7 +442,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         // Assert
         // In a true state CRDT merge, it shouldn't generate diff patches as it directly merges state in place natively
-        broadcastedPatch.ShouldBeNull();
+        patchObserverMock.Verify(x => x.OnPatchGeneratedAsync(It.IsAny<string>(), It.IsAny<CrdtPatch>(), It.IsAny<CancellationToken>()), Times.Never);
 
         // Both keys should exist as a true state merge unions divergent mapped states logically
         docA.Document.Data.DataMap.ShouldContainKeyAndValue("LocalKey", "LocalValue");

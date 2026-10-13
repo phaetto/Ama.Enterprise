@@ -12,11 +12,6 @@ using Ama.Enterprise.CRDT.Distributed.Topology.ShowCase.Models;
 public interface ITaskManager
 {
     /// <summary>
-    /// Event triggered when the task list state changes.
-    /// </summary>
-    event EventHandler? StateChanged;
-
-    /// <summary>
     /// Retrieves the read-only dictionary of active tasks for the specified document.
     /// </summary>
     IReadOnlyDictionary<string, TaskItem> GetTasks(string documentId);

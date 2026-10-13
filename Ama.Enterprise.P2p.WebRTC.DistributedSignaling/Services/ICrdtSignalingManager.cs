@@ -7,15 +7,10 @@ using System.Threading.Tasks;
 using Ama.Enterprise.P2p.WebRTC.Models;
 
 /// <summary>
-/// Contract managing the WebRTC out-of-band signaling drop-box backed by a distributed CRDT state.
+/// Contract managing the WebRTC out-of-band signaling drop-box backed by a distributed CRDT state decoupled natively bypassing events.
 /// </summary>
 public interface ICrdtSignalingManager
 {
-    /// <summary>
-    /// Triggered when the overarching signaling document state changes structurally across the mesh.
-    /// </summary>
-    event EventHandler? StateChanged;
-
     /// <summary>
     /// Retrieves the current map of active node Join Intents signifying presence inside the topology bounds.
     /// </summary>

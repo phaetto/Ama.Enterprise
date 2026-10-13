@@ -1,6 +1,5 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services;
 
-using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,11 +12,6 @@ using Ama.Enterprise.P2p.Models.Core;
 /// </summary>
 public interface ICrdtDocumentOrchestrator
 {
-    /// <summary>
-    /// Fired asynchronously when active document registries change.
-    /// </summary>
-    event EventHandler? DocumentsChanged;
-
     /// <summary>
     /// Exposes the global decentralized map managing P2P CRDT topology logic across the cluster.
     /// </summary>
@@ -62,11 +56,6 @@ public interface ICrdtDocumentOrchestrator
     /// Serializes the current local state and dispatches it directly as a targeted snapshot following an unrecoverable journal truncation gap.
     /// </summary>
     Task ProvideSnapshotAsync(string documentId, string targetReplicaId, PeerId targetPeerId, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Broadcasts a causally linked local patch immediately to active remote replica connections avoiding structural divergence manually.
-    /// </summary>
-    Task BroadcastPatchAsync(string documentId, CrdtPatch patch, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Dispatches a targeted point-to-point synchronization request mapping peer topologies extracting random active peers internally automatically.
