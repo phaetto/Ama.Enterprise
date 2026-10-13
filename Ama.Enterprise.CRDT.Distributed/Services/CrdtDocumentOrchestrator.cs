@@ -254,7 +254,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     {
         try
         {
-            var registryDoc = await Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            var registry = Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
+            var registryDoc = await registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
             var registryMap = registryDoc.Data.Documents;
             bool changed = false;
 
@@ -347,7 +348,9 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
     public IReadOnlyList<IDistributedCrdtDocument> GetActiveDocuments()
     {
-        var docs = new List<IDistributedCrdtDocument>(activeDocuments.Count + 1) { Registry };
+        var registry = Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
+        var docs = new List<IDistributedCrdtDocument>(activeDocuments.Count + 1) { registry };
+        
         docs.AddRange(activeDocuments.Values);
         return docs;
     }
@@ -359,8 +362,10 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             return typedDoc;
         }
 
+        var registry = Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
+
         // Fast asynchronous check bypassing task bounds executing synchronous ValueTask bindings.
-        var registryDocTask = Registry.GetDocumentAsync(CancellationToken.None);
+        var registryDocTask = registry.GetDocumentAsync(CancellationToken.None);
         var registryDoc = registryDocTask.IsCompletedSuccessfully ? registryDocTask.Result : registryDocTask.AsTask().GetAwaiter().GetResult();
         
         if (registryDoc.Data.Documents.TryGetValue(documentId, out var regEntry) && !regEntry.IsDeleted)
@@ -402,12 +407,14 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
     private async Task ProcessCreateDocumentInternalAsync(PooledOrchestratorCommand cmd)
     {
+        var registry = Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
+
         var intent = new MapSetIntent(cmd.DocumentId!, new CrdtRegistryEntry(cmd.DocumentId!, cmd.TypeAlias!, false));
-        var registryDoc = await Registry.GetDocumentAsync(cmd.CancellationToken).ConfigureAwait(false);
+        var registryDoc = await registry.GetDocumentAsync(cmd.CancellationToken).ConfigureAwait(false);
         var operation = await patcher.GenerateOperationAsync(registryDoc, x => x.Documents, intent, cmd.ExplicitTimestamp!, cmd.CancellationToken).ConfigureAwait(false);
         var patch = new CrdtPatch(new[] { operation });
         
-        await Registry.ApplyPatchAsync(patch, cmd.CancellationToken).ConfigureAwait(false);
+        await registry.ApplyPatchAsync(patch, cmd.CancellationToken).ConfigureAwait(false);
         await ProcessSyncDocumentsInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
     }
 
@@ -433,14 +440,16 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
     private async Task ProcessDeleteDocumentInternalAsync(PooledOrchestratorCommand cmd)
     {
-        var registryDoc = await Registry.GetDocumentAsync(cmd.CancellationToken).ConfigureAwait(false);
+        var registry = Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
+
+        var registryDoc = await registry.GetDocumentAsync(cmd.CancellationToken).ConfigureAwait(false);
         if (registryDoc.Data.Documents.TryGetValue(cmd.DocumentId!, out var existing))
         {
             var intent = new MapSetIntent(cmd.DocumentId!, existing with { IsDeleted = true });
             var operation = await patcher.GenerateOperationAsync(registryDoc, x => x.Documents, intent, cmd.ExplicitTimestamp!, cmd.CancellationToken).ConfigureAwait(false);
             var patch = new CrdtPatch(new[] { operation });
             
-            await Registry.ApplyPatchAsync(patch, cmd.CancellationToken).ConfigureAwait(false);
+            await registry.ApplyPatchAsync(patch, cmd.CancellationToken).ConfigureAwait(false);
             await ProcessSyncDocumentsInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
         }
     }
@@ -455,13 +464,15 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             return;
         }
 
-        if (!activeDocuments.TryGetValue(documentId, out var doc) && Registry.DocumentId != documentId)
+        var registry = Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
+
+        if (!activeDocuments.TryGetValue(documentId, out var doc) && registry.DocumentId != documentId)
         {
             logger.LogWarning("Requested snapshot for unknown or completely detached document {DocumentId}.", documentId);
             return;
         }
 
-        var targetDoc = documentId == Registry.DocumentId ? Registry : doc;
+        var targetDoc = documentId == registry.DocumentId ? registry : doc;
 
         try
         {
