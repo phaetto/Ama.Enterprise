@@ -18,7 +18,6 @@ public sealed class FleetManager : IFleetManager
 {
     private readonly ICrdtDocumentOrchestrator orchestrator;
     private readonly IAsyncCrdtPatcher patcher;
-    private readonly object syncRoot = new();
 
     public FleetManager(
         ICrdtDocumentOrchestrator orchestrator,
@@ -29,15 +28,16 @@ public sealed class FleetManager : IFleetManager
     }
 
     /// <inheritdoc />
-    public IReadOnlyDictionary<string, DeviceStatus> GetDevices(string documentId)
+    public async ValueTask<IReadOnlyDictionary<string, DeviceStatus>> GetDevicesAsync(string documentId, CancellationToken cancellationToken = default)
     {
-        lock (syncRoot)
+        var docManager = orchestrator.GetDocument<FleetState>(documentId);
+        if (docManager != null)
         {
-            var doc = orchestrator.GetDocument<FleetState>(documentId);
-            return doc != null 
-                ? new ReadOnlyDictionary<string, DeviceStatus>(doc.Document.Data.Devices) 
-                : new ReadOnlyDictionary<string, DeviceStatus>(new Dictionary<string, DeviceStatus>());
+            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            return new ReadOnlyDictionary<string, DeviceStatus>(crdtDoc.Data.Devices);
         }
+        
+        return new ReadOnlyDictionary<string, DeviceStatus>(new Dictionary<string, DeviceStatus>());
     }
 
     /// <inheritdoc />
@@ -46,14 +46,15 @@ public sealed class FleetManager : IFleetManager
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document Id cannot be null or empty.", nameof(documentId));
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or empty.", nameof(id));
 
-        var doc = orchestrator.GetDocument<FleetState>(documentId);
-        if (doc != null)
+        var docManager = orchestrator.GetDocument<FleetState>(documentId);
+        if (docManager != null)
         {
+            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
             var item = new DeviceStatus(id, isOnline, batteryLevel);
-            var operation = await patcher.GenerateOperationAsync(doc.Document, x => x.Devices, new MapSetIntent(id, item), cancellationToken).ConfigureAwait(false);
+            var operation = await patcher.GenerateOperationAsync(crdtDoc, x => x.Devices, new MapSetIntent(id, item), cancellationToken).ConfigureAwait(false);
             var patch = new CrdtPatch(new[] { operation });
 
-            await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+            await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -63,13 +64,14 @@ public sealed class FleetManager : IFleetManager
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document Id cannot be null or empty.", nameof(documentId));
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or empty.", nameof(id));
 
-        var doc = orchestrator.GetDocument<FleetState>(documentId);
-        if (doc != null)
+        var docManager = orchestrator.GetDocument<FleetState>(documentId);
+        if (docManager != null)
         {
-            var operation = await patcher.GenerateOperationAsync(doc.Document, x => x.Devices, new MapRemoveIntent(id), cancellationToken).ConfigureAwait(false);
+            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            var operation = await patcher.GenerateOperationAsync(crdtDoc, x => x.Devices, new MapRemoveIntent(id), cancellationToken).ConfigureAwait(false);
             var patch = new CrdtPatch(new[] { operation });
 
-            await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+            await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
         }
     }
 }

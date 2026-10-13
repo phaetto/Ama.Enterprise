@@ -76,14 +76,17 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         var docA = orchA.GetDocument<SharedTestState>("doc-1")!;
         var docB = orchB.GetDocument<SharedTestState>("doc-1")!;
         docB.ShouldNotBeNull();
+        
+        var crdtDocA = await docA.GetDocumentAsync(CancellationToken.None);
+        var crdtDocB = await docB.GetDocumentAsync(CancellationToken.None);
 
         // Concurrently modify both documents
         var intentA = new MapSetIntent("KeyA", "ValueA");
-        var opA = await patcherA.GenerateOperationAsync(docA.Document, x => x.DataMap, intentA, CancellationToken.None);
+        var opA = await patcherA.GenerateOperationAsync(crdtDocA, x => x.DataMap, intentA, CancellationToken.None);
         var taskA = docA.ApplyPatchAsync(new CrdtPatch(new[] { opA }), CancellationToken.None);
 
         var intentB = new MapSetIntent("KeyB", "ValueB");
-        var opB = await patcherB.GenerateOperationAsync(docB.Document, x => x.DataMap, intentB, CancellationToken.None);
+        var opB = await patcherB.GenerateOperationAsync(crdtDocB, x => x.DataMap, intentB, CancellationToken.None);
         var taskB = docB.ApplyPatchAsync(new CrdtPatch(new[] { opB }), CancellationToken.None);
 
         await Task.WhenAll(taskA, taskB);
@@ -91,11 +94,14 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         await Task.Delay(1500); // Allow CRDT lock-free channel queues to naturally process the inbound payloads
 
         // Assert
-        docA.Document.Data.DataMap.ShouldContainKeyAndValue("KeyA", "ValueA");
-        docA.Document.Data.DataMap.ShouldContainKeyAndValue("KeyB", "ValueB");
+        var crdtDocAAfter = await docA.GetDocumentAsync(CancellationToken.None);
+        var crdtDocBAfter = await docB.GetDocumentAsync(CancellationToken.None);
+        
+        crdtDocAAfter.Data.DataMap.ShouldContainKeyAndValue("KeyA", "ValueA");
+        crdtDocAAfter.Data.DataMap.ShouldContainKeyAndValue("KeyB", "ValueB");
 
-        docB.Document.Data.DataMap.ShouldContainKeyAndValue("KeyA", "ValueA");
-        docB.Document.Data.DataMap.ShouldContainKeyAndValue("KeyB", "ValueB");
+        crdtDocBAfter.Data.DataMap.ShouldContainKeyAndValue("KeyA", "ValueA");
+        crdtDocBAfter.Data.DataMap.ShouldContainKeyAndValue("KeyB", "ValueB");
     }
 
     [IntegrationFact]
@@ -168,14 +174,17 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
 
         var docA = orchA.GetDocument<SharedTestState>("doc-ae")!;
         var docB = orchB.GetDocument<SharedTestState>("doc-ae")!;
+        
+        var crdtDocA = await docA.GetDocumentAsync(CancellationToken.None);
+        var crdtDocB = await docB.GetDocumentAsync(CancellationToken.None);
 
         // Modify offline
         var intentA = new MapSetIntent("OfflineKeyA", "ValueA");
-        var opA = await patcherA.GenerateOperationAsync(docA.Document, x => x.DataMap, intentA, CancellationToken.None);
+        var opA = await patcherA.GenerateOperationAsync(crdtDocA, x => x.DataMap, intentA, CancellationToken.None);
         await docA.ApplyPatchAsync(new CrdtPatch(new[] { opA }), CancellationToken.None);
 
         var intentB = new MapSetIntent("OfflineKeyB", "ValueB");
-        var opB = await patcherB.GenerateOperationAsync(docB.Document, x => x.DataMap, intentB, CancellationToken.None);
+        var opB = await patcherB.GenerateOperationAsync(crdtDocB, x => x.DataMap, intentB, CancellationToken.None);
         await docB.ApplyPatchAsync(new CrdtPatch(new[] { opB }), CancellationToken.None);
 
         await Task.Delay(500);
@@ -210,11 +219,14 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         await Task.Delay(1500); // Allow bidirectional DVV evaluation and Missing Operations transfers over direct channels
 
         // Assert - Both nodes converged explicitly handling missing boundaries correctly
-        docA.Document.Data.DataMap.ShouldContainKeyAndValue("OfflineKeyA", "ValueA");
-        docA.Document.Data.DataMap.ShouldContainKeyAndValue("OfflineKeyB", "ValueB");
+        var crdtDocAAfter = await docA.GetDocumentAsync(CancellationToken.None);
+        var crdtDocBAfter = await docB.GetDocumentAsync(CancellationToken.None);
+        
+        crdtDocAAfter.Data.DataMap.ShouldContainKeyAndValue("OfflineKeyA", "ValueA");
+        crdtDocAAfter.Data.DataMap.ShouldContainKeyAndValue("OfflineKeyB", "ValueB");
 
-        docB.Document.Data.DataMap.ShouldContainKeyAndValue("OfflineKeyA", "ValueA");
-        docB.Document.Data.DataMap.ShouldContainKeyAndValue("OfflineKeyB", "ValueB");
+        crdtDocBAfter.Data.DataMap.ShouldContainKeyAndValue("OfflineKeyA", "ValueA");
+        crdtDocBAfter.Data.DataMap.ShouldContainKeyAndValue("OfflineKeyB", "ValueB");
     }
 
     [IntegrationFact]
@@ -256,11 +268,15 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         
         docB.ShouldNotBeNull();
         docC.ShouldNotBeNull();
+        
+        var crdtDocA = await docA.GetDocumentAsync(CancellationToken.None);
+        var crdtDocB = await docB.GetDocumentAsync(CancellationToken.None);
+        var crdtDocC = await docC.GetDocumentAsync(CancellationToken.None);
 
         // Act - Concurrently patch from all three distinct replica matrices
-        var opA = await patcherA.GenerateOperationAsync(docA.Document, x => x.DataMap, new MapSetIntent("KeyA", "ValA"), CancellationToken.None);
-        var opB = await patcherB.GenerateOperationAsync(docB.Document, x => x.DataMap, new MapSetIntent("KeyB", "ValB"), CancellationToken.None);
-        var opC = await patcherC.GenerateOperationAsync(docC.Document, x => x.DataMap, new MapSetIntent("KeyC", "ValC"), CancellationToken.None);
+        var opA = await patcherA.GenerateOperationAsync(crdtDocA, x => x.DataMap, new MapSetIntent("KeyA", "ValA"), CancellationToken.None);
+        var opB = await patcherB.GenerateOperationAsync(crdtDocB, x => x.DataMap, new MapSetIntent("KeyB", "ValB"), CancellationToken.None);
+        var opC = await patcherC.GenerateOperationAsync(crdtDocC, x => x.DataMap, new MapSetIntent("KeyC", "ValC"), CancellationToken.None);
 
         var t1 = docA.ApplyPatchAsync(new CrdtPatch(new[] { opA }), CancellationToken.None);
         var t2 = docB.ApplyPatchAsync(new CrdtPatch(new[] { opB }), CancellationToken.None);
@@ -271,11 +287,15 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         await Task.Delay(2000); // Full multi-mesh synchronization traversal limits bounds explicitly
 
         // Assert - Convergence ensures identical deterministic bounds organically globally
-        foreach (var doc in new[] { docA, docB, docC })
+        var crdtDocAAfter = await docA.GetDocumentAsync(CancellationToken.None);
+        var crdtDocBAfter = await docB.GetDocumentAsync(CancellationToken.None);
+        var crdtDocCAfter = await docC.GetDocumentAsync(CancellationToken.None);
+        
+        foreach (var doc in new[] { crdtDocAAfter, crdtDocBAfter, crdtDocCAfter })
         {
-            doc.Document.Data.DataMap.ShouldContainKeyAndValue("KeyA", "ValA");
-            doc.Document.Data.DataMap.ShouldContainKeyAndValue("KeyB", "ValB");
-            doc.Document.Data.DataMap.ShouldContainKeyAndValue("KeyC", "ValC");
+            doc.Data.DataMap.ShouldContainKeyAndValue("KeyA", "ValA");
+            doc.Data.DataMap.ShouldContainKeyAndValue("KeyB", "ValB");
+            doc.Data.DataMap.ShouldContainKeyAndValue("KeyC", "ValC");
         }
     }
 

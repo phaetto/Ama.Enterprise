@@ -257,7 +257,8 @@ public sealed class ScopeTopologyProviderIntegrationTests
         for (int i = 0; i < 5; i++)
         {
             var intent = new MapSetIntent($"key{i}", $"value{i}");
-            var op = await patcher.GenerateOperationAsync(doc.Document, x => x.DataMap, intent, CancellationToken.None);
+            var crdtDoc = await doc.GetDocumentAsync(CancellationToken.None).ConfigureAwait(false);
+            var op = await patcher.GenerateOperationAsync(crdtDoc, x => x.DataMap, intent, CancellationToken.None);
             await doc.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
         }
 

@@ -211,14 +211,15 @@ public class EvictionIntegrationTests
         var docManager = orchestrator.GetDocument<TestState>("test-doc")!;
         var evictionService = scope.ServiceProvider.GetRequiredService<ICrdtEvictionService>();
         
-        var originalDoc = docManager.Document;
-        docManager.Document.Data.DataMap["Key"] = "Unsaved Offline Edit";
+        var crdtDoc = await docManager.GetDocumentAsync(CancellationToken.None);
+        crdtDoc.Data.DataMap["Key"] = "Unsaved Offline Edit";
         
         // Act
         await evictionService.RebootLocalIdentityAsync(CancellationToken.None);
         
         // Assert
-        docManager.Document.Data.DataMap["Key"].ShouldBe("Unsaved Offline Edit");
+        var crdtDocAfter = await docManager.GetDocumentAsync(CancellationToken.None);
+        crdtDocAfter.Data.DataMap["Key"].ShouldBe("Unsaved Offline Edit");
     }
 
     [IntegrationFact]
@@ -236,13 +237,14 @@ public class EvictionIntegrationTests
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var docManager = orchestrator.GetDocument<TestState>("test-doc")!;
+        var crdtDoc = await docManager.GetDocumentAsync(CancellationToken.None);
         var metadataManager = scope.ServiceProvider.GetRequiredService<ICrdtMetadataManager>();
         var serializer = scope.ServiceProvider.GetRequiredService<ICrdtSerializer>();
         var patcher = scope.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
         var applicator = scope.ServiceProvider.GetRequiredService<IAsyncCrdtApplicator>();
         
         // Local pending edit (no metadata tracking)
-        docManager.Document.Data.DataMap["Key"] = "Local Pending Edit";
+        crdtDoc.Data.DataMap["Key"] = "Local Pending Edit";
         
         var snapshotState = new TestState { Id = "test-doc" };
         var metadata = metadataManager.Initialize(snapshotState);
@@ -259,6 +261,7 @@ public class EvictionIntegrationTests
         await docManager.MergeSnapshotAsync(snapshotData, new ShardVersionVectorMap(), CancellationToken.None);
         
         // Assert
-        docManager.Document.Data.DataMap["Key"].ShouldBe("Cluster Snapshot Data");
+        var crdtDocAfter = await docManager.GetDocumentAsync(CancellationToken.None);
+        crdtDocAfter.Data.DataMap["Key"].ShouldBe("Cluster Snapshot Data");
     }
 }

@@ -272,7 +272,7 @@ public static class Program
                         if (_needsRedraw)
                         {
                             _needsRedraw = false;
-                            DrawState(orchestrator, taskManager, fleetManager);
+                            await DrawStateAsync(orchestrator, taskManager, fleetManager, cts.Token).ConfigureAwait(false);
                         }
                     }
                 }
@@ -285,7 +285,7 @@ public static class Program
             CancellationTokenSource? hammerCts = null;
 
             DrawMenu();
-            DrawState(orchestrator, taskManager, fleetManager);
+            await DrawStateAsync(orchestrator, taskManager, fleetManager, cts.Token).ConfigureAwait(false);
 
             while (!cts.Token.IsCancellationRequested)
             {
@@ -552,31 +552,43 @@ public static class Program
         }
     }
 
-    private static void DrawState(ICrdtDocumentOrchestrator orchestrator, ITaskManager taskManager, IFleetManager fleetManager)
+    private static async Task DrawStateAsync(ICrdtDocumentOrchestrator orchestrator, ITaskManager taskManager, IFleetManager fleetManager, CancellationToken cancellationToken)
     {
+        var taskDocsInfo = new List<(string Id, IReadOnlyDictionary<string, TaskItem> Tasks)>();
+        foreach (var doc in orchestrator.GetActiveDocuments().OfType<IDistributedCrdtDocument<TaskListState>>())
+        {
+            var tasks = await taskManager.GetTasksAsync(doc.DocumentId, cancellationToken).ConfigureAwait(false);
+            taskDocsInfo.Add((doc.DocumentId, tasks));
+        }
+
+        var fleetDocsInfo = new List<(string Id, IReadOnlyDictionary<string, DeviceStatus> Devices)>();
+        foreach (var doc in orchestrator.GetActiveDocuments().OfType<IDistributedCrdtDocument<FleetState>>())
+        {
+            var devices = await fleetManager.GetDevicesAsync(doc.DocumentId, cancellationToken).ConfigureAwait(false);
+            fleetDocsInfo.Add((doc.DocumentId, devices));
+        }
+
         lock (ConsoleLock)
         {
             Console.WriteLine("\n--- [Cluster Registry Synchronized] ---");
             
             Console.WriteLine(" [Tasks CRDT State]");
-            var taskDocs = orchestrator.GetActiveDocuments().OfType<IDistributedCrdtDocument<TaskListState>>().ToList();
-            if (taskDocs.Count == 0)
+            if (taskDocsInfo.Count == 0)
             {
                 Console.WriteLine("   (No task lists currently defined)");
             }
             else
             {
-                foreach (var doc in taskDocs)
+                foreach (var info in taskDocsInfo)
                 {
-                    Console.WriteLine($"   => List [{doc.DocumentId}]:");
-                    var tasks = taskManager.GetTasks(doc.DocumentId);
-                    if (tasks.Count == 0)
+                    Console.WriteLine($"   => List [{info.Id}]:");
+                    if (info.Tasks.Count == 0)
                     {
                         Console.WriteLine("      (Empty)");
                     }
                     else
                     {
-                        foreach (var task in tasks.OrderBy(t => t.Key))
+                        foreach (var task in info.Tasks.OrderBy(t => t.Key))
                         {
                             Console.WriteLine($"      [{task.Key}]: {task.Value.Description} (Done: {task.Value.IsDone})");
                         }
@@ -585,24 +597,22 @@ public static class Program
             }
 
             Console.WriteLine("\n [Fleet CRDT State]");
-            var fleetDocs = orchestrator.GetActiveDocuments().OfType<IDistributedCrdtDocument<FleetState>>().ToList();
-            if (fleetDocs.Count == 0)
+            if (fleetDocsInfo.Count == 0)
             {
                 Console.WriteLine("   (No fleets currently defined)");
             }
             else
             {
-                foreach (var doc in fleetDocs)
+                foreach (var info in fleetDocsInfo)
                 {
-                    Console.WriteLine($"   => Fleet [{doc.DocumentId}]:");
-                    var devices = fleetManager.GetDevices(doc.DocumentId);
-                    if (devices.Count == 0)
+                    Console.WriteLine($"   => Fleet [{info.Id}]:");
+                    if (info.Devices.Count == 0)
                     {
                         Console.WriteLine("      (Empty)");
                     }
                     else
                     {
-                        foreach (var device in devices.OrderBy(d => d.Key))
+                        foreach (var device in info.Devices.OrderBy(d => d.Key))
                         {
                             Console.WriteLine($"      [{device.Key}]: Online: {device.Value.IsOnline}, Battery: {device.Value.BatteryLevel}%");
                         }

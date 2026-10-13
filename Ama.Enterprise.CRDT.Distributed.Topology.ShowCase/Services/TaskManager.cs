@@ -18,7 +18,6 @@ public sealed class TaskManager : ITaskManager
 {
     private readonly ICrdtDocumentOrchestrator orchestrator;
     private readonly IAsyncCrdtPatcher patcher;
-    private readonly object syncRoot = new();
 
     public TaskManager(
         ICrdtDocumentOrchestrator orchestrator,
@@ -29,15 +28,16 @@ public sealed class TaskManager : ITaskManager
     }
 
     /// <inheritdoc />
-    public IReadOnlyDictionary<string, TaskItem> GetTasks(string documentId)
+    public async ValueTask<IReadOnlyDictionary<string, TaskItem>> GetTasksAsync(string documentId, CancellationToken cancellationToken = default)
     {
-        lock (syncRoot)
+        var docManager = orchestrator.GetDocument<TaskListState>(documentId);
+        if (docManager != null) 
         {
-            var doc = orchestrator.GetDocument<TaskListState>(documentId);
-            return doc != null 
-                ? new ReadOnlyDictionary<string, TaskItem>(doc.Document.Data.Tasks) 
-                : new ReadOnlyDictionary<string, TaskItem>(new Dictionary<string, TaskItem>());
+            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            return new ReadOnlyDictionary<string, TaskItem>(crdtDoc.Data.Tasks);
         }
+        
+        return new ReadOnlyDictionary<string, TaskItem>(new Dictionary<string, TaskItem>());
     }
 
     /// <inheritdoc />
@@ -46,14 +46,15 @@ public sealed class TaskManager : ITaskManager
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document Id cannot be null or empty.", nameof(documentId));
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or empty.", nameof(id));
 
-        var doc = orchestrator.GetDocument<TaskListState>(documentId);
-        if (doc != null)
+        var docManager = orchestrator.GetDocument<TaskListState>(documentId);
+        if (docManager != null)
         {
+            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
             var item = new TaskItem(id, description, isDone);
-            var operation = await patcher.GenerateOperationAsync(doc.Document, x => x.Tasks, new MapSetIntent(id, item), cancellationToken).ConfigureAwait(false);
+            var operation = await patcher.GenerateOperationAsync(crdtDoc, x => x.Tasks, new MapSetIntent(id, item), cancellationToken).ConfigureAwait(false);
             var patch = new CrdtPatch(new[] { operation });
 
-            await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+            await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -63,13 +64,14 @@ public sealed class TaskManager : ITaskManager
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document Id cannot be null or empty.", nameof(documentId));
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or empty.", nameof(id));
 
-        var doc = orchestrator.GetDocument<TaskListState>(documentId);
-        if (doc != null)
+        var docManager = orchestrator.GetDocument<TaskListState>(documentId);
+        if (docManager != null)
         {
-            var operation = await patcher.GenerateOperationAsync(doc.Document, x => x.Tasks, new MapRemoveIntent(id), cancellationToken).ConfigureAwait(false);
+            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            var operation = await patcher.GenerateOperationAsync(crdtDoc, x => x.Tasks, new MapRemoveIntent(id), cancellationToken).ConfigureAwait(false);
             var patch = new CrdtPatch(new[] { operation });
 
-            await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+            await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
         }
     }
 }

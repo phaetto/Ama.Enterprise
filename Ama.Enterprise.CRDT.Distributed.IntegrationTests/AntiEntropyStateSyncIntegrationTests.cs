@@ -111,12 +111,15 @@ public sealed class AntiEntropyStateSyncIntegrationTests
 
         var doc1 = orchestrator.GetDocument<SyncTestState>("sync-doc-1")!;
         var doc2 = orchestrator.GetDocument<SyncTestState>("sync-doc-2")!;
+        
+        var crdtDoc1 = await doc1.GetDocumentAsync(CancellationToken.None);
+        var crdtDoc2 = await doc2.GetDocumentAsync(CancellationToken.None);
 
         var intent1 = new MapSetIntent("testKey", "Val1");
-        var op1 = await patcher.GenerateOperationAsync(doc1.Document, x => x.DataMap, intent1, CancellationToken.None);
+        var op1 = await patcher.GenerateOperationAsync(crdtDoc1, x => x.DataMap, intent1, CancellationToken.None);
 
         var intent2 = new MapSetIntent("testKey", "Val2");
-        var op2 = await patcher.GenerateOperationAsync(doc2.Document, x => x.DataMap, intent2, CancellationToken.None);
+        var op2 = await patcher.GenerateOperationAsync(crdtDoc2, x => x.DataMap, intent2, CancellationToken.None);
 
         await doc1.ApplyPatchAsync(new CrdtPatch(new[] { op1 }), CancellationToken.None);
         await doc2.ApplyPatchAsync(new CrdtPatch(new[] { op2 }), CancellationToken.None);
@@ -263,6 +266,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         }
 
         var docManager = orchestrator.GetDocument<SyncTestState>("sync-doc-1")!;
+        var crdtDoc = await docManager.GetDocumentAsync(CancellationToken.None);
         
         // Prepare empty patch to verify it skips
         var patch = new CrdtPatch(Array.Empty<CrdtOperation>());
@@ -271,7 +275,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         await docManager.ApplyPatchAsync(patch, CancellationToken.None);
 
         var intent = new MapSetIntent("Field", "test");
-        var op1 = await patcher.GenerateOperationAsync(docManager.Document, x => x.DataMap, intent, CancellationToken.None);
+        var op1 = await patcher.GenerateOperationAsync(crdtDoc, x => x.DataMap, intent, CancellationToken.None);
         var populatedPatch = new CrdtPatch(new[] { op1 });
 
         await docManager.ApplyPatchAsync(populatedPatch, CancellationToken.None);

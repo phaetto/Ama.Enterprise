@@ -19,7 +19,6 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager
 {
     private readonly ICrdtDocumentOrchestrator orchestrator;
     private readonly IAsyncCrdtPatcher patcher;
-    private readonly object syncRoot = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CrdtSignalingManager"/> class.
@@ -35,29 +34,31 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager
     }
 
     /// <inheritdoc />
-    public IReadOnlyDictionary<string, long> GetJoinIntents(string? documentId = null)
+    public async ValueTask<IReadOnlyDictionary<string, long>> GetJoinIntentsAsync(string? documentId = null, CancellationToken cancellationToken = default)
     {
-        lock (syncRoot)
+        var docManager = orchestrator.GetDocument<CrdtSignalingState>(ResolveDocumentId(documentId));
+        if (docManager != null)
         {
-            var doc = orchestrator.GetDocument<CrdtSignalingState>(ResolveDocumentId(documentId));
-            return doc != null 
-                ? new ReadOnlyDictionary<string, long>(doc.Document.Data.JoinIntents) 
-                : new ReadOnlyDictionary<string, long>(new Dictionary<string, long>());
+            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            return new ReadOnlyDictionary<string, long>(crdtDoc.Data.JoinIntents);
         }
+        
+        return new ReadOnlyDictionary<string, long>(new Dictionary<string, long>());
     }
 
     /// <inheritdoc />
     public async Task SetJoinIntentAsync(Guid peerId, string? documentId = null, CancellationToken cancellationToken = default)
     {
         var docId = ResolveDocumentId(documentId);
-        var doc = await GetOrCreateDocumentAsync(docId, cancellationToken).ConfigureAwait(false);
-        if (doc != null)
+        var docManager = await GetOrCreateDocumentAsync(docId, cancellationToken).ConfigureAwait(false);
+        if (docManager != null)
         {
+            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
             var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            var operation = await patcher.GenerateOperationAsync(doc.Document, x => x.JoinIntents, new MapSetIntent(peerId.ToString(), timestamp), cancellationToken).ConfigureAwait(false);
+            var operation = await patcher.GenerateOperationAsync(crdtDoc, x => x.JoinIntents, new MapSetIntent(peerId.ToString(), timestamp), cancellationToken).ConfigureAwait(false);
             var patch = new CrdtPatch(new[] { operation });
 
-            await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+            await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -65,38 +66,41 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager
     public async Task RemoveJoinIntentAsync(Guid peerId, string? documentId = null, CancellationToken cancellationToken = default)
     {
         var docId = ResolveDocumentId(documentId);
-        var doc = orchestrator.GetDocument<CrdtSignalingState>(docId);
-        if (doc != null)
+        var docManager = orchestrator.GetDocument<CrdtSignalingState>(docId);
+        if (docManager != null)
         {
-            var operation = await patcher.GenerateOperationAsync(doc.Document, x => x.JoinIntents, new MapRemoveIntent(peerId.ToString()), cancellationToken).ConfigureAwait(false);
+            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            var operation = await patcher.GenerateOperationAsync(crdtDoc, x => x.JoinIntents, new MapRemoveIntent(peerId.ToString()), cancellationToken).ConfigureAwait(false);
             var patch = new CrdtPatch(new[] { operation });
 
-            await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+            await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
         }
     }
 
     /// <inheritdoc />
-    public IReadOnlyDictionary<string, WebRtcInvitationOffer> GetOffers(string? documentId = null)
+    public async ValueTask<IReadOnlyDictionary<string, WebRtcInvitationOffer>> GetOffersAsync(string? documentId = null, CancellationToken cancellationToken = default)
     {
-        lock (syncRoot)
+        var docManager = orchestrator.GetDocument<CrdtSignalingState>(ResolveDocumentId(documentId));
+        if (docManager != null)
         {
-            var doc = orchestrator.GetDocument<CrdtSignalingState>(ResolveDocumentId(documentId));
-            return doc != null 
-                ? new ReadOnlyDictionary<string, WebRtcInvitationOffer>(doc.Document.Data.Offers) 
-                : new ReadOnlyDictionary<string, WebRtcInvitationOffer>(new Dictionary<string, WebRtcInvitationOffer>());
+            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            return new ReadOnlyDictionary<string, WebRtcInvitationOffer>(crdtDoc.Data.Offers);
         }
+        
+        return new ReadOnlyDictionary<string, WebRtcInvitationOffer>(new Dictionary<string, WebRtcInvitationOffer>());
     }
 
     /// <inheritdoc />
-    public IReadOnlyDictionary<string, WebRtcInvitationAnswer> GetAnswers(string? documentId = null)
+    public async ValueTask<IReadOnlyDictionary<string, WebRtcInvitationAnswer>> GetAnswersAsync(string? documentId = null, CancellationToken cancellationToken = default)
     {
-        lock (syncRoot)
+        var docManager = orchestrator.GetDocument<CrdtSignalingState>(ResolveDocumentId(documentId));
+        if (docManager != null)
         {
-            var doc = orchestrator.GetDocument<CrdtSignalingState>(ResolveDocumentId(documentId));
-            return doc != null 
-                ? new ReadOnlyDictionary<string, WebRtcInvitationAnswer>(doc.Document.Data.Answers) 
-                : new ReadOnlyDictionary<string, WebRtcInvitationAnswer>(new Dictionary<string, WebRtcInvitationAnswer>());
+            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            return new ReadOnlyDictionary<string, WebRtcInvitationAnswer>(crdtDoc.Data.Answers);
         }
+        
+        return new ReadOnlyDictionary<string, WebRtcInvitationAnswer>(new Dictionary<string, WebRtcInvitationAnswer>());
     }
 
     /// <inheritdoc />
@@ -105,13 +109,14 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager
         ArgumentException.ThrowIfNullOrWhiteSpace(routingKey);
         
         var docId = ResolveDocumentId(documentId);
-        var doc = await GetOrCreateDocumentAsync(docId, cancellationToken).ConfigureAwait(false);
-        if (doc != null)
+        var docManager = await GetOrCreateDocumentAsync(docId, cancellationToken).ConfigureAwait(false);
+        if (docManager != null)
         {
-            var operation = await patcher.GenerateOperationAsync(doc.Document, x => x.Offers, new MapSetIntent(routingKey, offer), cancellationToken).ConfigureAwait(false);
+            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            var operation = await patcher.GenerateOperationAsync(crdtDoc, x => x.Offers, new MapSetIntent(routingKey, offer), cancellationToken).ConfigureAwait(false);
             var patch = new CrdtPatch(new[] { operation });
 
-            await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+            await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -121,13 +126,14 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager
         ArgumentException.ThrowIfNullOrWhiteSpace(routingKey);
         
         var docId = ResolveDocumentId(documentId);
-        var doc = orchestrator.GetDocument<CrdtSignalingState>(docId);
-        if (doc != null)
+        var docManager = orchestrator.GetDocument<CrdtSignalingState>(docId);
+        if (docManager != null)
         {
-            var operation = await patcher.GenerateOperationAsync(doc.Document, x => x.Offers, new MapRemoveIntent(routingKey), cancellationToken).ConfigureAwait(false);
+            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            var operation = await patcher.GenerateOperationAsync(crdtDoc, x => x.Offers, new MapRemoveIntent(routingKey), cancellationToken).ConfigureAwait(false);
             var patch = new CrdtPatch(new[] { operation });
 
-            await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+            await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -137,13 +143,14 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager
         ArgumentException.ThrowIfNullOrWhiteSpace(routingKey);
 
         var docId = ResolveDocumentId(documentId);
-        var doc = await GetOrCreateDocumentAsync(docId, cancellationToken).ConfigureAwait(false);
-        if (doc != null)
+        var docManager = await GetOrCreateDocumentAsync(docId, cancellationToken).ConfigureAwait(false);
+        if (docManager != null)
         {
-            var operation = await patcher.GenerateOperationAsync(doc.Document, x => x.Answers, new MapSetIntent(routingKey, answer), cancellationToken).ConfigureAwait(false);
+            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            var operation = await patcher.GenerateOperationAsync(crdtDoc, x => x.Answers, new MapSetIntent(routingKey, answer), cancellationToken).ConfigureAwait(false);
             var patch = new CrdtPatch(new[] { operation });
 
-            await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+            await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -153,13 +160,14 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager
         ArgumentException.ThrowIfNullOrWhiteSpace(routingKey);
 
         var docId = ResolveDocumentId(documentId);
-        var doc = orchestrator.GetDocument<CrdtSignalingState>(docId);
-        if (doc != null)
+        var docManager = orchestrator.GetDocument<CrdtSignalingState>(docId);
+        if (docManager != null)
         {
-            var operation = await patcher.GenerateOperationAsync(doc.Document, x => x.Answers, new MapRemoveIntent(routingKey), cancellationToken).ConfigureAwait(false);
+            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            var operation = await patcher.GenerateOperationAsync(crdtDoc, x => x.Answers, new MapRemoveIntent(routingKey), cancellationToken).ConfigureAwait(false);
             var patch = new CrdtPatch(new[] { operation });
 
-            await doc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+            await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
         }
     }
 

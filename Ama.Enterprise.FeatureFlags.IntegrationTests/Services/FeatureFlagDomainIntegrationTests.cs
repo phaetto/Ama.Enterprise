@@ -46,7 +46,7 @@ public sealed class FeatureFlagDomainIntegrationTests
         await StartAllHostedServicesAsync(provider);
 
         // Assert
-        var flags = manager.GetFlags();
+        var flags = await manager.GetFlagsAsync(CancellationToken.None);
         flags.ShouldNotBeNull();
         flags.ShouldBeEmpty();
     }
@@ -69,7 +69,8 @@ public sealed class FeatureFlagDomainIntegrationTests
         await observer.WaitForStateChangeAsync(() => 
             manager.SetFlagAsync("BetaFeature", true, "Admin", initialMetadata, initialOwnership, CancellationToken.None));
 
-        var initialFlag = manager.GetFlags()["BetaFeature"];
+        var initialFlags = await manager.GetFlagsAsync(CancellationToken.None);
+        var initialFlag = initialFlags["BetaFeature"];
         
         // Wait slightly to ensure DateTimeOffset ticks advance naturally for the audit trail assertion
         await Task.Delay(10);
@@ -79,7 +80,8 @@ public sealed class FeatureFlagDomainIntegrationTests
             manager.SetFlagAsync("BetaFeature", false, "SystemAuto", metadata: null, ownership: null, CancellationToken.None));
 
         // Assert
-        var updatedFlag = manager.GetFlags()["BetaFeature"];
+        var updatedFlags = await manager.GetFlagsAsync(CancellationToken.None);
+        var updatedFlag = updatedFlags["BetaFeature"];
 
         updatedFlag.IsEnabled.ShouldBeFalse();
         updatedFlag.Audit.LastModifiedBy.ShouldBe("SystemAuto");
@@ -105,14 +107,16 @@ public sealed class FeatureFlagDomainIntegrationTests
         await observer.WaitForStateChangeAsync(() => 
             manager.SetFlagAsync("ObsoleteFeature", true, "Admin", null, null, CancellationToken.None));
 
-        manager.GetFlags().ShouldContainKey("ObsoleteFeature");
+        var flagsBefore = await manager.GetFlagsAsync(CancellationToken.None);
+        flagsBefore.ShouldContainKey("ObsoleteFeature");
 
         // Act
         await observer.WaitForStateChangeAsync(() => 
             manager.RemoveFlagAsync("ObsoleteFeature", CancellationToken.None));
 
         // Assert
-        manager.GetFlags().ShouldNotContainKey("ObsoleteFeature");
+        var flagsAfter = await manager.GetFlagsAsync(CancellationToken.None);
+        flagsAfter.ShouldNotContainKey("ObsoleteFeature");
     }
 
     [IntegrationFact]

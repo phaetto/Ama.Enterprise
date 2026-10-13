@@ -11,9 +11,10 @@ using Ama.Enterprise.FeatureFlags.Models;
 public interface IFeatureFlagClusterManager
 {
     /// <summary>
-    /// Gets the current read-only map of feature flags.
+    /// Gets the current read-only map of feature flags asynchronously.
     /// </summary>
-    IReadOnlyDictionary<string, FeatureFlag> GetFlags();
+    /// <param name="cancellationToken">The cancellation token.</param>
+    ValueTask<IReadOnlyDictionary<string, FeatureFlag>> GetFlagsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Upserts a feature flag.

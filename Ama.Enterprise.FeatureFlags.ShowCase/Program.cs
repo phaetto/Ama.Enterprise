@@ -171,7 +171,7 @@ public static class Program
                     if (needsRedraw)
                     {
                         needsRedraw = false;
-                        var flags = clusterManager.GetFlags();
+                        var flags = await clusterManager.GetFlagsAsync(cts.Token).ConfigureAwait(false);
                         DrawFlags(flags);
                     }
                 }
@@ -195,7 +195,7 @@ public static class Program
             DrawMenu();
 
             // Initial UI draw
-            var initialFlags = clusterManager.GetFlags();
+            var initialFlags = await clusterManager.GetFlagsAsync(cts.Token).ConfigureAwait(false);
             DrawFlags(initialFlags);
 
             // Interactive Console Loop
@@ -237,7 +237,7 @@ public static class Program
                             break;
 
                         case "list":
-                            var currentFlags = clusterManager.GetFlags();
+                            var currentFlags = await clusterManager.GetFlagsAsync(cts.Token).ConfigureAwait(false);
                             DrawFlags(currentFlags);
                             break;
 

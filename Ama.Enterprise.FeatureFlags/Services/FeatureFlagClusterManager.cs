@@ -28,13 +28,14 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
     }
 
     /// <inheritdoc />
-    public IReadOnlyDictionary<string, FeatureFlag> GetFlags()
+    public async ValueTask<IReadOnlyDictionary<string, FeatureFlag>> GetFlagsAsync(CancellationToken cancellationToken = default)
     {
         var docManager = orchestrator.GetDocument<FeatureFlagState>(Constants.GlobalDocumentId);
         
         if (docManager != null)
         {
-            return new ReadOnlyDictionary<string, FeatureFlag>(docManager.Document.Data.Flags);
+            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            return new ReadOnlyDictionary<string, FeatureFlag>(crdtDoc.Data.Flags);
         }
 
         return new ReadOnlyDictionary<string, FeatureFlag>(new Dictionary<string, FeatureFlag>());
@@ -55,10 +56,11 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
         }
 
         var docManager = GetRequiredDocument();
+        var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
         var now = DateTimeOffset.UtcNow;
 
         // Preserve existing metadata, ownership, and creation date if they are not explicitly updated during an upsert
-        var hasExisting = docManager.Document.Data.Flags.TryGetValue(name, out var existingFlag);
+        var hasExisting = crdtDoc.Data.Flags.TryGetValue(name, out var existingFlag);
         var createdAt = hasExisting ? existingFlag.Audit.CreatedAt : now;
 
         var audit = new FeatureFlagAudit
@@ -80,7 +82,7 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
             Ownership = actualOwnership!
         };
         
-        var operation = await patcher.GenerateOperationAsync(docManager.Document, x => x.Flags, new MapSetIntent(name, flag), cancellationToken).ConfigureAwait(false);
+        var operation = await patcher.GenerateOperationAsync(crdtDoc, x => x.Flags, new MapSetIntent(name, flag), cancellationToken).ConfigureAwait(false);
         var patch = new CrdtPatch(new[] { operation });
 
         await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
@@ -95,7 +97,8 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
         }
 
         var docManager = GetRequiredDocument();
-        var operation = await patcher.GenerateOperationAsync(docManager.Document, x => x.Flags, new MapRemoveIntent(name), cancellationToken).ConfigureAwait(false);
+        var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+        var operation = await patcher.GenerateOperationAsync(crdtDoc, x => x.Flags, new MapRemoveIntent(name), cancellationToken).ConfigureAwait(false);
         var patch = new CrdtPatch(new[] { operation });
 
         await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);

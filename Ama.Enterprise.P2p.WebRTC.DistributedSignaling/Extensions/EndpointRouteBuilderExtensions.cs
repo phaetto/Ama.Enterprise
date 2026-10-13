@@ -48,7 +48,7 @@ public static class EndpointRouteBuilderExtensions
             var manager = scope.ServiceProvider.GetRequiredService<ICrdtSignalingManager>();
             var serializer = context.RequestServices.GetRequiredService<ICrdtSerializer>();
             
-            var intents = manager.GetJoinIntents(documentId);
+            var intents = await manager.GetJoinIntentsAsync(documentId, context.RequestAborted).ConfigureAwait(false);
             var payload = serializer.SerializeToBytes(intents);
 
             context.Response.ContentType = "application/octet-stream";
@@ -111,7 +111,7 @@ public static class EndpointRouteBuilderExtensions
             var manager = scope.ServiceProvider.GetRequiredService<ICrdtSignalingManager>();
             var serializer = context.RequestServices.GetRequiredService<ICrdtSerializer>();
             
-            var offers = manager.GetOffers(documentId);
+            var offers = await manager.GetOffersAsync(documentId, context.RequestAborted).ConfigureAwait(false);
             var payload = serializer.SerializeToBytes(offers);
 
             context.Response.ContentType = "application/octet-stream";
@@ -192,7 +192,7 @@ public static class EndpointRouteBuilderExtensions
             var manager = scope.ServiceProvider.GetRequiredService<ICrdtSignalingManager>();
             var serializer = context.RequestServices.GetRequiredService<ICrdtSerializer>();
             
-            var answers = manager.GetAnswers(documentId);
+            var answers = await manager.GetAnswersAsync(documentId, context.RequestAborted).ConfigureAwait(false);
             var payload = serializer.SerializeToBytes(answers);
 
             context.Response.ContentType = "application/octet-stream";

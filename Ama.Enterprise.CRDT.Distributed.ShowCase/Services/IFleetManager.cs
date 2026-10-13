@@ -13,7 +13,9 @@ public interface IFleetManager
     /// <summary>
     /// Retrieves the read-only dictionary of active devices for the specified document.
     /// </summary>
-    IReadOnlyDictionary<string, DeviceStatus> GetDevices(string documentId);
+    /// <param name="documentId">The target document ID.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    ValueTask<IReadOnlyDictionary<string, DeviceStatus>> GetDevicesAsync(string documentId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Adds or updates a device in the fleet state.

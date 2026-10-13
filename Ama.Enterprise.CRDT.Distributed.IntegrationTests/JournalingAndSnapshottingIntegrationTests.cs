@@ -174,9 +174,10 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var docManager = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
+        var crdtDoc = await docManager.GetDocumentAsync(CancellationToken.None);
         
         var intent = new MapSetIntent("testKey", "DirtyData");
-        var op = await patcher.GenerateOperationAsync(docManager.Document, x => x.DataMap, intent, CancellationToken.None);
+        var op = await patcher.GenerateOperationAsync(crdtDoc, x => x.DataMap, intent, CancellationToken.None);
         await docManager.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
 
         var checkpointService = sp.GetServices<IHostedService>().OfType<CrdtCheckpointService>().First();
@@ -282,7 +283,8 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await handler.HandlePayloadAsync(gossipMsg.MeshId, gossipMsg.SenderId, gossipMsg.Payload, CancellationToken.None);
 
         // Assert
-        docManager.Document.Data.DataMap.ShouldContainKeyAndValue("Field", "SnapshotData");
+        var crdtDoc = await docManager.GetDocumentAsync(CancellationToken.None);
+        crdtDoc.Data.DataMap.ShouldContainKeyAndValue("Field", "SnapshotData");
         context.ShardVersionVectors["journal-doc"].Versions["RemoteA"].ShouldBe(10);
     }
 
@@ -329,9 +331,10 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var docA = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
+        var crdtDocA = await docA.GetDocumentAsync(CancellationToken.None);
 
         var intent = new MapSetIntent("testKey", "Updated");
-        var op = await patcher.GenerateOperationAsync(docA.Document, x => x.DataMap, intent, CancellationToken.None);
+        var op = await patcher.GenerateOperationAsync(crdtDocA, x => x.DataMap, intent, CancellationToken.None);
         await docA.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
 
         var remoteDvv = new DottedVersionVector();
@@ -368,9 +371,10 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var docA = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
+        var crdtDocA = await docA.GetDocumentAsync(CancellationToken.None);
 
         var intent = new MapSetIntent("testKey", "Updated");
-        var op = await patcher.GenerateOperationAsync(docA.Document, x => x.DataMap, intent, CancellationToken.None);
+        var op = await patcher.GenerateOperationAsync(crdtDocA, x => x.DataMap, intent, CancellationToken.None);
         await docA.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
 
         var gmvv = new Dictionary<string, long> { { "ReplicaA", 10 } }; 
@@ -414,9 +418,10 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var docA = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
+        var crdtDocA = await docA.GetDocumentAsync(CancellationToken.None);
 
         var localIntent = new MapSetIntent("LocalKey", "LocalValue");
-        var localOp = await patcher.GenerateOperationAsync(docA.Document, x => x.DataMap, localIntent, CancellationToken.None);
+        var localOp = await patcher.GenerateOperationAsync(crdtDocA, x => x.DataMap, localIntent, CancellationToken.None);
         await docA.ApplyPatchAsync(new CrdtPatch(new[] { localOp }), CancellationToken.None);
 
         var remoteState = new JournalTestState { Id = "journal-doc" };
@@ -445,8 +450,9 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         patchObserverMock.Verify(x => x.OnPatchGeneratedAsync(It.IsAny<string>(), It.IsAny<CrdtPatch>(), It.IsAny<CancellationToken>()), Times.Never);
 
         // Both keys should exist as a true state merge unions divergent mapped states logically
-        docA.Document.Data.DataMap.ShouldContainKeyAndValue("LocalKey", "LocalValue");
-        docA.Document.Data.DataMap.ShouldContainKeyAndValue("RemoteKey", "RemoteValue");
+        var crdtDocAAfter = await docA.GetDocumentAsync(CancellationToken.None);
+        crdtDocAAfter.Data.DataMap.ShouldContainKeyAndValue("LocalKey", "LocalValue");
+        crdtDocAAfter.Data.DataMap.ShouldContainKeyAndValue("RemoteKey", "RemoteValue");
         
         var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
         replicaContext.ShardVersionVectors["journal-doc"].Versions["ReplicaB"].ShouldBe(15);
@@ -473,12 +479,13 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await orchestrator1.SyncDocumentsAsync(CancellationToken.None);
 
         var doc1 = orchestrator1.GetDocument<JournalTestState>("test-replayed-doc")!;
+        var crdtDoc1 = await doc1.GetDocumentAsync(CancellationToken.None);
         
         var intent1 = new MapSetIntent("key1", "ReplayedData1");
-        var op1 = await patcher1.GenerateOperationAsync(doc1.Document, x => x.DataMap, intent1, CancellationToken.None);
+        var op1 = await patcher1.GenerateOperationAsync(crdtDoc1, x => x.DataMap, intent1, CancellationToken.None);
 
         var intent2 = new MapSetIntent("key2", "ReplayedData2");
-        var op2 = await patcher1.GenerateOperationAsync(doc1.Document, x => x.DataMap, intent2, CancellationToken.None);
+        var op2 = await patcher1.GenerateOperationAsync(crdtDoc1, x => x.DataMap, intent2, CancellationToken.None);
 
         await doc1.ApplyPatchAsync(new CrdtPatch(new[] { op1, op2 }), CancellationToken.None);
 
@@ -503,8 +510,9 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         doc2.ShouldNotBeNull();
         doc2!.DocumentId.ShouldBe("test-replayed-doc");
-        doc2.Document.Data.DataMap.ShouldContainKeyAndValue("key1", "ReplayedData1");
-        doc2.Document.Data.DataMap.ShouldContainKeyAndValue("key2", "ReplayedData2");
+        var crdtDoc2 = await doc2.GetDocumentAsync(CancellationToken.None);
+        crdtDoc2.Data.DataMap.ShouldContainKeyAndValue("key1", "ReplayedData1");
+        crdtDoc2.Data.DataMap.ShouldContainKeyAndValue("key2", "ReplayedData2");
     }
 
     [IntegrationFact]
@@ -533,12 +541,16 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var doc = orchestrator.GetDocument<JournalTestState>("trim-test-doc")!;
+        var crdtDoc = await doc.GetDocumentAsync(CancellationToken.None);
 
         for (int i = 0; i < 10; i++)
         {
             var intent = new MapSetIntent($"key{i}", $"value{i}");
-            var op = await patcher.GenerateOperationAsync(doc.Document, x => x.DataMap, intent, CancellationToken.None);
+            var op = await patcher.GenerateOperationAsync(crdtDoc, x => x.DataMap, intent, CancellationToken.None);
             await doc.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
+            
+            // Refetch document natively after patching to ensure valid mapped bounds on upcoming mutations
+            crdtDoc = await doc.GetDocumentAsync(CancellationToken.None);
         }
 
         var initialJournalOps = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();

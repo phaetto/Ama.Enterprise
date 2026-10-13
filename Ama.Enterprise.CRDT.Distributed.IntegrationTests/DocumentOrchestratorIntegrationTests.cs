@@ -150,7 +150,7 @@ public sealed class DocumentOrchestratorIntegrationTests
         var deletedDoc = orchestrator.GetDocument<DynamicTestState>("doc-to-delete");
         deletedDoc.ShouldBeNull();
         
-        var registryDocs = orchestrator.Registry.Document.Data.Documents;
+        var registryDocs = (await orchestrator.Registry.GetDocumentAsync()).Data!.Documents;
         registryDocs.TryGetValue("doc-to-delete", out var entry).ShouldBeTrue();
         entry.IsDeleted.ShouldBeTrue();
 

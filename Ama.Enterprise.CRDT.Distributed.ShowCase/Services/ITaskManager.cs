@@ -13,7 +13,9 @@ public interface ITaskManager
     /// <summary>
     /// Retrieves the read-only dictionary of active tasks for the specified document.
     /// </summary>
-    IReadOnlyDictionary<string, TaskItem> GetTasks(string documentId);
+    /// <param name="documentId">The target document ID.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    ValueTask<IReadOnlyDictionary<string, TaskItem>> GetTasksAsync(string documentId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Adds or updates a task in the list.

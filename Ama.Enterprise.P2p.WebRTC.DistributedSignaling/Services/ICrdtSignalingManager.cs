@@ -15,8 +15,9 @@ public interface ICrdtSignalingManager
     /// Retrieves the current map of active node Join Intents signifying presence inside the topology bounds.
     /// </summary>
     /// <param name="documentId">The target document ID.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A read-only dictionary mapped by Peer IDs.</returns>
-    IReadOnlyDictionary<string, long> GetJoinIntents(string? documentId = null);
+    ValueTask<IReadOnlyDictionary<string, long>> GetJoinIntentsAsync(string? documentId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Pushes a new presence join intent directly asserting the Peer's status inside the topology bounds.
@@ -40,15 +41,17 @@ public interface ICrdtSignalingManager
     /// Retrieves the current map of available WebRTC SDP offers.
     /// </summary>
     /// <param name="documentId">The target document ID (defaulting to the global signaling hub if null/empty).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A read-only dictionary of mapped offers.</returns>
-    IReadOnlyDictionary<string, WebRtcInvitationOffer> GetOffers(string? documentId = null);
+    ValueTask<IReadOnlyDictionary<string, WebRtcInvitationOffer>> GetOffersAsync(string? documentId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Retrieves the current map of available WebRTC SDP answers.
     /// </summary>
     /// <param name="documentId">The target document ID (defaulting to the global signaling hub if null/empty).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A read-only dictionary of mapped answers.</returns>
-    IReadOnlyDictionary<string, WebRtcInvitationAnswer> GetAnswers(string? documentId = null);
+    ValueTask<IReadOnlyDictionary<string, WebRtcInvitationAnswer>> GetAnswersAsync(string? documentId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Pushes a new targeted WebRTC SDP offer into the distributed CRDT mesh aggressively.
