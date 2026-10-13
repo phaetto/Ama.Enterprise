@@ -443,7 +443,7 @@
 | `$/Images/SetFF_P0V3_Run_Pipelining_Msgpack_Encrypt_Http_01.png` | No description provided. |
 | `$/Images/SetFF_P0V3_Run_Pipelining_Msgpack_Encrypt_Http_02.png` | No description provided. |
 | `$/LICENSE` | Dual-license agreement detailing the revenue-capped Community and Enterprise honor-based terms, updated to enforce strictly constrained GPLv3 or standard license bounds for forks and derivative works. |
-| `$/README.md` | Primary introduction documentation explaining the core architecture, capabilities, getting started guide, and repository structure for the decentralized P2P toolkit. |
+| `$/README.md` | Primary introduction documentation explaining the core architecture, capabilities, getting started guide, and repository structure for the decentralized P2P toolkit. Language simplified for easier reading. |
 | `$/apps-todo.txt` | No description provided. |
 | `$/global.json` | No description provided. |
 | `$/p2p-mesh-architectures.md` | No description provided. |

@@ -1,29 +1,30 @@
 # Ama.Enterprise
 
-A .NET 10 enterprise-grade toolkit for building decentralized, masterless Peer-to-Peer (P2P) distributed systems. It combines robust networking meshes with Conflict-free Replicated Data Types (CRDTs) to guarantee high availability, fault tolerance, and eventual consistency across nodes without requiring centralized databases or brokers.
+A .NET 10 enterprise-grade toolkit for building decentralized, masterless Peer-to-Peer (P2P) distributed systems. It combines networking meshes with Conflict-free Replicated Data Types (CRDTs) to keep data highly available and eventually consistent across nodes without needing centralized databases or brokers.
 
 ## Features
 
-- **Native AOT Ready**: Designed from the ground up for Native AOT. Zero runtime reflection, utilizing strict source-generated `System.Text.Json` contexts and MessagePack polymorphic resolvers for high-performance serialization.
-- **Masterless P2P Mesh Networking**: Form decentralized clusters dynamically. Nodes automatically discover peers, negotiate connections, and replicate states via highly optimized Gossip and Anti-Entropy protocols.
-- **Transport Agnostic**: Out-of-the-box support for multiple network transports and topologies:
-  - **TCP & UDP**: Low-level stream and datagram routing.
-  - **QUIC**: High-performance natively multiplexed and encrypted TLS 1.3 streams.
-  - **ASP.NET Core (Kestrel)**: Bind P2P meshes directly into existing web host pipelines natively.
-  - **WebRTC**: Out-of-band signaling and data channels for direct browser-to-server or NAT-traversing node communication (includes Secure WebSockets/WSS support).
-  - **MQTT**: Decoupled multi-mesh architectures using standard IoT brokers for discovery and transport.
-- **Enterprise Security & Zero-Trust**: Implement End-to-End (E2E) AES-GCM data-in-transit wire encryption. Secure node connections using strict X.509 Certificate authentication (with offline/air-gapped revocation support) or dynamic Zero-Trust session token routing policies.
-- **High-Performance Architecture**: Lock-free single-reader object pooled channels (`IValueTaskSource`), dynamic journal backpressure limits, and anti-entropy network jitter algorithms to prevent "thundering herd" broadcast storms.
-- **Pluggable Peer Discovery**: Locate peers dynamically using UDP Multicast, DNS A records (with possible extension to SRV), or active HTTP polling depending on your infrastructure constraints.
-- **Distributed CRDT Orchestrator**: Manage the lifecycles of hundreds of distributed CRDT documents dynamically. Create, sync, and tombstone documents across the mesh automatically with built-in snapshotting and journal truncation.
-- **Storage Backends**: Persist distributed states safely using ephemeral Memory, scalable Azure Table Storage (with unified bounds tracking), or easily connect your own backend (`Ama.Enterprise.CRDT.Distributed.ShowCase` has its own implementation of AOT SQLite).
-- **Built-in Telemetry**: Natively integrated with `System.Diagnostics.Metrics`. It includes a P2P metric aggregator utilizing magic-byte binary slicing that pushes time-series hardware and mesh statistics across isolated nodes dynamically.
+- Native AOT Ready: Built for Native AOT. Uses source-generated `System.Text.Json` contexts and MessagePack polymorphic resolvers for high-performance serialization without runtime reflection.
+- Masterless P2P Mesh Networking: Nodes form clusters dynamically. They find peers, connect, and sync data automatically using Gossip and Anti-Entropy protocols.
+- Transport Agnostic: Supports multiple network transports and topologies out of the box:
+  - TCP & UDP: Standard stream and datagram routing.
+  - QUIC: Fast, encrypted TLS 1.3 streams.
+  - ASP.NET Core (Kestrel): Integrate P2P meshes directly into existing web applications.
+  - WebRTC: Direct browser-to-server or node-to-node communication across firewalls (includes Secure WebSockets/WSS support).
+  - MQTT: Connect multiple distinct network meshes using standard IoT brokers.
+- Enterprise Security & Zero-Trust: Encrypt data in transit using AES-GCM. Authenticate node connections via strict X.509 Certificates (with offline support) or dynamic Zero-Trust session token routing policies.
+- High-Performance Architecture: Uses object pools, lock-free channels, dynamic journal limits, and network jitter controls to handle high traffic and prevent broadcast storms.
+- Pluggable Peer Discovery: Find other nodes using UDP Multicast, DNS A/SRV records, or active HTTP polling depending on your infrastructure.
+- Distributed CRDT Orchestrator: Manage the lifecycles of distributed data documents. The system creates, syncs, and removes documents across the mesh automatically, and handles snapshots and log truncation.
+- Sharding: Built-in consistent hash sharding to distribute data and scale CRDT documents on nodes across the network.
+- Storage Backends: Save data using memory, Azure Table Storage, or custom databases (like the included AOT SQLite implementation).
+- Built-in Telemetry: Integrates with `System.Diagnostics.Metrics`. It includes a P2P metric aggregator that shares hardware and network stats across nodes using fast binary data slicing.
 
 ## State of the repo
 
-The repo is still in preview and I am woirking to reach 0.1 version. Until the version reaches 1.0 there will be frequent updates, fixes, but also _refactorings_ and that might break some things.
+The repo is still in preview and I am working to reach the 0.1 version. Until the version reaches 1.0 there will be frequent updates, fixes, but also _refactorings_ that might introduce breaking changes.
 
-The code is running on some PROD systems and is very stable. The main work now is to wrap up protocols, algorithms and tooling which I want to be plentiful out-of-the-box.
+The code is running on some PROD systems and is very stable. The main work now is to wrap up protocols, algorithms, and tooling to provide more features out-of-the-box.
 
 ## Quickstart
 
@@ -31,36 +32,36 @@ Check the [samples repo here](https://github.com/phaetto/Ama.Enterprise.Samples)
 
 ## Architecture Overview
 
-The architecture of `Ama.Enterprise` is strictly layered to provide a clean separation of concerns, ensuring that high-level business logic remains decoupled from the complexities of decentralized network routing and state synchronization.
+The architecture of `Ama.Enterprise` is divided into strict layers to separate concerns. This keeps your business logic isolated from the complex details of network routing and data synchronization.
 
 ### High-Level Ecosystem & Layering
 
 ![End Products Overview](./Images/Enterprise%20CRDTs%20-%20End%20Products%20Overview.png)
 
-At the macro level, the ecosystem is built upon three foundational pillars:
-1. **The P2P Mesh Layer**: The lowest level handling raw byte distribution, node discovery, transport streams, and cryptographic boundaries.
-2. **The CRDT Distributed Layer**: The orchestration engine sitting on top of the mesh. It abstracts the network away entirely, treating the mesh as a medium to synchronize local replica storage mathematical structures via Version Vectors.
-3. **The End Products & Applications**: The top-level domain. Applications like the Feature Flags module, the P2P Telemetry CLI, or your own custom services consume the CRDT layer. They simply read and mutate standard .NET objects, and the underlying layers guarantee that those mutations are eventually consistent across the entire global cluster.
+The ecosystem is built on three main layers:
+1. The P2P Mesh Layer: The lowest level. It handles sending bytes, finding nodes, managing network streams, and enforcing encryption.
+2. The CRDT Distributed Layer: Sits on top of the mesh. It ignores the network details and focuses on syncing local data changes using Version Vectors.
+3. The End Products & Applications: The top level. Your applications (like the Feature Flags module or custom services) use the CRDT layer. You just read and change standard .NET objects, and the lower layers ensure these changes reach all other nodes.
 
 ### The P2P Mesh Networking Layer
 
 ![P2P Architecture](./Images/Enterprise%20CRDTs%20-%20P2P.png)
 
-The Peer-to-Peer layer (`Ama.Enterprise.P2p.*`) is designed to be completely masterless and highly adaptable to different infrastructure environments.
-- **Discovery**: Nodes bootstrap into the network dynamically. Depending on the environment, they can discover each other via UDP Multicast (for local networks), DNS resolution (for Kubernetes/Cloud environments), or HTTP polling.
-- **Security & Authentication**: Before accepting any topology connections, nodes must pass strict Zero-Trust boundaries. This is handled either by mutual TLS (mTLS) X.509 Certificates or dynamic token-based Session Authenticators. Data-in-transit is secured via AES-GCM wire encoders preventing eavesdropping.
-- **Transports**: The routing dispatcher is transport-agnostic. Packets can be seamlessly multiplexed over TCP, UDP, QUIC, ASP.NET Core Kestrel, or WebRTC data channels depending on the configured Multi-Mesh bindings.
-- **Algorithms**: Network states are replicated via push-pull Gossip algorithms for rapid epidemic payload dissemination and targeted Anti-Entropy background loops to heal partitioned network islands silently.
+The Peer-to-Peer layer (`Ama.Enterprise.P2p.*`) is masterless and adapts to different environments.
+- Discovery: Nodes join the network automatically. They can find each other via UDP Multicast (local networks), DNS (cloud/Kubernetes), or HTTP polling.
+- Security & Authentication: Nodes must pass Zero-Trust boundaries before connecting. This uses either X.509 Certificates or Session tokens. Data is encrypted on the wire with AES-GCM.
+- Transports: The routing system does not depend on one specific protocol. Messages can travel over TCP, UDP, QUIC, Kestrel, or WebRTC depending on your configuration.
+- Algorithms: Data spreads quickly across the network using Gossip protocols. Anti-Entropy background loops run to fix missing data and heal separated network parts.
 
 ### The Distributed CRDT Orchestration Layer
 
 ![Distributed CRDTs Architecture](./Images/Enterprise%20CRDTs%20-%20Distributed%20CRDTs.png)
 
-The Orchestration layer (`Ama.Enterprise.CRDT.Distributed.*`) bridges the gap between your data models and the raw P2P mesh.
-- **Local Replica Scopes**: Every node acts as an independent replica holding a localized state of a document. Modifications are applied instantly to the local scope without waiting for network locks.
-- **Storage & Journaling**: Mutations are captured mathematically as structural patches and journaled into a pluggable storage backend. This could be high-performance Ephemeral Memory, a local SQLite database, or highly scalable Azure Table Storage.
-- **Mesh Synchronization**: The `ICrdtDocumentOrchestrator` runs continuous maintenance loops. It leverages Dotted Version Vectors (DVV) to track exact causality across nodes. When an Anti-Entropy sync triggers, nodes evaluate their version vectors and exchange only the missing mathematical patches (or fallback to full snapshots if log truncation has occurred).
-- **Tombstoning & Eviction**: The orchestrator inherently handles the lifecycle of dynamic objects, safely tombstoning deleted documents, rejecting zombie states (amnesia), and cooling down evicted nodes before pruning them from the global cluster registry.
+The Orchestration layer (`Ama.Enterprise.CRDT.Distributed.*`) connects your data models to the P2P mesh.
+- Local Replica Scopes: Every node keeps a local copy of a document. Changes are applied instantly locally without waiting for network locks.
+- Storage & Journaling: Changes are saved as mathematical patches into a storage backend like Memory, SQLite, or Azure Table Storage.
+- Mesh Synchronization: The orchestrator runs continuous background loops. It uses Version Vectors to track the exact order of events across nodes. Nodes compare these vectors and exchange only the missing data patches (or full snapshots if needed).
+- Tombstoning & Eviction: The system manages the lifecycle of dynamic objects. It handles deleting documents, ignoring outdated states, and removing disconnected nodes from the cluster.
 
 ## Load tests
 
@@ -68,31 +69,31 @@ The Orchestration layer (`Ama.Enterprise.CRDT.Distributed.*`) bridges the gap be
 
 ## Showcases
 
-This repository includes highly interactive console applications demonstrating the framework across dynamically spawned nodes:
+This repository includes interactive console applications that demonstrate the framework across dynamically created nodes:
 
-- [Distributed CRDT Showcase](Ama.Enterprise.CRDT.Distributed.ShowCase) (`Ama.Enterprise.CRDT.Distributed.ShowCase`): Demonstrates the `ICrdtDocumentOrchestrator` managing multiple generic CRDT collections (Task Lists and IoT Fleet Statuses) simultaneously. Features local file-based storage, Native MessagePack binary serialization, out-of-band admin telemetry forwarding, and a `hammer` load-testing mode that pumps thousands of concurrent operations into the mesh.
-- [Distributed CRDT Topology Showcase](Ama.Enterprise.CRDT.Distributed.Topology.ShowCase) (`Ama.Enterprise.CRDT.Distributed.Topology.ShowCase`): Demonstrates advanced Multi-Mesh architectures using isolated network topologies (Server TCP/UDP meshes and User WebRTC out-of-band signaling meshes) bridged by decoupled Zero-Trust RBAC routing policies. Features dynamic multi-role session capabilities, WebRTC signaling bridging, and region-based generic clustering.
-- [Feature Flags Showcase](Ama.Enterprise.FeatureFlags.ShowCase) (`Ama.Enterprise.FeatureFlags.ShowCase`): A masterless P2P Feature Flag management console. Demonstrates extracting high-level applications backed by CRDT synchronization, Azure Table Storage persistence, strict X.509 Certificate mutual authentication, and E2E AES-GCM data-in-transit wire encryption.
+- [Distributed CRDT Showcase](Ama.Enterprise.CRDT.Distributed.ShowCase) (`Ama.Enterprise.CRDT.Distributed.ShowCase`): Shows how the orchestrator manages multiple CRDT collections (Task Lists and IoT Fleet Statuses). Features local file storage, Native MessagePack serialization, admin telemetry, and a load-testing mode that pumps thousands of operations into the mesh.
+- [Distributed CRDT Topology Showcase](Ama.Enterprise.CRDT.Distributed.Topology.ShowCase) (`Ama.Enterprise.CRDT.Distributed.Topology.ShowCase`): Demonstrates Multi-Mesh architectures using isolated networks (TCP/UDP servers and WebRTC clients) connected by Zero-Trust routing policies. Features multi-role sessions and WebRTC signaling.
+- [Feature Flags Showcase](Ama.Enterprise.FeatureFlags.ShowCase) (`Ama.Enterprise.FeatureFlags.ShowCase`): A masterless P2P Feature Flag management console. Uses Azure Table Storage, certificate authentication, and AES-GCM encryption.
 
-*Tip: While running any showcase, type `clone` into the console. This will automatically spawn a brand-new node process on a new port that instantly discovers and syncs with your primary node.*
+*Tip: While running any showcase, type `clone` into the console. This will automatically start a new node process on a new port that instantly discovers and syncs with your primary node.*
 
 For additional advanced scenarios, tutorials, and complete sample projects, please check out the [Ama.Enterprise.Examples](https://github.com/amuste/Ama.Enterprise.Examples) repository.
 
 ## Applications Provided Out-Of-The-Box
 
-This repository includes ready-to-use tooling designed to integrate seamlessly into your decentralized environments:
+This repository includes ready-to-use tooling designed to integrate into your decentralized environments:
 
-- **P2P Telemetry CLI** (`Ama.Enterprise.P2p.Telemetry.Cli`): A terminal-based real-time UI built with `Terminal.Gui`. It connects to the mesh as a passive observer to aggregate and display decentralized cluster metrics, time-series histories, and hardware utilization across the distributed topology.
+- P2P Telemetry CLI (`Ama.Enterprise.P2p.Telemetry.Cli`): A terminal UI built with `Terminal.Gui`. It connects to the mesh to gather and display cluster metrics, hardware stats, and network histories.
 
 ## Prerequisites
 
 - [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) or later.
 - A compatible IDE such as Visual Studio 2022 (latest preview), JetBrains Rider, or VS Code.
-- *(Optional)* Azurite / Azure Storage Emulator if you plan to use the Azure Table Storage persistence backend locally.
+- *(Optional)* Azurite / Azure Storage Emulator if you plan to use the Azure Table Storage backend locally.
 
 ## Installation
 
-The toolkit is highly modular. You only need to install the specific packages required for your node architecture. 
+The toolkit is highly modular. You only need to install the packages required for your node architecture. 
 
 To get started with the core P2P network and the distributed CRDT orchestrator, install the primary packages via the .NET CLI:
 
@@ -104,7 +105,7 @@ dotnet add package Ama.Enterprise.P2p
 dotnet add package Ama.Enterprise.CRDT.Distributed
 ```
 
-Depending on your environment, you may also want to install specific transports or persistence mechanisms to extend the capabilities of your mesh:
+Depending on your environment, you can install specific transports or storage tools:
 
 ```bash
 # ASP.NET Core HTTP/Kestrel Transport integration
@@ -184,13 +185,13 @@ var taskManager = scope.ServiceProvider.GetRequiredService<ITaskManager>();
 // Create a distributed document locally (it will replicate to the mesh)
 await orchestrator.CreateDocumentAsync("dev-team-list", "task-list", cancellationToken);
 
-// Mutate the state. Changes are natively synced!
+// Mutate the state. Changes are synced across the network!
 await taskManager.SetTaskAsync("dev-team-list", "task-1", "Review PR", isDone: false, cancellationToken);
 ```
 
 ## AI Coding Assistance
 
-To maintain full transparency, please note that AI coding assistants and Large Language Models (LLMs) were actively used in the design, development, testing, and documentation of this repository. While AI tools significantly accelerated the generation of code and ideas, all output was rigorously reviewed, steered, tested, and refined by human developers (me). I believe in leveraging these tools to enhance productivity while taking complete responsibility for the library's architecture, security, and mathematical correctness.
+To maintain full transparency, please note that AI coding assistants and Large Language Models (LLMs) were actively used in the design, development, testing, and documentation of this repository. While AI tools significantly accelerated the generation of code and ideas, all output was rigorously reviewed, steered, tested, and refined by human developers (me). I believe in leveraging these tools to enhance productivity while taking responsibility for the library's architecture, security, and mathematical accuracy.
 
 ## License & Pricing
 
@@ -207,7 +208,7 @@ You qualify for the free Community License if your company (including parent/con
 
 Note: To remain eligible, your entity or organization must not have ever received more than $1,000,000 USD in outside capital, such as Private Equity, Venture Capital, or Angel investments. (Standard commercial bank debt or loans are explicitly excluded from this capital limit).
 
-You do not need a license key. The software will run completely unrestricted.
+You do not need a license key. The software will run unrestricted.
 
 #### 2. Enterprise License (Paid)
 This license is for established companies, enterprises, heavily funded startups, and government agencies.
@@ -239,9 +240,9 @@ services.AddP2pMesh("internal")
         // ... add transports and discovery mechanisms
 ```
 
-* Note on Client-Side Environments: To prevent inadvertently leaking private enterprise licenses into public-facing frontends, the `ConfigureAmaEnterpriseLicense` API forces a compile-time error (`[UnsupportedOSPlatform("browser")]`) if called from a Blazor WebAssembly environment. Client-side environments strictly rely on backend services for validation. For client-side deployments (like Blazor WebAssembly), use the `ConfigureAmaCommunityLicense()` declaration locally to satisfy initialization requirements. Your Enterprise license is successfully validated and enforced at the backend cluster level.
+* Note on Client-Side Environments: To prevent inadvertently leaking private enterprise licenses into public-facing frontends, the `ConfigureAmaEnterpriseLicense` API forces a compile-time error (`[UnsupportedOSPlatform("browser")]`) if called from a Blazor WebAssembly environment. Client-side environments rely on backend services for validation. For client-side deployments (like Blazor WebAssembly), use the `ConfigureAmaCommunityLicense()` declaration locally to satisfy initialization requirements. Your Enterprise license is validated and enforced at the backend cluster level.
 * The node validates the cryptographic signature locally. No network requests are ever made.
-* If a license is missing or expired, the node will never crash, pause, or throttle your application. It will simply emit a single warning to your application logs on startup reminding you to acquire a license. Your mesh will remain 100% operational.
+* If a license is missing or expired, the node will never crash, pause, or throttle your application. It will emit a single warning to your application logs on startup reminding you to acquire a license. Your mesh will remain 100% operational.
 
 ### Agencies, Consultancies, and SaaS
 If you are an agency or consultancy building software for a client, the licensing requirement applies to the end-client running the software in production. 
@@ -258,4 +259,4 @@ If you decide to buy the Enterprise license in addition to supporting the projec
 
 * Direct Developer Access: Private email and issue-tracker access directly to the library's developer.
 * Prioritized Hotfixes: If you find a critical bug in the core CRDT or P2P networking layers, a patched NuGet package will be provided via a best-effort prioritized response within a number of business days (excluding public holidays and scheduled developer unavailability).
-* Architectural Guidance: A number of hours per year of direct architectural review to ensure you are configuring your CRDTs, mesh topologies, and data models correctly for your specific use case.
+* Architectural Guidance: A number of hours per year of direct architectural review to ensure you are configuring your CRDTs, mesh topologies, and data models for your specific use case.
