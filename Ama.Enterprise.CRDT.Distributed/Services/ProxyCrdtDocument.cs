@@ -2,9 +2,11 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
+using Ama.CRDT.Services;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.P2p.Models.Core;
@@ -16,6 +18,7 @@ using Microsoft.Extensions.Logging;
 /// </summary>
 public sealed class ProxyCrdtDocument<TState> : IDistributedCrdtDocument<TState> where TState : class, new()
 {
+    private readonly ReplicaContext replicaContext;
     private readonly IP2pRpcCorrelator rpcCorrelator;
     private readonly IDirectMessageSender directSender;
     private readonly IShardDistributionManager distributionManager;
@@ -32,6 +35,7 @@ public sealed class ProxyCrdtDocument<TState> : IDistributedCrdtDocument<TState>
     public ProxyCrdtDocument(
         string documentId,
         string shardId,
+        ReplicaContext replicaContext,
         IP2pRpcCorrelator rpcCorrelator,
         IDirectMessageSender directSender,
         IShardDistributionManager distributionManager,
@@ -41,6 +45,7 @@ public sealed class ProxyCrdtDocument<TState> : IDistributedCrdtDocument<TState>
     {
         DocumentId = documentId ?? throw new ArgumentNullException(nameof(documentId));
         ShardId = shardId ?? throw new ArgumentNullException(nameof(shardId));
+        this.replicaContext = replicaContext ?? throw new ArgumentNullException(nameof(replicaContext));
         this.rpcCorrelator = rpcCorrelator ?? throw new ArgumentNullException(nameof(rpcCorrelator));
         this.directSender = directSender ?? throw new ArgumentNullException(nameof(directSender));
         this.distributionManager = distributionManager ?? throw new ArgumentNullException(nameof(distributionManager));
@@ -75,15 +80,38 @@ public sealed class ProxyCrdtDocument<TState> : IDistributedCrdtDocument<TState>
 
         await directSender.SendDirectAsync(new PeerId(Guid.Parse(targetPeerId)), wrapperBytes, cancellationToken).ConfigureAwait(false);
 
-        var responseBytes = await rpcCorrelator.RegisterRequestAsync<byte[]>(req.CorrelationId, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
-        
-        return serializer.DeserializeFromBytes<CrdtDocument<TState>>(responseBytes.AsSpan())!;
+        return await rpcCorrelator.RegisterRequestAsync<CrdtDocument<TState>>(req.CorrelationId, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public Task ApplyPatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default)
+    public async Task ApplyPatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default)
     {
-        throw new NotSupportedException("Stateless proxies cannot apply local patches. Execute ForwardIntentAsync invoking dynamic network structures.");
+        if (patch.Operations == null || patch.Operations.Count == 0)
+        {
+            return;
+        }
+
+        var patchMsg = new CrdtPatchMessage(replicaContext.ReplicaId, patch);
+        var payload = serializer.SerializeToBytes(patchMsg);
+        var wrapper = new CrdtMessageWrapper(DocumentId, "CrdtPatch", payload);
+        var wrapperBytes = serializer.SerializeToBytes(wrapper);
+
+        var activeNodes = distributionManager.GetTargetReplicas(ShardId);
+        if (activeNodes == null || activeNodes.Count == 0)
+        {
+            logger.LogWarning("Forwarding patch rejected mapping strict zero node topologies bounding proxy for shard {ShardId}.", ShardId);
+            return;
+        }
+
+        foreach (var targetReplicaId in activeNodes)
+        {
+            var targetPeerId = clusterStateTracker.GetPeerIdByReplicaId(targetReplicaId);
+            if (!string.IsNullOrWhiteSpace(targetPeerId))
+            {
+                logger.LogTrace("Stateless proxy forwarding explicit patch for document {DocumentId} towards remote shard owner {TargetReplica} via peer {TargetPeer}.", DocumentId, targetReplicaId, targetPeerId);
+                await directSender.SendDirectAsync(new PeerId(Guid.Parse(targetPeerId)), wrapperBytes, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -141,9 +169,34 @@ public sealed class ProxyCrdtDocument<TState> : IDistributedCrdtDocument<TState>
         throw new NotSupportedException("Stateless proxies do not strictly execute snapshots locally across local channels.");
     }
 
-    public Task ApplyOperationsAsync(IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default)
+    public async Task ApplyOperationsAsync(IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default)
     {
-        throw new NotSupportedException("Stateless proxies ignore passive operations mapping constraints exclusively via proxy forwarding bounds.");
+        if (operations == null || operations.Count == 0)
+        {
+            return;
+        }
+
+        var opsMsg = new CrdtOperationsMessage(replicaContext.ReplicaId, operations.ToArray());
+        var payload = serializer.SerializeToBytes(opsMsg);
+        var wrapper = new CrdtMessageWrapper(DocumentId, "CrdtOps", payload);
+        var wrapperBytes = serializer.SerializeToBytes(wrapper);
+
+        var activeNodes = distributionManager.GetTargetReplicas(ShardId);
+        if (activeNodes == null || activeNodes.Count == 0)
+        {
+            logger.LogWarning("Forwarding operations rejected mapping strict zero node topologies bounding proxy for shard {ShardId}.", ShardId);
+            return;
+        }
+
+        foreach (var targetReplicaId in activeNodes)
+        {
+            var targetPeerId = clusterStateTracker.GetPeerIdByReplicaId(targetReplicaId);
+            if (!string.IsNullOrWhiteSpace(targetPeerId))
+            {
+                logger.LogTrace("Stateless proxy forwarding explicit operations for document {DocumentId} towards remote shard owner {TargetReplica} via peer {TargetPeer}.", DocumentId, targetReplicaId, targetPeerId);
+                await directSender.SendDirectAsync(new PeerId(Guid.Parse(targetPeerId)), wrapperBytes, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     public Task ApplyJournaledOperationsAsync(IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default)
