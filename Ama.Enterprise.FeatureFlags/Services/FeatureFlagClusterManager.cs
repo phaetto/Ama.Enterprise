@@ -9,54 +9,22 @@ using Ama.CRDT.Models;
 using Ama.CRDT.Models.Intents;
 using Ama.CRDT.Services;
 using Ama.Enterprise.CRDT.Distributed.Services;
-using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 using Ama.Enterprise.FeatureFlags.Models;
-using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Implementation of the feature flag cluster manager explicitly adopting distinct generic observer boundaries securely avoiding runtime exceptions.
+/// Implementation of the feature flag cluster manager explicitly focused on generic structural mutations and retrievals.
 /// </summary>
-public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager, IDocumentStateObserver<FeatureFlagState>
+public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
 {
     private readonly ICrdtDocumentOrchestrator orchestrator;
     private readonly IAsyncCrdtPatcher patcher;
-    private readonly IEnumerable<IFeatureFlagStateObserver> domainObservers;
-    private readonly ILogger<FeatureFlagClusterManager> logger;
 
     public FeatureFlagClusterManager(
         ICrdtDocumentOrchestrator orchestrator,
-        IAsyncCrdtPatcher patcher,
-        IEnumerable<IFeatureFlagStateObserver> domainObservers,
-        ILogger<FeatureFlagClusterManager> logger)
+        IAsyncCrdtPatcher patcher)
     {
         this.orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         this.patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
-        this.domainObservers = domainObservers ?? throw new ArgumentNullException(nameof(domainObservers));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
-
-    /// <inheritdoc />
-    public Task OnStateChangedAsync(string documentId, CancellationToken cancellationToken = default)
-    {
-        if (documentId == Constants.GlobalDocumentId)
-        {
-            _ = Task.Run(async () => 
-            {
-                foreach(var observer in domainObservers)
-                {
-                    try 
-                    { 
-                        await observer.OnFeatureFlagsUpdatedAsync(cancellationToken).ConfigureAwait(false); 
-                    }
-                    catch(Exception ex) 
-                    { 
-                        logger.LogError(ex, "Error notifying domain feature flag observer decoupled from structural synchronization pipeline."); 
-                    }
-                }
-            }, cancellationToken);
-        }
-        
-        return Task.CompletedTask;
     }
 
     /// <inheritdoc />

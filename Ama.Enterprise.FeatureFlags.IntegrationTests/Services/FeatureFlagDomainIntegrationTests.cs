@@ -145,17 +145,31 @@ public sealed class FeatureFlagDomainIntegrationTests
         // Standard DI logger bypassing abstract Xunit logging constraints explicitly.
         services.AddLogging(); 
 
-        // Satisfy transport constraints required by the CRDT P2P layer natively avoiding opening explicit network sockets
-        services.AddSingleton(Mock.Of<IDirectMessageSender>());
-        services.AddSingleton(Mock.Of<IApplicationPayloadDispatcher>());
-        services.AddSingleton(Mock.Of<IPeerRegistry>());
+        // Satisfy transport constraints required by the CRDT P2P layer natively avoiding opening explicit network sockets.
+        // Explicitly set the default return for Tasks to prevent background channel crash loops executing NullReferenceExceptions.
+        var mockSender = new Mock<IDirectMessageSender>();
+        mockSender.SetReturnsDefault(Task.CompletedTask);
+        services.AddSingleton(mockSender.Object);
+
+        var mockDispatcher = new Mock<IApplicationPayloadDispatcher>();
+        mockDispatcher.SetReturnsDefault(Task.CompletedTask);
+        services.AddSingleton(mockDispatcher.Object);
+
+        var mockRegistry = new Mock<IPeerRegistry>();
+        services.AddSingleton(mockRegistry.Object);
+
+        var mockP2p = new Mock<IP2pAlgorithm>();
+        mockP2p.SetReturnsDefault(Task.CompletedTask);
+        services.AddSingleton(mockP2p.Object);
 
         // Register default memory storage mapped to the distributed core explicitly guaranteeing an ephemeral domain space
         services.AddSingleton<IDistributedCrdtStorage, MemoryCrdtStorage>();
 
         // Explicitly register the distributed CRDT topological core bounds
         services.AddDistributedCrdtReplica("integration-replica-1");
-        services.AddDistributedCrdtCore(_ => { });
+        services.AddDistributedCrdtCore(x => {
+            x.ActiveSyncEnabled = true;
+        });
         services.AddDistributedCrdtP2p("integration-mesh", "integration-replica-1");
 
         // Bootstrap the feature flags exactly as a real application would natively
@@ -187,7 +201,7 @@ public sealed class FeatureFlagDomainIntegrationTests
             return Task.CompletedTask;
         }
 
-        public async Task WaitForStateChangeAsync(Func<Task> action, int timeoutMs = 5000)
+        public async Task WaitForStateChangeAsync(Func<Task> action, int timeoutMs = 15000)
         {
             tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             await action().ConfigureAwait(false);

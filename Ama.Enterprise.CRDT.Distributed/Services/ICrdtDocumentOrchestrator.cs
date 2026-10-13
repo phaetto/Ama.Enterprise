@@ -3,7 +3,6 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Ama.CRDT.Models;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.P2p.Models.Core;
 

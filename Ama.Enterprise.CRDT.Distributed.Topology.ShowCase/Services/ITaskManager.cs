@@ -1,6 +1,5 @@
 namespace Ama.Enterprise.CRDT.Distributed.Topology.ShowCase.Services;
 
-using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;

@@ -128,7 +128,7 @@
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/start-azurite.bat` | Windows batch script that automatically discovers and executes natively installed Azurite instances (via Visual Studio or NPM) bypassing Docker requirements, explicitly detached via PowerShell to prevent MSBuild hangs. |
 | `$/Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
 | `$/Ama.Enterprise.FeatureFlags/Constants.cs` | Global constants for the Feature Flags module, defining common identifiers and document types. |
-| `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | Extensions for registering feature flags components and background synchronization bootstrappers. |
+| `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | Updated to register the distinct decoupled `FeatureFlagStateObserver`. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlag.cs` | Represents a single enterprise feature flag in the system incorporating audit and ownership structures. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagAudit.cs` | Audit trace structure tracking temporal modifications for a specific feature flag. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagMetadata.cs` | Metadata structure encapsulating enterprise multi-tenancy and product domain boundaries. |
@@ -137,7 +137,8 @@
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsCrdtAotContext.cs` | AOT reflection context for the Feature Flags CRDT models. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsJsonContext.cs` | AOT-friendly JSON context for Feature Flags serialization. |
 | `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagBootstrapper.cs` | Background service initializing the singleton feature flags state across replica scopes. |
-| `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagClusterManager.cs` | Implemented direct `IDocumentStateObserver` executing native multi-mesh event triggers extracting structural dependencies dropping obsolete document reference caching mechanisms safely completely effortlessly cleanly dynamically intelligently flexibly correctly rationally reliably seamlessly safely. |
+| `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagClusterManager.cs` | Refactored to extract the observer logic into a dedicated class, retaining strictly the document mutation and retrieval mechanics. |
+| `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagStateObserver.cs` | New dedicated observer implementation explicitly tracking feature flag distributed state modifications securely decoupled from the core manager. |
 | `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagClusterManager.cs` | Removed brittle generic `StateChanged` boundaries exposing native topological decoupled evaluation hooks safely gracefully accurately structurally seamlessly. |
 | `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagStateObserver.cs` | Dedicated Feature Flag domain observer contract enabling consumer systems explicitly routing decoupled tracking dynamically perfectly securely. |
 | `$/Ama.Enterprise.Licensing.UnitTests/Ama.Enterprise.Licensing.UnitTests.csproj` | No description provided. |
