@@ -85,12 +85,17 @@ public interface IDistributedCrdtDocument
 public interface IDistributedCrdtDocument<TState> : IDistributedCrdtDocument where TState : class, new()
 {
     /// <summary>
-    /// Exposes the strictly typed underlying CRDT document containing the application state.
+    /// Exposes the strictly typed underlying CRDT document containing the application state asynchronously, executing network RPC reads seamlessly for remote proxy shards.
     /// </summary>
-    CrdtDocument<TState> Document { get; }
+    ValueTask<CrdtDocument<TState>> GetDocumentAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Applies a locally generated patch intention over the state and initiates immediate replication if configured.
+    /// Applies a locally generated patch intention over the state and initiates immediate replication if configured natively.
     /// </summary>
     Task ApplyPatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Forwards a generic intent dynamically bound traversing directly to the active authoritative shard securely decoupled from local allocations.
+    /// </summary>
+    Task<bool> ForwardIntentAsync<TIntent>(TIntent intent, string targetProperty, CancellationToken cancellationToken = default) where TIntent : class;
 }

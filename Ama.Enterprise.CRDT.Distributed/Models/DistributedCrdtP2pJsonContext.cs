@@ -13,6 +13,10 @@ using Ama.CRDT.Models;
 [JsonSerializable(typeof(DottedVersionVector))]
 [JsonSerializable(typeof(CrdtSnapshotMessage))]
 [JsonSerializable(typeof(CrdtEvictionRejectionMessage))]
+[JsonSerializable(typeof(CrdtReadRequestDto))]
+[JsonSerializable(typeof(CrdtReadResponseDto))]
+[JsonSerializable(typeof(CrdtIntentForwardRequestDto))]
+[JsonSerializable(typeof(CrdtIntentForwardResponseDto))]
 public sealed partial class DistributedCrdtP2pJsonContext : JsonSerializerContext
 {
 }

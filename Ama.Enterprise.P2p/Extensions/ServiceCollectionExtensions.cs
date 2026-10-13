@@ -61,6 +61,11 @@ public static class ServiceCollectionExtensions
             services.TryAddSingleton<IDirectMessageSender, DirectMessageSender>();
         }
 
+        if (!services.Any(s => s.ImplementationType == typeof(P2pRpcCorrelator)))
+        {
+            services.TryAddSingleton<IP2pRpcCorrelator, P2pRpcCorrelator>();
+        }
+
         if (!services.Any(s => s.ServiceType == typeof(IJsonTypeInfoResolver) && s.ServiceKey as string == "Ama.CRDT" && s.ImplementationInstance == P2pJsonSerializerContext.Default))
         {
             services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", P2pJsonSerializerContext.Default);

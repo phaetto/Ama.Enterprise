@@ -32,6 +32,13 @@ public interface IClusterStateTracker
     IReadOnlyList<string> GetActiveReplicaIds();
 
     /// <summary>
+    /// Retrieves the network Peer ID associated with a given Replica ID.
+    /// </summary>
+    /// <param name="replicaId">The specific replica identifier.</param>
+    /// <returns>The corresponding network Peer ID, or null if not found.</returns>
+    string? GetPeerIdByReplicaId(string replicaId);
+
+    /// <summary>
     /// Safely unmaps a disconnected network peer ID without causing CRDT amnesia. 
     /// The CRDT state remains preserved until the TTL expires allowing for safe offline recovery.
     /// </summary>
