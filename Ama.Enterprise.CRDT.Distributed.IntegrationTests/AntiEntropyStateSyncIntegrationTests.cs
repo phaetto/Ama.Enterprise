@@ -25,6 +25,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Moq;
 using Shouldly;
+using Ama.Enterprise.CRDT.Distributed.Services.P2p;
 
 [CrdtAotType(typeof(AntiEntropyStateSyncIntegrationTests.SyncTestState))]
 [CrdtAotType(typeof(Dictionary<string, string>))]
@@ -213,7 +214,8 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         await orchestrator.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
-        var observer = sp.GetRequiredKeyedService<IPeerTopologyObserver>(TestMeshId);
+        var observers = sp.GetServices<IPeerTopologyObserver>();
+        var observer = observers.OfType<CrdtTopologyObserver>().Single();
         var peerNode = new PeerNode(new PeerId(Guid.NewGuid()), new TcpPeerEndpoint("http://localhost", 5000));
         
         // Map explicitly into registry natively 

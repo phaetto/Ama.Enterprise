@@ -1,21 +1,22 @@
 namespace Ama.Enterprise.CRDT.Distributed.IntegrationTests;
 
-using System;
-using System.Linq;
-using System.Text.Json.Serialization;
-using System.Threading;
-using System.Threading.Tasks;
 using Ama.CRDT.Attributes;
 using Ama.CRDT.Extensions;
 using Ama.CRDT.Models;
 using Ama.CRDT.Models.Aot;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Services;
+using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.Project.Tests.Common.Attributes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Moq;
 using Shouldly;
+using System;
+using System.Linq;
+using System.Text.Json.Serialization;
+using System.Threading;
+using System.Threading.Tasks;
 
 [CrdtAotType(typeof(DocumentOrchestratorIntegrationTests.DynamicTestState))]
 public sealed partial class DynamicTestAotContext : CrdtAotContext
@@ -51,6 +52,10 @@ public sealed class DocumentOrchestratorIntegrationTests
         services.AddDistributedDocumentType<DynamicTestState>("dynamic-type");
 
         configureExtra?.Invoke(services);
+
+        var mockP2p = new Mock<IP2pAlgorithm>();
+        mockP2p.SetReturnsDefault(Task.CompletedTask);
+        services.AddSingleton(mockP2p.Object);
 
         return services.BuildServiceProvider();
     }

@@ -209,13 +209,17 @@ public sealed class ConcurrencyIntegrationTests
         // Register the target peer in the cluster tracker so DispatchAntiEntropyStateAsync actually routes targeted messages natively
         clusterTracker.UpdatePeerState("RemoteRep", targetPeerId.ToString(), new ShardVersionVectorMap());
 
+        // Wait to allow any background observers (e.g. CrdtTopologyObserver) tracking new peers to finish firing state syncs natively avoiding verification counts accumulating implicitly.
+        await Task.Delay(200);
+        mockP2p.Invocations.Clear();
+
         // Act - Flood orchestrator channel with distinct network bound intent messages
         var broadcastTasks = Enumerable.Range(0, TotalTasks).Select(i => Task.Run(async () =>
         {
             // Evenly distribute 3 distinct concurrent pipeline commands
             if (i % 3 == 0)
             {
-                var dummyOp = default(CrdtOperation) with { Id = Guid.NewGuid(), ReplicaId = "Replica1" };
+                var dummyOp = default(CrdtOperation) with { Id = Guid.NewGuid(), ReplicaId = "Replica1", JsonPath = "$.data" };
                 await targetDoc!.ApplyPatchAsync(new CrdtPatch(new[] { dummyOp }), CancellationToken.None);
             }
             else if (i % 3 == 1)

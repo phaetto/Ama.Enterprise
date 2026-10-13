@@ -212,6 +212,10 @@ public sealed class ScopeTopologyProviderIntegrationTests
         await peerRegistry.AddOrUpdatePeerAsync(TestMeshId, expectedNode, PeerStatus.Active, CancellationToken.None);
         await peerRegistry.AddOrUpdatePeerAsync(TestMeshId, unexpectedNode, PeerStatus.Active, CancellationToken.None);
 
+        // Wait to allow any background observers (e.g. CrdtTopologyObserver) tracking new peers to finish firing state syncs natively avoiding verification counts accumulating implicitly.
+        await Task.Delay(200);
+        mockSender.Invocations.Clear();
+
         // Act
         await orchestrator.DispatchAntiEntropyStateAsync(CancellationToken.None);
 
