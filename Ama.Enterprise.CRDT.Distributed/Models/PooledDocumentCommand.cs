@@ -1,7 +1,6 @@
 namespace Ama.Enterprise.CRDT.Distributed.Models;
 
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Threading.Tasks.Sources;
@@ -11,8 +10,8 @@ internal enum DocumentCommandType
 {
     Initialize,
     ApplyPatch,
-    ApplyOperations,
-    ApplyJournaledOperations,
+    ApplyRemotePatch,
+    ApplyJournaledPatch,
     GetSnapshotData,
     MergeSnapshot,
     Checkpoint,
@@ -37,7 +36,6 @@ internal sealed class PooledDocumentCommand<TState> : IValueTaskSource where TSt
 
     public DocumentCommandType Type { get; set; }
     public CrdtPatch? Patch { get; set; }
-    public IReadOnlyList<CrdtOperation>? Operations { get; set; }
     public byte[]? SnapshotData { get; set; }
     public ShardVersionVectorMap? GlobalState { get; set; }
     public ICrdtTimestamp? ExplicitTimestamp { get; set; }
@@ -53,7 +51,6 @@ internal sealed class PooledDocumentCommand<TState> : IValueTaskSource where TSt
         core.Reset();
         Type = default;
         Patch = null;
-        Operations = null;
         SnapshotData = null;
         GlobalState = null;
         ExplicitTimestamp = null;

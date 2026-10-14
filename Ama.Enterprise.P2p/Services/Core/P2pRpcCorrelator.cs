@@ -46,7 +46,7 @@ public sealed class P2pRpcCorrelator : IP2pRpcCorrelator
         try
         {
             var payload = await tcs.Task.ConfigureAwait(false);
-            
+
             var response = this.serializer.DeserializeFromBytes<TResponse>(payload.Span);
             return response ?? throw new InvalidOperationException($"Failed to deserialize the RPC response payload into {typeof(TResponse).Name}.");
         }

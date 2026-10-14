@@ -244,22 +244,17 @@ public sealed class ScopeTopologyProviderIntegrationTests
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
         var scope = scopeManager.GetOrCreateScope("Replica1");
         var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcher = scope.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
         var clusterTracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("topo-doc", "topo-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
-        var doc = orchestrator.GetDocument<TopologyTestState>("topo-doc")!;
-
         // Generate 5 operations locally, bumping the local DVV for Replica1 appropriately
         for (int i = 0; i < 5; i++)
         {
             var intent = new MapSetIntent($"key{i}", $"value{i}");
-            var crdtDoc = await doc.GetDocumentAsync(CancellationToken.None).ConfigureAwait(false);
-            var op = await patcher.GenerateOperationAsync(crdtDoc, x => x.DataMap, intent, CancellationToken.None);
-            await doc.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
+            await orchestrator.ForwardIntentAsync<TopologyTestState>("topo-doc", intent, "DataMap", CancellationToken.None);
         }
 
         var opsBeforeCheckpoint = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();

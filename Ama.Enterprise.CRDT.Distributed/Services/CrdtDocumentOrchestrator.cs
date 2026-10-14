@@ -21,7 +21,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Centralized generic orchestrator managing global active P2P CRDT document bindings eliminating lightweight shard memory dependencies executing stateless async proxies dynamically natively cleanly safely smartly reliably securely elegantly flawlessly completely accurately correctly.
+/// Centralized stateless gateway orchestrating global P2P CRDT document bindings eliminating proxy memory dependencies executing stateless async RPCs dynamically.
 /// </summary>
 public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDisposable
 {
@@ -31,6 +31,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     private readonly ICrdtTimestampProvider timestampProvider;
     private readonly IShardDistributionManager distributionManager;
     private readonly IEnumerable<ICrdtOrchestratorObserver> orchestratorObservers;
+    private readonly IEnumerable<IDocumentPatchObserver> patchObservers;
     private readonly ILogger<CrdtDocumentOrchestrator> logger;
     
     private readonly ConcurrentDictionary<string, IDistributedCrdtDocument> activeDocuments = new(StringComparer.Ordinal);
@@ -39,7 +40,6 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     private readonly Channel<PooledOrchestratorCommand> commandChannel;
     private readonly ConcurrentQueue<PooledOrchestratorCommand> commandPool = new();
     private readonly CancellationTokenSource disposeCts = new();
-    private readonly Task processingTask;
 
     private readonly Meter meter;
     private readonly Counter<long> documentCreatedCounter;
@@ -52,8 +52,6 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     private readonly Counter<long> commandsEnqueuedCounter;
     private readonly Counter<long> commandsProcessedCounter;
     private readonly Counter<long> commandFailuresCounter;
-    private readonly ObservableGauge<int> channelQueueLengthGauge;
-    private readonly ObservableGauge<int> commandPoolSizeGauge;
     
     public IDistributedCrdtDocument<CrdtRegistryState> Registry { get; private set; } = null!;
 
@@ -66,6 +64,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         ICrdtTimestampProvider timestampProvider,
         IShardDistributionManager distributionManager,
         IEnumerable<ICrdtOrchestratorObserver> orchestratorObservers,
+        IEnumerable<IDocumentPatchObserver> patchObservers,
         IMeterFactory? meterFactory = null)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -76,6 +75,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         this.timestampProvider = timestampProvider ?? throw new ArgumentNullException(nameof(timestampProvider));
         this.distributionManager = distributionManager ?? throw new ArgumentNullException(nameof(distributionManager));
         this.orchestratorObservers = orchestratorObservers ?? throw new ArgumentNullException(nameof(orchestratorObservers));
+        this.patchObservers = patchObservers ?? throw new ArgumentNullException(nameof(patchObservers));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         var capacity = options.Value.ChannelCapacity;
@@ -107,10 +107,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         this.commandsEnqueuedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.channel.commands_enqueued", "commands", "Total orchestrator commands enqueued to the lock-free channel");
         this.commandsProcessedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.channel.commands_processed", "commands", "Total orchestrator commands processed by the channel");
         this.commandFailuresCounter = this.meter.CreateCounter<long>("crdt.orchestrator.channel.command_failures", "errors", "Total orchestrator command processing failures");
-        this.channelQueueLengthGauge = this.meter.CreateObservableGauge("crdt.orchestrator.channel.queue_length", () => this.commandChannel.Reader.CanCount ? this.commandChannel.Reader.Count : 0, "commands", "Current number of pending orchestrator commands");
-        this.commandPoolSizeGauge = this.meter.CreateObservableGauge("crdt.orchestrator.channel.pool_size", () => this.commandPool.Count, "commands", "Current size of the orchestrator command object pool");
+        
+        _ = this.meter.CreateObservableGauge("crdt.orchestrator.channel.queue_length", () => this.commandChannel.Reader.CanCount ? this.commandChannel.Reader.Count : 0, "commands", "Current number of pending orchestrator commands");
+        _ = this.meter.CreateObservableGauge("crdt.orchestrator.channel.pool_size", () => this.commandPool.Count, "commands", "Current size of the orchestrator command object pool");
 
-        this.processingTask = Task.Run(ProcessChannelAsync);
+        _ = Task.Run(ProcessChannelAsync);
     }
     
     private async Task NotifyTopologyChangedAsync(CancellationToken cancellationToken)
@@ -270,7 +271,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                         {
                             var doc = factory.CreateDocument(serviceProvider, kvp.Key);
                             
-                            if (distributionManager.IsShardLocal(doc.ShardId))
+                            if (await distributionManager.IsShardLocalAsync(doc.ShardId, cancellationToken).ConfigureAwait(false))
                             {
                                 await doc.InitializeAsync(cancellationToken).ConfigureAwait(false);
                                 
@@ -282,13 +283,20 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                                 }
                                 else
                                 {
-                                    if (doc is IDisposable d) d.Dispose();
+                                    try
+                                    {
+                                        if (doc is IDisposable d) d.Dispose();
+                                    }
+                                    catch (ObjectDisposedException) { }
                                 }
                             }
                             else
                             {
-                                // Remote shards are bypassed avoiding memory limits evaluating safely natively structurally smoothly securely dynamically properly efficiently completely cleanly perfectly elegantly intelligently smartly optimally.
-                                if (doc is IDisposable d) d.Dispose();
+                                try
+                                {
+                                    if (doc is IDisposable d) d.Dispose();
+                                }
+                                catch (ObjectDisposedException) { }
                             }
                         }
                         else
@@ -298,11 +306,15 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                     }
                     else if (activeDocuments.TryGetValue(kvp.Key, out var activeDoc))
                     {
-                        if (!distributionManager.IsShardLocal(activeDoc.ShardId))
+                        if (!await distributionManager.IsShardLocalAsync(activeDoc.ShardId, cancellationToken).ConfigureAwait(false))
                         {
                             if (activeDocuments.TryRemove(kvp.Key, out _))
                             {
-                                if (activeDoc is IDisposable d) d.Dispose();
+                                try
+                                {
+                                    if (activeDoc is IDisposable d) d.Dispose();
+                                }
+                                catch (ObjectDisposedException) { }
                                 changed = true;
                                 logger.LogInformation("Orchestrator demoted transitioning CRDT document away eliminating footprint cleanly properly explicitly: {DocumentId}", kvp.Key);
                             }
@@ -326,7 +338,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 if (activeDocuments.TryRemove(docId, out var doc))
                 {
                     var shardId = doc.ShardId;
-                    if (doc is IDisposable d) d.Dispose();
+                    try
+                    {
+                        if (doc is IDisposable d) d.Dispose();
+                    }
+                    catch (ObjectDisposedException) { }
                     await storage.DeleteDocumentAsync(shardId, docId, cancellationToken).ConfigureAwait(false);
                     changed = true;
                     documentDeletedCounter.Add(1, new KeyValuePair<string, object?>("document_id", docId));
@@ -355,33 +371,166 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         return docs;
     }
 
-    public IDistributedCrdtDocument<TState>? GetDocument<TState>(string documentId) where TState : class, new()
+    public IDistributedCrdtDocument<TState>? TryGetLocalDocument<TState>(string documentId) where TState : class, new()
     {
         if (activeDocuments.TryGetValue(documentId, out var doc) && doc is IDistributedCrdtDocument<TState> typedDoc)
         {
             return typedDoc;
         }
 
-        var registry = Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
+        return null;
+    }
 
-        // Fast asynchronous check bypassing task bounds executing synchronous ValueTask bindings.
-        var registryDocTask = registry.GetDocumentAsync(CancellationToken.None);
-        var registryDoc = registryDocTask.IsCompletedSuccessfully ? registryDocTask.Result : registryDocTask.AsTask().GetAwaiter().GetResult();
-        
-        if (registryDoc.Data.Documents.TryGetValue(documentId, out var regEntry) && !regEntry.IsDeleted)
+    public async ValueTask<CrdtDocument<TState>> GetDocumentStateAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        if (activeDocuments.TryGetValue(documentId, out var activeDoc) && activeDoc is IDistributedCrdtDocument<TState> typedDoc)
         {
-            var initialState = new TState();
-            var metadataManager = serviceProvider.GetRequiredService<ICrdtMetadataManager>();
-            var shardIdProvider = serviceProvider.GetRequiredService<IShardIdProvider>();
-            
-            var metadata = metadataManager.Initialize(initialState);
-            var dummyDoc = new CrdtDocument<TState>(initialState, metadata);
-            var expectedShardId = shardIdProvider.GetShardId(dummyDoc) ?? documentId;
-            
-            return ActivatorUtilities.CreateInstance<ProxyCrdtDocument<TState>>(serviceProvider, documentId, expectedShardId);
+            return await typedDoc.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        return null;
+        var shardId = GetShardId<TState>(documentId);
+        
+        var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
+        var clusterStateTracker = serviceProvider.GetRequiredService<IClusterStateTracker>();
+        var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
+        var rpcCorrelator = serviceProvider.GetRequiredService<IP2pRpcCorrelator>();
+
+        var req = new CrdtReadRequestDto { CorrelationId = Guid.NewGuid(), DocumentId = documentId };
+        var reqPayload = serializer.SerializeToBytes(req);
+        var wrapper = new CrdtMessageWrapper(documentId, "CrdtReadReq", reqPayload);
+        var wrapperBytes = serializer.SerializeToBytes(wrapper);
+
+        var activeNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
+        if (activeNodes == null || activeNodes.Count == 0)
+        {
+            throw new InvalidOperationException($"Cannot evaluate stateless CRDT State. No active nodes found mapping strictly for shard {shardId}.");
+        }
+        
+        var targetReplicaId = activeNodes[0]; 
+        var targetPeerId = clusterStateTracker.GetPeerIdByReplicaId(targetReplicaId);
+
+        if (string.IsNullOrWhiteSpace(targetPeerId))
+        {
+            throw new InvalidOperationException($"Cannot evaluate stateless CRDT State. Replica {targetReplicaId} has no active network peer mapping.");
+        }
+
+        logger.LogTrace("Stateless gateway actively querying explicit network RPC bounds addressing document {DocumentId} against replica {TargetReplica} via peer {TargetPeer}.", documentId, targetReplicaId, targetPeerId);
+
+        await directSender.SendDirectAsync(new PeerId(Guid.Parse(targetPeerId)), wrapperBytes, cancellationToken).ConfigureAwait(false);
+
+        return await rpcCorrelator.RegisterRequestAsync<CrdtDocument<TState>>(req.CorrelationId, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<bool> ForwardIntentAsync<TState>(string documentId, IOperationIntent intent, string targetProperty, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        if (activeDocuments.TryGetValue(documentId, out var activeDoc) && activeDoc is IDistributedCrdtDocument<TState> typedDoc)
+        {
+            logger.LogTrace("Stateless gateway executing intent directly against local active document {DocumentId}.", documentId);
+            return await typedDoc.ApplyRemoteIntentAsync(intent, targetProperty, patcher, cancellationToken).ConfigureAwait(false);
+        }
+
+        var shardId = GetShardId<TState>(documentId);
+        
+        var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
+        var clusterStateTracker = serviceProvider.GetRequiredService<IClusterStateTracker>();
+        var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
+        var rpcCorrelator = serviceProvider.GetRequiredService<IP2pRpcCorrelator>();
+
+        var req = new CrdtIntentForwardRequestDto
+        {
+            CorrelationId = Guid.NewGuid(),
+            DocumentId = documentId,
+            SerializedIntent = serializer.SerializeToBytes(intent),
+            IntentTypeAlias = intent.GetType().Name,
+            TargetProperty = targetProperty
+        };
+
+        var reqPayload = serializer.SerializeToBytes(req);
+        var wrapper = new CrdtMessageWrapper(documentId, "CrdtIntentReq", reqPayload);
+        var wrapperBytes = serializer.SerializeToBytes(wrapper);
+
+        var activeNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
+        if (activeNodes == null || activeNodes.Count == 0)
+        {
+            logger.LogWarning("Forwarding generic intent rejected mapping strict zero node topologies bounding gateway.");
+            return false;
+        }
+
+        var targetReplicaId = activeNodes[0];
+        var targetPeerId = clusterStateTracker.GetPeerIdByReplicaId(targetReplicaId);
+
+        if (string.IsNullOrWhiteSpace(targetPeerId))
+        {
+            logger.LogWarning("Forwarding generic intent rejected mapping strict disconnected network peer for replica {ReplicaId}.", targetReplicaId);
+            return false;
+        }
+        
+        logger.LogTrace("Stateless gateway forwarding execution intent mapping explicit document {DocumentId} towards remote shard owner {TargetReplica} via peer {TargetPeer}.", documentId, targetReplicaId, targetPeerId);
+        
+        await directSender.SendDirectAsync(new PeerId(Guid.Parse(targetPeerId)), wrapperBytes, cancellationToken).ConfigureAwait(false);
+
+        var response = await rpcCorrelator.RegisterRequestAsync<CrdtIntentForwardResponseDto>(req.CorrelationId, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+        
+        if (!response.IsSuccess)
+        {
+            logger.LogWarning("Gateway execution explicitly faulting natively traversing intent: {ErrorMessage}", response.ErrorMessage);
+        }
+
+        return response.IsSuccess;
+    }
+
+    public async Task ApplyPatchAsync<TState>(string documentId, CrdtPatch patch, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        if (patch.Operations == null || patch.Operations.Count == 0)
+        {
+            return;
+        }
+
+        if (activeDocuments.TryGetValue(documentId, out var activeDoc) && activeDoc is IDistributedCrdtDocument<TState> typedDoc)
+        {
+            await typedDoc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var shardId = GetShardId<TState>(documentId);
+        
+        var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
+        var clusterStateTracker = serviceProvider.GetRequiredService<IClusterStateTracker>();
+        var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
+        var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
+
+        var patchMsg = new CrdtPatchMessage(replicaContext.ReplicaId, patch);
+        var payload = serializer.SerializeToBytes(patchMsg);
+        var wrapper = new CrdtMessageWrapper(documentId, "CrdtPatch", payload);
+        var wrapperBytes = serializer.SerializeToBytes(wrapper);
+
+        var activeNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
+        if (activeNodes == null || activeNodes.Count == 0)
+        {
+            logger.LogWarning("Forwarding patch rejected mapping strict zero node topologies bounding gateway for shard {ShardId}.", shardId);
+            return;
+        }
+
+        foreach (var targetReplicaId in activeNodes)
+        {
+            var targetPeerId = clusterStateTracker.GetPeerIdByReplicaId(targetReplicaId);
+            if (!string.IsNullOrWhiteSpace(targetPeerId))
+            {
+                logger.LogTrace("Stateless gateway forwarding explicit patch for document {DocumentId} towards remote shard owner {TargetReplica} via peer {TargetPeer}.", documentId, targetReplicaId, targetPeerId);
+                await directSender.SendDirectAsync(new PeerId(Guid.Parse(targetPeerId)), wrapperBytes, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private string GetShardId<TState>(string documentId) where TState : class, new()
+    {
+        var metadataManager = serviceProvider.GetRequiredService<ICrdtMetadataManager>();
+        var shardIdProvider = serviceProvider.GetRequiredService<IShardIdProvider>();
+        
+        var initialState = new TState();
+        var metadata = metadataManager.Initialize(initialState);
+        var dummyDoc = new CrdtDocument<TState>(initialState, metadata);
+        return shardIdProvider.GetShardId(dummyDoc) ?? documentId;
     }
 
     public async Task CreateDocumentAsync(string documentId, string typeAlias, CancellationToken cancellationToken = default)
@@ -415,6 +564,12 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         var patch = new CrdtPatch(new[] { operation });
         
         await registry.ApplyPatchAsync(patch, cmd.CancellationToken).ConfigureAwait(false);
+
+        foreach (var observer in patchObservers)
+        {
+            await observer.OnPatchGeneratedAsync(registry.DocumentId, patch, cmd.CancellationToken).ConfigureAwait(false);
+        }
+
         await ProcessSyncDocumentsInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
     }
 
@@ -450,6 +605,12 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             var patch = new CrdtPatch(new[] { operation });
             
             await registry.ApplyPatchAsync(patch, cmd.CancellationToken).ConfigureAwait(false);
+
+            foreach (var observer in patchObservers)
+            {
+                await observer.OnPatchGeneratedAsync(registry.DocumentId, patch, cmd.CancellationToken).ConfigureAwait(false);
+            }
+
             await ProcessSyncDocumentsInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
         }
     }
@@ -534,6 +695,15 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
             var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
 
+            var localShards = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var shardKvp in replicaContext.ShardVersionVectors)
+            {
+                if (await distributionManager.IsShardLocalAsync(shardKvp.Key, cancellationToken).ConfigureAwait(false))
+                {
+                    localShards.Add(shardKvp.Key);
+                }
+            }
+
             ShardVersionVectorMap globalState;
             lock (replicaContext.ShardVersionVectors)
             {
@@ -541,7 +711,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 foreach (var shardKvp in replicaContext.ShardVersionVectors)
                 {
                     // Route specifically tracking strictly local shards avoiding network saturation limits
-                    if (!distributionManager.IsShardLocal(shardKvp.Key))
+                    if (!localShards.Contains(shardKvp.Key))
                     {
                         continue;
                     }

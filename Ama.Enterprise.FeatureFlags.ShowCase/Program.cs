@@ -18,6 +18,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net.NetworkInformation;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
@@ -35,13 +36,13 @@ public static class Program
 
     public static async Task Main(string[] args)
     {
-        // Parse port from arguments, or assign a random free-ish port for showcase
+        // Parse port from arguments, or assign a free port for showcase
         if (args.Length == 0 || !int.TryParse(args[0], out currentPort))
         {
-            currentPort = 8080 + Random.Shared.Next(0, 1000);
+            currentPort = GetNextAvailablePort(8080);
         }
 
-        currentHandshakePort = 8080 + Random.Shared.Next(0, 1000);
+        currentHandshakePort = GetNextAvailablePort(currentPort + 1);
 
         // Generate or load a shared self-signed certificate for the local showcase cluster
         using var clusterCert = GetOrCreateClusterCertificate();
@@ -89,7 +90,7 @@ public static class Program
             options.MaintenanceIntervalSeconds = (int)TimeSpan.FromHours(1).TotalSeconds;
             options.AntiEntropyIntervalSeconds = 1;
             options.AntiEntropyInitialDelaySeconds = 1;
-            options.ShardReplicationFactor = 1;
+            options.ShardReplicationFactor = 2;
         });
 
         // 2. Delegate routing orchestrations and background services completely to the distributed core explicitly bounded
@@ -99,7 +100,11 @@ public static class Program
         services.AddFeatureFlags();
 
         // 4. Wire up the generic P2P mesh network specifically configured for this feature's underlying topology
-        services.AddP2pMesh("feature-flags-internal-mesh")
+        services.AddP2pMesh("feature-flags-internal-mesh",
+                options =>
+                {
+                    options.MinActivePeers = 10;
+                })
                 .AddGossipNetwork(options =>
                 {
                     options.GossipInterval = TimeSpan.FromMilliseconds(1500);
@@ -242,7 +247,12 @@ public static class Program
                             break;
 
                         case "clone":
-                            CloneProcess(logger);
+                            int cloneCount = 1;
+                            if (parts.Length >= 2 && int.TryParse(parts[1], out var parsedCount) && parsedCount > 0)
+                            {
+                                cloneCount = parsedCount;
+                            }
+                            CloneProcess(logger, cloneCount);
                             break;
 
                         case "exit":
@@ -274,9 +284,8 @@ public static class Program
     /// <summary>
     /// Spawns a new instance of this console application on a new random port to join the cluster.
     /// </summary>
-    private static void CloneProcess(ILogger logger)
+    private static void CloneProcess(ILogger logger, int count)
     {
-        var nextPort = 8080 + Random.Shared.Next(0, 1000);
         var processPath = Environment.ProcessPath;
 
         if (string.IsNullOrEmpty(processPath))
@@ -285,14 +294,21 @@ public static class Program
             return;
         }
 
-        Process.Start(new ProcessStartInfo
+        var startPort = currentPort + 1;
+        for (var i = 0; i < count; i++)
         {
-            FileName = processPath,
-            Arguments = nextPort.ToString(),
-            UseShellExecute = true // Spawns a new independent console window
-        });
+            var nextPort = GetNextAvailablePort(startPort);
 
-        logger.LogInformation("Cloned new cluster node instance on port {NextPort}.", nextPort);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = processPath,
+                Arguments = nextPort.ToString(),
+                UseShellExecute = true // Spawns a new independent console window
+            });
+
+            logger.LogInformation("Cloned new cluster node instance on port {NextPort}.", nextPort);
+            startPort = nextPort + 1;
+        }
     }
 
     private static void DrawMenu()
@@ -305,8 +321,8 @@ public static class Program
             Console.WriteLine("Commands:");
             Console.WriteLine(" set <flagName> <true|false>  - Adds or Updates a flag");
             Console.WriteLine(" del <flagName>               - Removes a flag entirely");
-            Console.WriteLine(" list                        - Prints all currently known flags");
-            Console.WriteLine(" clone                        - Spawns a new cluster node in a new window");
+            Console.WriteLine(" list                         - Prints all currently known flags");
+            Console.WriteLine(" clone [count]                - Spawns new cluster node(s) in a new window (default 1)");
             Console.WriteLine(" exit                         - Shuts down this node gracefully");
             Console.WriteLine("=================================================\n");
         }
@@ -338,6 +354,24 @@ public static class Program
         {
             Console.WriteLine(message);
         }
+    }
+    
+    private static int GetNextAvailablePort(int startingPort)
+    {
+        var ipGlobalProperties = IPGlobalProperties.GetIPGlobalProperties();
+        
+        var activeTcpPorts = ipGlobalProperties.GetActiveTcpListeners().Select(l => l.Port);
+        var activeUdpPorts = ipGlobalProperties.GetActiveUdpListeners().Select(l => l.Port);
+
+        var activePorts = activeTcpPorts.Concat(activeUdpPorts).ToHashSet();
+
+        var port = startingPort;
+        while (activePorts.Contains(port))
+        {
+            port++;
+        }
+
+        return port;
     }
 
     /// <summary>

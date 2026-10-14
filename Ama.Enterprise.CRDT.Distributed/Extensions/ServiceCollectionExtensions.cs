@@ -108,8 +108,11 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IClusterStateTracker, ClusterStateTracker>();
         services.AddScoped<ICrdtEvictionService, CrdtEvictionService>();
         
+        // Ensure topology observer decoupled triggering boundaries explicitly dynamically mapping.
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IClusterStateObserver, OrchestratorClusterStateObserver>());
+        
         // Register decoupled explicit broadcast evaluations
-        services.TryAddScoped<IDocumentPatchObserver, CrdtPatchBroadcaster>();
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IDocumentPatchObserver, CrdtPatchBroadcaster>());
 
         services.AddHostedService<CrdtInitializationService>();
         services.AddHostedService<CrdtCheckpointService>();
@@ -165,14 +168,13 @@ public static class ServiceCollectionExtensions
         if (string.IsNullOrWhiteSpace(meshId)) throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshId));
         if (string.IsNullOrWhiteSpace(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
 
+        services.AddSingleton(new DistributedCrdtP2pRegistration(meshId, replicaId));
+
         services.AddKeyedSingleton<IApplicationPayloadHandler>(meshId, (sp, key) => 
             ActivatorUtilities.CreateInstance<CrdtP2pPayloadHandler>(sp, replicaId));
             
         services.AddSingleton<IPeerTopologyObserver>(sp => 
             ActivatorUtilities.CreateInstance<CrdtTopologyObserver>(sp, meshId, replicaId));
-
-        services.AddSingleton<IPeerTopologyObserver>(sp => 
-            ActivatorUtilities.CreateInstance<OrchestratorTopologyObserver>(sp, meshId, replicaId));
             
         services.AddHostedService<CrdtAntiEntropyService>();
 

@@ -5,35 +5,28 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Threading;
 using System.Threading.Tasks;
-using Ama.CRDT.Models;
 using Ama.CRDT.Models.Intents;
-using Ama.CRDT.Services;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 
 /// <summary>
-/// Implementation handling intentions and queries for the Fleet document decoupled from UI triggers natively.
+/// Implementation handling intentions and queries for the Fleet document decoupled from UI triggers natively routing via the Stateless Orchestrator Gateway directly.
 /// </summary>
 public sealed class FleetManager : IFleetManager
 {
     private readonly ICrdtDocumentOrchestrator orchestrator;
-    private readonly IAsyncCrdtPatcher patcher;
 
-    public FleetManager(
-        ICrdtDocumentOrchestrator orchestrator,
-        IAsyncCrdtPatcher patcher)
+    public FleetManager(ICrdtDocumentOrchestrator orchestrator)
     {
         this.orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
-        this.patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
     }
 
     /// <inheritdoc />
     public async ValueTask<IReadOnlyDictionary<string, DeviceStatus>> GetDevicesAsync(string documentId, CancellationToken cancellationToken = default)
     {
-        var docManager = orchestrator.GetDocument<FleetState>(documentId);
-        if (docManager != null)
+        var crdtDoc = await orchestrator.GetDocumentStateAsync<FleetState>(documentId, cancellationToken).ConfigureAwait(false);
+        if (crdtDoc.Data != null && crdtDoc.Data.Devices != null)
         {
-            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
             return new ReadOnlyDictionary<string, DeviceStatus>(crdtDoc.Data.Devices);
         }
         
@@ -46,16 +39,8 @@ public sealed class FleetManager : IFleetManager
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document Id cannot be null or empty.", nameof(documentId));
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or empty.", nameof(id));
 
-        var docManager = orchestrator.GetDocument<FleetState>(documentId);
-        if (docManager != null)
-        {
-            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-            var item = new DeviceStatus(id, isOnline, batteryLevel);
-            var operation = await patcher.GenerateOperationAsync(crdtDoc, x => x.Devices, new MapSetIntent(id, item), cancellationToken).ConfigureAwait(false);
-            var patch = new CrdtPatch(new[] { operation });
-
-            await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
-        }
+        var intent = new MapSetIntent(id, new DeviceStatus(id, isOnline, batteryLevel));
+        await orchestrator.ForwardIntentAsync<FleetState>(documentId, intent, "Devices", cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -64,14 +49,7 @@ public sealed class FleetManager : IFleetManager
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document Id cannot be null or empty.", nameof(documentId));
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or empty.", nameof(id));
 
-        var docManager = orchestrator.GetDocument<FleetState>(documentId);
-        if (docManager != null)
-        {
-            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-            var operation = await patcher.GenerateOperationAsync(crdtDoc, x => x.Devices, new MapRemoveIntent(id), cancellationToken).ConfigureAwait(false);
-            var patch = new CrdtPatch(new[] { operation });
-
-            await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
-        }
+        var intent = new MapRemoveIntent(id);
+        await orchestrator.ForwardIntentAsync<FleetState>(documentId, intent, "Devices", cancellationToken).ConfigureAwait(false);
     }
 }

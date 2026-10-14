@@ -6,12 +6,17 @@ using System.Diagnostics.Metrics;
 using System.Linq;
 using Ama.CRDT.Models;
 using Ama.Enterprise.CRDT.Distributed.Models;
+using Ama.Enterprise.CRDT.Distributed.Services.Observers;
+using Microsoft.Extensions.Logging;
 
 /// <summary>
 /// Singleton thread-safe implementation capturing localized maps representing overarching remote state matrix limits.
 /// </summary>
 public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
 {
+    private readonly IEnumerable<IClusterStateObserver> observers;
+    private readonly ILogger<ClusterStateTracker> logger;
+    
     private readonly Dictionary<string, PeerStateEntry> peerStates = new();
     private readonly Dictionary<string, string> networkIdToReplicaId = new();
     private readonly Dictionary<string, DateTime> tombstonedReplicas = new();
@@ -23,8 +28,14 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
     private readonly Counter<long> peerRemovalsCounter;
     private readonly Counter<long> expiredTombstonesCounter;
 
-    public ClusterStateTracker(IMeterFactory? meterFactory = null)
+    public ClusterStateTracker(
+        IEnumerable<IClusterStateObserver> observers,
+        ILogger<ClusterStateTracker> logger,
+        IMeterFactory? meterFactory = null)
     {
+        this.observers = observers ?? throw new ArgumentNullException(nameof(observers));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.ClusterStateTracker") ?? new Meter("Ama.Enterprise.CRDT.Distributed.ClusterStateTracker");
         this.stateUpdatesCounter = this.meter.CreateCounter<long>("crdt.cluster.state_updates", "updates", "Number of cluster state updates");
         this.tombstonedPeersCounter = this.meter.CreateCounter<long>("crdt.cluster.tombstoned_peers", "peers", "Number of explicitly tombstoned replicas");
@@ -39,11 +50,30 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
         if (string.IsNullOrWhiteSpace(peerId)) throw new ArgumentException("Peer ID cannot be null or empty.", nameof(peerId));
         ArgumentNullException.ThrowIfNull(globalState);
 
+        bool topologyChanged = false;
+
         lock (syncRoot)
         {
-            if (networkIdToReplicaId.TryGetValue(peerId, out var oldReplicaId) && oldReplicaId != peerReplicaId)
+            // 1. Remove any old network mappings for this specific replica (enforce 1:1 relationship)
+            var stalePeerIds = networkIdToReplicaId
+                .Where(x => x.Value == peerReplicaId && x.Key != peerId)
+                .Select(x => x.Key)
+                .ToList();
+                
+            foreach (var stalePeerId in stalePeerIds)
             {
-                peerStates.Remove(oldReplicaId);
+                networkIdToReplicaId.Remove(stalePeerId);
+                topologyChanged = true;
+            }
+
+            // 2. Handle if the current network PeerId was previously mapped to a DIFFERENT replica
+            if (!networkIdToReplicaId.TryGetValue(peerId, out var oldReplicaId) || oldReplicaId != peerReplicaId)
+            {
+                if (oldReplicaId != null)
+                {
+                    peerStates.Remove(oldReplicaId);
+                }
+                topologyChanged = true;
             }
             
             peerStates[peerReplicaId] = new PeerStateEntry(globalState, DateTime.UtcNow);
@@ -51,6 +81,11 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
         }
 
         stateUpdatesCounter.Add(1, new KeyValuePair<string, object?>("replica_id", peerReplicaId));
+        
+        if (topologyChanged)
+        {
+            NotifyObservers();
+        }
     }
 
     /// <inheritdoc />
@@ -90,19 +125,39 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
     }
 
     /// <inheritdoc />
+    public string? GetReplicaIdByPeerId(string peerId)
+    {
+        if (string.IsNullOrWhiteSpace(peerId)) return null;
+
+        lock (syncRoot)
+        {
+            if (networkIdToReplicaId.TryGetValue(peerId, out var replicaId))
+            {
+                return replicaId;
+            }
+        }
+        return null;
+    }
+
+    /// <inheritdoc />
     public void RemovePeerByNetworkId(string peerId)
     {
         if (string.IsNullOrWhiteSpace(peerId)) throw new ArgumentException("Peer ID cannot be null or empty.", nameof(peerId));
+
+        bool removed = false;
 
         lock (syncRoot)
         {
             // ONLY unmap the network routing. We intentionally DO NOT remove the replica from `peerStates` here!
             // If we remove the CRDT state early, the GMVV will trim the journal and cause amnesia for offline peers.
             // The state remains safely bounded until `GetAndTombstoneExpiredPeers` handles the TTL timeout inherently.
-            if (networkIdToReplicaId.Remove(peerId))
-            {
-                peerRemovalsCounter.Add(1);
-            }
+            removed = networkIdToReplicaId.Remove(peerId);
+        }
+        
+        if (removed)
+        {
+            peerRemovalsCounter.Add(1);
+            NotifyObservers();
         }
     }
 
@@ -111,13 +166,20 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
     {
         if (string.IsNullOrWhiteSpace(replicaId)) return;
         
+        bool topologyChanged = false;
+
         lock (syncRoot)
         {
             if (tombstonedReplicas.TryAdd(replicaId, DateTime.UtcNow))
             {
                 tombstonedPeersCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaId));
+                topologyChanged = true;
             }
-            peerStates.Remove(replicaId);
+            
+            if (peerStates.Remove(replicaId))
+            {
+                topologyChanged = true;
+            }
             
             var keysToRemove = networkIdToReplicaId
                 .Where(x => x.Value == replicaId)
@@ -127,7 +189,13 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
             foreach (var key in keysToRemove)
             {
                 networkIdToReplicaId.Remove(key);
+                topologyChanged = true;
             }
+        }
+        
+        if (topologyChanged)
+        {
+            NotifyObservers();
         }
     }
 
@@ -136,13 +204,20 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
     {
         if (string.IsNullOrWhiteSpace(peerId)) return null;
 
+        string? replicaIdToTombstone = null;
+
         lock (syncRoot)
         {
             if (networkIdToReplicaId.TryGetValue(peerId, out var replicaId))
             {
-                TombstoneReplica(replicaId);
-                return replicaId;
+                replicaIdToTombstone = replicaId;
             }
+        }
+
+        if (replicaIdToTombstone != null)
+        {
+            TombstoneReplica(replicaIdToTombstone);
+            return replicaIdToTombstone;
         }
 
         return null;
@@ -174,11 +249,11 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
                     expiredReplicas.Add(kvp.Key);
                 }
             }
+        }
 
-            foreach (var replicaId in expiredReplicas)
-            {
-                TombstoneReplica(replicaId);
-            }
+        foreach (var replicaId in expiredReplicas)
+        {
+            TombstoneReplica(replicaId);
         }
 
         return expiredReplicas;
@@ -220,10 +295,8 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
         {
             var dto = new ClusterStateSnapshotDto();
 
-            foreach (var kvp in networkIdToReplicaId)
-            {
-                dto.NetworkIdToReplicaId[kvp.Key] = kvp.Value;
-            }
+            // Deliberately skipping networkIdToReplicaId export, as Peer IDs are ephemeral session concepts
+            // and should never survive across node reboots or long-term storage boundaries.
 
             foreach (var kvp in tombstonedReplicas)
             {
@@ -262,10 +335,8 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
         lock (syncRoot)
         {
             networkIdToReplicaId.Clear();
-            foreach (var kvp in state.NetworkIdToReplicaId)
-            {
-                networkIdToReplicaId[kvp.Key] = kvp.Value;
-            }
+            // Deliberately skipping networkIdToReplicaId import to prevent poisoning live routing
+            // with dead ephemeral session identifiers loaded from storage.
 
             tombstonedReplicas.Clear();
             foreach (var kvp in state.TombstonedReplicas)
@@ -292,6 +363,8 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
             }
         }
         
+        NotifyObservers();
+        
         // Immediately purge tombstones that expired while offline evaluating limits.
         if (cooldown > TimeSpan.Zero)
         {
@@ -302,6 +375,21 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
     public void Dispose()
     {
         meter.Dispose();
+    }
+    
+    private void NotifyObservers()
+    {
+        foreach (var observer in observers)
+        {
+            try
+            {
+                observer.OnClusterTopologyChanged();
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "An error occurred executing cluster state topology observer explicitly mapped bounding limits cleanly.");
+            }
+        }
     }
 
     private readonly record struct PeerStateEntry : IEquatable<PeerStateEntry>

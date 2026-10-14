@@ -144,7 +144,7 @@ public sealed class ConcurrencyIntegrationTests
 
         for (var i = 0; i < DocumentCount; i++)
         {
-            var doc = orchestrator.GetDocument<ConcurrencyTestState>($"doc-{i}");
+            var doc = orchestrator.TryGetLocalDocument<ConcurrencyTestState>($"doc-{i}");
             doc.ShouldNotBeNull();
         }
 
@@ -200,7 +200,7 @@ public sealed class ConcurrencyIntegrationTests
         await orchestrator.CreateDocumentAsync("doc-msg-1", "concurrent-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
         
-        var targetDoc = orchestrator.GetDocument<ConcurrencyTestState>("doc-msg-1");
+        var targetDoc = orchestrator.TryGetLocalDocument<ConcurrencyTestState>("doc-msg-1");
         targetDoc.ShouldNotBeNull();
 
         var targetPeerId = new PeerId(Guid.NewGuid());
@@ -220,7 +220,7 @@ public sealed class ConcurrencyIntegrationTests
             if (i % 3 == 0)
             {
                 var dummyOp = default(CrdtOperation) with { Id = Guid.NewGuid(), ReplicaId = "Replica1", JsonPath = "$.data" };
-                await targetDoc!.ApplyPatchAsync(new CrdtPatch(new[] { dummyOp }), CancellationToken.None);
+                await orchestrator.ApplyPatchAsync<ConcurrencyTestState>("doc-msg-1", new CrdtPatch(new[] { dummyOp }), CancellationToken.None);
             }
             else if (i % 3 == 1)
             {
@@ -268,9 +268,9 @@ public sealed class ConcurrencyIntegrationTests
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Assert - Subsequent command succeeds securely
-        var successDoc = orchestrator.GetDocument<ConcurrencyTestState>("success-doc");
+        var successDoc = orchestrator.TryGetLocalDocument<ConcurrencyTestState>("success-doc");
         successDoc.ShouldNotBeNull();
-        successDoc.DocumentId.ShouldBe("success-doc");
+        successDoc!.DocumentId.ShouldBe("success-doc");
     }
 
     [IntegrationFact]

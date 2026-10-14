@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
+using Ama.CRDT.Models.Intents;
 using Ama.CRDT.Services;
 using Ama.CRDT.Services.Journaling;
 using Ama.CRDT.Services.Serialization;
@@ -18,7 +19,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Deserializes incoming network application payloads bounding properly gracefully explicitly natively resolving standard active mappings alongside dynamic stateless RPC proxies reliably optimally cleanly securely perfectly successfully flawlessly smartly logically properly cleanly intelligently elegantly correctly cleanly elegantly accurately cleanly flawlessly properly.
+/// Deserializes incoming network application payloads bounding natively resolving standard active mappings alongside dynamic stateless RPC proxies.
 /// </summary>
 public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposable
 {
@@ -46,10 +47,10 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.CrdtP2pPayloadHandler") ?? new Meter("Ama.Enterprise.CRDT.Distributed.CrdtP2pPayloadHandler");
-        this.messagesProcessedCounter = this.meter.CreateCounter<long>("crdt.payloads.processed", "messages", "Total network payload wrappers intercepted smoothly directly explicitly");
-        this.operationsReceivedCounter = this.meter.CreateCounter<long>("crdt.payloads.operations_received", "operations", "Total operations accurately dispatched natively towards application limits");
-        this.snapshotsMergedCounter = this.meter.CreateCounter<long>("crdt.payloads.snapshots_merged", "snapshots", "Total fallback snapshots successfully merged dynamically");
-        this.rebootsHandledCounter = this.meter.CreateCounter<long>("crdt.payloads.reboots_handled", "events", "Total eviction rejection payloads correctly forcing dynamic bounds");
+        this.messagesProcessedCounter = this.meter.CreateCounter<long>("crdt.payloads.processed", "messages", "Total network payload wrappers intercepted directly");
+        this.operationsReceivedCounter = this.meter.CreateCounter<long>("crdt.payloads.operations_received", "operations", "Total operations dispatched natively towards application limits");
+        this.snapshotsMergedCounter = this.meter.CreateCounter<long>("crdt.payloads.snapshots_merged", "snapshots", "Total fallback snapshots merged dynamically");
+        this.rebootsHandledCounter = this.meter.CreateCounter<long>("crdt.payloads.reboots_handled", "events", "Total eviction rejection payloads forcing dynamic bounds");
     }
 
     /// <inheritdoc />
@@ -105,11 +106,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             return;
         }
 
-        if (wrapper.MessageType == "CrdtOps")
-        {
-            await ProcessOperationsAsync(scope, targetDoc, meshId, wrapper, cancellationToken).ConfigureAwait(false);
-        }
-        else if (wrapper.MessageType == "CrdtPatch")
+        if (wrapper.MessageType == "CrdtPatch")
         {
             await ProcessPatchAsync(scope, targetDoc, meshId, wrapper, cancellationToken).ConfigureAwait(false);
         }
@@ -148,10 +145,21 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                 var req = serializer.DeserializeFromBytes<CrdtIntentForwardRequestDto>(wrapper.Payload!);
                 var targetDoc = scope.Orchestrator.GetActiveDocuments().FirstOrDefault(d => d.DocumentId == req.DocumentId);
                 
-                // Intentionally mapping directly executing intent generation boundaries gracefully decoupling generic pipelines
-                // NOTE: Finalizing applicator bounds actively requires internal intent deserialization implementations evaluating type bounds.
-                // Assuming logical generic execution safely mapping explicitly resolving successfully tracking intent paths accurately properly cleanly perfectly smartly.
-                var isSuccess = targetDoc != null; 
+                var isSuccess = false;
+                if (targetDoc != null)
+                {
+                    try 
+                    {
+                        var intent = serializer.DeserializeFromBytes<IOperationIntent>(req.SerializedIntent);
+                        var patcher = scope.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
+                        
+                        isSuccess = await targetDoc.ApplyRemoteIntentAsync(intent, req.TargetProperty, patcher, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Failed to apply forwarded intent on target document {DocumentId}.", req.DocumentId);
+                    }
+                }
 
                 var res = new CrdtIntentForwardResponseDto { CorrelationId = req.CorrelationId, IsSuccess = isSuccess };
                 var resPayload = serializer.SerializeToBytes(res);
@@ -169,7 +177,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to completely successfully process asynchronous RPC payload for proxy evaluations cleanly.");
+            logger.LogError(ex, "Failed to process asynchronous RPC payload for proxy evaluations.");
         }
     }
 
@@ -277,10 +285,10 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                 {
                     if (opsByDoc.TryGetValue(targetDoc.DocumentId, out var docOps) && docOps.Length > 0)
                     {
-                        var opsMsg = new CrdtOperationsMessage(replicaContext.ReplicaId, docOps);
-                        var opsPayload = serializer.SerializeToBytes(opsMsg);
+                        var patchMsg = new CrdtPatchMessage(replicaContext.ReplicaId, new CrdtPatch(docOps));
+                        var patchPayload = serializer.SerializeToBytes(patchMsg);
                         
-                        var replyWrapper = new CrdtMessageWrapper(targetDoc.DocumentId, "CrdtOps", opsPayload);
+                        var replyWrapper = new CrdtMessageWrapper(targetDoc.DocumentId, "CrdtPatch", patchPayload);
                         var replyBytes = serializer.SerializeToBytes(replyWrapper);
 
                         await directSender.SendDirectAsync(senderId, replyBytes, cancellationToken).ConfigureAwait(false);
@@ -291,37 +299,6 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
         catch (Exception ex)
         {
             logger.LogError(ex, "[{ReplicaId}] Failed to process incoming CrdtSync message.", replicaId);
-        }
-    }
-
-    private async Task ProcessOperationsAsync(IDistributedCrdtScope scope, IDistributedCrdtDocument targetDoc, string meshId, CrdtMessageWrapper wrapper, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var opsMsg = serializer.DeserializeFromBytes<CrdtOperationsMessage>(wrapper.Payload!);
-            
-            if (opsMsg.ReplicaId != null && scope.ClusterTracker.IsReplicaTombstoned(opsMsg.ReplicaId))
-            {
-                await RejectEvictedReplicaAsync(scope, meshId, targetDoc.DocumentId, opsMsg.ReplicaId, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            if (opsMsg.Operations == null || opsMsg.Operations.Length == 0)
-            {
-                return;
-            }
-            
-            await targetDoc.ApplyOperationsAsync(opsMsg.Operations, cancellationToken).ConfigureAwait(false);
-            operationsReceivedCounter.Add(opsMsg.Operations.Length, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
-            
-            if (targetDoc.DocumentId == scope.Orchestrator.Registry.DocumentId)
-            {
-                await scope.Orchestrator.SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "[{ReplicaId}] Failed to process incoming CrdtOps message for document {DocumentId}.", scope.ReplicaId, targetDoc.DocumentId);
         }
     }
 
@@ -342,7 +319,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                 return;
             }
             
-            await targetDoc.ApplyOperationsAsync([.. patchMsg.Patch.Operations], cancellationToken).ConfigureAwait(false);
+            await targetDoc.ApplyRemotePatchAsync(patchMsg.Patch, cancellationToken).ConfigureAwait(false);
             operationsReceivedCounter.Add(patchMsg.Patch.Operations.Count, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
             
             if (targetDoc.DocumentId == scope.Orchestrator.Registry.DocumentId)

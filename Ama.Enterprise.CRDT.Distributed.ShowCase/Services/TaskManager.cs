@@ -5,35 +5,28 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Threading;
 using System.Threading.Tasks;
-using Ama.CRDT.Models;
 using Ama.CRDT.Models.Intents;
-using Ama.CRDT.Services;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 
 /// <summary>
-/// Implementation handling intentions and queries for the task list document decoupled from generic UI events natively.
+/// Implementation handling intentions and queries for the task list document decoupled from generic UI events natively routing via the Stateless Orchestrator Gateway directly.
 /// </summary>
 public sealed class TaskManager : ITaskManager
 {
     private readonly ICrdtDocumentOrchestrator orchestrator;
-    private readonly IAsyncCrdtPatcher patcher;
 
-    public TaskManager(
-        ICrdtDocumentOrchestrator orchestrator,
-        IAsyncCrdtPatcher patcher)
+    public TaskManager(ICrdtDocumentOrchestrator orchestrator)
     {
         this.orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
-        this.patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
     }
 
     /// <inheritdoc />
     public async ValueTask<IReadOnlyDictionary<string, TaskItem>> GetTasksAsync(string documentId, CancellationToken cancellationToken = default)
     {
-        var docManager = orchestrator.GetDocument<TaskListState>(documentId);
-        if (docManager != null) 
+        var crdtDoc = await orchestrator.GetDocumentStateAsync<TaskListState>(documentId, cancellationToken).ConfigureAwait(false);
+        if (crdtDoc.Data != null && crdtDoc.Data.Tasks != null)
         {
-            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
             return new ReadOnlyDictionary<string, TaskItem>(crdtDoc.Data.Tasks);
         }
         
@@ -46,16 +39,8 @@ public sealed class TaskManager : ITaskManager
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document Id cannot be null or empty.", nameof(documentId));
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or empty.", nameof(id));
 
-        var docManager = orchestrator.GetDocument<TaskListState>(documentId);
-        if (docManager != null)
-        {
-            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-            var item = new TaskItem(id, description, isDone);
-            var operation = await patcher.GenerateOperationAsync(crdtDoc, x => x.Tasks, new MapSetIntent(id, item), cancellationToken).ConfigureAwait(false);
-            var patch = new CrdtPatch(new[] { operation });
-
-            await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
-        }
+        var intent = new MapSetIntent(id, new TaskItem(id, description, isDone));
+        await orchestrator.ForwardIntentAsync<TaskListState>(documentId, intent, "Tasks", cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -64,14 +49,7 @@ public sealed class TaskManager : ITaskManager
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document Id cannot be null or empty.", nameof(documentId));
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or empty.", nameof(id));
 
-        var docManager = orchestrator.GetDocument<TaskListState>(documentId);
-        if (docManager != null)
-        {
-            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-            var operation = await patcher.GenerateOperationAsync(crdtDoc, x => x.Tasks, new MapRemoveIntent(id), cancellationToken).ConfigureAwait(false);
-            var patch = new CrdtPatch(new[] { operation });
-
-            await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
-        }
+        var intent = new MapRemoveIntent(id);
+        await orchestrator.ForwardIntentAsync<TaskListState>(documentId, intent, "Tasks", cancellationToken).ConfigureAwait(false);
     }
 }

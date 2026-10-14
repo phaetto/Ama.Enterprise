@@ -167,18 +167,13 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
         var scope = scopeManager.GetOrCreateScope("Replica1");
         var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcher = scope.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
         
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
-        var docManager = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
-        var crdtDoc = await docManager.GetDocumentAsync(CancellationToken.None);
-        
         var intent = new MapSetIntent("testKey", "DirtyData");
-        var op = await patcher.GenerateOperationAsync(crdtDoc, x => x.DataMap, intent, CancellationToken.None);
-        await docManager.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
+        await orchestrator.ForwardIntentAsync<JournalTestState>("journal-doc", intent, "DataMap", CancellationToken.None);
 
         var checkpointService = sp.GetServices<IHostedService>().OfType<CrdtCheckpointService>().First();
 
@@ -210,7 +205,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
-        var docManager = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
+        var docManager = orchestrator.TryGetLocalDocument<JournalTestState>("journal-doc")!;
 
         // Act
         await docManager.InitializeAsync(CancellationToken.None);
@@ -219,7 +214,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         docManager.DocumentId.ShouldBe("journal-doc");
 
         // Act
-        await scope.Orchestrator.ProvideSnapshotAsync(docManager.DocumentId, "RemoteReplica2", new PeerId(Guid.NewGuid()), CancellationToken.None);
+        await orchestrator.ProvideSnapshotAsync("journal-doc", "RemoteReplica2", new PeerId(Guid.NewGuid()), CancellationToken.None);
 
         // Assert
         mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
@@ -262,7 +257,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
             dvv.Merge(globalDvv);
         }
         
-        var docManager = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
         var metadataManager = scope.ServiceProvider.GetRequiredService<ICrdtMetadataManager>();
         
         var snapshotState = new JournalTestState { Id = "journal-doc" };
@@ -283,7 +277,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await handler.HandlePayloadAsync(gossipMsg.MeshId, gossipMsg.SenderId, gossipMsg.Payload, CancellationToken.None);
 
         // Assert
-        var crdtDoc = await docManager.GetDocumentAsync(CancellationToken.None);
+        var crdtDoc = await orchestrator.GetDocumentStateAsync<JournalTestState>("journal-doc", CancellationToken.None);
         crdtDoc.Data.DataMap.ShouldContainKeyAndValue("Field", "SnapshotData");
         context.ShardVersionVectors["journal-doc"].Versions["RemoteA"].ShouldBe(10);
     }
@@ -321,7 +315,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
         var scope = scopeManager.GetOrCreateScope("ReplicaA");
         var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcher = scope.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
         var syncService = scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
         var journalManager = scope.ServiceProvider.GetRequiredService<IJournalManager>();
         var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
@@ -330,12 +323,8 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
-        var docA = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
-        var crdtDocA = await docA.GetDocumentAsync(CancellationToken.None);
-
         var intent = new MapSetIntent("testKey", "Updated");
-        var op = await patcher.GenerateOperationAsync(crdtDocA, x => x.DataMap, intent, CancellationToken.None);
-        await docA.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
+        await orchestrator.ForwardIntentAsync<JournalTestState>("journal-doc", intent, "DataMap", CancellationToken.None);
 
         var remoteDvv = new DottedVersionVector();
 
@@ -349,7 +338,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         // Assert
         result.SnapshotRequired.ShouldBeFalse();
         result.Operations.Count.ShouldBeGreaterThan(0);
-        result.Operations.Any(o => o.Operation.Id == op.Id).ShouldBeTrue();
+        result.Operations.Any(o => o.Operation.JsonPath.Contains("dataMap")).ShouldBeTrue();
     }
 
     [IntegrationFact]
@@ -360,7 +349,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
         var scope = scopeManager.GetOrCreateScope("ReplicaA");
         var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcher = scope.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
         var storage = scope.ServiceProvider.GetRequiredService<IDistributedCrdtStorage>();
         var syncService = scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
         var journalManager = scope.ServiceProvider.GetRequiredService<IJournalManager>();
@@ -370,12 +358,8 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
-        var docA = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
-        var crdtDocA = await docA.GetDocumentAsync(CancellationToken.None);
-
         var intent = new MapSetIntent("testKey", "Updated");
-        var op = await patcher.GenerateOperationAsync(crdtDocA, x => x.DataMap, intent, CancellationToken.None);
-        await docA.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
+        await orchestrator.ForwardIntentAsync<JournalTestState>("journal-doc", intent, "DataMap", CancellationToken.None);
 
         var gmvv = new Dictionary<string, long> { { "ReplicaA", 10 } }; 
         await storage.TrimAsync("default", gmvv, CancellationToken.None);
@@ -417,12 +401,8 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
-        var docA = orchestrator.GetDocument<JournalTestState>("journal-doc")!;
-        var crdtDocA = await docA.GetDocumentAsync(CancellationToken.None);
-
         var localIntent = new MapSetIntent("LocalKey", "LocalValue");
-        var localOp = await patcher.GenerateOperationAsync(crdtDocA, x => x.DataMap, localIntent, CancellationToken.None);
-        await docA.ApplyPatchAsync(new CrdtPatch(new[] { localOp }), CancellationToken.None);
+        await orchestrator.ForwardIntentAsync<JournalTestState>("journal-doc", localIntent, "DataMap", CancellationToken.None);
 
         var remoteState = new JournalTestState { Id = "journal-doc" };
         var remoteMetadata = metadataManager.Initialize(remoteState);
@@ -441,6 +421,8 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         patchObserverMock.Invocations.Clear();
 
+        var docA = orchestrator.TryGetLocalDocument<JournalTestState>("journal-doc")!;
+
         // Act
         await docA.MergeSnapshotAsync(snapshotBytes, globalMap, CancellationToken.None);
         await Task.Delay(500);
@@ -450,7 +432,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         patchObserverMock.Verify(x => x.OnPatchGeneratedAsync(It.IsAny<string>(), It.IsAny<CrdtPatch>(), It.IsAny<CancellationToken>()), Times.Never);
 
         // Both keys should exist as a true state merge unions divergent mapped states logically
-        var crdtDocAAfter = await docA.GetDocumentAsync(CancellationToken.None);
+        var crdtDocAAfter = await orchestrator.GetDocumentStateAsync<JournalTestState>("journal-doc", CancellationToken.None);
         crdtDocAAfter.Data.DataMap.ShouldContainKeyAndValue("LocalKey", "LocalValue");
         crdtDocAAfter.Data.DataMap.ShouldContainKeyAndValue("RemoteKey", "RemoteValue");
         
@@ -472,22 +454,13 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var scopeManager1 = sp1.GetRequiredService<DistributedCrdtScopeManager>();
         var scope1 = scopeManager1.GetOrCreateScope("Replica1");
         var orchestrator1 = scope1.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcher1 = scope1.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
 
         await orchestrator1.InitializeAsync(CancellationToken.None);
         await orchestrator1.CreateDocumentAsync("test-replayed-doc", "journal-doc", CancellationToken.None);
         await orchestrator1.SyncDocumentsAsync(CancellationToken.None);
 
-        var doc1 = orchestrator1.GetDocument<JournalTestState>("test-replayed-doc")!;
-        var crdtDoc1 = await doc1.GetDocumentAsync(CancellationToken.None);
-        
-        var intent1 = new MapSetIntent("key1", "ReplayedData1");
-        var op1 = await patcher1.GenerateOperationAsync(crdtDoc1, x => x.DataMap, intent1, CancellationToken.None);
-
-        var intent2 = new MapSetIntent("key2", "ReplayedData2");
-        var op2 = await patcher1.GenerateOperationAsync(crdtDoc1, x => x.DataMap, intent2, CancellationToken.None);
-
-        await doc1.ApplyPatchAsync(new CrdtPatch(new[] { op1, op2 }), CancellationToken.None);
+        await orchestrator1.ForwardIntentAsync<JournalTestState>("test-replayed-doc", new MapSetIntent("key1", "ReplayedData1"), "DataMap", CancellationToken.None);
+        await orchestrator1.ForwardIntentAsync<JournalTestState>("test-replayed-doc", new MapSetIntent("key2", "ReplayedData2"), "DataMap", CancellationToken.None);
 
         var journalOps = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
         journalOps.Count.ShouldBeGreaterThan(2);
@@ -506,11 +479,12 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var scope2 = scopeManager2.GetOrCreateScope("Replica1");
         var orchestrator2 = scope2.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         
-        var doc2 = orchestrator2.GetDocument<JournalTestState>("test-replayed-doc");
+        var doc2 = orchestrator2.TryGetLocalDocument<JournalTestState>("test-replayed-doc");
 
         doc2.ShouldNotBeNull();
         doc2!.DocumentId.ShouldBe("test-replayed-doc");
-        var crdtDoc2 = await doc2.GetDocumentAsync(CancellationToken.None);
+
+        var crdtDoc2 = await orchestrator2.GetDocumentStateAsync<JournalTestState>("test-replayed-doc", CancellationToken.None);
         crdtDoc2.Data.DataMap.ShouldContainKeyAndValue("key1", "ReplayedData1");
         crdtDoc2.Data.DataMap.ShouldContainKeyAndValue("key2", "ReplayedData2");
     }
@@ -534,23 +508,15 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
         var scope = scopeManager.GetOrCreateScope("Replica1");
         var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcher = scope.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("trim-test-doc", "journal-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
-        var doc = orchestrator.GetDocument<JournalTestState>("trim-test-doc")!;
-        var crdtDoc = await doc.GetDocumentAsync(CancellationToken.None);
-
         for (int i = 0; i < 10; i++)
         {
             var intent = new MapSetIntent($"key{i}", $"value{i}");
-            var op = await patcher.GenerateOperationAsync(crdtDoc, x => x.DataMap, intent, CancellationToken.None);
-            await doc.ApplyPatchAsync(new CrdtPatch(new[] { op }), CancellationToken.None);
-            
-            // Refetch document natively after patching to ensure valid mapped bounds on upcoming mutations
-            crdtDoc = await doc.GetDocumentAsync(CancellationToken.None);
+            await orchestrator.ForwardIntentAsync<JournalTestState>("trim-test-doc", intent, "DataMap", CancellationToken.None);
         }
 
         var initialJournalOps = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();

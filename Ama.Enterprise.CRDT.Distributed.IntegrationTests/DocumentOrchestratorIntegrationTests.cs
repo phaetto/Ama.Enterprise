@@ -111,7 +111,7 @@ public sealed class DocumentOrchestratorIntegrationTests
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Assert
-        var doc = orchestrator.GetDocument<DynamicTestState>("dynamic-doc-1");
+        var doc = orchestrator.TryGetLocalDocument<DynamicTestState>("dynamic-doc-1");
         doc.ShouldNotBeNull();
         doc!.DocumentId.ShouldBe("dynamic-doc-1");
 
@@ -138,7 +138,7 @@ public sealed class DocumentOrchestratorIntegrationTests
         await orchestrator.CreateDocumentAsync("doc-to-delete", "dynamic-type", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
         
-        orchestrator.GetDocument<DynamicTestState>("doc-to-delete").ShouldNotBeNull();
+        orchestrator.TryGetLocalDocument<DynamicTestState>("doc-to-delete").ShouldNotBeNull();
 
         // Act
         await orchestrator.DeleteDocumentAsync("doc-to-delete", CancellationToken.None);
@@ -147,7 +147,7 @@ public sealed class DocumentOrchestratorIntegrationTests
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Assert
-        var deletedDoc = orchestrator.GetDocument<DynamicTestState>("doc-to-delete");
+        var deletedDoc = orchestrator.TryGetLocalDocument<DynamicTestState>("doc-to-delete");
         deletedDoc.ShouldBeNull();
         
         var registryDocs = (await orchestrator.Registry.GetDocumentAsync()).Data!.Documents;

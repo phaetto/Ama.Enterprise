@@ -208,17 +208,16 @@ public class EvictionIntegrationTests
         await orchestrator.CreateDocumentAsync("test-doc", "test-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
         
-        var docManager = orchestrator.GetDocument<TestState>("test-doc")!;
         var evictionService = scope.ServiceProvider.GetRequiredService<ICrdtEvictionService>();
         
-        var crdtDoc = await docManager.GetDocumentAsync(CancellationToken.None);
+        var crdtDoc = await orchestrator.GetDocumentStateAsync<TestState>("test-doc", CancellationToken.None);
         crdtDoc.Data.DataMap["Key"] = "Unsaved Offline Edit";
         
         // Act
         await evictionService.RebootLocalIdentityAsync(CancellationToken.None);
         
         // Assert
-        var crdtDocAfter = await docManager.GetDocumentAsync(CancellationToken.None);
+        var crdtDocAfter = await orchestrator.GetDocumentStateAsync<TestState>("test-doc", CancellationToken.None);
         crdtDocAfter.Data.DataMap["Key"].ShouldBe("Unsaved Offline Edit");
     }
 
@@ -236,8 +235,8 @@ public class EvictionIntegrationTests
         await orchestrator.CreateDocumentAsync("test-doc", "test-doc", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
-        var docManager = orchestrator.GetDocument<TestState>("test-doc")!;
-        var crdtDoc = await docManager.GetDocumentAsync(CancellationToken.None);
+        var docManager = orchestrator.TryGetLocalDocument<TestState>("test-doc")!;
+        var crdtDoc = await orchestrator.GetDocumentStateAsync<TestState>("test-doc", CancellationToken.None);
         var metadataManager = scope.ServiceProvider.GetRequiredService<ICrdtMetadataManager>();
         var serializer = scope.ServiceProvider.GetRequiredService<ICrdtSerializer>();
         var patcher = scope.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
@@ -261,7 +260,7 @@ public class EvictionIntegrationTests
         await docManager.MergeSnapshotAsync(snapshotData, new ShardVersionVectorMap(), CancellationToken.None);
         
         // Assert
-        var crdtDocAfter = await docManager.GetDocumentAsync(CancellationToken.None);
+        var crdtDocAfter = await orchestrator.GetDocumentStateAsync<TestState>("test-doc", CancellationToken.None);
         crdtDocAfter.Data.DataMap["Key"].ShouldBe("Cluster Snapshot Data");
     }
 }

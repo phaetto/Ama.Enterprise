@@ -30,7 +30,7 @@ public sealed class FeatureFlagDomainIntegrationTests
         var exception = await Should.ThrowAsync<InvalidOperationException>(async () => 
             await manager.SetFlagAsync("TestFlag", true, "TestUser", null, null, CancellationToken.None));
             
-        exception.Message.ShouldContain("initialized");
+        exception.Message.ShouldContain("Cannot evaluate stateless CRDT State");
     }
 
     [IntegrationFact]
@@ -161,6 +161,10 @@ public sealed class FeatureFlagDomainIntegrationTests
 
         var mockRegistry = new Mock<IPeerRegistry>();
         services.AddSingleton(mockRegistry.Object);
+
+        var mockP2pRpcCorrelator = new Mock<IP2pRpcCorrelator>();
+        mockP2pRpcCorrelator.SetReturnsDefault(Task.CompletedTask);
+        services.AddSingleton(mockP2pRpcCorrelator.Object);
 
         var mockP2p = new Mock<IP2pAlgorithm>();
         mockP2p.SetReturnsDefault(Task.CompletedTask);

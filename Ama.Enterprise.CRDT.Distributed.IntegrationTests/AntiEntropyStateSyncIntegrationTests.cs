@@ -11,7 +11,6 @@ using Ama.CRDT.Extensions;
 using Ama.CRDT.Models;
 using Ama.CRDT.Models.Aot;
 using Ama.CRDT.Models.Intents;
-using Ama.CRDT.Services;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
@@ -101,7 +100,6 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
         var scope = scopeManager.GetOrCreateScope("Replica1");
         var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcher = scope.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         
@@ -109,20 +107,11 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         await orchestrator.CreateDocumentAsync("sync-doc-2", "sync-doc-2", CancellationToken.None);
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
-        var doc1 = orchestrator.GetDocument<SyncTestState>("sync-doc-1")!;
-        var doc2 = orchestrator.GetDocument<SyncTestState>("sync-doc-2")!;
-        
-        var crdtDoc1 = await doc1.GetDocumentAsync(CancellationToken.None);
-        var crdtDoc2 = await doc2.GetDocumentAsync(CancellationToken.None);
-
         var intent1 = new MapSetIntent("testKey", "Val1");
-        var op1 = await patcher.GenerateOperationAsync(crdtDoc1, x => x.DataMap, intent1, CancellationToken.None);
+        await orchestrator.ForwardIntentAsync<SyncTestState>("sync-doc-1", intent1, "DataMap", CancellationToken.None);
 
         var intent2 = new MapSetIntent("testKey", "Val2");
-        var op2 = await patcher.GenerateOperationAsync(crdtDoc2, x => x.DataMap, intent2, CancellationToken.None);
-
-        await doc1.ApplyPatchAsync(new CrdtPatch(new[] { op1 }), CancellationToken.None);
-        await doc2.ApplyPatchAsync(new CrdtPatch(new[] { op2 }), CancellationToken.None);
+        await orchestrator.ForwardIntentAsync<SyncTestState>("sync-doc-2", intent2, "DataMap", CancellationToken.None);
 
         var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
         var serializer = sp.GetRequiredService<ICrdtSerializer>();
@@ -146,7 +135,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         foreach (var payload in capturedDirectSends)
         {
             var msgWrapper = serializer.DeserializeFromBytes<CrdtMessageWrapper>(payload.ToArray());
-            msgWrapper.MessageType.ShouldBe("CrdtOps");
+            msgWrapper.MessageType.ShouldBe("CrdtPatch");
             broadcastedDocIds.Add(msgWrapper.DocumentId);
         }
 
@@ -253,7 +242,6 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
         var scope = scopeManager.GetOrCreateScope("Replica1");
         var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcher = scope.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
@@ -265,20 +253,14 @@ public sealed class AntiEntropyStateSyncIntegrationTests
             await svc.StartAsync(CancellationToken.None);
         }
 
-        var docManager = orchestrator.GetDocument<SyncTestState>("sync-doc-1")!;
-        var crdtDoc = await docManager.GetDocumentAsync(CancellationToken.None);
-        
         // Prepare empty patch to verify it skips
         var patch = new CrdtPatch(Array.Empty<CrdtOperation>());
 
         // Act
-        await docManager.ApplyPatchAsync(patch, CancellationToken.None);
+        await orchestrator.ApplyPatchAsync<SyncTestState>("sync-doc-1", patch, CancellationToken.None);
 
         var intent = new MapSetIntent("Field", "test");
-        var op1 = await patcher.GenerateOperationAsync(crdtDoc, x => x.DataMap, intent, CancellationToken.None);
-        var populatedPatch = new CrdtPatch(new[] { op1 });
-
-        await docManager.ApplyPatchAsync(populatedPatch, CancellationToken.None);
+        await orchestrator.ForwardIntentAsync<SyncTestState>("sync-doc-1", intent, "DataMap", CancellationToken.None);
 
         await Task.Delay(1000);
 

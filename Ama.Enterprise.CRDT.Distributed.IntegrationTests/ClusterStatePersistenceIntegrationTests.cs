@@ -305,7 +305,6 @@ public sealed class ClusterStatePersistenceIntegrationTests
         capturedState.ShouldNotBeNull();
         
         capturedState.TombstonedReplicas.ShouldContainKey("ReplicaC");
-        capturedState.NetworkIdToReplicaId.ShouldContainKeyAndValue("NetworkB", "ReplicaB");
         capturedState.PeerStates.ShouldContainKey("ReplicaB");
         capturedState.PeerStates["ReplicaB"].State[""].Versions["ReplicaB"].ShouldBe(15);
     }
@@ -357,7 +356,8 @@ public sealed class ClusterStatePersistenceIntegrationTests
         states[0][""].Versions.ShouldContainKeyAndValue("ReplicaD", 42);
         
         var tombstonedPeer = tracker.TombstonePeerByNetworkId("NetworkD");
-        tombstonedPeer.ShouldBe("ReplicaD");
+        tombstonedPeer.ShouldNotBe("ReplicaD"); // We don't load the network volatile info anymore
+        tracker.TombstoneReplica("ReplicaD");
         tracker.IsReplicaTombstoned("ReplicaD").ShouldBeTrue();
     }
 

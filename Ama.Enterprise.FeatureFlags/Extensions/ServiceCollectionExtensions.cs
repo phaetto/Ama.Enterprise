@@ -3,11 +3,9 @@ namespace Ama.Enterprise.FeatureFlags.Extensions;
 using Ama.CRDT.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Services.Observers;
-using Ama.Enterprise.CRDT.Distributed.Services.P2p;
 using Ama.Enterprise.FeatureFlags.Models;
 using Ama.Enterprise.FeatureFlags.Services;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using System;
 
 /// <summary>

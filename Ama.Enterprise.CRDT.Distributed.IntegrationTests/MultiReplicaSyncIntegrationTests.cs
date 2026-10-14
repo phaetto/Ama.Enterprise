@@ -57,12 +57,10 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
 
         var scopeA = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeA.ReplicaId);
         var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcherA = scopeA.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
         await orchA.InitializeAsync(CancellationToken.None);
 
         var scopeB = nodeB.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeB.ReplicaId);
         var orchB = scopeB.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcherB = scopeB.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
         await orchB.InitializeAsync(CancellationToken.None);
 
         // Act - Node A dynamically creates a document
@@ -73,29 +71,20 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         // Node B dynamically processes the registry update to instantiate the document
         await orchB.SyncDocumentsAsync(CancellationToken.None);
 
-        var docA = orchA.GetDocument<SharedTestState>("doc-1")!;
-        var docB = orchB.GetDocument<SharedTestState>("doc-1")!;
-        docB.ShouldNotBeNull();
-        
-        var crdtDocA = await docA.GetDocumentAsync(CancellationToken.None);
-        var crdtDocB = await docB.GetDocumentAsync(CancellationToken.None);
-
         // Concurrently modify both documents
         var intentA = new MapSetIntent("KeyA", "ValueA");
-        var opA = await patcherA.GenerateOperationAsync(crdtDocA, x => x.DataMap, intentA, CancellationToken.None);
-        var taskA = docA.ApplyPatchAsync(new CrdtPatch(new[] { opA }), CancellationToken.None);
+        var taskA = orchA.ForwardIntentAsync<SharedTestState>("doc-1", intentA, "DataMap", CancellationToken.None);
 
         var intentB = new MapSetIntent("KeyB", "ValueB");
-        var opB = await patcherB.GenerateOperationAsync(crdtDocB, x => x.DataMap, intentB, CancellationToken.None);
-        var taskB = docB.ApplyPatchAsync(new CrdtPatch(new[] { opB }), CancellationToken.None);
+        var taskB = orchB.ForwardIntentAsync<SharedTestState>("doc-1", intentB, "DataMap", CancellationToken.None);
 
         await Task.WhenAll(taskA, taskB);
         
         await Task.Delay(1500); // Allow CRDT lock-free channel queues to naturally process the inbound payloads
 
         // Assert
-        var crdtDocAAfter = await docA.GetDocumentAsync(CancellationToken.None);
-        var crdtDocBAfter = await docB.GetDocumentAsync(CancellationToken.None);
+        var crdtDocAAfter = await orchA.GetDocumentStateAsync<SharedTestState>("doc-1", CancellationToken.None);
+        var crdtDocBAfter = await orchB.GetDocumentStateAsync<SharedTestState>("doc-1", CancellationToken.None);
         
         crdtDocAAfter.Data.DataMap.ShouldContainKeyAndValue("KeyA", "ValueA");
         crdtDocAAfter.Data.DataMap.ShouldContainKeyAndValue("KeyB", "ValueB");
@@ -160,32 +149,22 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         // Do NOT wire mesh initially to simulate disconnected topologies natively
         var scopeA = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeA.ReplicaId);
         var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcherA = scopeA.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
         await orchA.InitializeAsync(CancellationToken.None);
         await orchA.CreateDocumentAsync("doc-ae", "shared-doc", CancellationToken.None);
         await orchA.SyncDocumentsAsync(CancellationToken.None);
 
         var scopeB = nodeB.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeB.ReplicaId);
         var orchB = scopeB.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcherB = scopeB.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
         await orchB.InitializeAsync(CancellationToken.None);
         await orchB.CreateDocumentAsync("doc-ae", "shared-doc", CancellationToken.None);
         await orchB.SyncDocumentsAsync(CancellationToken.None);
 
-        var docA = orchA.GetDocument<SharedTestState>("doc-ae")!;
-        var docB = orchB.GetDocument<SharedTestState>("doc-ae")!;
-        
-        var crdtDocA = await docA.GetDocumentAsync(CancellationToken.None);
-        var crdtDocB = await docB.GetDocumentAsync(CancellationToken.None);
-
         // Modify offline
         var intentA = new MapSetIntent("OfflineKeyA", "ValueA");
-        var opA = await patcherA.GenerateOperationAsync(crdtDocA, x => x.DataMap, intentA, CancellationToken.None);
-        await docA.ApplyPatchAsync(new CrdtPatch(new[] { opA }), CancellationToken.None);
+        await orchA.ForwardIntentAsync<SharedTestState>("doc-ae", intentA, "DataMap", CancellationToken.None);
 
         var intentB = new MapSetIntent("OfflineKeyB", "ValueB");
-        var opB = await patcherB.GenerateOperationAsync(crdtDocB, x => x.DataMap, intentB, CancellationToken.None);
-        await docB.ApplyPatchAsync(new CrdtPatch(new[] { opB }), CancellationToken.None);
+        await orchB.ForwardIntentAsync<SharedTestState>("doc-ae", intentB, "DataMap", CancellationToken.None);
 
         await Task.Delay(500);
 
@@ -219,8 +198,8 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         await Task.Delay(1500); // Allow bidirectional DVV evaluation and Missing Operations transfers over direct channels
 
         // Assert - Both nodes converged explicitly handling missing boundaries correctly
-        var crdtDocAAfter = await docA.GetDocumentAsync(CancellationToken.None);
-        var crdtDocBAfter = await docB.GetDocumentAsync(CancellationToken.None);
+        var crdtDocAAfter = await orchA.GetDocumentStateAsync<SharedTestState>("doc-ae", CancellationToken.None);
+        var crdtDocBAfter = await orchB.GetDocumentStateAsync<SharedTestState>("doc-ae", CancellationToken.None);
         
         crdtDocAAfter.Data.DataMap.ShouldContainKeyAndValue("OfflineKeyA", "ValueA");
         crdtDocAAfter.Data.DataMap.ShouldContainKeyAndValue("OfflineKeyB", "ValueB");
@@ -241,17 +220,14 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
 
         var scopeA = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeA.ReplicaId);
         var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcherA = scopeA.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
         await orchA.InitializeAsync(CancellationToken.None);
 
         var scopeB = nodeB.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeB.ReplicaId);
         var orchB = scopeB.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcherB = scopeB.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
         await orchB.InitializeAsync(CancellationToken.None);
 
         var scopeC = nodeC.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeC.ReplicaId);
         var orchC = scopeC.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var patcherC = scopeC.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
         await orchC.InitializeAsync(CancellationToken.None);
 
         // Node A creates the generic shared root, which propagates via dynamic topologies implicitly to B and C
@@ -262,34 +238,19 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         await orchB.SyncDocumentsAsync(CancellationToken.None);
         await orchC.SyncDocumentsAsync(CancellationToken.None);
 
-        var docA = orchA.GetDocument<SharedTestState>("doc-3")!;
-        var docB = orchB.GetDocument<SharedTestState>("doc-3")!;
-        var docC = orchC.GetDocument<SharedTestState>("doc-3")!;
-        
-        docB.ShouldNotBeNull();
-        docC.ShouldNotBeNull();
-        
-        var crdtDocA = await docA.GetDocumentAsync(CancellationToken.None);
-        var crdtDocB = await docB.GetDocumentAsync(CancellationToken.None);
-        var crdtDocC = await docC.GetDocumentAsync(CancellationToken.None);
-
         // Act - Concurrently patch from all three distinct replica matrices
-        var opA = await patcherA.GenerateOperationAsync(crdtDocA, x => x.DataMap, new MapSetIntent("KeyA", "ValA"), CancellationToken.None);
-        var opB = await patcherB.GenerateOperationAsync(crdtDocB, x => x.DataMap, new MapSetIntent("KeyB", "ValB"), CancellationToken.None);
-        var opC = await patcherC.GenerateOperationAsync(crdtDocC, x => x.DataMap, new MapSetIntent("KeyC", "ValC"), CancellationToken.None);
-
-        var t1 = docA.ApplyPatchAsync(new CrdtPatch(new[] { opA }), CancellationToken.None);
-        var t2 = docB.ApplyPatchAsync(new CrdtPatch(new[] { opB }), CancellationToken.None);
-        var t3 = docC.ApplyPatchAsync(new CrdtPatch(new[] { opC }), CancellationToken.None);
+        var t1 = orchA.ForwardIntentAsync<SharedTestState>("doc-3", new MapSetIntent("KeyA", "ValA"), "DataMap", CancellationToken.None);
+        var t2 = orchB.ForwardIntentAsync<SharedTestState>("doc-3", new MapSetIntent("KeyB", "ValB"), "DataMap", CancellationToken.None);
+        var t3 = orchC.ForwardIntentAsync<SharedTestState>("doc-3", new MapSetIntent("KeyC", "ValC"), "DataMap", CancellationToken.None);
 
         await Task.WhenAll(t1, t2, t3);
         
         await Task.Delay(2000); // Full multi-mesh synchronization traversal limits bounds explicitly
 
         // Assert - Convergence ensures identical deterministic bounds organically globally
-        var crdtDocAAfter = await docA.GetDocumentAsync(CancellationToken.None);
-        var crdtDocBAfter = await docB.GetDocumentAsync(CancellationToken.None);
-        var crdtDocCAfter = await docC.GetDocumentAsync(CancellationToken.None);
+        var crdtDocAAfter = await orchA.GetDocumentStateAsync<SharedTestState>("doc-3", CancellationToken.None);
+        var crdtDocBAfter = await orchB.GetDocumentStateAsync<SharedTestState>("doc-3", CancellationToken.None);
+        var crdtDocCAfter = await orchC.GetDocumentStateAsync<SharedTestState>("doc-3", CancellationToken.None);
         
         foreach (var doc in new[] { crdtDocAAfter, crdtDocBAfter, crdtDocCAfter })
         {

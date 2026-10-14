@@ -5,36 +5,28 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Threading;
 using System.Threading.Tasks;
-using Ama.CRDT.Models;
 using Ama.CRDT.Models.Intents;
-using Ama.CRDT.Services;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.FeatureFlags.Models;
 
 /// <summary>
-/// Implementation of the feature flag cluster manager explicitly focused on generic structural mutations and retrievals.
+/// Implementation of the feature flag cluster manager explicitly focused on generic structural mutations and retrievals routing via the Stateless Orchestrator Gateway directly.
 /// </summary>
 public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
 {
     private readonly ICrdtDocumentOrchestrator orchestrator;
-    private readonly IAsyncCrdtPatcher patcher;
 
-    public FeatureFlagClusterManager(
-        ICrdtDocumentOrchestrator orchestrator,
-        IAsyncCrdtPatcher patcher)
+    public FeatureFlagClusterManager(ICrdtDocumentOrchestrator orchestrator)
     {
         this.orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
-        this.patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
     }
 
     /// <inheritdoc />
     public async ValueTask<IReadOnlyDictionary<string, FeatureFlag>> GetFlagsAsync(CancellationToken cancellationToken = default)
     {
-        var docManager = orchestrator.GetDocument<FeatureFlagState>(Constants.GlobalDocumentId);
-        
-        if (docManager != null)
+        var crdtDoc = await orchestrator.GetDocumentStateAsync<FeatureFlagState>(Constants.GlobalDocumentId, cancellationToken).ConfigureAwait(false);
+        if (crdtDoc.Data != null && crdtDoc.Data.Flags != null)
         {
-            var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
             return new ReadOnlyDictionary<string, FeatureFlag>(crdtDoc.Data.Flags);
         }
 
@@ -55,12 +47,17 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
             throw new ArgumentException("Flag name cannot be null or empty.", nameof(name));
         }
 
-        var docManager = GetRequiredDocument();
-        var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+        var crdtDoc = await orchestrator.GetDocumentStateAsync<FeatureFlagState>(Constants.GlobalDocumentId, cancellationToken).ConfigureAwait(false);
         var now = DateTimeOffset.UtcNow;
 
-        // Preserve existing metadata, ownership, and creation date if they are not explicitly updated during an upsert
-        var hasExisting = crdtDoc.Data.Flags.TryGetValue(name, out var existingFlag);
+        var hasExisting = false;
+        FeatureFlag existingFlag = default!;
+
+        if (crdtDoc.Data?.Flags != null)
+        {
+            hasExisting = crdtDoc.Data.Flags.TryGetValue(name, out existingFlag);
+        }
+
         var createdAt = hasExisting ? existingFlag.Audit.CreatedAt : now;
 
         var audit = new FeatureFlagAudit
@@ -82,10 +79,8 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
             Ownership = actualOwnership!
         };
         
-        var operation = await patcher.GenerateOperationAsync(crdtDoc, x => x.Flags, new MapSetIntent(name, flag), cancellationToken).ConfigureAwait(false);
-        var patch = new CrdtPatch(new[] { operation });
-
-        await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+        var intent = new MapSetIntent(name, flag);
+        await orchestrator.ForwardIntentAsync<FeatureFlagState>(Constants.GlobalDocumentId, intent, "Flags", cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -96,21 +91,7 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
             throw new ArgumentException("Flag name cannot be null or empty.", nameof(name));
         }
 
-        var docManager = GetRequiredDocument();
-        var crdtDoc = await docManager.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-        var operation = await patcher.GenerateOperationAsync(crdtDoc, x => x.Flags, new MapRemoveIntent(name), cancellationToken).ConfigureAwait(false);
-        var patch = new CrdtPatch(new[] { operation });
-
-        await docManager.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
-    }
-
-    private IDistributedCrdtDocument<FeatureFlagState> GetRequiredDocument()
-    {
-        var doc = orchestrator.GetDocument<FeatureFlagState>(Constants.GlobalDocumentId);
-        if (doc == null)
-        {
-            throw new InvalidOperationException("The global feature flag document has not been initialized yet by the application bootstrapper.");
-        }
-        return doc;
+        var intent = new MapRemoveIntent(name);
+        await orchestrator.ForwardIntentAsync<FeatureFlagState>(Constants.GlobalDocumentId, intent, "Flags", cancellationToken).ConfigureAwait(false);
     }
 }

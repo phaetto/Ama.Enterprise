@@ -2,19 +2,27 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
-using Ama.CRDT.Services;
+using System.Threading;
+using System.Threading.Tasks;
 using Ama.Enterprise.CRDT.Distributed.Models;
+using Ama.Enterprise.P2p.Models.Core;
+using Ama.Enterprise.P2p.Services.Core;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Implements consistent hashing to dynamically distribute CRDT shards across active cluster replicas securely and predictably.
+/// Evaluates standard network liveliness ensuring targeted requests seamlessly resolve to mapped connected peers natively.
 /// </summary>
 public sealed class ConsistentHashShardDistributionManager : IShardDistributionManager
 {
     private readonly IClusterStateTracker clusterTracker;
     private readonly string localReplicaId;
+    private readonly IServiceProvider serviceProvider;
+    private readonly IEnumerable<DistributedCrdtP2pRegistration> p2pRegistrations;
     private readonly int replicationFactor;
     private readonly int virtualNodes;
 
@@ -27,22 +35,28 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
 
     public ConsistentHashShardDistributionManager(
         IClusterStateTracker clusterTracker,
-        ReplicaContext replicaContext,
+        DistributedCrdtReplicaRegistration replicaRegistration,
+        IServiceProvider serviceProvider,
+        IEnumerable<DistributedCrdtP2pRegistration> p2pRegistrations,
         IOptions<DistributedCrdtOptions> options)
     {
         ArgumentNullException.ThrowIfNull(options);
         
         this.clusterTracker = clusterTracker ?? throw new ArgumentNullException(nameof(clusterTracker));
-        this.localReplicaId = replicaContext?.ReplicaId ?? throw new ArgumentNullException(nameof(replicaContext));
+        this.localReplicaId = replicaRegistration?.ReplicaId ?? throw new ArgumentNullException(nameof(replicaRegistration));
+        this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        this.p2pRegistrations = p2pRegistrations ?? throw new ArgumentNullException(nameof(p2pRegistrations));
         
         this.replicationFactor = Math.Max(1, options.Value.ShardReplicationFactor);
         this.virtualNodes = Math.Max(1, options.Value.VirtualNodesPerReplica);
     }
 
     /// <inheritdoc />
-    public bool IsShardLocal(string shardId)
+    public async ValueTask<bool> IsShardLocalAsync(string shardId, CancellationToken cancellationToken = default)
     {
-        var targets = GetTargetReplicas(shardId);
+        if (string.IsNullOrWhiteSpace(shardId)) return false;
+
+        var targets = await GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
         
         for (int i = 0; i < targets.Count; i++)
         {
@@ -56,11 +70,11 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<string> GetTargetReplicas(string shardId)
+    public async ValueTask<IReadOnlyList<string>> GetTargetNodesForShardAsync(string shardId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(shardId)) return [];
 
-        EnsureRingUpdated();
+        await EnsureRingUpdatedAsync(cancellationToken).ConfigureAwait(false);
 
         uint[] currentKeys;
         string[] currentValues;
@@ -115,22 +129,53 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
         return targets;
     }
 
-    private void EnsureRingUpdated()
+    private async ValueTask EnsureRingUpdatedAsync(CancellationToken cancellationToken)
     {
-        var activeRemotes = clusterTracker.GetActiveReplicaIds();
+        var activeReplicaIds = new HashSet<string>(StringComparer.Ordinal);
+        
+        // Resolve the registry through the service provider dynamically bridging capabilities 
+        // to prevent DI validation failures if P2P meshes are not explicitly registered or to break circular graphs.
+        var peerRegistry = serviceProvider.GetService<IPeerRegistry>();
+
+        if (peerRegistry != null)
+        {
+            // Dynamically map solely connected live network peers explicitly bypassing offline tracked tombstone cooldowns
+            foreach (var registration in p2pRegistrations)
+            {
+                if (!string.Equals(registration.ReplicaId, localReplicaId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var activePeers = await peerRegistry.GetPeersByStatusAsync(registration.MeshId, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
+                foreach (var peer in activePeers)
+                {
+                    var peerIdStr = peer.Id.Value.ToString();
+                    var replicaId = clusterTracker.GetReplicaIdByPeerId(peerIdStr);
+                    
+                    if (!string.IsNullOrWhiteSpace(replicaId))
+                    {
+                        activeReplicaIds.Add(replicaId);
+                    }
+                }
+            }
+        }
         
         lock (syncRoot)
         {
-            var currentReplicas = new HashSet<string>(activeRemotes, StringComparer.Ordinal);
-            currentReplicas.Add(localReplicaId); // Consistently evaluate local instance inside topological calculations
+            activeReplicaIds.Add(localReplicaId); // Consistently evaluate local instance inside topological calculations
 
-            if (currentReplicas.SetEquals(lastKnownReplicas))
+            if (activeReplicaIds.SetEquals(lastKnownReplicas))
             {
                 return; // Topologies mirror effectively, return dynamically mapped arrays directly
             }
 
             var newRing = new SortedDictionary<uint, string>();
-            foreach (var replica in currentReplicas)
+            
+            // Fix determinism by ordering the set execution structurally explicitly guaranteeing the exact identical collision resolution across all cluster nodes
+            var sortedReplicas = activeReplicaIds.OrderBy(r => r, StringComparer.Ordinal).ToList();
+            
+            foreach (var replica in sortedReplicas)
             {
                 for (int i = 0; i < virtualNodes; i++)
                 {
@@ -158,7 +203,7 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
                 idx++;
             }
 
-            lastKnownReplicas = currentReplicas;
+            lastKnownReplicas = activeReplicaIds;
         }
     }
 
