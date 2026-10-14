@@ -25,6 +25,7 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
     private readonly IEnumerable<DistributedCrdtP2pRegistration> p2pRegistrations;
     private readonly int replicationFactor;
     private readonly int virtualNodes;
+    private readonly bool enableSharding;
 
     private readonly object syncRoot = new();
     private HashSet<string> lastKnownReplicas = new(StringComparer.Ordinal);
@@ -32,6 +33,7 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
     // Fast arrays used to execute Array.BinarySearch preventing list alloc bounds natively.
     private uint[] ringKeys = [];
     private string[] ringValues = [];
+    private IReadOnlyList<string> cachedAllReplicas;
 
     public ConsistentHashShardDistributionManager(
         IClusterStateTracker clusterTracker,
@@ -49,11 +51,19 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
         
         this.replicationFactor = Math.Max(1, options.Value.ShardReplicationFactor);
         this.virtualNodes = Math.Max(1, options.Value.VirtualNodesPerReplica);
+        this.enableSharding = options.Value.EnableSharding;
+        
+        this.cachedAllReplicas = [this.localReplicaId];
     }
 
     /// <inheritdoc />
     public async ValueTask<bool> IsShardLocalAsync(string shardId, CancellationToken cancellationToken = default)
     {
+        if (!enableSharding)
+        {
+            return true;
+        }
+        
         if (string.IsNullOrWhiteSpace(shardId)) return false;
 
         var targets = await GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
@@ -81,6 +91,11 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
 
         lock (syncRoot)
         {
+            if (!enableSharding)
+            {
+                return cachedAllReplicas;
+            }
+
             if (ringKeys.Length == 0)
             {
                 return [localReplicaId];
@@ -170,10 +185,17 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
                 return; // Topologies mirror effectively, return dynamically mapped arrays directly
             }
 
-            var newRing = new SortedDictionary<uint, string>();
-            
             // Fix determinism by ordering the set execution structurally explicitly guaranteeing the exact identical collision resolution across all cluster nodes
             var sortedReplicas = activeReplicaIds.OrderBy(r => r, StringComparer.Ordinal).ToList();
+            
+            if (!enableSharding)
+            {
+                cachedAllReplicas = sortedReplicas;
+                lastKnownReplicas = activeReplicaIds;
+                return; // Bypass entire hash ring generation if sharding is natively disabled
+            }
+
+            var newRing = new SortedDictionary<uint, string>();
             
             foreach (var replica in sortedReplicas)
             {

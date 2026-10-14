@@ -130,4 +130,10 @@ public sealed class DistributedCrdtOptions
     /// Defaults to 100. Must be greater than 0.
     /// </summary>
     public int VirtualNodesPerReplica { get; set; } = 100;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether standard hash ring sharding is enabled.
+    /// When disabled (false, the default), all active network nodes will treat every instantiated distributed CRDT document as a local shard natively, bypassing distribution bounds entirely.
+    /// </summary>
+    public bool EnableSharding { get; set; } = false;
 }

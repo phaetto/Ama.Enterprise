@@ -91,6 +91,7 @@ public static class Program
             options.AntiEntropyIntervalSeconds = 1;
             options.AntiEntropyInitialDelaySeconds = 1;
             options.ShardReplicationFactor = 2;
+            options.EnableSharding = true;
         });
 
         // 2. Delegate routing orchestrations and background services completely to the distributed core explicitly bounded
