@@ -31,6 +31,9 @@ public static class Program
     private static int currentAdminPort;
     private static volatile bool _needsRedraw;
 
+    // DTO for representing the state output instead of using tuples
+    private readonly record struct DocumentStateDto<T>(string Id, IReadOnlyDictionary<string, T> Items);
+
     public static async Task Main(string[] args)
     {
         if (args.Length == 0 || !int.TryParse(args[0], out currentPort))
@@ -69,8 +72,11 @@ public static class Program
             options.PeerEvictionTtlSeconds = 0;
             options.AntiEntropyInitialDelaySeconds = 0;
             options.AntiEntropyIntervalSeconds = 5;
-            options.CheckpointIntervalSeconds = 5;
+            options.CheckpointIntervalSeconds = 3;
+            options.MaintenanceIntervalSeconds = 5 * 60;
             options.CompactionTtlSeconds = 5 * 60;
+            options.ShardReplicationFactor = 2;
+            options.EnableSharding = true;
         });
 
         services.AddDistributedCrdtReplica(replicaId);
@@ -81,7 +87,8 @@ public static class Program
                 .AddCrdtAotContext(new ShowCaseCrdtAotContext())
                 .AddCrdtSerializableType<TaskItem>("task-item")
                 .AddCrdtSerializableType<DeviceStatus>("device-status")
-                .AddCrdtSystemTextJson(useBrotliCompression: true);
+                .AddCrdtSystemTextJson(useBrotliCompression: true)
+                .AddCrdtShardIdProvider<ShowCaseShardIdProvider>();
 
         services.AddCrdtMessagePack(
             MessagePack.Resolvers.Ama_Enterprise_CRDT_MessagePack_MessagePackResolver.Instance,
@@ -204,7 +211,7 @@ public static class Program
                         if (_needsRedraw)
                         {
                             _needsRedraw = false;
-                            await DrawStateAsync(orchestrator, taskManager, fleetManager, cts.Token).ConfigureAwait(false);
+                            await DrawStateAsync(replicaId, orchestrator, taskManager, fleetManager, cts.Token).ConfigureAwait(false);
                         }
                     }
                 }
@@ -218,7 +225,7 @@ public static class Program
             Task? hammerTask = null;
 
             DrawMenu();
-            await DrawStateAsync(orchestrator, taskManager, fleetManager, cts.Token).ConfigureAwait(false);
+            await DrawStateAsync(replicaId, orchestrator, taskManager, fleetManager, cts.Token).ConfigureAwait(false);
 
             while (!cts.Token.IsCancellationRequested)
             {
@@ -284,6 +291,33 @@ public static class Program
                                 WriteLineLocked("Usage: fdel <docId> <deviceId>");
                             break;
 
+                        case "gen-fleets":
+                            if (parts.Length >= 3 && int.TryParse(parts[1], out var fleetCount) && int.TryParse(parts[2], out var devicesPerFleet))
+                            {
+                                logger.LogInformation("Generating {FleetCount} fleets with {DevicesPerFleet} devices each...", fleetCount, devicesPerFleet);
+                                for (int i = 1; i <= fleetCount; i++)
+                                {
+                                    if (cts.Token.IsCancellationRequested) break;
+                                    var docId = $"auto-fleet-{i}";
+                                    await orchestrator.CreateDocumentAsync(docId, "fleet-list", cts.Token).ConfigureAwait(false);
+                                    
+                                    for (int j = 1; j <= devicesPerFleet; j++)
+                                    {
+                                        if (cts.Token.IsCancellationRequested) break;
+                                        var deviceId = $"dev-{j}";
+                                        var isDevOnline = Random.Shared.NextDouble() > 0.5;
+                                        var deviceBattery = Random.Shared.Next(0, 101);
+                                        await fleetManager.SetDeviceAsync(docId, deviceId, isDevOnline, deviceBattery, cts.Token).ConfigureAwait(false);
+                                    }
+                                }
+                                logger.LogInformation("Finished generating fleets.");
+                            }
+                            else
+                            {
+                                WriteLineLocked("Usage: gen-fleets <numberOfFleets> <devicesPerFleet>");
+                            }
+                            break;
+
                         case "hammer":
                             if (parts.Length >= 2 && int.TryParse(parts[1], out var cps))
                             {
@@ -319,8 +353,14 @@ public static class Program
                                     {
                                         try
                                         {
-                                            await orchestrator.CreateDocumentAsync("nail", "task-list", token).ConfigureAwait(false);
-                                            logger.LogInformation("Hammer mode activated. Target: {Cps} ops/sec against doc 'nail'...", cps);
+                                            // Distribute traffic across 5 distinct documents ensuring parallel load on multiple distributed shards
+                                            var targetDocs = Enumerable.Range(1, 5).Select(i => $"nail-{i}").ToArray();
+                                            foreach (var doc in targetDocs)
+                                            {
+                                                await orchestrator.CreateDocumentAsync(doc, "task-list", token).ConfigureAwait(false);
+                                            }
+
+                                            logger.LogInformation("Hammer mode activated. Target: {Cps} ops/sec sharded across {DocCount} nail documents...", cps, targetDocs.Length);
 
                                             var sw = Stopwatch.StartNew();
                                             var reportSw = Stopwatch.StartNew();
@@ -331,7 +371,7 @@ public static class Program
                                             var taskIds = Enumerable.Range(1, 20).Select(i => $"nail-task-{i}").ToArray();
 
                                             // Helper for concurrent dispatch avoiding closure captures or ValueTask casting ambiguities
-                                            async Task FirePayloadAsync(string tId, long index, bool done, bool delete, CancellationToken ct)
+                                            async Task FirePayloadAsync(string dId, string tId, long index, bool done, bool delete, CancellationToken ct)
                                             {
                                                 if (ct.IsCancellationRequested) return;
 
@@ -340,11 +380,11 @@ public static class Program
                                                     // Do not use cancellation tokens here, because we will break the process in memory/journal
                                                     if (delete)
                                                     {
-                                                        await taskManager.RemoveTaskAsync("nail", tId).ConfigureAwait(false);
+                                                        await taskManager.RemoveTaskAsync(dId, tId).ConfigureAwait(false);
                                                     }
                                                     else
                                                     {
-                                                        await taskManager.SetTaskAsync("nail", tId, $"Hammered payload {index}", done).ConfigureAwait(false);
+                                                        await taskManager.SetTaskAsync(dId, tId, $"Hammered payload {index}", done).ConfigureAwait(false);
                                                     }
                                                 }
                                                 // Suppress cancellation exceptions to avoid massive unwinding delays when stopping heavy loads
@@ -371,12 +411,13 @@ public static class Program
                                                     {
                                                         if (token.IsCancellationRequested) break;
 
+                                                        var docId = targetDocs[Random.Shared.Next(targetDocs.Length)];
                                                         var taskId = taskIds[Random.Shared.Next(taskIds.Length)];
                                                         var isDelete = Random.Shared.NextDouble() < 0.2; // 20% chance to delete
                                                         var isDone = (opsCompleted + i) % 2 == 0;
                                                         
                                                         // Enqueue operation without awaiting immediately
-                                                        pendingTasks.Add(FirePayloadAsync(taskId, opsCompleted + i, isDone, isDelete, token));
+                                                        pendingTasks.Add(FirePayloadAsync(docId, taskId, opsCompleted + i, isDone, isDelete, token));
                                                     }
                                                     
                                                     // Await the entire batch concurrently, maximizing thread pool utilization and breaking the serial bottleneck
@@ -414,6 +455,10 @@ public static class Program
                             {
                                 WriteLineLocked("Usage: hammer <changes_per_second> (use 0 to stop)");
                             }
+                            break;
+                            
+                        case "print":
+                            await DrawStateAsync(replicaId, orchestrator, taskManager, fleetManager, cts.Token).ConfigureAwait(false);
                             break;
 
                         case "clone":
@@ -461,7 +506,7 @@ public static class Program
             return;
         }
 
-        var startPort = currentPort + 1;
+        var startPort = currentPort + 2;
         for (var i = 0; i < count; i++)
         {
             var nextPort = GetNextAvailablePort(startPort);
@@ -474,7 +519,7 @@ public static class Program
             });
 
             logger.LogInformation("Cloned new cluster node on port {NextPort}.", nextPort);
-            startPort = nextPort + 1;
+            startPort = nextPort + 2;
         }
     }
 
@@ -493,50 +538,58 @@ public static class Program
             Console.WriteLine(" tdel <docId> <taskId>                          - Removes a task item");
             Console.WriteLine(" fset <docId> <deviceId> <true|false> <batt>    - Adds/Updates a fleet device");
             Console.WriteLine(" fdel <docId> <deviceId>                        - Removes a fleet device");
-            Console.WriteLine(" hammer <cps>                                   - Pumps <cps> changes/sec into doc 'nail' (0 to stop)");
+            Console.WriteLine(" gen-fleets <count> <devices>                   - Generates <count> fleets with <devices> devices each");
+            Console.WriteLine(" hammer <cps>                                   - Pumps <cps> changes/sec into 5 sharded documents (0 to stop)");
+            Console.WriteLine(" print                                          - Prints the current state of documents hosted on this node");
             Console.WriteLine(" clone [count]                                  - Spawns new node process(es) (default 1)");
             Console.WriteLine(" exit                                           - Shuts down the node");
             Console.WriteLine("=================================================\n");
         }
     }
 
-    private static async Task DrawStateAsync(ICrdtDocumentOrchestrator orchestrator, ITaskManager taskManager, IFleetManager fleetManager, CancellationToken cancellationToken)
+    private static async Task DrawStateAsync(string replicaId, ICrdtDocumentOrchestrator orchestrator, ITaskManager taskManager, IFleetManager fleetManager, CancellationToken cancellationToken)
     {
-        var taskDocsInfo = new List<(string Id, IReadOnlyDictionary<string, TaskItem> Tasks)>();
+        ArgumentNullException.ThrowIfNull(replicaId);
+        ArgumentNullException.ThrowIfNull(orchestrator);
+        ArgumentNullException.ThrowIfNull(taskManager);
+        ArgumentNullException.ThrowIfNull(fleetManager);
+
+        var taskDocsInfo = new List<DocumentStateDto<TaskItem>>();
         foreach (var doc in orchestrator.GetActiveDocuments().OfType<IDistributedCrdtDocument<TaskListState>>())
         {
             var tasks = await taskManager.GetTasksAsync(doc.DocumentId, cancellationToken).ConfigureAwait(false);
-            taskDocsInfo.Add((doc.DocumentId, tasks));
+            taskDocsInfo.Add(new DocumentStateDto<TaskItem>(doc.DocumentId, tasks));
         }
 
-        var fleetDocsInfo = new List<(string Id, IReadOnlyDictionary<string, DeviceStatus> Devices)>();
+        var fleetDocsInfo = new List<DocumentStateDto<DeviceStatus>>();
         foreach (var doc in orchestrator.GetActiveDocuments().OfType<IDistributedCrdtDocument<FleetState>>())
         {
             var devices = await fleetManager.GetDevicesAsync(doc.DocumentId, cancellationToken).ConfigureAwait(false);
-            fleetDocsInfo.Add((doc.DocumentId, devices));
+            fleetDocsInfo.Add(new DocumentStateDto<DeviceStatus>(doc.DocumentId, devices));
         }
 
         lock (ConsoleLock)
         {
-            Console.WriteLine("\n--- [Cluster Registry Synchronized] ---");
+            Console.WriteLine($"\n--- [Local Shard State: {replicaId}] ---");
+            Console.WriteLine("   (Only documents assigned to this specific node are printed)");
             
-            Console.WriteLine(" [Tasks CRDT State]");
+            Console.WriteLine("\n [Tasks CRDT State]");
             if (taskDocsInfo.Count == 0)
             {
-                Console.WriteLine("   (No task lists currently defined)");
+                Console.WriteLine("   (No task lists hosted locally)");
             }
             else
             {
                 foreach (var info in taskDocsInfo)
                 {
                     Console.WriteLine($"   => List [{info.Id}]:");
-                    if (info.Tasks.Count == 0)
+                    if (info.Items.Count == 0)
                     {
                         Console.WriteLine("      (Empty)");
                     }
                     else
                     {
-                        foreach (var task in info.Tasks.OrderBy(t => t.Key))
+                        foreach (var task in info.Items.OrderBy(t => t.Key))
                         {
                             Console.WriteLine($"      [{task.Key}]: {task.Value.Description} (Done: {task.Value.IsDone})");
                         }
@@ -547,20 +600,20 @@ public static class Program
             Console.WriteLine("\n [Fleet CRDT State]");
             if (fleetDocsInfo.Count == 0)
             {
-                Console.WriteLine("   (No fleets currently defined)");
+                Console.WriteLine("   (No fleets hosted locally)");
             }
             else
             {
                 foreach (var info in fleetDocsInfo)
                 {
                     Console.WriteLine($"   => Fleet [{info.Id}]:");
-                    if (info.Devices.Count == 0)
+                    if (info.Items.Count == 0)
                     {
                         Console.WriteLine("      (Empty)");
                     }
                     else
                     {
-                        foreach (var device in info.Devices.OrderBy(d => d.Key))
+                        foreach (var device in info.Items.OrderBy(d => d.Key))
                         {
                             Console.WriteLine($"      [{device.Key}]: Online: {device.Value.IsOnline}, Battery: {device.Value.BatteryLevel}%");
                         }

@@ -271,6 +271,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             }
         }
         catch (OperationCanceledException) { /* Clean graceful termination */ }
+        catch (ObjectDisposedException) { /* Clean graceful termination */ }
         catch (Exception ex)
         {
             logger.LogCritical(ex, "Distributed CRDT document lock-free processing loop critically faulted.");
@@ -452,22 +453,22 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         lock (sourceMap)
         {
             var map = new ShardVersionVectorMap();
-            foreach (var shardKvp in sourceMap)
+            if (sourceMap.TryGetValue(ShardId, out var dvv))
             {
                 var copiedVersions = new Dictionary<string, long>();
                 var copiedDots = new Dictionary<string, ISet<long>>();
-                foreach (var kvp in shardKvp.Value.Versions)
+                foreach (var kvp in dvv.Versions)
                 {
                     copiedVersions[kvp.Key] = kvp.Value;
                 }
-                if (shardKvp.Value.Dots != null)
+                if (dvv.Dots != null)
                 {
-                    foreach (var kvp in shardKvp.Value.Dots)
+                    foreach (var kvp in dvv.Dots)
                     {
                         copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
                     }
                 }
-                map[shardKvp.Key] = new DottedVersionVector(copiedVersions, copiedDots);
+                map[ShardId] = new DottedVersionVector(copiedVersions, copiedDots);
             }
             return map;
         }
@@ -635,14 +636,14 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
             lock (replicaContext.ShardVersionVectors)
             {
-                foreach (var shardKvp in cmd.GlobalState!)
+                if (cmd.GlobalState!.TryGetValue(ShardId, out var incomingDvv))
                 {
-                    if (!replicaContext.ShardVersionVectors.TryGetValue(shardKvp.Key, out var dvv))
+                    if (!replicaContext.ShardVersionVectors.TryGetValue(ShardId, out var dvv))
                     {
                         dvv = new DottedVersionVector();
-                        replicaContext.ShardVersionVectors[shardKvp.Key] = dvv;
+                        replicaContext.ShardVersionVectors[ShardId] = dvv;
                     }
-                    dvv.Merge(shardKvp.Value);
+                    dvv.Merge(incomingDvv);
                 }
             }
 
