@@ -51,6 +51,7 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
             {
                 var globalStorage = scope.Storage;
                 var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+                var versionVectorManager = scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
                 
                 var options = scope.ServiceProvider.GetRequiredService<IOptions<DistributedCrdtOptions>>().Value;
                 var tombstoneCooldown = TimeSpan.FromSeconds(options.PeerTombstoneCooldownSeconds);
@@ -59,28 +60,7 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
                 var savedMap = await globalStorage.LoadShardVersionVectorMapAsync(replicaContext.ReplicaId, cancellationToken).ConfigureAwait(false);
                 if (savedMap != null)
                 {
-                    lock (replicaContext.ShardVersionVectors)
-                    {
-                        replicaContext.ShardVersionVectors.Clear();
-                        foreach (var kvp in savedMap)
-                        {
-                            var dvv = new DottedVersionVector();
-                            foreach (var vKvp in kvp.Value.Versions)
-                            {
-                                dvv.Versions[vKvp.Key] = vKvp.Value;
-                            }
-                            
-                            if (kvp.Value.Dots != null)
-                            {
-                                foreach (var dKvp in kvp.Value.Dots)
-                                {
-                                    dvv.Dots[dKvp.Key] = new HashSet<long>(dKvp.Value);
-                                }
-                            }
-                            
-                            replicaContext.ShardVersionVectors[kvp.Key] = dvv;
-                        }
-                    }
+                    versionVectorManager.RestoreFullState(savedMap);
                     
                     globalDvvRestoredCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
                     logger.LogInformation("Successfully re-initialized in-place CRDT global Dotted Version Vector for replica {ReplicaId}.", replicaContext.ReplicaId);

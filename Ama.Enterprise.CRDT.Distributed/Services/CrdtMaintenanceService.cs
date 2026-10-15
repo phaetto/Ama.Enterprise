@@ -70,7 +70,7 @@ public sealed class CrdtMaintenanceService : BackgroundService
             {
                 try
                 {
-                    var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+                    var versionVectorManager = scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
                     var topologyProvider = scope.ServiceProvider.GetRequiredService<IScopeTopologyProvider>();
                     
                     var tag = new KeyValuePair<string, object?>("replica_id", scope.ReplicaId);
@@ -95,29 +95,7 @@ public sealed class CrdtMaintenanceService : BackgroundService
                                 }
                             }
 
-                            var syncService = scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
-                            lock (replicaContext.ShardVersionVectors)
-                            {
-                                foreach (var kvp in replicaContext.ShardVersionVectors)
-                                {
-                                    var cleanedDvv = syncService.RemoveEvictedReplicas(kvp.Value, tombstonedPeers);
-                                    
-                                    kvp.Value.Versions.Clear();
-                                    foreach (var versionKvp in cleanedDvv.Versions)
-                                    {
-                                        kvp.Value.Versions[versionKvp.Key] = versionKvp.Value;
-                                    }
-                                    
-                                    kvp.Value.Dots.Clear();
-                                    if (cleanedDvv.Dots != null)
-                                    {
-                                        foreach (var dotKvp in cleanedDvv.Dots)
-                                        {
-                                            kvp.Value.Dots[dotKvp.Key] = dotKvp.Value;
-                                        }
-                                    }
-                                }
-                            }
+                            versionVectorManager.EvictReplicas(tombstonedPeers);
                         }
                     }
 
@@ -127,32 +105,7 @@ public sealed class CrdtMaintenanceService : BackgroundService
                         scope.ClusterTracker.CleanupExpiredTombstones(cooldown);
                     }
 
-                    var sourceMap = replicaContext.ShardVersionVectors;
-                    var safelyPersistedMap = new ShardVersionVectorMap();
-                    
-                    lock (sourceMap)
-                    {
-                        foreach (var shardKvp in sourceMap)
-                        {
-                            var copiedVersions = new Dictionary<string, long>();
-                            var copiedDots = new Dictionary<string, ISet<long>>();
-                            
-                            foreach (var kvp in shardKvp.Value.Versions)
-                            {
-                                copiedVersions[kvp.Key] = kvp.Value;
-                            }
-                            if (shardKvp.Value.Dots != null)
-                            {
-                                foreach (var kvp in shardKvp.Value.Dots)
-                                {
-                                    copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
-                                }
-                            }
-                            
-                            safelyPersistedMap[shardKvp.Key] = new DottedVersionVector(copiedVersions, copiedDots);
-                        }
-                    }
-                    
+                    var safelyPersistedMap = versionVectorManager.GetFullSnapshot();
                     var exportedClusterState = scope.ClusterTracker.ExportState();
                     var softThreshold = options.Value.JournalSoftTrimThreshold;
                     var hardThreshold = options.Value.JournalHardTrimThreshold;

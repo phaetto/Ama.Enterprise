@@ -908,35 +908,22 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             }
 
             var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
+            var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
             var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
             var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
 
-            var knownShardIds = new HashSet<string>(StringComparer.Ordinal);
+            var activeShardIds = new HashSet<string>(StringComparer.Ordinal);
             if (Registry != null)
             {
-                knownShardIds.Add(Registry.ShardId);
+                activeShardIds.Add(Registry.ShardId);
             }
 
             foreach (var doc in activeDocuments.Values)
             {
-                knownShardIds.Add(doc.ShardId);
+                activeShardIds.Add(doc.ShardId);
             }
 
-            lock (replicaContext.ShardVersionVectors)
-            {
-                foreach (var shardId in knownShardIds)
-                {
-                    if (!replicaContext.ShardVersionVectors.ContainsKey(shardId))
-                    {
-                        replicaContext.ShardVersionVectors[shardId] = new DottedVersionVector();
-                    }
-                }
-
-                foreach (var key in replicaContext.ShardVersionVectors.Keys)
-                {
-                    knownShardIds.Add(key);
-                }
-            }
+            var knownShardIds = versionVectorManager.EnsureShardsRegisteredAndGetAll(activeShardIds);
 
             var localShards = new HashSet<string>(StringComparer.Ordinal);
             if (Registry != null)
@@ -952,33 +939,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 }
             }
 
-            ShardVersionVectorMap globalState;
-            lock (replicaContext.ShardVersionVectors)
-            {
-                globalState = new ShardVersionVectorMap();
-                foreach (var shardKvp in replicaContext.ShardVersionVectors)
-                {
-                    if (!localShards.Contains(shardKvp.Key))
-                    {
-                        continue;
-                    }
-
-                    var copiedVersions = new Dictionary<string, long>();
-                    var copiedDots = new Dictionary<string, ISet<long>>();
-                    foreach (var kvp in shardKvp.Value.Versions)
-                    {
-                        copiedVersions[kvp.Key] = kvp.Value;
-                    }
-                    if (shardKvp.Value.Dots != null)
-                    {
-                        foreach (var kvp in shardKvp.Value.Dots)
-                        {
-                            copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
-                        }
-                    }
-                    globalState[shardKvp.Key] = new DottedVersionVector(copiedVersions, copiedDots);
-                }
-            }
+            var globalState = await versionVectorManager.GetShardsSnapshotAsync(localShards, cancellationToken).ConfigureAwait(false);
 
             var syncMsg = new CrdtStateSyncMessage(replicaContext.ReplicaId, globalState);
             var payload = serializer.SerializeToBytes(syncMsg);
@@ -1118,14 +1079,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         
         await Registry.InitializeAsync(cancellationToken).ConfigureAwait(false);
 
-        var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
-        lock (replicaContext.ShardVersionVectors)
-        {
-            if (!replicaContext.ShardVersionVectors.ContainsKey(Registry.ShardId))
-            {
-                replicaContext.ShardVersionVectors[Registry.ShardId] = new DottedVersionVector();
-            }
-        }
+        var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
+        versionVectorManager.EnsureShardRegistered(Registry.ShardId);
         
         await ProcessSyncDocumentsInternalAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -1167,14 +1122,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         if (activeDocuments.TryAdd(documentId, doc))
         {
-            var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
-            lock (replicaContext.ShardVersionVectors)
-            {
-                if (!replicaContext.ShardVersionVectors.ContainsKey(doc.ShardId))
-                {
-                    replicaContext.ShardVersionVectors[doc.ShardId] = new DottedVersionVector();
-                }
-            }
+            var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
+            versionVectorManager.EnsureShardRegistered(doc.ShardId);
 
             documentCreatedCounter.Add(1, new KeyValuePair<string, object?>("document_id", documentId));
             logger.LogInformation("Lazily promoted active CRDT document: {DocumentId}", documentId);
@@ -1199,15 +1148,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             var registryMap = registryDoc.Data.Documents;
             bool changed = false;
             
-            var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
-
-            lock (replicaContext.ShardVersionVectors)
-            {
-                if (!replicaContext.ShardVersionVectors.ContainsKey(registry.ShardId))
-                {
-                    replicaContext.ShardVersionVectors[registry.ShardId] = new DottedVersionVector();
-                }
-            }
+            var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
+            versionVectorManager.EnsureShardRegistered(registry.ShardId);
 
             foreach (var kvp in registryMap)
             {
@@ -1235,13 +1177,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                                     documentCreatedCounter.Add(1, new KeyValuePair<string, object?>("document_id", kvp.Key));
                                     logger.LogInformation("Mapped new active CRDT document: {DocumentId}", kvp.Key);
                                     
-                                    lock (replicaContext.ShardVersionVectors)
-                                    {
-                                        if (!replicaContext.ShardVersionVectors.ContainsKey(doc.ShardId))
-                                        {
-                                            replicaContext.ShardVersionVectors[doc.ShardId] = new DottedVersionVector();
-                                        }
-                                    }
+                                    versionVectorManager.EnsureShardRegistered(doc.ShardId);
                                 }
                                 else
                                 {
@@ -1274,22 +1210,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                                 bool shardStillInUse = string.Equals(registry.ShardId, demotedShardId, StringComparison.Ordinal);
                                 if (!shardStillInUse)
                                 {
-                                    foreach (var remainingDoc in activeDocuments.Values)
-                                    {
-                                        if (string.Equals(remainingDoc.ShardId, demotedShardId, StringComparison.Ordinal))
-                                        {
-                                            shardStillInUse = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                                
-                                if (!shardStillInUse)
-                                {
-                                    lock (replicaContext.ShardVersionVectors)
-                                    {
-                                        replicaContext.ShardVersionVectors.Remove(demotedShardId);
-                                    }
+                                    versionVectorManager.RemoveShard(demotedShardId);
                                 }
 
                                 changed = true;
@@ -1327,22 +1248,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                     bool shardStillInUse = string.Equals(registry.ShardId, shardId, StringComparison.Ordinal);
                     if (!shardStillInUse)
                     {
-                        foreach (var remainingDoc in activeDocuments.Values)
-                        {
-                            if (string.Equals(remainingDoc.ShardId, shardId, StringComparison.Ordinal))
-                            {
-                                shardStillInUse = true;
-                                break;
-                            }
-                        }
-                    }
-                    
-                    if (!shardStillInUse)
-                    {
-                        lock (replicaContext.ShardVersionVectors)
-                        {
-                            replicaContext.ShardVersionVectors.Remove(shardId);
-                        }
+                        versionVectorManager.RemoveShard(shardId);
                     }
 
                     changed = true;

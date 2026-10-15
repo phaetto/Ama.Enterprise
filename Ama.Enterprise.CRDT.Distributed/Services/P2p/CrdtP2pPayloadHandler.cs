@@ -235,6 +235,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
 
             stateSyncsProcessedCounter.Add(1, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
             var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+            var versionVectorManager = scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
             var directSender = scope.ServiceProvider.GetService<IDirectMessageSender>();
             var syncService = scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
             var journalManager = scope.ServiceProvider.GetRequiredService<IJournalManager>();
@@ -247,28 +248,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
 
             scope.ClusterTracker.UpdatePeerState(syncMsg.ReplicaId, senderId.Value.ToString(), syncMsg.State);
 
-            ShardVersionVectorMap safeLocalState;
-            lock (replicaContext.ShardVersionVectors)
-            {
-                safeLocalState = new ShardVersionVectorMap();
-                foreach (var shardKvp in replicaContext.ShardVersionVectors)
-                {
-                    var copiedVersions = new Dictionary<string, long>();
-                    var copiedDots = new Dictionary<string, ISet<long>>();
-                    foreach (var kvp in shardKvp.Value.Versions)
-                    {
-                        copiedVersions[kvp.Key] = kvp.Value;
-                    }
-                    if (shardKvp.Value.Dots != null)
-                    {
-                        foreach (var kvp in shardKvp.Value.Dots)
-                        {
-                            copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
-                        }
-                    }
-                    safeLocalState[shardKvp.Key] = new DottedVersionVector(copiedVersions, copiedDots);
-                }
-            }
+            var safeLocalState = await versionVectorManager.GetFullSnapshotAsync(cancellationToken).ConfigureAwait(false);
 
             var allShardsToEvaluate = new HashSet<string>(syncMsg.State.Keys, StringComparer.Ordinal);
             foreach (var localShardId in safeLocalState.Keys)
@@ -301,7 +281,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                 return;
             }
 
-            var snapshotRequired = false;
+            var shardsRequiringSnapshot = new HashSet<string>(StringComparer.Ordinal);
             var allOps = new List<JournaledOperation>();
 
             for (int i = 0; i < requirements.Count; i++)
@@ -309,23 +289,29 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                 var syncResult = await syncService.EvaluateJournalCompletionAsync(missingOpsStreams[i], requirements[i], cancellationToken).ConfigureAwait(false);
                 if (syncResult.SnapshotRequired)
                 {
-                    snapshotRequired = true;
-                    break;
+                    shardsRequiringSnapshot.Add(requirements[i].ShardId);
                 }
-                allOps.AddRange(syncResult.Operations);
+                else
+                {
+                    allOps.AddRange(syncResult.Operations);
+                }
             }
 
             var documents = scope.Orchestrator.GetActiveDocuments();
 
-            if (snapshotRequired)
+            if (shardsRequiringSnapshot.Count > 0)
             {
-                logger.LogWarning("[{ReplicaId}] Journal missing or trimmed. Sending full snapshots.", replicaContext.ReplicaId);
+                logger.LogWarning("[{ReplicaId}] Journal missing or trimmed for {ShardCount} shard(s). Sending full snapshots for affected shards.", replicaContext.ReplicaId, shardsRequiringSnapshot.Count);
                 foreach (var targetDoc in documents)
                 {
-                    await scope.Orchestrator.ProvideSnapshotAsync(targetDoc.DocumentId, syncMsg.ReplicaId, senderId, cancellationToken).ConfigureAwait(false);
+                    if (shardsRequiringSnapshot.Contains(targetDoc.ShardId))
+                    {
+                        await scope.Orchestrator.ProvideSnapshotAsync(targetDoc.DocumentId, syncMsg.ReplicaId, senderId, cancellationToken).ConfigureAwait(false);
+                    }
                 }
             }
-            else if (allOps.Count > 0 && directSender != null)
+
+            if (allOps.Count > 0 && directSender != null)
             {
                 var registryDoc = await scope.Orchestrator.Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
                 var opsByDoc = allOps
@@ -334,6 +320,11 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
 
                 foreach (var targetDoc in documents)
                 {
+                    if (shardsRequiringSnapshot.Contains(targetDoc.ShardId))
+                    {
+                        continue;
+                    }
+
                     if (opsByDoc.TryGetValue(targetDoc.DocumentId, out var docOps) && docOps.Length > 0)
                     {
                         var patchMsg = new CrdtPatchMessage(replicaContext.ReplicaId, new CrdtPatch(docOps));

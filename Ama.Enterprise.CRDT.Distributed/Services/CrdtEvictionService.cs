@@ -43,7 +43,7 @@ public sealed class CrdtEvictionService : ICrdtEvictionService, IDisposable
         var orchestrator = serviceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         var documents = orchestrator.GetActiveDocuments();
         var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
-        var syncService = serviceProvider.GetRequiredService<IVersionVectorSyncService>();
+        var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
 
         foreach (var document in documents)
         {
@@ -53,28 +53,7 @@ public sealed class CrdtEvictionService : ICrdtEvictionService, IDisposable
             }
         }
 
-        lock (replicaContext.ShardVersionVectors)
-        {
-            foreach (var kvp in replicaContext.ShardVersionVectors)
-            {
-                var cleanedDvv = syncService.RemoveEvictedReplicas(kvp.Value, replicaIds);
-                
-                kvp.Value.Versions.Clear();
-                foreach (var versionKvp in cleanedDvv.Versions)
-                {
-                    kvp.Value.Versions[versionKvp.Key] = versionKvp.Value;
-                }
-                
-                kvp.Value.Dots.Clear();
-                if (cleanedDvv.Dots != null)
-                {
-                    foreach (var dotKvp in cleanedDvv.Dots)
-                    {
-                        kvp.Value.Dots[dotKvp.Key] = dotKvp.Value;
-                    }
-                }
-            }
-        }
+        versionVectorManager.EvictReplicas(replicaIds);
         
         replicasEvictedCounter.Add(replicaIds.Count, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
         logger.LogInformation("[{LocalReplicaId}] Successfully applied eviction across {DocCount} documents for {ReplicaCount} replicas.", replicaContext.ReplicaId, documents.Count, replicaIds.Count);
@@ -84,6 +63,7 @@ public sealed class CrdtEvictionService : ICrdtEvictionService, IDisposable
     public async Task RebootLocalIdentityAsync(CancellationToken cancellationToken = default)
     {
         var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
+        var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
         var orchestrator = serviceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         var documents = orchestrator.GetActiveDocuments();
 
@@ -102,10 +82,7 @@ public sealed class CrdtEvictionService : ICrdtEvictionService, IDisposable
             
         logger.LogCritical("CRITICAL: This replica is now internally routing active payloads mapped matching natively explicitly seamlessly utilizing logically identified inherently limits as: {ReplicaId}", replicaContext.ReplicaId);
         
-        lock (replicaContext.ShardVersionVectors)
-        {
-            replicaContext.ShardVersionVectors.Clear();
-        }
+        versionVectorManager.Clear();
 
         foreach (var doc in documents)
         {

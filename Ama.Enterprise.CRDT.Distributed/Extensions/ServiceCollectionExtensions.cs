@@ -109,6 +109,7 @@ public static class ServiceCollectionExtensions
         
         // Register Consistent Hashing Distribution mappings
         services.TryAddScoped<IShardDistributionManager, ConsistentHashShardDistributionManager>();
+        services.TryAddScoped<IShardVersionVectorManager, ShardVersionVectorManager>();
 
         services.AddScoped<ICrdtDocumentOrchestrator, CrdtDocumentOrchestrator>();
         services.AddScoped<IClusterStateTracker, ClusterStateTracker>();

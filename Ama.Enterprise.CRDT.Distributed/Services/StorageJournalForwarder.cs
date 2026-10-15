@@ -59,14 +59,10 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         {
             try
             {
-                var replicaContext = this.serviceProvider.GetRequiredService<ReplicaContext>();
+                var versionVectorManager = this.serviceProvider.GetRequiredService<IShardVersionVectorManager>();
                 long totalCount = 0;
                 
-                List<string> shardIds;
-                lock (replicaContext.ShardVersionVectors)
-                {
-                    shardIds = replicaContext.ShardVersionVectors.Keys.ToList();
-                }
+                var shardIds = versionVectorManager.GetShardIds();
 
                 foreach (var shardId in shardIds)
                 {
@@ -411,37 +407,10 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
     private async Task ExecuteAggressiveTrimAsync(CancellationToken cancellationToken)
     {
         var replicaContext = this.serviceProvider.GetRequiredService<ReplicaContext>();
+        var versionVectorManager = this.serviceProvider.GetRequiredService<IShardVersionVectorManager>();
         var orchestrator = this.serviceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         
-        var sourceMap = replicaContext.ShardVersionVectors;
-        var safelyPersistedMap = new ShardVersionVectorMap();
-        
-        lock (sourceMap)
-        {
-            foreach (var shardKvp in sourceMap)
-            {
-                var dvv = shardKvp.Value;
-                var copiedVersions = new Dictionary<string, long>();
-                var copiedDots = new Dictionary<string, ISet<long>>();
-                
-                lock (dvv)
-                {
-                    foreach (var kvp in dvv.Versions)
-                    {
-                        copiedVersions[kvp.Key] = kvp.Value;
-                    }
-                    if (dvv.Dots != null)
-                    {
-                        foreach (var kvp in dvv.Dots)
-                        {
-                            copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
-                        }
-                    }
-                }
-                
-                safelyPersistedMap[shardKvp.Key] = new DottedVersionVector(copiedVersions, copiedDots);
-            }
-        }
+        var safelyPersistedMap = versionVectorManager.GetFullSnapshot();
         
         // Parallelize checkpointing across active documents to drastically reduce the trim duration lock time
         var documents = orchestrator.GetActiveDocuments().ToList();
