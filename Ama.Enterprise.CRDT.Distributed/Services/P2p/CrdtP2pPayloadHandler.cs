@@ -107,7 +107,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             return;
         }
 
-        var targetDoc = await ResolveLocalDocumentAsync(scope, wrapper.DocumentId, cancellationToken).ConfigureAwait(false);
+        var targetDoc = await ResolveLocalDocumentAsync(scope, wrapper.DocumentId, wrapper.DocumentTypeAlias, cancellationToken).ConfigureAwait(false);
 
         if (targetDoc == null)
         {
@@ -129,28 +129,14 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
         meter.Dispose();
     }
 
-    private static async ValueTask<IDistributedCrdtDocument?> ResolveLocalDocumentAsync(IDistributedCrdtScope scope, string documentId, CancellationToken cancellationToken)
+    private static ValueTask<IDistributedCrdtDocument?> ResolveLocalDocumentAsync(IDistributedCrdtScope scope, string? documentId, string? documentTypeAlias, CancellationToken cancellationToken)
     {
-        var targetDoc = scope.Orchestrator.GetActiveDocuments().FirstOrDefault(d => d.DocumentId == documentId);
-        if (targetDoc != null)
+        if (string.IsNullOrWhiteSpace(documentId))
         {
-            return targetDoc;
+            return new ValueTask<IDistributedCrdtDocument?>((IDistributedCrdtDocument?)null);
         }
 
-        var shardId = await scope.Orchestrator.TryGetShardIdAsync(documentId, cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrEmpty(shardId))
-        {
-            return null;
-        }
-
-        var distributionManager = scope.ServiceProvider.GetRequiredService<IShardDistributionManager>();
-        if (!await distributionManager.IsShardLocalAsync(shardId, cancellationToken).ConfigureAwait(false))
-        {
-            return null;
-        }
-
-        await scope.Orchestrator.SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
-        return scope.Orchestrator.GetActiveDocuments().FirstOrDefault(d => d.DocumentId == documentId);
+        return scope.Orchestrator.ResolveOrPromoteLocalDocumentAsync(documentId, documentTypeAlias, cancellationToken);
     }
 
     private async Task ProcessProxyRpcPayloadsAsync(IDistributedCrdtScope scope, string meshId, CrdtMessageWrapper wrapper, PeerId senderId, CancellationToken cancellationToken)
@@ -162,14 +148,15 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             if (wrapper.MessageType == "CrdtReadReq")
             {
                 var req = serializer.DeserializeFromBytes<CrdtReadRequestDto>(wrapper.Payload!);
-                var targetDoc = await ResolveLocalDocumentAsync(scope, req.DocumentId, cancellationToken).ConfigureAwait(false);
+                var typeAlias = !string.IsNullOrWhiteSpace(req.DocumentTypeAlias) ? req.DocumentTypeAlias : wrapper.DocumentTypeAlias;
+                var targetDoc = await ResolveLocalDocumentAsync(scope, req.DocumentId, typeAlias, cancellationToken).ConfigureAwait(false);
 
                 if (targetDoc != null)
                 {
                     var snapshot = await targetDoc.GetSnapshotDataAsync(cancellationToken).ConfigureAwait(false);
                     var res = new CrdtReadResponseDto { CorrelationId = req.CorrelationId, StatePayload = snapshot.SnapshotData };
                     var resPayload = serializer.SerializeToBytes(res);
-                    var resWrapper = new CrdtMessageWrapper(req.DocumentId, "CrdtReadRes", resPayload);
+                    var resWrapper = new CrdtMessageWrapper(req.DocumentId, "CrdtReadRes", resPayload, typeAlias);
                     var directSender = scope.ServiceProvider.GetRequiredService<IDirectMessageSender>();
                     await directSender.SendDirectAsync(senderId, serializer.SerializeToBytes(resWrapper), cancellationToken).ConfigureAwait(false);
                 }
@@ -183,7 +170,8 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             else if (wrapper.MessageType == "CrdtIntentReq")
             {
                 var req = serializer.DeserializeFromBytes<CrdtIntentForwardRequestDto>(wrapper.Payload!);
-                var targetDoc = await ResolveLocalDocumentAsync(scope, req.DocumentId, cancellationToken).ConfigureAwait(false);
+                var typeAlias = !string.IsNullOrWhiteSpace(req.DocumentTypeAlias) ? req.DocumentTypeAlias : wrapper.DocumentTypeAlias;
+                var targetDoc = await ResolveLocalDocumentAsync(scope, req.DocumentId, typeAlias, cancellationToken).ConfigureAwait(false);
                 var isFireAndForget = req.CorrelationId == Guid.Empty;
                 var deliveryMode = isFireAndForget ? IntentDeliveryMode.FireAndForget : IntentDeliveryMode.Acknowledged;
                 
@@ -339,6 +327,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             }
             else if (allOps.Count > 0 && directSender != null)
             {
+                var registryDoc = await scope.Orchestrator.Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
                 var opsByDoc = allOps
                     .GroupBy(x => x.DocumentId)
                     .ToDictionary(g => g.Key, g => g.Select(x => x.Operation).ToArray());
@@ -350,7 +339,13 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                         var patchMsg = new CrdtPatchMessage(replicaContext.ReplicaId, new CrdtPatch(docOps));
                         var patchPayload = serializer.SerializeToBytes(patchMsg);
                         
-                        var replyWrapper = new CrdtMessageWrapper(targetDoc.DocumentId, "CrdtPatch", patchPayload);
+                        string? docTypeAlias = null;
+                        if (registryDoc.Data.Documents.TryGetValue(targetDoc.DocumentId, out var entry))
+                        {
+                            docTypeAlias = entry.TypeAlias;
+                        }
+
+                        var replyWrapper = new CrdtMessageWrapper(targetDoc.DocumentId, "CrdtPatch", patchPayload, docTypeAlias);
                         var replyBytes = serializer.SerializeToBytes(replyWrapper);
 
                         await directSender.SendDirectAsync(senderId, replyBytes, cancellationToken).ConfigureAwait(false);

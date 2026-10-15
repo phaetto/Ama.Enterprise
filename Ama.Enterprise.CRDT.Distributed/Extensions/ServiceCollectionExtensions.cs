@@ -147,7 +147,9 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         if (string.IsNullOrWhiteSpace(typeAlias)) throw new ArgumentException("Type alias cannot be null or empty.", nameof(typeAlias));
 
-        services.AddKeyedSingleton<IDocumentFactory>(typeAlias, new DocumentFactory<TState>());
+        var factory = new DocumentFactory<TState>(typeAlias);
+        services.AddKeyedSingleton<IDocumentFactory>(typeAlias, factory);
+        services.AddSingleton<IDocumentFactory>(factory);
         return services;
     }
 

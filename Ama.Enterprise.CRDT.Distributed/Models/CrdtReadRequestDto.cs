@@ -23,6 +23,12 @@ public sealed record CrdtReadRequestDto : IEquatable<CrdtReadRequestDto>, IExten
     [JsonPropertyName("d")]
     public string DocumentId { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Gets the optional document type alias used for lazy shard instantiation when outracing registry gossip.
+    /// </summary>
+    [JsonPropertyName("dt")]
+    public string DocumentTypeAlias { get; init; } = string.Empty;
+
     /// <inheritdoc />
     [JsonExtensionData]
     public IDictionary<string, JsonElement>? JsonExtensionData { get; set; }
@@ -38,12 +44,13 @@ public sealed record CrdtReadRequestDto : IEquatable<CrdtReadRequestDto>, IExten
         if (ReferenceEquals(this, other)) return true;
 
         return CorrelationId.Equals(other.CorrelationId) &&
-               DocumentId == other.DocumentId;
+               DocumentId == other.DocumentId &&
+               DocumentTypeAlias == other.DocumentTypeAlias;
     }
 
     /// <inheritdoc />
     public override int GetHashCode()
     {
-        return HashCode.Combine(CorrelationId, DocumentId);
+        return HashCode.Combine(CorrelationId, DocumentId, DocumentTypeAlias);
     }
 }

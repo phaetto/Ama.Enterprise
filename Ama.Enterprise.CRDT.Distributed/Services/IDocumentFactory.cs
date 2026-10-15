@@ -16,6 +16,16 @@ using System;
 public interface IDocumentFactory
 {
     /// <summary>
+    /// Gets the registered string alias for the document state type.
+    /// </summary>
+    string TypeAlias { get; }
+
+    /// <summary>
+    /// Gets the CLR type of the document state.
+    /// </summary>
+    Type StateType { get; }
+
+    /// <summary>
     /// Resolves the shard identifier for a document without allocating or initializing the full document instance.
     /// </summary>
     /// <param name="serviceProvider">The scoped service provider.</param>
@@ -37,6 +47,18 @@ public interface IDocumentFactory
 /// </summary>
 internal sealed class DocumentFactory<TState> : IDocumentFactory where TState : class, new()
 {
+    public DocumentFactory(string typeAlias)
+    {
+        if (string.IsNullOrWhiteSpace(typeAlias)) throw new ArgumentException("Type alias cannot be null or empty.", nameof(typeAlias));
+        TypeAlias = typeAlias;
+    }
+
+    /// <inheritdoc />
+    public string TypeAlias { get; }
+
+    /// <inheritdoc />
+    public Type StateType => typeof(TState);
+
     /// <inheritdoc />
     public string GetShardId(IServiceProvider serviceProvider, string documentId)
     {

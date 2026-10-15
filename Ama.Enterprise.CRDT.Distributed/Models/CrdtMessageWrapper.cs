@@ -9,7 +9,7 @@ using Ama.Enterprise.P2p.Models.Core;
 /// <summary>
 /// Envelope wrapper for generic CRDT messages sent over the P2P gossip network.
 /// </summary>
-public sealed record CrdtMessageWrapper(string? DocumentId, string? MessageType, byte[]? Payload) : IExtensibleDistributedPayload
+public sealed record CrdtMessageWrapper(string? DocumentId, string? MessageType, byte[]? Payload, string? DocumentTypeAlias = null) : IExtensibleDistributedPayload
 {
     /// <inheritdoc />
     [JsonExtensionData]

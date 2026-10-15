@@ -10,8 +10,10 @@ using Ama.CRDT.Models;
 using Ama.CRDT.Services;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Models;
+using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 using Ama.Enterprise.P2p.Services.Core;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
@@ -21,6 +23,7 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
 {
     private readonly record struct OutboundPatchItem(string DocumentId, CrdtPatch Patch);
 
+    private readonly IServiceProvider serviceProvider;
     private readonly IP2pAlgorithm p2pAlgorithm;
     private readonly ReplicaContext replicaContext;
     private readonly ICrdtSerializer serializer;
@@ -35,12 +38,14 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
     private readonly Counter<long> broadcastFailuresCounter;
 
     public CrdtPatchBroadcaster(
+        IServiceProvider serviceProvider,
         IP2pAlgorithm p2pAlgorithm,
         ReplicaContext replicaContext,
         ICrdtSerializer serializer,
         ILogger<CrdtPatchBroadcaster> logger,
         IMeterFactory? meterFactory = null)
     {
+        this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         this.p2pAlgorithm = p2pAlgorithm ?? throw new ArgumentNullException(nameof(p2pAlgorithm));
         this.replicaContext = replicaContext ?? throw new ArgumentNullException(nameof(replicaContext));
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
@@ -85,10 +90,21 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
             {
                 try
                 {
+                    string? documentTypeAlias = null;
+                    var orchestrator = serviceProvider.GetService<ICrdtDocumentOrchestrator>();
+                    if (orchestrator?.Registry != null && !string.Equals(item.DocumentId, orchestrator.Registry.DocumentId, StringComparison.Ordinal))
+                    {
+                        var registryDoc = await orchestrator.Registry.GetDocumentAsync(disposeCts.Token).ConfigureAwait(false);
+                        if (registryDoc.Data.Documents.TryGetValue(item.DocumentId, out var entry))
+                        {
+                            documentTypeAlias = entry.TypeAlias;
+                        }
+                    }
+
                     var patchMsg = new CrdtPatchMessage(replicaContext.ReplicaId, item.Patch);
                     var payload = serializer.SerializeToBytes(patchMsg);
                     
-                    var wrapper = new CrdtMessageWrapper(item.DocumentId, "CrdtPatch", payload);
+                    var wrapper = new CrdtMessageWrapper(item.DocumentId, "CrdtPatch", payload, documentTypeAlias);
                     var finalBytes = serializer.SerializeToBytes(wrapper);
 
                     broadcastBytesCounter.Add(finalBytes.Length, new KeyValuePair<string, object?>("document_id", item.DocumentId));

@@ -46,6 +46,11 @@ public interface ICrdtDocumentOrchestrator
     ValueTask<string?> TryGetShardIdAsync(string documentId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Resolves a local active document or lazily instantiates and promotes it if the local node is an authoritative shard owner and the document is not tombstoned.
+    /// </summary>
+    ValueTask<IDistributedCrdtDocument?> ResolveOrPromoteLocalDocumentAsync(string documentId, string? typeAlias = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Retrieves the materialized document state routing across local memory channels or out-of-bound RPC network fetches.
     /// </summary>
     ValueTask<CrdtDocument<TState>> GetDocumentStateAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new();

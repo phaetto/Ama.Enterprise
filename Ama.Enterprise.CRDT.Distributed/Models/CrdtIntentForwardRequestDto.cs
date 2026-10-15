@@ -42,6 +42,12 @@ public sealed record CrdtIntentForwardRequestDto : IEquatable<CrdtIntentForwardR
     [JsonPropertyName("p")]
     public string TargetProperty { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Gets the optional document type alias used for lazy shard instantiation when outracing registry gossip.
+    /// </summary>
+    [JsonPropertyName("dt")]
+    public string DocumentTypeAlias { get; init; } = string.Empty;
+
     /// <inheritdoc />
     [JsonExtensionData]
     public IDictionary<string, JsonElement>? JsonExtensionData { get; set; }
@@ -60,7 +66,8 @@ public sealed record CrdtIntentForwardRequestDto : IEquatable<CrdtIntentForwardR
                DocumentId == other.DocumentId &&
                SerializedIntent.SequenceEqual(other.SerializedIntent) &&
                IntentTypeAlias == other.IntentTypeAlias &&
-               TargetProperty == other.TargetProperty;
+               TargetProperty == other.TargetProperty &&
+               DocumentTypeAlias == other.DocumentTypeAlias;
     }
 
     /// <inheritdoc />
@@ -72,6 +79,7 @@ public sealed record CrdtIntentForwardRequestDto : IEquatable<CrdtIntentForwardR
         hash.Add(SerializedIntent.Length);
         hash.Add(IntentTypeAlias);
         hash.Add(TargetProperty);
+        hash.Add(DocumentTypeAlias);
         return hash.ToHashCode();
     }
 }
