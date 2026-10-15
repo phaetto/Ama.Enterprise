@@ -6,11 +6,12 @@ using System.Collections.ObjectModel;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models.Intents;
+using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.FeatureFlags.Models;
 
 /// <summary>
-/// Implementation of the feature flag cluster manager explicitly focused on generic structural mutations and retrievals routing via the Stateless Orchestrator Gateway directly.
+/// Implementation of the feature flag cluster manager focused on mutations and retrievals routing via the orchestrator gateway.
 /// </summary>
 public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
 {
@@ -40,6 +41,7 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
         string? modifiedBy = null,
         FeatureFlagMetadata? metadata = null,
         FeatureFlagOwnership? ownership = null,
+        IntentDeliveryMode deliveryMode = IntentDeliveryMode.Acknowledged,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -80,11 +82,17 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
         };
         
         var intent = new MapSetIntent(name, flag);
-        await orchestrator.ApplyIntentAsync<FeatureFlagState>(Constants.GlobalDocumentId, intent, "Flags", cancellationToken).ConfigureAwait(false);
+        await orchestrator.ApplyIntentAsync<FeatureFlagState>(Constants.GlobalDocumentId, intent, "Flags", deliveryMode, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public async Task RemoveFlagAsync(string name, CancellationToken cancellationToken = default)
+    public Task RemoveFlagAsync(string name, CancellationToken cancellationToken = default)
+    {
+        return RemoveFlagAsync(name, IntentDeliveryMode.Acknowledged, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task RemoveFlagAsync(string name, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -92,6 +100,6 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
         }
 
         var intent = new MapRemoveIntent(name);
-        await orchestrator.ApplyIntentAsync<FeatureFlagState>(Constants.GlobalDocumentId, intent, "Flags", cancellationToken).ConfigureAwait(false);
+        await orchestrator.ApplyIntentAsync<FeatureFlagState>(Constants.GlobalDocumentId, intent, "Flags", deliveryMode, cancellationToken).ConfigureAwait(false);
     }
 }

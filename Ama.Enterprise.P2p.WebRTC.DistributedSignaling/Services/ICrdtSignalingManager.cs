@@ -4,11 +4,18 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.P2p.WebRTC.Models;
 
 /// <summary>
-/// Contract managing the WebRTC out-of-band signaling drop-box backed by a distributed CRDT state decoupled natively bypassing events.
+/// Contract managing the WebRTC out-of-band signaling drop-box backed by a distributed CRDT state.
 /// </summary>
+/// <example>
+/// <code>
+/// await signalingManager.SetJoinIntentAsync(peerId, "signaling-doc", IntentDeliveryMode.Acknowledged, cancellationToken);
+/// var intents = await signalingManager.GetJoinIntentsAsync("signaling-doc", cancellationToken);
+/// </code>
+/// </example>
 public interface ICrdtSignalingManager
 {
     /// <summary>
@@ -20,7 +27,7 @@ public interface ICrdtSignalingManager
     ValueTask<IReadOnlyDictionary<string, long>> GetJoinIntentsAsync(string? documentId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Pushes a new presence join intent directly asserting the Peer's status inside the topology bounds.
+    /// Pushes a new presence join intent asserting the Peer's status inside the topology bounds using the default acknowledged delivery mode.
     /// </summary>
     /// <param name="peerId">The specific remote or local unique node ID.</param>
     /// <param name="documentId">The target document ID.</param>
@@ -29,13 +36,33 @@ public interface ICrdtSignalingManager
     Task SetJoinIntentAsync(Guid peerId, string? documentId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Removes a targeted peer intent signifying an offline or departed state removing logic connections.
+    /// Pushes a new presence join intent asserting the Peer's status inside the topology bounds with the specified delivery mode.
+    /// </summary>
+    /// <param name="peerId">The specific remote or local unique node ID.</param>
+    /// <param name="documentId">The target document ID.</param>
+    /// <param name="deliveryMode">The delivery mode for the operation intent.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task SetJoinIntentAsync(Guid peerId, string? documentId, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Removes a targeted peer intent signifying an offline or departed state using the default acknowledged delivery mode.
     /// </summary>
     /// <param name="peerId">The target peer node ID.</param>
     /// <param name="documentId">The target document ID.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     Task RemoveJoinIntentAsync(Guid peerId, string? documentId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Removes a targeted peer intent signifying an offline or departed state with the specified delivery mode.
+    /// </summary>
+    /// <param name="peerId">The target peer node ID.</param>
+    /// <param name="documentId">The target document ID.</param>
+    /// <param name="deliveryMode">The delivery mode for the operation intent.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task RemoveJoinIntentAsync(Guid peerId, string? documentId, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Retrieves the current map of available WebRTC SDP offers.
@@ -54,7 +81,7 @@ public interface ICrdtSignalingManager
     ValueTask<IReadOnlyDictionary<string, WebRtcInvitationAnswer>> GetAnswersAsync(string? documentId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Pushes a new targeted WebRTC SDP offer into the distributed CRDT mesh aggressively.
+    /// Pushes a new targeted WebRTC SDP offer into the distributed CRDT mesh using the default acknowledged delivery mode.
     /// </summary>
     /// <param name="routingKey">The custom deterministic targeted mapping identifier ({TargetPeerId}:{OffererPeerId}).</param>
     /// <param name="offer">The generated WebRTC offer.</param>
@@ -64,7 +91,18 @@ public interface ICrdtSignalingManager
     Task SetOfferAsync(string routingKey, WebRtcInvitationOffer offer, string? documentId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Removes an existing WebRTC SDP offer from the distributed CRDT mesh globally.
+    /// Pushes a new targeted WebRTC SDP offer into the distributed CRDT mesh with the specified delivery mode.
+    /// </summary>
+    /// <param name="routingKey">The custom deterministic targeted mapping identifier ({TargetPeerId}:{OffererPeerId}).</param>
+    /// <param name="offer">The generated WebRTC offer.</param>
+    /// <param name="documentId">The target document ID.</param>
+    /// <param name="deliveryMode">The delivery mode for the operation intent.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task SetOfferAsync(string routingKey, WebRtcInvitationOffer offer, string? documentId, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Removes an existing WebRTC SDP offer from the distributed CRDT mesh using the default acknowledged delivery mode.
     /// </summary>
     /// <param name="routingKey">The matched deterministic mapped routing identifier.</param>
     /// <param name="documentId">The target document ID.</param>
@@ -73,7 +111,17 @@ public interface ICrdtSignalingManager
     Task RemoveOfferAsync(string routingKey, string? documentId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Pushes a new targeted WebRTC SDP answer into the distributed CRDT mesh aggressively.
+    /// Removes an existing WebRTC SDP offer from the distributed CRDT mesh with the specified delivery mode.
+    /// </summary>
+    /// <param name="routingKey">The matched deterministic mapped routing identifier.</param>
+    /// <param name="documentId">The target document ID.</param>
+    /// <param name="deliveryMode">The delivery mode for the operation intent.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task RemoveOfferAsync(string routingKey, string? documentId, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Pushes a new targeted WebRTC SDP answer into the distributed CRDT mesh using the default acknowledged delivery mode.
     /// </summary>
     /// <param name="routingKey">The custom deterministic targeted mapping identifier ({OffererPeerId}:{AnswererPeerId}).</param>
     /// <param name="answer">The generated WebRTC answer.</param>
@@ -83,11 +131,32 @@ public interface ICrdtSignalingManager
     Task SetAnswerAsync(string routingKey, WebRtcInvitationAnswer answer, string? documentId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Removes an existing WebRTC SDP answer from the distributed CRDT mesh globally.
+    /// Pushes a new targeted WebRTC SDP answer into the distributed CRDT mesh with the specified delivery mode.
+    /// </summary>
+    /// <param name="routingKey">The custom deterministic targeted mapping identifier ({OffererPeerId}:{AnswererPeerId}).</param>
+    /// <param name="answer">The generated WebRTC answer.</param>
+    /// <param name="documentId">The target document ID.</param>
+    /// <param name="deliveryMode">The delivery mode for the operation intent.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task SetAnswerAsync(string routingKey, WebRtcInvitationAnswer answer, string? documentId, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Removes an existing WebRTC SDP answer from the distributed CRDT mesh using the default acknowledged delivery mode.
     /// </summary>
     /// <param name="routingKey">The matched deterministic mapped routing identifier.</param>
     /// <param name="documentId">The target document ID.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     Task RemoveAnswerAsync(string routingKey, string? documentId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Removes an existing WebRTC SDP answer from the distributed CRDT mesh with the specified delivery mode.
+    /// </summary>
+    /// <param name="routingKey">The matched deterministic mapped routing identifier.</param>
+    /// <param name="documentId">The target document ID.</param>
+    /// <param name="deliveryMode">The delivery mode for the operation intent.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task RemoveAnswerAsync(string routingKey, string? documentId, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
 }

@@ -25,12 +25,12 @@
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskItem.cs` | Data structure representing an individual task item. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskListState.cs` | Root CRDT document model representing a task list, updated to inherit `IDistributedCrdtState`. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Refactored to map generic `ShowCaseShardIdProvider` dependency matching document types for causal domain tracking. Replaced tuples with explicitly evaluated Data Transfer Objects (DTO) and expanded rendering state to demonstrate isolated Document Hash Sharding capabilities gracefully balancing distributed domains natively. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetManager.cs` | Refactored consumer evaluating simplified standard `CrdtDocumentOrchestrator` gateway methods, dropping complex patch allocations natively. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/IFleetManager.cs` | Interface for managing the distributed fleet status CRDT document. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ITaskManager.cs` | Interface for managing the distributed task list CRDT document. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetManager.cs` | Added `IntentDeliveryMode` support when forwarding device intents to `ICrdtDocumentOrchestrator.ApplyIntentAsync`. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/IFleetManager.cs` | Added overloads accepting `IntentDeliveryMode` for setting and removing devices. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ITaskManager.cs` | Added overloads accepting `IntentDeliveryMode` for setting and removing tasks. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseCrdtStorage.cs` | Upgraded SQLite Document queries evaluating strictly filtered `ShardId` constraints executing mapped isolated state bindings preventing generic overrides. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseShardIdProvider.cs` | Custom shard ID provider decoupling overarching multi-document structures into isolated causal tracking domains. Implemented lightweight `GetShardId` overloads avoiding document allocations. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/TaskManager.cs` | Refactored to use `ICrdtDocumentOrchestrator` as a stateless gateway for reading states and forwarding intents directly, avoiding local patch generation limits. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/TaskManager.cs` | Added `IntentDeliveryMode` support when forwarding task intents to `ICrdtDocumentOrchestrator.ApplyIntentAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Ama.Enterprise.CRDT.Distributed.TableStorage.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Extensions/ServiceCollectionExtensions.cs` | Simplified Table Storage DI extensions to strictly register a single unified scoped storage using `TryAddSingleton` to register default AOT JSON fallbacks safely bridging implementations. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Models/CrdtTableEntity.cs` | Refactored into a static helper directly mapping chunks onto the dictionary-backed `TableEntity` avoiding reflection-heavy SDK deserialization limits ensuring AOT compatibility. |
@@ -147,9 +147,9 @@
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsCrdtAotContext.cs` | AOT reflection context for the Feature Flags CRDT models. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsJsonContext.cs` | AOT-friendly JSON context for Feature Flags serialization. |
 | `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagBootstrapper.cs` | Background service initializing the singleton feature flags state across replica scopes. |
-| `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagClusterManager.cs` | Refactored to leverage standard stateless orchestrator generic capabilities natively mapping evaluations and forwarding explicit intents directly. |
+| `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagClusterManager.cs` | Added `IntentDeliveryMode` support to `SetFlagAsync` and `RemoveFlagAsync` when calling `ICrdtDocumentOrchestrator.ApplyIntentAsync`. |
 | `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagStateObserver.cs` | New dedicated observer implementation explicitly tracking feature flag distributed state modifications securely decoupled from the core manager. |
-| `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagClusterManager.cs` | Removed brittle generic `StateChanged` boundaries exposing native topological decoupled evaluation hooks safely gracefully accurately structurally seamlessly. |
+| `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagClusterManager.cs` | Exposed `IntentDeliveryMode` on `SetFlagAsync` and `RemoveFlagAsync`. |
 | `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagStateObserver.cs` | Dedicated Feature Flag domain observer contract enabling consumer systems explicitly routing decoupled tracking dynamically perfectly securely. |
 | `$/Ama.Enterprise.Licensing.UnitTests/Ama.Enterprise.Licensing.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.Licensing.UnitTests/Services/CertificateLoaderTests.cs` | Unit tests verifying certificate loading capabilities from multiple inputs evaluating null constraints and cryptographic formats. |
@@ -285,8 +285,8 @@
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Models/CrdtSignalingState.cs` | Root CRDT document model representing the WebRTC out-of-band signaling state drop-box updating definitions reflecting dynamic target tracking properties matching presence scopes. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Models/DistributedSignalingAotContext.cs` | Appended standard CRDT payload structs (CrdtDocument, JournaledOperation, DottedVersionVector) exposing explicit AOT-friendly serialization mappings. Cleaned up duplicate Dictionary definitions and adjusted class to `public sealed`. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Models/DistributedSignalingCrdtAotContext.cs` | Native AOT mapping explicitly bounding WebRTC DTOs and multidimensional dictionary topologies securing the distributed serialization pipeline. |
-| `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Services/CrdtSignalingManager.cs` | Refactored targeting standard decoupled stateless document orchestrator logic, omitting explicit patch generations in favor of direct intent forwarding bounded to remote shards. |
-| `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Services/ICrdtSignalingManager.cs` | Contract managing the WebRTC out-of-band signaling drop-box updated tracking target presence mapping dictionary evaluation constraints. |
+| `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Services/CrdtSignalingManager.cs` | Added `IntentDeliveryMode` overloads for join intents, offers, and answers when calling `ICrdtDocumentOrchestrator.ApplyIntentAsync`. |
+| `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Services/ICrdtSignalingManager.cs` | Added overloads accepting `IntentDeliveryMode` for join intents, offers, and answers. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Services/IWebRtcDistributedSignalingClient.cs` | Replaced `meshId` generic parameters with strict `replicaId` mappings matching isolated CRDT localized multi-replica bounds. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Services/IWebRtcSignalingOrchestrator.cs` | Appended `replicaId` tracking executing constraints alongside `meshId` tracking bounds matching local CRDT generic orchestrations. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Services/WebRtcDistributedSignalingClient.cs` | Updated HTTP signaling boundaries executing `replicaId` targeted bounds tracking multi-replica architectural routes avoiding unstructured multi-mesh amnesia limits. |
