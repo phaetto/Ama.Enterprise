@@ -4,6 +4,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
+using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.FeatureFlags.Extensions;
 using Ama.Enterprise.FeatureFlags.Models;
@@ -28,7 +29,7 @@ public sealed class FeatureFlagDomainIntegrationTests
 
         // Act & Assert
         var exception = await Should.ThrowAsync<InvalidOperationException>(async () => 
-            await manager.SetFlagAsync("TestFlag", true, "TestUser", null, null, CancellationToken.None));
+            await manager.SetFlagAsync("TestFlag", true, "TestUser", null, null, IntentDeliveryMode.Acknowledged, CancellationToken.None));
             
         exception.Message.ShouldContain("Orchestrator registry is not initialized");
     }
@@ -67,7 +68,7 @@ public sealed class FeatureFlagDomainIntegrationTests
         var initialOwnership = new FeatureFlagOwnership { Owner = "BackendTeam", ContactInfo = "backend@ama.com" };
 
         await observer.WaitForStateChangeAsync(() => 
-            manager.SetFlagAsync("BetaFeature", true, "Admin", initialMetadata, initialOwnership, CancellationToken.None));
+            manager.SetFlagAsync("BetaFeature", true, "Admin", initialMetadata, initialOwnership, IntentDeliveryMode.Acknowledged, CancellationToken.None));
 
         var initialFlags = await manager.GetFlagsAsync(CancellationToken.None);
         var initialFlag = initialFlags["BetaFeature"];
@@ -77,7 +78,7 @@ public sealed class FeatureFlagDomainIntegrationTests
 
         // Act - Partial Update dropping specific fields
         await observer.WaitForStateChangeAsync(() => 
-            manager.SetFlagAsync("BetaFeature", false, "SystemAuto", metadata: null, ownership: null, CancellationToken.None));
+            manager.SetFlagAsync("BetaFeature", false, "SystemAuto", metadata: null, ownership: null, IntentDeliveryMode.Acknowledged, CancellationToken.None));
 
         // Assert
         var updatedFlags = await manager.GetFlagsAsync(CancellationToken.None);
@@ -105,7 +106,7 @@ public sealed class FeatureFlagDomainIntegrationTests
         await StartAllHostedServicesAsync(provider);
 
         await observer.WaitForStateChangeAsync(() => 
-            manager.SetFlagAsync("ObsoleteFeature", true, "Admin", null, null, CancellationToken.None));
+            manager.SetFlagAsync("ObsoleteFeature", true, "Admin", null, null, IntentDeliveryMode.Acknowledged, CancellationToken.None));
 
         var flagsBefore = await manager.GetFlagsAsync(CancellationToken.None);
         flagsBefore.ShouldContainKey("ObsoleteFeature");

@@ -85,7 +85,39 @@ public sealed class CrdtMaintenanceService : BackgroundService
                         {
                             evictedPeersCounter.Add(tombstonedPeers.Count, tag);
                             logger.LogInformation("[{ReplicaId}] Tombstoned {Count} dead peers based on TTL threshold ({TtlSeconds}s) preventing network log bound halts.", scope.ReplicaId, tombstonedPeers.Count, options.Value.PeerEvictionTtlSeconds);
-                            await scope.EvictionService.EvictPeersAsync(tombstonedPeers, stoppingToken).ConfigureAwait(false);
+                            
+                            var documents = scope.Orchestrator.GetActiveDocuments();
+                            foreach (var document in documents)
+                            {
+                                foreach (var replicaId in tombstonedPeers)
+                                {
+                                    await document.EvictReplicaAsync(replicaId, IntentDeliveryMode.FireAndForget, stoppingToken).ConfigureAwait(false);
+                                }
+                            }
+
+                            var syncService = scope.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
+                            lock (replicaContext.ShardVersionVectors)
+                            {
+                                foreach (var kvp in replicaContext.ShardVersionVectors)
+                                {
+                                    var cleanedDvv = syncService.RemoveEvictedReplicas(kvp.Value, tombstonedPeers);
+                                    
+                                    kvp.Value.Versions.Clear();
+                                    foreach (var versionKvp in cleanedDvv.Versions)
+                                    {
+                                        kvp.Value.Versions[versionKvp.Key] = versionKvp.Value;
+                                    }
+                                    
+                                    kvp.Value.Dots.Clear();
+                                    if (cleanedDvv.Dots != null)
+                                    {
+                                        foreach (var dotKvp in cleanedDvv.Dots)
+                                        {
+                                            kvp.Value.Dots[dotKvp.Key] = dotKvp.Value;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 

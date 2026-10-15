@@ -2,7 +2,7 @@ namespace Ama.Enterprise.CRDT.Distributed.Services.Observers;
 
 using System;
 using System.Threading;
-using System.Threading.Tasks;
+using Ama.Enterprise.CRDT.Distributed.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -27,20 +27,16 @@ public sealed class OrchestratorClusterStateObserver : IClusterStateObserver
     {
         logger.LogInformation("Cluster state topology change detected. Triggering orchestrator topology re-evaluation.");
         
-        // Fire and forget cleanly isolating limits securely bypassing synchronous lock boundaries optimally.
-        _ = Task.Run(async () =>
+        try
         {
-            try
-            {
-                // Resolve dynamically to prevent circular dependencies at startup
-                // Orchestrator -> ShardDistributionManager -> ClusterStateTracker -> OrchestratorClusterStateObserver -> Orchestrator
-                var orchestrator = serviceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-                await orchestrator.ReevaluateTopologyAsync(CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to re-evaluate orchestrator topology.");
-            }
-        });
+            // Resolve dynamically to prevent circular dependencies at startup
+            // Orchestrator -> ShardDistributionManager -> ClusterStateTracker -> OrchestratorClusterStateObserver -> Orchestrator
+            var orchestrator = serviceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+            _ = orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.FireAndForget, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to re-evaluate orchestrator topology.");
+        }
     }
 }

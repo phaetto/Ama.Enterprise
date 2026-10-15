@@ -34,6 +34,7 @@ internal sealed class PooledOrchestratorCommand : IValueTaskSource
     public string? DocumentId { get; set; }
     public string? TypeAlias { get; set; }
     public ICrdtTimestamp? ExplicitTimestamp { get; set; }
+    public bool IsFireAndForget { get; set; }
     public CancellationToken CancellationToken { get; set; }
 
     public void Reset()
@@ -43,6 +44,7 @@ internal sealed class PooledOrchestratorCommand : IValueTaskSource
         DocumentId = null;
         TypeAlias = null;
         ExplicitTimestamp = null;
+        IsFireAndForget = false;
         CancellationToken = default;
     }
 

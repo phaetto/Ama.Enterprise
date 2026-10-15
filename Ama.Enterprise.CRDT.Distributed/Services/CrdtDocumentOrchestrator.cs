@@ -138,8 +138,31 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
     }
 
-    public async Task SyncDocumentsAsync(CancellationToken cancellationToken = default)
+    public Task SyncDocumentsAsync(CancellationToken cancellationToken = default)
     {
+        return SyncDocumentsAsync(IntentDeliveryMode.Acknowledged, cancellationToken);
+    }
+
+    public async Task SyncDocumentsAsync(IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default)
+    {
+        if (deliveryMode == IntentDeliveryMode.FireAndForget)
+        {
+            var ffCmd = GetCommand();
+            ffCmd.Type = OrchestratorCommandType.SyncDocuments;
+            ffCmd.IsFireAndForget = true;
+            ffCmd.CancellationToken = CancellationToken.None;
+
+            if (commandChannel.Writer.TryWrite(ffCmd))
+            {
+                commandsEnqueuedCounter.Add(1);
+                return;
+            }
+
+            await commandChannel.Writer.WriteAsync(ffCmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1);
+            return;
+        }
+
         var cmd = GetCommand();
         cmd.Type = OrchestratorCommandType.SyncDocuments;
         cmd.CancellationToken = cancellationToken;
@@ -156,8 +179,31 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
     }
     
-    public async Task ReevaluateTopologyAsync(CancellationToken cancellationToken = default)
+    public Task ReevaluateTopologyAsync(CancellationToken cancellationToken = default)
     {
+        return ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, cancellationToken);
+    }
+
+    public async Task ReevaluateTopologyAsync(IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default)
+    {
+        if (deliveryMode == IntentDeliveryMode.FireAndForget)
+        {
+            var ffCmd = GetCommand();
+            ffCmd.Type = OrchestratorCommandType.ReevaluateTopology;
+            ffCmd.IsFireAndForget = true;
+            ffCmd.CancellationToken = CancellationToken.None;
+
+            if (commandChannel.Writer.TryWrite(ffCmd))
+            {
+                commandsEnqueuedCounter.Add(1);
+                return;
+            }
+
+            await commandChannel.Writer.WriteAsync(ffCmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1);
+            return;
+        }
+
         var cmd = GetCommand();
         cmd.Type = OrchestratorCommandType.ReevaluateTopology;
         cmd.CancellationToken = cancellationToken;
@@ -528,7 +574,12 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         return false;
     }
 
-    public async Task ApplyPatchAsync<TState>(string documentId, CrdtPatch patch, CancellationToken cancellationToken = default) where TState : class, new()
+    public Task ApplyPatchAsync<TState>(string documentId, CrdtPatch patch, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        return ApplyPatchAsync<TState>(documentId, patch, IntentDeliveryMode.Acknowledged, cancellationToken);
+    }
+
+    public async Task ApplyPatchAsync<TState>(string documentId, CrdtPatch patch, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default) where TState : class, new()
     {
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
 
@@ -539,8 +590,21 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         if (Registry != null && string.Equals(Registry.DocumentId, documentId, StringComparison.Ordinal) && Registry is IDistributedCrdtDocument<TState> registryTyped)
         {
-            await registryTyped.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
-            await SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
+            await registryTyped.ApplyPatchAsync(patch, deliveryMode, cancellationToken).ConfigureAwait(false);
+            if (deliveryMode == IntentDeliveryMode.Acknowledged)
+            {
+                await SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await SyncDocumentsAsync(IntentDeliveryMode.FireAndForget, cancellationToken).ConfigureAwait(false);
+            }
+            return;
+        }
+
+        if (activeDocuments.TryGetValue(documentId, out var fastDoc) && fastDoc is IDistributedCrdtDocument<TState> fastTypedDoc)
+        {
+            await fastTypedDoc.ApplyPatchAsync(patch, deliveryMode, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -557,7 +621,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
             if (activeDoc is IDistributedCrdtDocument<TState> typedDoc)
             {
-                await typedDoc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+                await typedDoc.ApplyPatchAsync(patch, deliveryMode, cancellationToken).ConfigureAwait(false);
                 return;
             }
         }
@@ -908,17 +972,39 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                             break;
                     }
 
-                    cmd.SetResult();
                     commandsProcessedCounter.Add(1);
+
+                    if (cmd.IsFireAndForget)
+                    {
+                        ReturnCommand(cmd);
+                    }
+                    else
+                    {
+                        cmd.SetResult();
+                    }
                 }
                 catch (OperationCanceledException)
                 {
-                    cmd.SetException(new OperationCanceledException("Orchestrator operation cancelled."));
+                    if (cmd.IsFireAndForget)
+                    {
+                        ReturnCommand(cmd);
+                    }
+                    else
+                    {
+                        cmd.SetException(new OperationCanceledException("Orchestrator operation cancelled."));
+                    }
                 }
                 catch (Exception ex)
                 {
                     commandFailuresCounter.Add(1);
-                    cmd.SetException(ex);
+                    if (cmd.IsFireAndForget)
+                    {
+                        ReturnCommand(cmd);
+                    }
+                    else
+                    {
+                        cmd.SetException(ex);
+                    }
                 }
             }
         }

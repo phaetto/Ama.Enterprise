@@ -216,14 +216,13 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         if (deliveryMode == IntentDeliveryMode.FireAndForget)
         {
-            var ffCmd = new PooledDocumentCommand<TState>
-            {
-                Type = DocumentCommandType.ApplyRemoteIntent,
-                Intent = intent,
-                TargetProperty = targetProperty,
-                Patcher = patcher,
-                CancellationToken = CancellationToken.None
-            };
+            var ffCmd = GetCommand();
+            ffCmd.Type = DocumentCommandType.ApplyRemoteIntent;
+            ffCmd.Intent = intent;
+            ffCmd.TargetProperty = targetProperty;
+            ffCmd.Patcher = patcher;
+            ffCmd.IsFireAndForget = true;
+            ffCmd.CancellationToken = CancellationToken.None;
 
             if (commandChannel.Writer.TryWrite(ffCmd))
             {
@@ -257,9 +256,34 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     }
 
     /// <inheritdoc />
-    public async Task ApplyPatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default)
+    public Task ApplyPatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default)
+    {
+        return ApplyPatchAsync(patch, IntentDeliveryMode.Acknowledged, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task ApplyPatchAsync(CrdtPatch patch, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default)
     {
         if (commandChannel == null) return;
+
+        if (deliveryMode == IntentDeliveryMode.FireAndForget)
+        {
+            var ffCmd = GetCommand();
+            ffCmd.Type = DocumentCommandType.ApplyPatch;
+            ffCmd.Patch = patch;
+            ffCmd.IsFireAndForget = true;
+            ffCmd.CancellationToken = CancellationToken.None;
+
+            if (commandChannel.Writer.TryWrite(ffCmd))
+            {
+                commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+                return;
+            }
+
+            await commandChannel.Writer.WriteAsync(ffCmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            return;
+        }
 
         var cmd = GetCommand();
         cmd.Type = DocumentCommandType.ApplyPatch;
@@ -307,9 +331,34 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     }
 
     /// <inheritdoc />
-    public async Task ApplyRemotePatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default)
+    public Task ApplyRemotePatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default)
+    {
+        return ApplyRemotePatchAsync(patch, IntentDeliveryMode.Acknowledged, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task ApplyRemotePatchAsync(CrdtPatch patch, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default)
     {
         if (commandChannel == null) return;
+
+        if (deliveryMode == IntentDeliveryMode.FireAndForget)
+        {
+            var ffCmd = GetCommand();
+            ffCmd.Type = DocumentCommandType.ApplyRemotePatch;
+            ffCmd.Patch = patch;
+            ffCmd.IsFireAndForget = true;
+            ffCmd.CancellationToken = CancellationToken.None;
+
+            if (commandChannel.Writer.TryWrite(ffCmd))
+            {
+                commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+                return;
+            }
+
+            await commandChannel.Writer.WriteAsync(ffCmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            return;
+        }
 
         var cmd = GetCommand();
         cmd.Type = DocumentCommandType.ApplyRemotePatch;
@@ -379,10 +428,36 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     }
 
     /// <inheritdoc />
-    public async Task MergeSnapshotAsync(byte[] snapshotData, ShardVersionVectorMap globalState, CancellationToken cancellationToken = default)
+    public Task MergeSnapshotAsync(byte[] snapshotData, ShardVersionVectorMap globalState, CancellationToken cancellationToken = default)
+    {
+        return MergeSnapshotAsync(snapshotData, globalState, IntentDeliveryMode.Acknowledged, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task MergeSnapshotAsync(byte[] snapshotData, ShardVersionVectorMap globalState, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default)
     {
         if (snapshotData == null || snapshotData.Length == 0 || commandChannel == null) return;
         ArgumentNullException.ThrowIfNull(globalState);
+
+        if (deliveryMode == IntentDeliveryMode.FireAndForget)
+        {
+            var ffCmd = GetCommand();
+            ffCmd.Type = DocumentCommandType.MergeSnapshot;
+            ffCmd.SnapshotData = snapshotData;
+            ffCmd.GlobalState = globalState;
+            ffCmd.IsFireAndForget = true;
+            ffCmd.CancellationToken = CancellationToken.None;
+
+            if (commandChannel.Writer.TryWrite(ffCmd))
+            {
+                commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+                return;
+            }
+
+            await commandChannel.Writer.WriteAsync(ffCmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            return;
+        }
 
         var cmd = GetCommand();
         cmd.Type = DocumentCommandType.MergeSnapshot;
@@ -424,11 +499,36 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     }
 
     /// <inheritdoc />
-    public async Task EvictReplicaAsync(string replicaId, CancellationToken cancellationToken = default)
+    public Task EvictReplicaAsync(string replicaId, CancellationToken cancellationToken = default)
+    {
+        return EvictReplicaAsync(replicaId, IntentDeliveryMode.Acknowledged, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task EvictReplicaAsync(string replicaId, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
 
         if (commandChannel == null) return;
+
+        if (deliveryMode == IntentDeliveryMode.FireAndForget)
+        {
+            var ffCmd = GetCommand();
+            ffCmd.Type = DocumentCommandType.EvictReplica;
+            ffCmd.ReplicaIdToEvict = replicaId;
+            ffCmd.IsFireAndForget = true;
+            ffCmd.CancellationToken = CancellationToken.None;
+
+            if (commandChannel.Writer.TryWrite(ffCmd))
+            {
+                commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+                return;
+            }
+
+            await commandChannel.Writer.WriteAsync(ffCmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            return;
+        }
 
         var cmd = GetCommand();
         cmd.Type = DocumentCommandType.EvictReplica;
@@ -577,17 +677,39 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                             break;
                     }
 
-                    cmd.SetResult();
                     commandsProcessedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+
+                    if (cmd.IsFireAndForget)
+                    {
+                        ReturnCommand(cmd);
+                    }
+                    else
+                    {
+                        cmd.SetResult();
+                    }
                 }
                 catch (OperationCanceledException)
                 {
-                    cmd.SetException(new OperationCanceledException("Document operation cancelled."));
+                    if (cmd.IsFireAndForget)
+                    {
+                        ReturnCommand(cmd);
+                    }
+                    else
+                    {
+                        cmd.SetException(new OperationCanceledException("Document operation cancelled."));
+                    }
                 }
                 catch (Exception ex)
                 {
                     commandFailuresCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-                    cmd.SetException(ex);
+                    if (cmd.IsFireAndForget)
+                    {
+                        ReturnCommand(cmd);
+                    }
+                    else
+                    {
+                        cmd.SetException(ex);
+                    }
                 }
             }
         }

@@ -66,6 +66,11 @@ public interface ICrdtDocumentOrchestrator
     Task ApplyPatchAsync<TState>(string documentId, CrdtPatch patch, CancellationToken cancellationToken = default) where TState : class, new();
 
     /// <summary>
+    /// Applies a locally generated patch intention with the specified delivery mode.
+    /// </summary>
+    Task ApplyPatchAsync<TState>(string documentId, CrdtPatch patch, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default) where TState : class, new();
+
+    /// <summary>
     /// Manually creates mapped distributed state models across the P2P network.
     /// </summary>
     Task CreateDocumentAsync(string documentId, string typeAlias, CancellationToken cancellationToken = default);
@@ -81,9 +86,19 @@ public interface ICrdtDocumentOrchestrator
     Task SyncDocumentsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Processes localized matrix modifications with the specified delivery mode.
+    /// </summary>
+    Task SyncDocumentsAsync(IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Manually triggers a re-evaluation of the document topology, promoting or demoting dynamically based on the current cluster map.
     /// </summary>
     Task ReevaluateTopologyAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Manually triggers a re-evaluation of the document topology with the specified delivery mode.
+    /// </summary>
+    Task ReevaluateTopologyAsync(IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Serializes the current local state and dispatches it directly as a targeted snapshot following an unrecoverable journal truncation gap.

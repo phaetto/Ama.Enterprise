@@ -57,9 +57,19 @@ public interface IDistributedCrdtDocument
     Task ApplyPatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Applies a locally generated patch intention over the state with the specified delivery mode.
+    /// </summary>
+    Task ApplyPatchAsync(CrdtPatch patch, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Applies an incoming remote patch retrieved from a proxy peer to the local document state bypassing broadcasting loops.
     /// </summary>
     Task ApplyRemotePatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Applies an incoming remote patch retrieved from a proxy peer to the local document state with the specified delivery mode.
+    /// </summary>
+    Task ApplyRemotePatchAsync(CrdtPatch patch, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
     
     /// <summary>
     /// Applies a patch loaded from the storage journal avoiding asynchronous re-journaling and broadcast triggers.
@@ -70,6 +80,11 @@ public interface IDistributedCrdtDocument
     /// Applies a materialized snapshot payload superseding local structure dependencies alongside targeted global bounds.
     /// </summary>
     Task MergeSnapshotAsync(byte[] snapshotData, ShardVersionVectorMap globalState, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Applies a materialized snapshot payload with the specified delivery mode.
+    /// </summary>
+    Task MergeSnapshotAsync(byte[] snapshotData, ShardVersionVectorMap globalState, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Asynchronously saves the current in-memory document state to persistent storage.
@@ -86,6 +101,15 @@ public interface IDistributedCrdtDocument
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     Task EvictReplicaAsync(string replicaId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Evicts the state and metadata of a specific peer replica with the specified delivery mode.
+    /// </summary>
+    /// <param name="replicaId">The identifier of the remote replica to evict.</param>
+    /// <param name="deliveryMode">The delivery mode specifying whether to wait for completion or enqueue as fire-and-forget.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task EvictReplicaAsync(string replicaId, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Resets the internal CRDT metadata and structures, used when forced to re-bootstrap identity following a cluster tombstone eviction.

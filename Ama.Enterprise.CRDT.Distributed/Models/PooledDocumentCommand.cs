@@ -47,6 +47,7 @@ internal sealed class PooledDocumentCommand<TState> : IValueTaskSource where TSt
     public ICrdtTimestamp? ExplicitTimestamp { get; set; }
     public string? ReplicaIdToEvict { get; set; }
     public string? OldReplicaId { get; set; }
+    public bool IsFireAndForget { get; set; }
     public CancellationToken CancellationToken { get; set; }
 
     public byte[]? ResultSnapshotData { get; set; }
@@ -65,6 +66,7 @@ internal sealed class PooledDocumentCommand<TState> : IValueTaskSource where TSt
         ExplicitTimestamp = null;
         ReplicaIdToEvict = null;
         OldReplicaId = null;
+        IsFireAndForget = false;
         CancellationToken = default;
         
         ResultSnapshotData = null;
