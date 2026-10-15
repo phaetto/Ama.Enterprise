@@ -40,7 +40,7 @@ public sealed class TaskManager : ITaskManager
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or empty.", nameof(id));
 
         var intent = new MapSetIntent(id, new TaskItem(id, description, isDone));
-        await orchestrator.ForwardIntentAsync<TaskListState>(documentId, intent, "Tasks", cancellationToken).ConfigureAwait(false);
+        await orchestrator.ApplyIntentAsync<TaskListState>(documentId, intent, "Tasks", cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -50,6 +50,6 @@ public sealed class TaskManager : ITaskManager
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or empty.", nameof(id));
 
         var intent = new MapRemoveIntent(id);
-        await orchestrator.ForwardIntentAsync<TaskListState>(documentId, intent, "Tasks", cancellationToken).ConfigureAwait(false);
+        await orchestrator.ApplyIntentAsync<TaskListState>(documentId, intent, "Tasks", cancellationToken).ConfigureAwait(false);
     }
 }

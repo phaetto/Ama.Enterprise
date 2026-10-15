@@ -108,10 +108,10 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var intent1 = new MapSetIntent("testKey", "Val1");
-        await orchestrator.ForwardIntentAsync<SyncTestState>("sync-doc-1", intent1, "DataMap", CancellationToken.None);
+        await orchestrator.ApplyIntentAsync<SyncTestState>("sync-doc-1", intent1, "DataMap", CancellationToken.None);
 
         var intent2 = new MapSetIntent("testKey", "Val2");
-        await orchestrator.ForwardIntentAsync<SyncTestState>("sync-doc-2", intent2, "DataMap", CancellationToken.None);
+        await orchestrator.ApplyIntentAsync<SyncTestState>("sync-doc-2", intent2, "DataMap", CancellationToken.None);
 
         var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
         var serializer = sp.GetRequiredService<ICrdtSerializer>();
@@ -260,7 +260,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         await orchestrator.ApplyPatchAsync<SyncTestState>("sync-doc-1", patch, CancellationToken.None);
 
         var intent = new MapSetIntent("Field", "test");
-        await orchestrator.ForwardIntentAsync<SyncTestState>("sync-doc-1", intent, "DataMap", CancellationToken.None);
+        await orchestrator.ApplyIntentAsync<SyncTestState>("sync-doc-1", intent, "DataMap", CancellationToken.None);
 
         await Task.Delay(1000);
 

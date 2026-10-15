@@ -40,7 +40,7 @@ public sealed class FleetManager : IFleetManager
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or empty.", nameof(id));
 
         var intent = new MapSetIntent(id, new DeviceStatus(id, isOnline, batteryLevel));
-        await orchestrator.ForwardIntentAsync<FleetState>(documentId, intent, "Devices", cancellationToken).ConfigureAwait(false);
+        await orchestrator.ApplyIntentAsync<FleetState>(documentId, intent, "Devices", cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -50,6 +50,6 @@ public sealed class FleetManager : IFleetManager
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or empty.", nameof(id));
 
         var intent = new MapRemoveIntent(id);
-        await orchestrator.ForwardIntentAsync<FleetState>(documentId, intent, "Devices", cancellationToken).ConfigureAwait(false);
+        await orchestrator.ApplyIntentAsync<FleetState>(documentId, intent, "Devices", cancellationToken).ConfigureAwait(false);
     }
 }

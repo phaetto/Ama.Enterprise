@@ -74,10 +74,10 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
 
         // Concurrently modify both documents
         var intentA = new MapSetIntent("KeyA", "ValueA");
-        var taskA = orchA.ForwardIntentAsync<SharedTestState>("doc-1", intentA, "DataMap", CancellationToken.None);
+        var taskA = orchA.ApplyIntentAsync<SharedTestState>("doc-1", intentA, "DataMap", CancellationToken.None);
 
         var intentB = new MapSetIntent("KeyB", "ValueB");
-        var taskB = orchB.ForwardIntentAsync<SharedTestState>("doc-1", intentB, "DataMap", CancellationToken.None);
+        var taskB = orchB.ApplyIntentAsync<SharedTestState>("doc-1", intentB, "DataMap", CancellationToken.None);
 
         await Task.WhenAll(taskA, taskB);
         
@@ -162,10 +162,10 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
 
         // Modify offline
         var intentA = new MapSetIntent("OfflineKeyA", "ValueA");
-        await orchA.ForwardIntentAsync<SharedTestState>("doc-ae", intentA, "DataMap", CancellationToken.None);
+        await orchA.ApplyIntentAsync<SharedTestState>("doc-ae", intentA, "DataMap", CancellationToken.None);
 
         var intentB = new MapSetIntent("OfflineKeyB", "ValueB");
-        await orchB.ForwardIntentAsync<SharedTestState>("doc-ae", intentB, "DataMap", CancellationToken.None);
+        await orchB.ApplyIntentAsync<SharedTestState>("doc-ae", intentB, "DataMap", CancellationToken.None);
 
         await Task.Delay(500);
 
@@ -241,9 +241,9 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         await orchC.SyncDocumentsAsync(CancellationToken.None);
 
         // Act - Concurrently patch from all three distinct replica matrices
-        var t1 = orchA.ForwardIntentAsync<SharedTestState>("doc-3", new MapSetIntent("KeyA", "ValA"), "DataMap", CancellationToken.None);
-        var t2 = orchB.ForwardIntentAsync<SharedTestState>("doc-3", new MapSetIntent("KeyB", "ValB"), "DataMap", CancellationToken.None);
-        var t3 = orchC.ForwardIntentAsync<SharedTestState>("doc-3", new MapSetIntent("KeyC", "ValC"), "DataMap", CancellationToken.None);
+        var t1 = orchA.ApplyIntentAsync<SharedTestState>("doc-3", new MapSetIntent("KeyA", "ValA"), "DataMap", CancellationToken.None);
+        var t2 = orchB.ApplyIntentAsync<SharedTestState>("doc-3", new MapSetIntent("KeyB", "ValB"), "DataMap", CancellationToken.None);
+        var t3 = orchC.ApplyIntentAsync<SharedTestState>("doc-3", new MapSetIntent("KeyC", "ValC"), "DataMap", CancellationToken.None);
 
         await Task.WhenAll(t1, t2, t3);
         

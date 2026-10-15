@@ -45,7 +45,7 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager
         await EnsureDocumentExistsAsync(docId, cancellationToken).ConfigureAwait(false);
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var intent = new MapSetIntent(peerId.ToString(), timestamp);
-        await orchestrator.ForwardIntentAsync<CrdtSignalingState>(docId, intent, "JoinIntents", cancellationToken).ConfigureAwait(false);
+        await orchestrator.ApplyIntentAsync<CrdtSignalingState>(docId, intent, "JoinIntents", cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -53,7 +53,7 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager
     {
         var docId = ResolveDocumentId(documentId);
         var intent = new MapRemoveIntent(peerId.ToString());
-        await orchestrator.ForwardIntentAsync<CrdtSignalingState>(docId, intent, "JoinIntents", cancellationToken).ConfigureAwait(false);
+        await orchestrator.ApplyIntentAsync<CrdtSignalingState>(docId, intent, "JoinIntents", cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -88,7 +88,7 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager
         var docId = ResolveDocumentId(documentId);
         await EnsureDocumentExistsAsync(docId, cancellationToken).ConfigureAwait(false);
         var intent = new MapSetIntent(routingKey, offer);
-        await orchestrator.ForwardIntentAsync<CrdtSignalingState>(docId, intent, "Offers", cancellationToken).ConfigureAwait(false);
+        await orchestrator.ApplyIntentAsync<CrdtSignalingState>(docId, intent, "Offers", cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -98,7 +98,7 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager
         
         var docId = ResolveDocumentId(documentId);
         var intent = new MapRemoveIntent(routingKey);
-        await orchestrator.ForwardIntentAsync<CrdtSignalingState>(docId, intent, "Offers", cancellationToken).ConfigureAwait(false);
+        await orchestrator.ApplyIntentAsync<CrdtSignalingState>(docId, intent, "Offers", cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -109,7 +109,7 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager
         var docId = ResolveDocumentId(documentId);
         await EnsureDocumentExistsAsync(docId, cancellationToken).ConfigureAwait(false);
         var intent = new MapSetIntent(routingKey, answer);
-        await orchestrator.ForwardIntentAsync<CrdtSignalingState>(docId, intent, "Answers", cancellationToken).ConfigureAwait(false);
+        await orchestrator.ApplyIntentAsync<CrdtSignalingState>(docId, intent, "Answers", cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -119,7 +119,7 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager
 
         var docId = ResolveDocumentId(documentId);
         var intent = new MapRemoveIntent(routingKey);
-        await orchestrator.ForwardIntentAsync<CrdtSignalingState>(docId, intent, "Answers", cancellationToken).ConfigureAwait(false);
+        await orchestrator.ApplyIntentAsync<CrdtSignalingState>(docId, intent, "Answers", cancellationToken).ConfigureAwait(false);
     }
 
     private static string ResolveDocumentId(string? documentId)

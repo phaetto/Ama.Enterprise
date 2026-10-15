@@ -341,13 +341,13 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         throw lastException ?? new TimeoutException($"Timed out waiting for remote state of document {documentId} on shard {shardId}.");
     }
 
-    public Task<bool> ForwardIntentAsync<TState>(string documentId, IOperationIntent intent, string targetProperty, CancellationToken cancellationToken = default) where TState : class, new()
+    public Task<bool> ApplyIntentAsync<TState>(string documentId, IOperationIntent intent, string targetProperty, CancellationToken cancellationToken = default) where TState : class, new()
     {
-        return ForwardIntentAsync<TState>(documentId, intent, targetProperty, IntentDeliveryMode.Acknowledged, cancellationToken);
+        return ApplyIntentAsync<TState>(documentId, intent, targetProperty, IntentDeliveryMode.Acknowledged, cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task<bool> ForwardIntentAsync<TState>(string documentId, IOperationIntent intent, string targetProperty, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default) where TState : class, new()
+    public async Task<bool> ApplyIntentAsync<TState>(string documentId, IOperationIntent intent, string targetProperty, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default) where TState : class, new()
     {
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
         ArgumentNullException.ThrowIfNull(intent);
@@ -616,7 +616,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         var registry = Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
         var intent = new MapSetIntent(documentId, new CrdtRegistryEntry(documentId, typeAlias, false));
         
-        var success = await ForwardIntentAsync<CrdtRegistryState>(registry.DocumentId, intent, nameof(CrdtRegistryState.Documents), IntentDeliveryMode.Acknowledged, cancellationToken).ConfigureAwait(false);
+        var success = await ApplyIntentAsync<CrdtRegistryState>(registry.DocumentId, intent, nameof(CrdtRegistryState.Documents), IntentDeliveryMode.Acknowledged, cancellationToken).ConfigureAwait(false);
         
         if (success)
         {
@@ -639,7 +639,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         {
             var intent = new MapSetIntent(documentId, existing with { IsDeleted = true });
             
-            var success = await ForwardIntentAsync<CrdtRegistryState>(registry.DocumentId, intent, nameof(CrdtRegistryState.Documents), IntentDeliveryMode.Acknowledged, cancellationToken).ConfigureAwait(false);
+            var success = await ApplyIntentAsync<CrdtRegistryState>(registry.DocumentId, intent, nameof(CrdtRegistryState.Documents), IntentDeliveryMode.Acknowledged, cancellationToken).ConfigureAwait(false);
             
             if (success)
             {

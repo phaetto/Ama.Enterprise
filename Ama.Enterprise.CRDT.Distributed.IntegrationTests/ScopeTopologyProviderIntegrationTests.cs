@@ -254,7 +254,7 @@ public sealed class ScopeTopologyProviderIntegrationTests
         for (int i = 0; i < 5; i++)
         {
             var intent = new MapSetIntent($"key{i}", $"value{i}");
-            await orchestrator.ForwardIntentAsync<TopologyTestState>("topo-doc", intent, "DataMap", CancellationToken.None);
+            await orchestrator.ApplyIntentAsync<TopologyTestState>("topo-doc", intent, "DataMap", CancellationToken.None);
         }
 
         var opsBeforeCheckpoint = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();

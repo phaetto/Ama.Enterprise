@@ -173,7 +173,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var intent = new MapSetIntent("testKey", "DirtyData");
-        await orchestrator.ForwardIntentAsync<JournalTestState>("journal-doc", intent, "DataMap", CancellationToken.None);
+        await orchestrator.ApplyIntentAsync<JournalTestState>("journal-doc", intent, "DataMap", CancellationToken.None);
 
         var checkpointService = sp.GetServices<IHostedService>().OfType<CrdtCheckpointService>().First();
 
@@ -324,7 +324,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var intent = new MapSetIntent("testKey", "Updated");
-        await orchestrator.ForwardIntentAsync<JournalTestState>("journal-doc", intent, "DataMap", CancellationToken.None);
+        await orchestrator.ApplyIntentAsync<JournalTestState>("journal-doc", intent, "DataMap", CancellationToken.None);
 
         var remoteDvv = new DottedVersionVector();
 
@@ -359,7 +359,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var intent = new MapSetIntent("testKey", "Updated");
-        await orchestrator.ForwardIntentAsync<JournalTestState>("journal-doc", intent, "DataMap", CancellationToken.None);
+        await orchestrator.ApplyIntentAsync<JournalTestState>("journal-doc", intent, "DataMap", CancellationToken.None);
 
         var gmvv = new Dictionary<string, long> { { "ReplicaA", 10 } }; 
         await storage.TrimAsync("default", gmvv, CancellationToken.None);
@@ -402,7 +402,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var localIntent = new MapSetIntent("LocalKey", "LocalValue");
-        await orchestrator.ForwardIntentAsync<JournalTestState>("journal-doc", localIntent, "DataMap", CancellationToken.None);
+        await orchestrator.ApplyIntentAsync<JournalTestState>("journal-doc", localIntent, "DataMap", CancellationToken.None);
 
         var remoteState = new JournalTestState { Id = "journal-doc" };
         var remoteMetadata = metadataManager.Initialize(remoteState);
@@ -459,8 +459,8 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await orchestrator1.CreateDocumentAsync("test-replayed-doc", "journal-doc", CancellationToken.None);
         await orchestrator1.SyncDocumentsAsync(CancellationToken.None);
 
-        await orchestrator1.ForwardIntentAsync<JournalTestState>("test-replayed-doc", new MapSetIntent("key1", "ReplayedData1"), "DataMap", CancellationToken.None);
-        await orchestrator1.ForwardIntentAsync<JournalTestState>("test-replayed-doc", new MapSetIntent("key2", "ReplayedData2"), "DataMap", CancellationToken.None);
+        await orchestrator1.ApplyIntentAsync<JournalTestState>("test-replayed-doc", new MapSetIntent("key1", "ReplayedData1"), "DataMap", CancellationToken.None);
+        await orchestrator1.ApplyIntentAsync<JournalTestState>("test-replayed-doc", new MapSetIntent("key2", "ReplayedData2"), "DataMap", CancellationToken.None);
 
         var journalOps = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
         journalOps.Count.ShouldBeGreaterThan(2);
@@ -516,7 +516,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         for (int i = 0; i < 10; i++)
         {
             var intent = new MapSetIntent($"key{i}", $"value{i}");
-            await orchestrator.ForwardIntentAsync<JournalTestState>("trim-test-doc", intent, "DataMap", CancellationToken.None);
+            await orchestrator.ApplyIntentAsync<JournalTestState>("trim-test-doc", intent, "DataMap", CancellationToken.None);
         }
 
         var initialJournalOps = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();

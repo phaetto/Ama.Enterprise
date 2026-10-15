@@ -53,12 +53,12 @@ public interface ICrdtDocumentOrchestrator
     /// <summary>
     /// Forwards an intent directly bounding execution on the remote authoritative shard mapped across the decentralized mesh topology.
     /// </summary>
-    Task<bool> ForwardIntentAsync<TState>(string documentId, IOperationIntent intent, string targetProperty, CancellationToken cancellationToken = default) where TState : class, new();
+    Task<bool> ApplyIntentAsync<TState>(string documentId, IOperationIntent intent, string targetProperty, CancellationToken cancellationToken = default) where TState : class, new();
 
     /// <summary>
     /// Forwards an intent directly bounding execution on the remote authoritative shard with the specified delivery mode.
     /// </summary>
-    Task<bool> ForwardIntentAsync<TState>(string documentId, IOperationIntent intent, string targetProperty, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default) where TState : class, new();
+    Task<bool> ApplyIntentAsync<TState>(string documentId, IOperationIntent intent, string targetProperty, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default) where TState : class, new();
 
     /// <summary>
     /// Applies a locally generated patch intention resolving structural mutations traversing the local memory channel or remote proxy.

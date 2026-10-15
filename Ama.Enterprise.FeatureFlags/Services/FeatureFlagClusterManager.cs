@@ -80,7 +80,7 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
         };
         
         var intent = new MapSetIntent(name, flag);
-        await orchestrator.ForwardIntentAsync<FeatureFlagState>(Constants.GlobalDocumentId, intent, "Flags", cancellationToken).ConfigureAwait(false);
+        await orchestrator.ApplyIntentAsync<FeatureFlagState>(Constants.GlobalDocumentId, intent, "Flags", cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -92,6 +92,6 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
         }
 
         var intent = new MapRemoveIntent(name);
-        await orchestrator.ForwardIntentAsync<FeatureFlagState>(Constants.GlobalDocumentId, intent, "Flags", cancellationToken).ConfigureAwait(false);
+        await orchestrator.ApplyIntentAsync<FeatureFlagState>(Constants.GlobalDocumentId, intent, "Flags", cancellationToken).ConfigureAwait(false);
     }
 }
