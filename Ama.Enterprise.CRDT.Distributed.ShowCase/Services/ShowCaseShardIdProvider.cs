@@ -13,12 +13,7 @@ using Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 /// </summary>
 public sealed class ShowCaseShardIdProvider : IShardIdProvider
 {
-    /// <summary>
-    /// Gets the Shard ID for the specified CRDT document.
-    /// </summary>
-    /// <typeparam name="T">The type of the CRDT document payload.</typeparam>
-    /// <param name="document">The document instance.</param>
-    /// <returns>A string representing the Shard ID.</returns>
+    /// <inheritdoc />
     public string GetShardId<T>(CrdtDocument<T> document) where T : class
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -31,6 +26,32 @@ public sealed class ShowCaseShardIdProvider : IShardIdProvider
         if (document.Data is FleetState fleetState)
         {
             return $"fleet-shard-{fleetState.Id}";
+        }
+
+        return "default";
+    }
+
+    /// <inheritdoc />
+    public string GetShardId<T>(IComparable documentId) where T : class
+    {
+        ArgumentNullException.ThrowIfNull(documentId);
+        return GetShardId(documentId, typeof(T));
+    }
+
+    /// <inheritdoc />
+    public string GetShardId(IComparable documentId, Type documentType)
+    {
+        ArgumentNullException.ThrowIfNull(documentId);
+        ArgumentNullException.ThrowIfNull(documentType);
+
+        if (documentType == typeof(TaskListState))
+        {
+            return $"task-shard-{documentId}";
+        }
+
+        if (documentType == typeof(FleetState))
+        {
+            return $"fleet-shard-{documentId}";
         }
 
         return "default";

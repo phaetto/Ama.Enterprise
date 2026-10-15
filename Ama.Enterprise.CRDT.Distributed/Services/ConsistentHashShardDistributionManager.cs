@@ -14,11 +14,13 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Implements consistent hashing to dynamically distribute CRDT shards across active cluster replicas securely and predictably.
-/// Evaluates standard network liveliness ensuring targeted requests seamlessly resolve to mapped connected peers natively.
+/// Implements consistent hashing to dynamically distribute CRDT shards across active cluster replicas.
+/// Evaluates standard network liveliness ensuring targeted requests resolve to mapped connected peers.
 /// </summary>
 public sealed class ConsistentHashShardDistributionManager : IShardDistributionManager
 {
+    private const string SystemRegistryDocumentId = "system-document-registry";
+
     private readonly IClusterStateTracker clusterTracker;
     private readonly string localReplicaId;
     private readonly IServiceProvider serviceProvider;
@@ -30,7 +32,7 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
     private readonly object syncRoot = new();
     private HashSet<string> lastKnownReplicas = new(StringComparer.Ordinal);
     
-    // Fast arrays used to execute Array.BinarySearch preventing list alloc bounds natively.
+    // Fast arrays used to execute Array.BinarySearch preventing list alloc bounds.
     private uint[] ringKeys = [];
     private string[] ringValues = [];
     private IReadOnlyList<string> cachedAllReplicas;
@@ -59,7 +61,7 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
     /// <inheritdoc />
     public async ValueTask<bool> IsShardLocalAsync(string shardId, CancellationToken cancellationToken = default)
     {
-        if (!enableSharding)
+        if (!enableSharding || IsSystemRegistryShard(shardId))
         {
             return true;
         }
@@ -91,7 +93,7 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
 
         lock (syncRoot)
         {
-            if (!enableSharding)
+            if (!enableSharding || IsSystemRegistryShard(shardId))
             {
                 return cachedAllReplicas;
             }
@@ -110,17 +112,17 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
         int index = Array.BinarySearch(currentKeys, hash);
         if (index < 0)
         {
-            // Bitwise complement maps towards the index of the first larger element successfully
+            // Bitwise complement maps towards the index of the first larger element
             index = ~index;
         }
         
         if (index >= currentKeys.Length)
         {
-            // Wrap completely around towards the beginning of the ring explicitly
+            // Wrap around towards the beginning of the ring
             index = 0;
         }
 
-        // Collect specific unique replicas bounded up to the required replication factor natively
+        // Collect specific unique replicas bounded up to the required replication factor
         for (int i = 0; i < currentKeys.Length && targets.Count < replicationFactor; i++)
         {
             var replica = currentValues[(index + i) % currentKeys.Length];
@@ -154,7 +156,7 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
 
         if (peerRegistry != null)
         {
-            // Dynamically map solely connected live network peers explicitly bypassing offline tracked tombstone cooldowns
+            // Dynamically map connected live network peers bypassing offline tracked tombstone cooldowns
             foreach (var registration in p2pRegistrations)
             {
                 if (!string.Equals(registration.ReplicaId, localReplicaId, StringComparison.Ordinal))
@@ -178,21 +180,21 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
         
         lock (syncRoot)
         {
-            activeReplicaIds.Add(localReplicaId); // Consistently evaluate local instance inside topological calculations
+            activeReplicaIds.Add(localReplicaId); // Always evaluate local instance inside topological calculations
 
             if (activeReplicaIds.SetEquals(lastKnownReplicas))
             {
-                return; // Topologies mirror effectively, return dynamically mapped arrays directly
+                return; // Topologies mirror, return mapped arrays directly
             }
 
-            // Fix determinism by ordering the set execution structurally explicitly guaranteeing the exact identical collision resolution across all cluster nodes
+            // Order the set to guarantee identical collision resolution across all cluster nodes
             var sortedReplicas = activeReplicaIds.OrderBy(r => r, StringComparer.Ordinal).ToList();
+            cachedAllReplicas = sortedReplicas;
             
             if (!enableSharding)
             {
-                cachedAllReplicas = sortedReplicas;
                 lastKnownReplicas = activeReplicaIds;
-                return; // Bypass entire hash ring generation if sharding is natively disabled
+                return; // Bypass entire hash ring generation if sharding is disabled
             }
 
             var newRing = new SortedDictionary<uint, string>();
@@ -204,7 +206,7 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
                     var vnodeKey = $"{replica}:vn:{i}";
                     var hash = ComputeHash(vnodeKey);
                     
-                    // Resolves mathematically improbable edge hash collisions securely resolving next available gap
+                    // Resolves edge hash collisions by finding next available gap
                     while (newRing.ContainsKey(hash))
                     {
                         hash++;
@@ -229,9 +231,17 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
         }
     }
 
+    private static bool IsSystemRegistryShard(string shardId)
+    {
+        return !string.IsNullOrWhiteSpace(shardId) &&
+               (string.Equals(shardId, SystemRegistryDocumentId, StringComparison.Ordinal) ||
+               string.Equals(shardId, nameof(CrdtRegistryState), StringComparison.Ordinal) ||
+               shardId.EndsWith($"_{SystemRegistryDocumentId}", StringComparison.Ordinal) ||
+               shardId.EndsWith($":{SystemRegistryDocumentId}", StringComparison.Ordinal));
+    }
+
     private static uint ComputeHash(string input)
     {
-        // Encapsulating explicit SHA256 truncating mapped exactly into integer bounds securely naturally
         var bytes = Encoding.UTF8.GetBytes(input);
         var hashBytes = SHA256.HashData(bytes);
         return BitConverter.ToUInt32(hashBytes, 0);

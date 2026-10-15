@@ -256,7 +256,7 @@ public sealed class ConcurrencyIntegrationTests
         preCancelledTokenSource.Cancel();
 
         // Act - Pass a cancelled token enforcing Task exceptions mapping through the IValueTaskSource natively
-        var exception = await Record.ExceptionAsync(() => 
+        var exception = await Record.ExceptionAsync(() =>
             orchestrator.CreateDocumentAsync("cancel-doc", "concurrent-doc", preCancelledTokenSource.Token));
 
         // Assert - Specific invocation correctly throws

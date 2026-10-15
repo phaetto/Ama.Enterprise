@@ -11,10 +11,16 @@ using Ama.Enterprise.CRDT.Distributed.Models;
 /// Defines the generic, non-typed interface for a distributed CRDT document manager.
 /// Extensively used by the routing dispatcher and anti-entropy services representing active local matrices.
 /// </summary>
+/// <example>
+/// <code>
+/// await doc.InitializeAsync(cancellationToken);
+/// await doc.ApplyRemoteIntentAsync(intent, "Items", patcher, IntentDeliveryMode.Acknowledged, cancellationToken);
+/// </code>
+/// </example>
 public interface IDistributedCrdtDocument
 {
     /// <summary>
-    /// Gets the shard identifier grouping the causality boundaries for this document natively.
+    /// Gets the shard identifier grouping the causality boundaries for this document.
     /// </summary>
     string ShardId { get; }
 
@@ -24,49 +30,49 @@ public interface IDistributedCrdtDocument
     string DocumentId { get; }
 
     /// <summary>
-    /// Initializes the document, loading initial state from persistent storage if configured natively.
+    /// Initializes the document, loading initial state from persistent storage if configured.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     Task InitializeAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Gets the current local Dotted Version Vector representing the exact synchronization state.
+    /// Gets the current local Dotted Version Vector representing the synchronization state.
     /// </summary>
     ShardVersionVectorMap GetLocalState();
 
     /// <summary>
-    /// Retrieves a completely materialized snapshot payload superseding local structure dependencies alongside explicitly targeted overarching global bounds.
+    /// Retrieves a materialized snapshot payload superseding local structure dependencies alongside targeted global bounds.
     /// </summary>
     Task<CrdtSnapshotDataDto> GetSnapshotDataAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Evaluates a remotely forwarded execution intent natively generating local structural operations bypassing generic mapping limits explicitly.
+    /// Evaluates a remotely forwarded execution intent generating local structural operations.
     /// </summary>
-    Task<bool> ApplyRemoteIntentAsync(IOperationIntent intent, string targetProperty, IAsyncCrdtPatcher patcher, CancellationToken cancellationToken = default);
+    Task<bool> ApplyRemoteIntentAsync(IOperationIntent intent, string targetProperty, IAsyncCrdtPatcher patcher, IntentDeliveryMode deliveryMode = IntentDeliveryMode.Acknowledged, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Applies a locally generated patch intention over the state and initiates immediate replication if configured natively.
+    /// Applies a locally generated patch intention over the state and initiates immediate replication if configured.
     /// </summary>
     Task ApplyPatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Applies an incoming remote patch retrieved from a proxy peer to the local document state natively bypassing broadcasting loops.
+    /// Applies an incoming remote patch retrieved from a proxy peer to the local document state bypassing broadcasting loops.
     /// </summary>
     Task ApplyRemotePatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default);
     
     /// <summary>
-    /// Applies a patch natively loaded from the storage journal explicitly avoiding asynchronous re-journaling and broadcast triggers.
+    /// Applies a patch loaded from the storage journal avoiding asynchronous re-journaling and broadcast triggers.
     /// </summary>
     Task ApplyJournaledPatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Applies a completely materialized snapshot payload superseding local structure dependencies alongside explicitly targeted overarching global bounds.
+    /// Applies a materialized snapshot payload superseding local structure dependencies alongside targeted global bounds.
     /// </summary>
     Task MergeSnapshotAsync(byte[] snapshotData, ShardVersionVectorMap globalState, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Asynchronously saves the current in-memory document state to persistent storage natively.
+    /// Asynchronously saves the current in-memory document state to persistent storage.
     /// Does not directly manage overarching DVV mapping updates avoiding structural write-ahead gaps.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
@@ -82,21 +88,26 @@ public interface IDistributedCrdtDocument
     Task EvictReplicaAsync(string replicaId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Resets the internal CRDT metadata and structures completely, used when forced to re-bootstrap identity following a cluster tombstone eviction.
+    /// Resets the internal CRDT metadata and structures, used when forced to re-bootstrap identity following a cluster tombstone eviction.
     /// </summary>
-    /// <param name="oldReplicaId">The pre-reboot replica ID allowing offline operation continuity to map correctly during the incoming fallback snapshot overwrite.</param>
+    /// <param name="oldReplicaId">The pre-reboot replica ID allowing offline operation continuity to map during the incoming fallback snapshot overwrite.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     Task ResetLocalStateAsync(string oldReplicaId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
-/// Defines the generic typed interface for a distributed CRDT document manager handling a specific domain model actively processing locally natively.
+/// Defines the generic typed interface for a distributed CRDT document manager handling a specific domain model.
 /// </summary>
+/// <example>
+/// <code>
+/// var crdtDoc = await typedDoc.GetDocumentAsync(cancellationToken);
+/// </code>
+/// </example>
 public interface IDistributedCrdtDocument<TState> : IDistributedCrdtDocument where TState : class, new()
 {
     /// <summary>
-    /// Exposes the strictly typed underlying CRDT document containing the application state actively tracked natively.
+    /// Exposes the strictly typed underlying CRDT document containing the application state.
     /// </summary>
     ValueTask<CrdtDocument<TState>> GetDocumentAsync(CancellationToken cancellationToken = default);
 }

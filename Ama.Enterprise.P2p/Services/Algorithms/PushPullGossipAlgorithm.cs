@@ -131,7 +131,7 @@ public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
 
             activeMeshes.TryAdd(meshId, state);
 
-            logger.LogInformation("[{MeshId}] Push-Pull Gossip Protocol algorithm orchestrator started successfully.", meshId);
+            logger.LogInformation("[{MeshId}] Push-Pull Gossip Protocol algorithm orchestrator started.", meshId);
         }
         
         return Task.CompletedTask;
@@ -176,7 +176,7 @@ public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
 
                     state.Dispose();
 
-                    logger.LogInformation("[{MeshId}] Push-Pull Gossip Protocol orchestrator stopped cleanly.", meshId);
+                    logger.LogInformation("[{MeshId}] Push-Pull Gossip Protocol orchestrator stopped.", meshId);
                 }, cancellationToken));
             }
         }
@@ -227,7 +227,7 @@ public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
 
             logger.LogDebug("[{MeshId}] Wrapping payload and broadcasting newly mapped envelope {MessageId} locally from {NodeId}.", meshId, message.MessageId, nodeOptions.LocalPeerId);
 
-            state.MessageCache.TryAdd(message.MessageId, (message, DateTimeOffset.UtcNow));
+            state.MessageCache.TryAdd(message.MessageId, new CachedGossipMessage(message, DateTimeOffset.UtcNow));
             state.MessageQueue.Enqueue(message);
 
             dispatchTasks.Add(state.Dispatcher.DispatchAsync(message.MeshId, message.SenderId, message.Payload, cancellationToken));
@@ -239,6 +239,8 @@ public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
     /// <inheritdoc />
     public async Task ProcessMessageAsync(IMeshMessage message, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(message);
+
         if (activeMeshes.TryGetValue(message.MeshId, out var state) && message is GossipMessage gossipMsg)
         {
             var tags = new KeyValuePair<string, object?>[] { new("mesh_id", gossipMsg.MeshId), new("message_type", gossipMsg.MessageType.ToString()) };
@@ -258,7 +260,11 @@ public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
 
             logger.LogDebug("[{MeshId}] Analyzing mapped P2P algorithm payload {MessageId} from {SenderId}. TTL: {Ttl}", gossipMsg.MeshId, gossipMsg.MessageId, gossipMsg.SenderId.Value, gossipMsg.TimeToLive);
 
-            state.MessageCache.TryAdd(gossipMsg.MessageId, (gossipMsg, DateTimeOffset.UtcNow));
+            bool isNewMessage = state.MessageCache.TryAdd(gossipMsg.MessageId, new CachedGossipMessage(gossipMsg, DateTimeOffset.UtcNow));
+            if (!isNewMessage)
+            {
+                return;
+            }
 
             try
             {
@@ -266,16 +272,16 @@ public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
                 {
                     await state.Dispatcher.DispatchAsync(gossipMsg.MeshId, gossipMsg.SenderId, gossipMsg.Payload, state.LoopCts.Token).ConfigureAwait(false);
                 }
-
-                if (gossipMsg.TimeToLive > 1)
-                {
-                    var forwardedMessage = gossipMsg with { TimeToLive = gossipMsg.TimeToLive - 1 };
-                    state.MessageQueue.Enqueue(forwardedMessage);
-                }
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "[{MeshId}] Error pushing generic unwrapped payload into localized domain {MessageId}.", gossipMsg.MeshId, gossipMsg.MessageId);
+            }
+
+            if (gossipMsg.TimeToLive > 1)
+            {
+                var forwardedMessage = gossipMsg with { TimeToLive = gossipMsg.TimeToLive - 1 };
+                state.MessageQueue.Enqueue(forwardedMessage);
             }
         }
     }
@@ -507,7 +513,7 @@ public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
         }
     }
 
-    private void CleanupMessageCache(ProtocolState state)
+    private static void CleanupMessageCache(ProtocolState state)
     {
         var threshold = DateTimeOffset.UtcNow.AddMinutes(-5);
         foreach (var kvp in state.MessageCache)
@@ -519,6 +525,8 @@ public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
         }
     }
 
+    private readonly record struct CachedGossipMessage(GossipMessage Message, DateTimeOffset ReceivedAt);
+
     private sealed class ProtocolState : IDisposable
     {
         public ITransportRouter TransportRouter { get; }
@@ -526,7 +534,7 @@ public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
         public IApplicationPayloadDispatcher Dispatcher { get; }
         public IPeerRegistry PeerRegistry { get; }
 
-        public ConcurrentDictionary<Guid, (GossipMessage Message, DateTimeOffset ReceivedAt)> MessageCache { get; } = new();
+        public ConcurrentDictionary<Guid, CachedGossipMessage> MessageCache { get; } = new();
         public ConcurrentQueue<GossipMessage> MessageQueue { get; } = new();
 
         public CancellationTokenSource? LoopCts { get; set; }

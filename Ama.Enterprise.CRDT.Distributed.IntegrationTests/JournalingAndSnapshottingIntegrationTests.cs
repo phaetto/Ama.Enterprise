@@ -415,7 +415,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var globalDvv = new DottedVersionVector();
         globalDvv.Versions["ReplicaB"] = 15;
         
-        var globalMap = new ShardVersionVectorMap { { "journal-doc", globalDvv } };
+        var globalMap = new ShardVersionVectorMap { { "default", globalDvv } };
 
         var snapshotBytes = serializer.SerializeToBytes(remoteAppliedDoc.Document);
 
@@ -437,7 +437,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         crdtDocAAfter.Data.DataMap.ShouldContainKeyAndValue("RemoteKey", "RemoteValue");
         
         var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
-        replicaContext.ShardVersionVectors["journal-doc"].Versions["ReplicaB"].ShouldBe(15);
+        replicaContext.ShardVersionVectors["default"].Versions["ReplicaB"].ShouldBe(15);
     }
 
     [IntegrationFact]

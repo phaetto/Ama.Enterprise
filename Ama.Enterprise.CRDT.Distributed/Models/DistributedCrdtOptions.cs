@@ -136,4 +136,22 @@ public sealed class DistributedCrdtOptions
     /// When disabled (false, the default), all active network nodes will treat every instantiated distributed CRDT document as a local shard natively, bypassing distribution bounds entirely.
     /// </summary>
     public bool EnableSharding { get; set; } = false;
+
+    /// <summary>
+    /// Gets or sets the timeout in milliseconds for outbound RPC requests (reads and acknowledged intent forwarding).
+    /// Defaults to 5000 milliseconds. Must be greater than 0.
+    /// </summary>
+    public int RpcTimeoutMilliseconds { get; set; } = 5000;
+
+    /// <summary>
+    /// Gets or sets the maximum number of retry and failover attempts when forwarding an acknowledged intent or reading state from a remote shard.
+    /// Defaults to 3. Must be greater than 0.
+    /// </summary>
+    public int RpcMaxRetries { get; set; } = 3;
+
+    /// <summary>
+    /// Gets or sets the base backoff delay in milliseconds between RPC retry attempts.
+    /// Defaults to 50 milliseconds. Must be non-negative.
+    /// </summary>
+    public int RpcRetryDelayMilliseconds { get; set; } = 50;
 }

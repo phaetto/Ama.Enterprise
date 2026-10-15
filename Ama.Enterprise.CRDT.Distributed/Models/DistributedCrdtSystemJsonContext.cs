@@ -1,18 +1,21 @@
 namespace Ama.Enterprise.CRDT.Distributed.Models;
 
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using Ama.CRDT.Models;
 
 /// <summary>
-/// JSON serialization context guaranteeing AOT compatibility for internal orchestrator registry CRDT scopes.
+/// Source-generated AOT JSON serialization context for internal orchestrator and cluster state models.
 /// </summary>
-[JsonSerializable(typeof(CrdtRegistryEntry))]
 [JsonSerializable(typeof(CrdtRegistryState))]
+[JsonSerializable(typeof(CrdtRegistryEntry))]
+[JsonSerializable(typeof(ConcurrentDictionary<string, CrdtRegistryEntry>))]
 [JsonSerializable(typeof(Dictionary<string, CrdtRegistryEntry>))]
 [JsonSerializable(typeof(CrdtDocument<CrdtRegistryState>))]
 [JsonSerializable(typeof(ClusterStateSnapshotDto))]
-[JsonSerializable(typeof(ClusterPeerStateDto))]
+[JsonSerializable(typeof(ShardVersionVectorMap))]
+[JsonSerializable(typeof(DottedVersionVector))]
 public sealed partial class DistributedCrdtSystemJsonContext : JsonSerializerContext
 {
 }

@@ -69,6 +69,7 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         await Task.Delay(1000); // Allow Gossip of the registry update to propagate natively
 
         // Node B dynamically processes the registry update to instantiate the document
+        await orchA.SyncDocumentsAsync(CancellationToken.None);
         await orchB.SyncDocumentsAsync(CancellationToken.None);
 
         // Concurrently modify both documents
@@ -235,6 +236,7 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         
         await Task.Delay(1500); // Propagation boundary explicitly allowing standard background gossip delays
 
+        await orchA.SyncDocumentsAsync(CancellationToken.None);
         await orchB.SyncDocumentsAsync(CancellationToken.None);
         await orchC.SyncDocumentsAsync(CancellationToken.None);
 
@@ -394,6 +396,10 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         
         services.AddSingleton(senderMock.Object);
         services.AddSingleton(gossipMock.Object);
+
+        var mockP2pRpcCorrelator = new Mock<IP2pRpcCorrelator>();
+        mockP2pRpcCorrelator.SetReturnsDefault(Task.CompletedTask);
+        services.AddSingleton(mockP2pRpcCorrelator.Object);
 
         var sp = services.BuildServiceProvider();
 

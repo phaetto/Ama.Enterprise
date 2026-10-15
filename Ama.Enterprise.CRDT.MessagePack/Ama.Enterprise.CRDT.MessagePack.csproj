@@ -32,8 +32,8 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Ama.CRDT" Version="5.0.261012-ci1733" />
-		<PackageReference Include="MessagePack" Version="3.1.11" />
+		<PackageReference Include="Ama.CRDT" Version="5.0.261015-ci1417" />
+		<PackageReference Include="MessagePack" Version="3.1.12" />
 	</ItemGroup>
 
 	<ItemGroup>

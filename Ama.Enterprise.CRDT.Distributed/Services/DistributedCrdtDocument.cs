@@ -4,6 +4,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
+using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -18,10 +19,12 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Generic document manager responsible for maintaining consistency mapping isolated local causal models for a specific CRDT tree natively processing active shards.
+/// Generic document manager responsible for maintaining the state of a specific CRDT tree processing active shards.
 /// </summary>
 public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<TState>, IDisposable where TState : class, new()
 {
+    private static readonly ConcurrentDictionary<string, Expression<Func<TState, object>>> PropertySelectorCache = new(StringComparer.Ordinal);
+
     private readonly ReplicaContext replicaContext;
     private readonly IAsyncCrdtApplicator applicator;
     private readonly ICrdtApplicator syncApplicator;
@@ -40,16 +43,13 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly bool avoidBlindWrites;
     private readonly TState initialState;
     
-    // Fast synchronous lock for atomic reference/flag swapping against torn struct reads exclusively.
     private readonly object syncRoot = new();
     private CrdtDocument<TState> currentDocument;
     
-    // Single-reader channel completely eliminating Thread locks allocating non-thread-safe applicator sequential streams
     private readonly Channel<PooledDocumentCommand<TState>>? commandChannel;
     private readonly ConcurrentQueue<PooledDocumentCommand<TState>> commandPool = new();
     private readonly CancellationTokenSource disposeCts = new();
     
-    // Active sync debouncing components
     private readonly object debounceSyncRoot = new();
     private readonly List<CrdtOperation>? debounceBuffer;
     private readonly Timer? debounceTimer;
@@ -61,6 +61,11 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly Counter<long> patchAppliedCounter;
     private readonly Counter<long> snapshotsMergedCounter;
     private readonly Counter<long> checkPointSavedCounter;
+
+    private readonly Counter<long> intentsAppliedCounter;
+    private readonly Counter<long> intentsFailedCounter;
+    private readonly Counter<long> replicaEvictionsCounter;
+    private readonly Counter<long> stateResetsCounter;
 
     // Channel metrics
     private readonly Counter<long> commandsEnqueuedCounter;
@@ -122,12 +127,18 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         ShardId = shardIdProvider.GetShardId(currentDocument) ?? string.Empty;
 
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.DistributedCrdtDocument") ?? new Meter("Ama.Enterprise.CRDT.Distributed.DistributedCrdtDocument");
-        this.patchAppliedCounter = this.meter.CreateCounter<long>("crdt.document.patches_applied", "patches", "Total local patches natively applied mapping intentions");
-        this.snapshotsMergedCounter = this.meter.CreateCounter<long>("crdt.document.snapshots_merged", "snapshots", "Total incoming full snapshots superseding states");
-        this.checkPointSavedCounter = this.meter.CreateCounter<long>("crdt.document.checkpoints_saved", "checkpoints", "Total underlying storage checkpoint alignments executed");
-        this.commandsEnqueuedCounter = this.meter.CreateCounter<long>("crdt.document.channel.commands_enqueued", "commands", "Total document commands enqueued to the lock-free channel");
-        this.commandsProcessedCounter = this.meter.CreateCounter<long>("crdt.document.channel.commands_processed", "commands", "Total document commands processed by the channel");
-        this.commandFailuresCounter = this.meter.CreateCounter<long>("crdt.document.channel.command_failures", "errors", "Total document command processing failures");
+        this.patchAppliedCounter = this.meter.CreateCounter<long>("crdt.document.patches_applied", "patches", "Total local patches applied");
+        this.snapshotsMergedCounter = this.meter.CreateCounter<long>("crdt.document.snapshots_merged", "snapshots", "Total incoming full snapshots merged");
+        this.checkPointSavedCounter = this.meter.CreateCounter<long>("crdt.document.checkpoints_saved", "checkpoints", "Total underlying storage checkpoints saved");
+        
+        this.intentsAppliedCounter = this.meter.CreateCounter<long>("crdt.document.intents_applied", "intents", "Total operation intents applied to this document");
+        this.intentsFailedCounter = this.meter.CreateCounter<long>("crdt.document.intents_failed", "intents", "Total operation intents that failed to apply");
+        this.replicaEvictionsCounter = this.meter.CreateCounter<long>("crdt.document.replica_evictions", "evictions", "Total replicas evicted from this document state");
+        this.stateResetsCounter = this.meter.CreateCounter<long>("crdt.document.state_resets", "resets", "Total local state resets performed on this document");
+
+        this.commandsEnqueuedCounter = this.meter.CreateCounter<long>("crdt.document.channel.commands_enqueued", "commands", "Total document commands enqueued");
+        this.commandsProcessedCounter = this.meter.CreateCounter<long>("crdt.document.channel.commands_processed", "commands", "Total document commands processed");
+        this.commandFailuresCounter = this.meter.CreateCounter<long>("crdt.document.channel.command_failures", "errors", "Total document command processing errors");
 
         if (this.activeSyncEnabled && this.activeSyncDebounceMs > 0)
         {
@@ -162,7 +173,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             () => new Measurement<int>(this.commandPool.Count, new KeyValuePair<string, object?>("document_id", this.DocumentId)), 
             "commands", "Current size of the document command object pool");
 
-        // Initiates the lock-free sequential execution loop immediately
         _ = Task.Run(ProcessChannelAsync);
     }
     
@@ -173,6 +183,314 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         {
             return new ValueTask<CrdtDocument<TState>>(currentDocument);
         }
+    }
+
+    /// <inheritdoc />
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        if (commandChannel == null) return;
+
+        var cmd = GetCommand();
+        cmd.Type = DocumentCommandType.Initialize;
+        cmd.CancellationToken = cancellationToken;
+
+        try
+        {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            await cmd.ExecuteAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            ReturnCommand(cmd);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> ApplyRemoteIntentAsync(IOperationIntent intent, string targetProperty, IAsyncCrdtPatcher patcher, IntentDeliveryMode deliveryMode = IntentDeliveryMode.Acknowledged, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(intent);
+        ArgumentNullException.ThrowIfNull(patcher);
+
+        if (commandChannel == null) return false;
+
+        if (deliveryMode == IntentDeliveryMode.FireAndForget)
+        {
+            var ffCmd = new PooledDocumentCommand<TState>
+            {
+                Type = DocumentCommandType.ApplyRemoteIntent,
+                Intent = intent,
+                TargetProperty = targetProperty,
+                Patcher = patcher,
+                CancellationToken = CancellationToken.None
+            };
+
+            if (commandChannel.Writer.TryWrite(ffCmd))
+            {
+                commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+                return true;
+            }
+
+            await commandChannel.Writer.WriteAsync(ffCmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            return true;
+        }
+
+        var cmd = GetCommand();
+        cmd.Type = DocumentCommandType.ApplyRemoteIntent;
+        cmd.Intent = intent;
+        cmd.TargetProperty = targetProperty;
+        cmd.Patcher = patcher;
+        cmd.CancellationToken = cancellationToken;
+
+        try
+        {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            await cmd.ExecuteAsync().ConfigureAwait(false);
+            return true;
+        }
+        finally
+        {
+            ReturnCommand(cmd);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task ApplyPatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default)
+    {
+        if (commandChannel == null) return;
+
+        var cmd = GetCommand();
+        cmd.Type = DocumentCommandType.ApplyPatch;
+        cmd.Patch = patch;
+        cmd.CancellationToken = cancellationToken;
+
+        try
+        {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            await cmd.ExecuteAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            ReturnCommand(cmd);
+        }
+    }
+
+    /// <inheritdoc />
+    public ShardVersionVectorMap GetLocalState()
+    {
+        var sourceMap = replicaContext.ShardVersionVectors;
+        lock (sourceMap)
+        {
+            var map = new ShardVersionVectorMap();
+            if (sourceMap.TryGetValue(ShardId, out var dvv))
+            {
+                var copiedVersions = new Dictionary<string, long>();
+                var copiedDots = new Dictionary<string, ISet<long>>();
+                foreach (var kvp in dvv.Versions)
+                {
+                    copiedVersions[kvp.Key] = kvp.Value;
+                }
+                if (dvv.Dots != null)
+                {
+                    foreach (var kvp in dvv.Dots)
+                    {
+                        copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
+                    }
+                }
+                map[ShardId] = new DottedVersionVector(copiedVersions, copiedDots);
+            }
+            return map;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task ApplyRemotePatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default)
+    {
+        if (commandChannel == null) return;
+
+        var cmd = GetCommand();
+        cmd.Type = DocumentCommandType.ApplyRemotePatch;
+        cmd.Patch = patch;
+        cmd.CancellationToken = cancellationToken;
+
+        try
+        {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            await cmd.ExecuteAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            ReturnCommand(cmd);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task ApplyJournaledPatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default)
+    {
+        if (commandChannel == null) return;
+
+        var cmd = GetCommand();
+        cmd.Type = DocumentCommandType.ApplyJournaledPatch;
+        cmd.Patch = patch;
+        cmd.CancellationToken = cancellationToken;
+
+        try
+        {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            await cmd.ExecuteAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            ReturnCommand(cmd);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<CrdtSnapshotDataDto> GetSnapshotDataAsync(CancellationToken cancellationToken = default)
+    {
+        if (commandChannel == null)
+        {
+            CrdtDocument<TState> currentDoc;
+            lock (syncRoot) { currentDoc = currentDocument; }
+            var snapshotData = serializer.SerializeToBytes(currentDoc);
+            return new CrdtSnapshotDataDto(snapshotData, GetLocalState());
+        }
+
+        var cmd = GetCommand();
+        cmd.Type = DocumentCommandType.GetSnapshotData;
+        cmd.CancellationToken = cancellationToken;
+
+        try
+        {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            await cmd.ExecuteAsync().ConfigureAwait(false);
+            return new CrdtSnapshotDataDto(cmd.ResultSnapshotData!, cmd.ResultGlobalState!);
+        }
+        finally
+        {
+            ReturnCommand(cmd);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task MergeSnapshotAsync(byte[] snapshotData, ShardVersionVectorMap globalState, CancellationToken cancellationToken = default)
+    {
+        if (snapshotData == null || snapshotData.Length == 0 || commandChannel == null) return;
+        ArgumentNullException.ThrowIfNull(globalState);
+
+        var cmd = GetCommand();
+        cmd.Type = DocumentCommandType.MergeSnapshot;
+        cmd.SnapshotData = snapshotData;
+        cmd.GlobalState = globalState;
+        cmd.CancellationToken = cancellationToken;
+
+        try
+        {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            await cmd.ExecuteAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            ReturnCommand(cmd);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task CheckpointAsync(CancellationToken cancellationToken = default)
+    {
+        if (commandChannel == null) return;
+
+        var cmd = GetCommand();
+        cmd.Type = DocumentCommandType.Checkpoint;
+        cmd.CancellationToken = cancellationToken;
+
+        try
+        {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            await cmd.ExecuteAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            ReturnCommand(cmd);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task EvictReplicaAsync(string replicaId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
+
+        if (commandChannel == null) return;
+
+        var cmd = GetCommand();
+        cmd.Type = DocumentCommandType.EvictReplica;
+        cmd.ReplicaIdToEvict = replicaId;
+        cmd.CancellationToken = cancellationToken;
+
+        try
+        {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            await cmd.ExecuteAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            ReturnCommand(cmd);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task ResetLocalStateAsync(string oldReplicaId, CancellationToken cancellationToken = default)
+    {
+        if (commandChannel == null) return;
+
+        var cmd = GetCommand();
+        cmd.Type = DocumentCommandType.ResetLocalState;
+        cmd.OldReplicaId = oldReplicaId;
+        cmd.CancellationToken = cancellationToken;
+
+        try
+        {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            await cmd.ExecuteAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            ReturnCommand(cmd);
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        debounceTimer?.Dispose();
+        disposeCts.Cancel();
+        commandChannel?.Writer.TryComplete();
+        disposeCts.Dispose();
+        meter.Dispose();
+    }
+
+    private static Expression<Func<TState, object>> GetOrAddPropertySelector(string? targetProperty)
+    {
+        var key = targetProperty ?? string.Empty;
+        return PropertySelectorCache.GetOrAdd(key, prop =>
+        {
+            var parameter = Expression.Parameter(typeof(TState), "x");
+            Expression propertyExpression = string.IsNullOrWhiteSpace(prop)
+                ? parameter
+                : Expression.PropertyOrField(parameter, prop);
+            var converted = Expression.Convert(propertyExpression, typeof(object));
+            return Expression.Lambda<Func<TState, object>>(converted, parameter);
+        });
     }
 
     private async Task NotifyStateChangedAsync(CancellationToken cancellationToken)
@@ -230,6 +548,9 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                         case DocumentCommandType.Initialize:
                             await ProcessInitializeInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
                             break;
+                        case DocumentCommandType.ApplyRemoteIntent:
+                            await ProcessApplyRemoteIntentInternalAsync(cmd).ConfigureAwait(false);
+                            break;
                         case DocumentCommandType.ApplyPatch:
                             await ProcessApplyPatchInternalAsync(cmd).ConfigureAwait(false);
                             break;
@@ -270,32 +591,11 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 }
             }
         }
-        catch (OperationCanceledException) { /* Clean graceful termination */ }
-        catch (ObjectDisposedException) { /* Clean graceful termination */ }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
         catch (Exception ex)
         {
-            logger.LogCritical(ex, "Distributed CRDT document lock-free processing loop critically faulted.");
-        }
-    }
-
-    /// <inheritdoc />
-    public async Task InitializeAsync(CancellationToken cancellationToken = default)
-    {
-        if (commandChannel == null) return;
-
-        var cmd = GetCommand();
-        cmd.Type = DocumentCommandType.Initialize;
-        cmd.CancellationToken = cancellationToken;
-
-        try
-        {
-            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
-            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-            await cmd.ExecuteAsync().ConfigureAwait(false);
-        }
-        finally
-        {
-            ReturnCommand(cmd);
+            logger.LogCritical(ex, "Document background channel failed.");
         }
     }
 
@@ -306,7 +606,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             var isLocalShard = await distributionManager.IsShardLocalAsync(ShardId, cancellationToken).ConfigureAwait(false);
             if (!isLocalShard)
             {
-                logger.LogWarning("DistributedCrdtDocument instantiated for a remote shard {ShardId}. The Orchestrator should exclusively handle out-of-bounds network execution.", this.ShardId);
+                logger.LogWarning("Document initialized for a remote shard {ShardId}. The Orchestrator should handle remote requests.", this.ShardId);
             }
 
             var storedDoc = await storage.LoadDocumentAsync<TState>(ShardId, DocumentId, cancellationToken).ConfigureAwait(false);
@@ -316,7 +616,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 storedDoc = await storage.LoadOrphanedDocumentAsync<TState>(ShardId, DocumentId, cancellationToken).ConfigureAwait(false);
                 if (storedDoc != null)
                 {
-                    logger.LogInformation("Successfully bootstrapped orphaned state for document {DocumentId} from persistent storage.", DocumentId);
+                    logger.LogInformation("Loaded orphaned state for document {DocumentId} from storage.", DocumentId);
                 }
             }
 
@@ -333,64 +633,41 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 }
 
                 await NotifyStateChangedAsync(cancellationToken).ConfigureAwait(false);
-                logger.LogInformation("Successfully loaded initial state for document {DocumentId} from persistent storage.", DocumentId);
+                logger.LogInformation("Loaded initial state for document {DocumentId} from storage.", DocumentId);
             }
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to load initial state for document {DocumentId} from persistent storage.", DocumentId);
+            logger.LogError(ex, "Failed to load initial state for document {DocumentId} from storage.", DocumentId);
             throw;
         }
     }
 
-    /// <inheritdoc />
-    public async Task<bool> ApplyRemoteIntentAsync(IOperationIntent intent, string targetProperty, IAsyncCrdtPatcher patcher, CancellationToken cancellationToken = default)
+    private async Task ProcessApplyRemoteIntentInternalAsync(PooledDocumentCommand<TState> cmd)
     {
         try
         {
-            var docState = await GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-            var parameter = System.Linq.Expressions.Expression.Parameter(typeof(TState), "x");
-            
-            System.Linq.Expressions.Expression propertyExpression = string.IsNullOrWhiteSpace(targetProperty)
-                ? parameter
-                : System.Linq.Expressions.Expression.PropertyOrField(parameter, targetProperty);
+            CrdtDocument<TState> docState;
+            lock (syncRoot)
+            {
+                docState = currentDocument;
+            }
 
-            var converted = System.Linq.Expressions.Expression.Convert(propertyExpression, typeof(object));
-            var propertySelector = System.Linq.Expressions.Expression.Lambda<Func<TState, object>>(converted, parameter);
+            var propertySelector = GetOrAddPropertySelector(cmd.TargetProperty);
 
-            var operation = await patcher.GenerateOperationAsync(docState, propertySelector, intent, cancellationToken).ConfigureAwait(false);
+            var operation = await cmd.Patcher!.GenerateOperationAsync(docState, propertySelector, cmd.Intent!, cmd.CancellationToken).ConfigureAwait(false);
             var patch = new CrdtPatch([operation]);
             
-            await ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+            cmd.Patch = patch;
+            await ProcessApplyPatchInternalAsync(cmd).ConfigureAwait(false);
             
-            return true;
+            intentsAppliedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to natively execute forwarded intent against local CRDT document {DocumentId}.", DocumentId);
-            return false;
-        }
-    }
-
-    /// <inheritdoc />
-    public async Task ApplyPatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default)
-    {
-        if (commandChannel == null) return;
-
-        var cmd = GetCommand();
-        cmd.Type = DocumentCommandType.ApplyPatch;
-        cmd.Patch = patch;
-        cmd.CancellationToken = cancellationToken;
-
-        try
-        {
-            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
-            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-            await cmd.ExecuteAsync().ConfigureAwait(false);
-        }
-        finally
-        {
-            ReturnCommand(cmd);
+            intentsFailedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            logger.LogError(ex, "Failed to apply forwarded intent to local document {DocumentId}.", DocumentId);
+            throw;
         }
     }
 
@@ -446,56 +723,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
     }
 
-    /// <inheritdoc />
-    public ShardVersionVectorMap GetLocalState()
-    {
-        var sourceMap = replicaContext.ShardVersionVectors;
-        lock (sourceMap)
-        {
-            var map = new ShardVersionVectorMap();
-            if (sourceMap.TryGetValue(ShardId, out var dvv))
-            {
-                var copiedVersions = new Dictionary<string, long>();
-                var copiedDots = new Dictionary<string, ISet<long>>();
-                foreach (var kvp in dvv.Versions)
-                {
-                    copiedVersions[kvp.Key] = kvp.Value;
-                }
-                if (dvv.Dots != null)
-                {
-                    foreach (var kvp in dvv.Dots)
-                    {
-                        copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
-                    }
-                }
-                map[ShardId] = new DottedVersionVector(copiedVersions, copiedDots);
-            }
-            return map;
-        }
-    }
-
-    /// <inheritdoc />
-    public async Task ApplyRemotePatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default)
-    {
-        if (commandChannel == null) return;
-
-        var cmd = GetCommand();
-        cmd.Type = DocumentCommandType.ApplyRemotePatch;
-        cmd.Patch = patch;
-        cmd.CancellationToken = cancellationToken;
-
-        try
-        {
-            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
-            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-            await cmd.ExecuteAsync().ConfigureAwait(false);
-        }
-        finally
-        {
-            ReturnCommand(cmd);
-        }
-    }
-
     private async Task ProcessApplyRemotePatchInternalAsync(PooledDocumentCommand<TState> cmd)
     {
         CrdtDocument<TState> currentDoc;
@@ -511,29 +738,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         patchAppliedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
-        // Excludes NotifyPatchGeneratedAsync explicitly bridging incoming remote topologies cleanly avoiding broadcast looping bounds
-    }
-
-    /// <inheritdoc />
-    public async Task ApplyJournaledPatchAsync(CrdtPatch patch, CancellationToken cancellationToken = default)
-    {
-        if (commandChannel == null) return;
-
-        var cmd = GetCommand();
-        cmd.Type = DocumentCommandType.ApplyJournaledPatch;
-        cmd.Patch = patch;
-        cmd.CancellationToken = cancellationToken;
-
-        try
-        {
-            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
-            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-            await cmd.ExecuteAsync().ConfigureAwait(false);
-        }
-        finally
-        {
-            ReturnCommand(cmd);
-        }
     }
 
     private async Task ProcessApplyJournaledPatchInternalAsync(PooledDocumentCommand<TState> cmd)
@@ -551,35 +755,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         patchAppliedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
-        // Uses standard synchronous applicator isolating generic initializations securely avoiding double WAL logging mapping natively
-    }
-
-    /// <inheritdoc />
-    public async Task<CrdtSnapshotDataDto> GetSnapshotDataAsync(CancellationToken cancellationToken = default)
-    {
-        if (commandChannel == null)
-        {
-            CrdtDocument<TState> currentDoc;
-            lock (syncRoot) { currentDoc = currentDocument; }
-            var snapshotData = serializer.SerializeToBytes(currentDoc);
-            return new CrdtSnapshotDataDto(snapshotData, GetLocalState());
-        }
-
-        var cmd = GetCommand();
-        cmd.Type = DocumentCommandType.GetSnapshotData;
-        cmd.CancellationToken = cancellationToken;
-
-        try
-        {
-            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
-            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-            await cmd.ExecuteAsync().ConfigureAwait(false);
-            return new CrdtSnapshotDataDto(cmd.ResultSnapshotData!, cmd.ResultGlobalState!);
-        }
-        finally
-        {
-            ReturnCommand(cmd);
-        }
     }
 
     private void ProcessGetSnapshotDataInternal(PooledDocumentCommand<TState> cmd)
@@ -591,30 +766,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         cmd.ResultSnapshotData = serializer.SerializeToBytes(currentDoc);
         cmd.ResultGlobalState = globalState;
-    }
-
-    /// <inheritdoc />
-    public async Task MergeSnapshotAsync(byte[] snapshotData, ShardVersionVectorMap globalState, CancellationToken cancellationToken = default)
-    {
-        if (snapshotData == null || snapshotData.Length == 0 || commandChannel == null) return;
-        ArgumentNullException.ThrowIfNull(globalState);
-
-        var cmd = GetCommand();
-        cmd.Type = DocumentCommandType.MergeSnapshot;
-        cmd.SnapshotData = snapshotData;
-        cmd.GlobalState = globalState;
-        cmd.CancellationToken = cancellationToken;
-
-        try
-        {
-            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
-            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-            await cmd.ExecuteAsync().ConfigureAwait(false);
-        }
-        finally
-        {
-            ReturnCommand(cmd);
-        }
     }
 
     private async Task ProcessMergeSnapshotInternalAsync(PooledDocumentCommand<TState> cmd)
@@ -650,33 +801,12 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             snapshotsMergedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
             await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
 
-            logger.LogInformation("Successfully merged global state snapshot for document {DocumentId}.", DocumentId);
+            logger.LogInformation("Merged full state snapshot for document {DocumentId}.", DocumentId);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to process snapshot merger for document {DocumentId}.", DocumentId);
+            logger.LogError(ex, "Failed to merge snapshot for document {DocumentId}.", DocumentId);
             throw;
-        }
-    }
-
-    /// <inheritdoc />
-    public async Task CheckpointAsync(CancellationToken cancellationToken = default)
-    {
-        if (commandChannel == null) return;
-
-        var cmd = GetCommand();
-        cmd.Type = DocumentCommandType.Checkpoint;
-        cmd.CancellationToken = cancellationToken;
-
-        try
-        {
-            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
-            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-            await cmd.ExecuteAsync().ConfigureAwait(false);
-        }
-        finally
-        {
-            ReturnCommand(cmd);
         }
     }
 
@@ -714,36 +844,12 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             }
 
             checkPointSavedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-            logger.LogDebug("Successfully saved checkpoint to persistent storage for document {DocumentId}.", DocumentId);
+            logger.LogDebug("Saved checkpoint to storage for document {DocumentId}.", DocumentId);
         }
         catch (Exception)
         {
             lock (syncRoot) { isDirty = true; }
             throw;
-        }
-    }
-
-    /// <inheritdoc />
-    public async Task EvictReplicaAsync(string replicaId, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
-
-        if (commandChannel == null) return;
-
-        var cmd = GetCommand();
-        cmd.Type = DocumentCommandType.EvictReplica;
-        cmd.ReplicaIdToEvict = replicaId;
-        cmd.CancellationToken = cancellationToken;
-
-        try
-        {
-            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
-            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-            await cmd.ExecuteAsync().ConfigureAwait(false);
-        }
-        finally
-        {
-            ReturnCommand(cmd);
         }
     }
 
@@ -754,29 +860,9 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             metadataManager.EvictReplica(currentDocument, cmd.ReplicaIdToEvict!);
             isDirty = true;
         }
+        
+        replicaEvictionsCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async Task ResetLocalStateAsync(string oldReplicaId, CancellationToken cancellationToken = default)
-    {
-        if (commandChannel == null) return;
-
-        var cmd = GetCommand();
-        cmd.Type = DocumentCommandType.ResetLocalState;
-        cmd.OldReplicaId = oldReplicaId;
-        cmd.CancellationToken = cancellationToken;
-
-        try
-        {
-            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
-            commandsEnqueuedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-            await cmd.ExecuteAsync().ConfigureAwait(false);
-        }
-        finally
-        {
-            ReturnCommand(cmd);
-        }
     }
 
     private async Task ProcessResetLocalStateInternalAsync(CancellationToken cancellationToken)
@@ -787,17 +873,9 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             currentDocument = new CrdtDocument<TState>(initialState, metadata);
             isDirty = true;
         }
+        
+        stateResetsCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
         await NotifyStateChangedAsync(cancellationToken).ConfigureAwait(false);
-        logger.LogInformation("Successfully performed a hard reset following identity re-bootstrap for document {DocumentId}.", DocumentId);
-    }
-
-    /// <inheritdoc />
-    public void Dispose()
-    {
-        debounceTimer?.Dispose();
-        disposeCts.Cancel();
-        commandChannel?.Writer.TryComplete();
-        disposeCts.Dispose();
-        meter.Dispose();
+        logger.LogInformation("Performed a hard reset for document {DocumentId}.", DocumentId);
     }
 }

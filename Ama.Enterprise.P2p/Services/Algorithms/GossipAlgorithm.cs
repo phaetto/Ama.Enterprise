@@ -102,7 +102,7 @@ public sealed class GossipAlgorithm : IP2pAlgorithm, IDisposable
 
             activeMeshes.TryAdd(meshId, state);
 
-            logger.LogInformation("[{MeshId}] Gossip Protocol algorithm orchestrator started successfully.", meshId);
+            logger.LogInformation("[{MeshId}] Gossip Protocol algorithm orchestrator started.", meshId);
         }
         
         return Task.CompletedTask;
@@ -138,7 +138,7 @@ public sealed class GossipAlgorithm : IP2pAlgorithm, IDisposable
 
                     state.Dispose();
 
-                    logger.LogInformation("[{MeshId}] Gossip Protocol orchestrator stopped cleanly.", meshId);
+                    logger.LogInformation("[{MeshId}] Gossip Protocol orchestrator stopped.", meshId);
                 }, cancellationToken));
             }
         }
@@ -187,6 +187,7 @@ public sealed class GossipAlgorithm : IP2pAlgorithm, IDisposable
 
             logger.LogDebug("[{MeshId}] Wrapping payload and broadcasting newly mapped envelope {MessageId} locally from {NodeId}.", meshId, message.MessageId, nodeOptions.LocalPeerId);
 
+            state.SeenMessages.TryAdd(message.MessageId, DateTimeOffset.UtcNow);
             state.MessageQueue.Enqueue(message);
 
             dispatchTasks.Add(state.Dispatcher.DispatchAsync(message.MeshId, message.SenderId, message.Payload, cancellationToken));
@@ -198,10 +199,17 @@ public sealed class GossipAlgorithm : IP2pAlgorithm, IDisposable
     /// <inheritdoc />
     public async Task ProcessMessageAsync(IMeshMessage message, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(message);
+
         if (activeMeshes.TryGetValue(message.MeshId, out var state) && message is GossipMessage gossipMsg)
         {
             var tags = new KeyValuePair<string, object?>[] { new("mesh_id", gossipMsg.MeshId) };
             messagesReceivedCounter.Add(1, tags);
+
+            if (!state.SeenMessages.TryAdd(gossipMsg.MessageId, DateTimeOffset.UtcNow))
+            {
+                return;
+            }
 
             logger.LogDebug("[{MeshId}] Evaluating incoming mapped payload {MessageId} from {SenderId}. TTL: {Ttl}", gossipMsg.MeshId, gossipMsg.MessageId, gossipMsg.SenderId.Value, gossipMsg.TimeToLive);
 
@@ -211,16 +219,16 @@ public sealed class GossipAlgorithm : IP2pAlgorithm, IDisposable
                 {
                     await state.Dispatcher.DispatchAsync(gossipMsg.MeshId, gossipMsg.SenderId, gossipMsg.Payload, state.LoopCts.Token).ConfigureAwait(false);
                 }
-
-                if (gossipMsg.TimeToLive > 1)
-                {
-                    var forwardedMessage = gossipMsg with { TimeToLive = gossipMsg.TimeToLive - 1 };
-                    state.MessageQueue.Enqueue(forwardedMessage);
-                }
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "[{MeshId}] Error pushing generic unwrapped payload into localized domain {MessageId}.", gossipMsg.MeshId, gossipMsg.MessageId);
+            }
+
+            if (gossipMsg.TimeToLive > 1)
+            {
+                var forwardedMessage = gossipMsg with { TimeToLive = gossipMsg.TimeToLive - 1 };
+                state.MessageQueue.Enqueue(forwardedMessage);
             }
         }
     }
@@ -247,6 +255,7 @@ public sealed class GossipAlgorithm : IP2pAlgorithm, IDisposable
                 await Task.Delay(options.GossipInterval, cancellationToken).ConfigureAwait(false);
 
                 await PerformGossipTickAsync(meshId, state, cancellationToken).ConfigureAwait(false);
+                CleanupSeenMessages(state);
             }
             catch (OperationCanceledException)
             {
@@ -302,12 +311,25 @@ public sealed class GossipAlgorithm : IP2pAlgorithm, IDisposable
         await Task.WhenAll(sendTasks).ConfigureAwait(false);
     }
 
+    private static void CleanupSeenMessages(ProtocolState state)
+    {
+        var threshold = DateTimeOffset.UtcNow.AddMinutes(-5);
+        foreach (var kvp in state.SeenMessages)
+        {
+            if (kvp.Value < threshold)
+            {
+                state.SeenMessages.TryRemove(kvp.Key, out _);
+            }
+        }
+    }
+
     private sealed class ProtocolState : IDisposable
     {
         public ITransportRouter TransportRouter { get; }
         public IPeerSelector PeerSelector { get; }
         public IApplicationPayloadDispatcher Dispatcher { get; }
 
+        public ConcurrentDictionary<Guid, DateTimeOffset> SeenMessages { get; } = new();
         public ConcurrentQueue<GossipMessage> MessageQueue { get; } = new();
 
         public CancellationTokenSource? LoopCts { get; set; }

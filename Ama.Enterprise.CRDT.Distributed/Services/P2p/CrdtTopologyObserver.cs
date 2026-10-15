@@ -10,7 +10,7 @@ using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Observes network connections natively mapping inherently multi-mesh capabilities isolated explicitly gracefully.
+/// Observes network connections and triggers anti-entropy synchronization across meshes.
 /// </summary>
 public sealed class CrdtTopologyObserver : IPeerTopologyObserver, IDisposable
 {
@@ -18,7 +18,7 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver, IDisposable
     private readonly string replicaId;
     private readonly DistributedCrdtScopeManager scopeManager;
     private readonly ILogger<CrdtTopologyObserver> logger;
-    private int hasConnected;
+    private int initialSyncTriggered;
 
     private readonly Meter meter;
     private readonly Counter<long> peersJoinedCounter;
@@ -51,18 +51,18 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver, IDisposable
 
         peersJoinedCounter.Add(1, new KeyValuePair<string, object?>("mesh_id", eventMeshId));
 
-        if (Interlocked.CompareExchange(ref hasConnected, 1, 0) == 0)
+        if (node.Id.Value != Guid.Empty && Interlocked.CompareExchange(ref initialSyncTriggered, 1, 0) == 0)
         {
-            logger.LogInformation("[{MeshId}] Connected to first peer {PeerId}. Triggering immediate global DVV state sync for localized replica {ReplicaId}.", eventMeshId, node.Id, replicaId);
+            logger.LogInformation("[{MeshId}] Connected to first peer {PeerId}. Triggering immediate DVV state sync for replica {ReplicaId}.", eventMeshId, node.Id, replicaId);
 
             try
             {
                 var scope = scopeManager.GetOrCreateScope(replicaId);
-                await scope.Orchestrator.DispatchAntiEntropyStateAsync(cancellationToken).ConfigureAwait(false);
+                await scope.Orchestrator.DispatchAntiEntropyStateAsync(node.Id, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "[{MeshId}] Failed to broadcast initial global state sync upon connecting to first peer.", eventMeshId);
+                logger.LogError(ex, "[{MeshId}] Failed to dispatch state sync upon connecting to peer {PeerId}.", eventMeshId, node.Id);
             }
         }
     }
@@ -78,7 +78,7 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver, IDisposable
         if (peerId.Value != Guid.Empty)
         {
             var stringId = peerId.Value.ToString();
-            logger.LogInformation("[{MeshId}] Peer {PeerId} departed. Preserving localized replica {ReplicaId} CRDT states explicitly.", eventMeshId, stringId, replicaId);
+            logger.LogInformation("[{MeshId}] Peer {PeerId} departed. Preserving localized replica {ReplicaId} CRDT states.", eventMeshId, stringId, replicaId);
             
             var scope = scopeManager.GetOrCreateScope(replicaId);
             scope.ClusterTracker.RemovePeerByNetworkId(stringId);

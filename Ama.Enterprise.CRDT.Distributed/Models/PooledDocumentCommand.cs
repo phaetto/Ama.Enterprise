@@ -5,10 +5,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Threading.Tasks.Sources;
 using Ama.CRDT.Models;
+using Ama.CRDT.Models.Intents;
+using Ama.CRDT.Services;
 
 internal enum DocumentCommandType
 {
     Initialize,
+    ApplyRemoteIntent,
     ApplyPatch,
     ApplyRemotePatch,
     ApplyJournaledPatch,
@@ -35,6 +38,9 @@ internal sealed class PooledDocumentCommand<TState> : IValueTaskSource where TSt
     }
 
     public DocumentCommandType Type { get; set; }
+    public IOperationIntent? Intent { get; set; }
+    public string? TargetProperty { get; set; }
+    public IAsyncCrdtPatcher? Patcher { get; set; }
     public CrdtPatch? Patch { get; set; }
     public byte[]? SnapshotData { get; set; }
     public ShardVersionVectorMap? GlobalState { get; set; }
@@ -50,6 +56,9 @@ internal sealed class PooledDocumentCommand<TState> : IValueTaskSource where TSt
     {
         core.Reset();
         Type = default;
+        Intent = null;
+        TargetProperty = null;
+        Patcher = null;
         Patch = null;
         SnapshotData = null;
         GlobalState = null;

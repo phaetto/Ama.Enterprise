@@ -61,9 +61,15 @@ public static class ServiceCollectionExtensions
             .Validate(options => options.CompactionTtlSeconds >= 0, 
                 "CompactionTtlSeconds cannot be negative.")
             .Validate(options => options.ShardReplicationFactor > 0,
-                "ShardReplicationFactor must be greater than zero ensuring redundant data safety dynamically.")
+                "ShardReplicationFactor must be greater than zero.")
             .Validate(options => options.VirtualNodesPerReplica > 0,
-                "VirtualNodesPerReplica must be greater than zero to properly map the hash ring distribution limits naturally.")
+                "VirtualNodesPerReplica must be greater than zero.")
+            .Validate(options => options.RpcTimeoutMilliseconds > 0,
+                "RpcTimeoutMilliseconds must be greater than zero.")
+            .Validate(options => options.RpcMaxRetries > 0,
+                "RpcMaxRetries must be greater than zero.")
+            .Validate(options => options.RpcRetryDelayMilliseconds >= 0,
+                "RpcRetryDelayMilliseconds cannot be negative.")
             .ValidateOnStart();
 
         services.AddCrdt()
@@ -72,7 +78,7 @@ public static class ServiceCollectionExtensions
                 .AddCrdtAotContext(new DistributedCrdtSystemAotContext())
                 .AddCrdtSerializableType<CrdtRegistryEntry>("crdt-registry-entry");
 
-        // Provide memory storage as the default fallback actively mapped as scoped per replica instance.
+        // Provide memory storage as the default fallback mapped as scoped per replica instance.
         services.TryAddScoped<IDistributedCrdtStorage, MemoryCrdtStorage>();
 
         services.AddCrdtJournaling<StorageJournalForwarder>();
@@ -101,17 +107,17 @@ public static class ServiceCollectionExtensions
 
         services.TryAddScoped<IScopeTopologyProvider, DefaultScopeTopologyProvider>();
         
-        // Register standard Consistent Hashing Distribution mappings isolating logic correctly naturally
+        // Register Consistent Hashing Distribution mappings
         services.TryAddScoped<IShardDistributionManager, ConsistentHashShardDistributionManager>();
 
         services.AddScoped<ICrdtDocumentOrchestrator, CrdtDocumentOrchestrator>();
         services.AddScoped<IClusterStateTracker, ClusterStateTracker>();
         services.AddScoped<ICrdtEvictionService, CrdtEvictionService>();
         
-        // Ensure topology observer decoupled triggering boundaries explicitly dynamically mapping.
+        // Register topology observer
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IClusterStateObserver, OrchestratorClusterStateObserver>());
         
-        // Register decoupled explicit broadcast evaluations
+        // Register decoupled broadcast evaluations
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IDocumentPatchObserver, CrdtPatchBroadcaster>());
 
         services.AddHostedService<CrdtInitializationService>();
@@ -122,7 +128,7 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Explicitly declares a distinct CRDT Replica registering bounding constraints generating persistent decoupled structures.
+    /// Declares a distinct CRDT Replica registering bounding constraints.
     /// </summary>
     public static IServiceCollection AddDistributedCrdtReplica(this IServiceCollection services, string replicaId)
     {
@@ -146,7 +152,7 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers a scoped distributed CRDT application service operating within the isolated CRDT multi-mesh scope explicitly.
+    /// Registers a scoped distributed CRDT application service operating within the isolated CRDT multi-mesh scope.
     /// </summary>
     public static IServiceCollection AddDistributedCrdtService<TService, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TImplementation>(this IServiceCollection services) 
         where TService : class
@@ -160,7 +166,7 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Injects generic anti-entropy multi-mesh payloads mapped tightly enforcing pure identity limits directly isolating routing domains.
+    /// Injects generic anti-entropy multi-mesh payloads mapped to a specific replica and mesh.
     /// </summary>
     public static IServiceCollection AddDistributedCrdtP2p(this IServiceCollection services, string meshId, string replicaId)
     {

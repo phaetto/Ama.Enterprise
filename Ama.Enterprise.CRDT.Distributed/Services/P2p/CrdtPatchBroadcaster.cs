@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
 using Ama.CRDT.Services;
@@ -14,17 +15,24 @@ using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Decoupled observer explicitly handling the P2P broadcast propagation of locally generated document patches.
+/// Decoupled observer handling the P2P broadcast propagation of locally generated document patches via an asynchronous background channel.
 /// </summary>
 public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
 {
+    private readonly record struct OutboundPatchItem(string DocumentId, CrdtPatch Patch);
+
     private readonly IP2pAlgorithm p2pAlgorithm;
     private readonly ReplicaContext replicaContext;
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<CrdtPatchBroadcaster> logger;
 
+    private readonly Channel<OutboundPatchItem> broadcastChannel;
+    private readonly CancellationTokenSource disposeCts = new();
+
     private readonly Meter meter;
     private readonly Counter<long> broadcastBytesCounter;
+    private readonly Counter<long> patchesBroadcastedCounter;
+    private readonly Counter<long> broadcastFailuresCounter;
 
     public CrdtPatchBroadcaster(
         IP2pAlgorithm p2pAlgorithm,
@@ -38,37 +46,74 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
+        this.broadcastChannel = Channel.CreateUnbounded<OutboundPatchItem>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false
+        });
+
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.CrdtPatchBroadcaster") ?? new Meter("Ama.Enterprise.CRDT.Distributed.CrdtPatchBroadcaster");
-        this.broadcastBytesCounter = this.meter.CreateCounter<long>("crdt.broadcaster.broadcast_bytes", "bytes", "Total bytes broadcasted across real-time patch syncs");
+        this.broadcastBytesCounter = this.meter.CreateCounter<long>("crdt.broadcaster.broadcast_bytes", "bytes", "Total bytes broadcasted for patches");
+        this.patchesBroadcastedCounter = this.meter.CreateCounter<long>("crdt.broadcaster.patches_broadcasted", "patches", "Total patch payloads broadcasted");
+        this.broadcastFailuresCounter = this.meter.CreateCounter<long>("crdt.broadcaster.broadcast_failures", "errors", "Total errors during patch broadcasting");
+
+        _ = Task.Run(ProcessBroadcastChannelAsync);
     }
 
     /// <inheritdoc />
-    public async Task OnPatchGeneratedAsync(string documentId, CrdtPatch patch, CancellationToken cancellationToken = default)
+    public Task OnPatchGeneratedAsync(string documentId, CrdtPatch patch, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
 
-        try
-        {
-            var patchMsg = new CrdtPatchMessage(replicaContext.ReplicaId, patch);
-            var payload = serializer.SerializeToBytes(patchMsg);
-            
-            var wrapper = new CrdtMessageWrapper(documentId, "CrdtPatch", payload);
-            var finalBytes = serializer.SerializeToBytes(wrapper);
-
-            broadcastBytesCounter.Add(finalBytes.Length, new KeyValuePair<string, object?>("document_id", documentId));
-
-            await p2pAlgorithm.BroadcastAsync(finalBytes, cancellationToken).ConfigureAwait(false);
-            
-            logger.LogTrace("Broadcasted active sync patch for document {DocumentId}.", documentId);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Failed to broadcast active sync patch for document {DocumentId}.", documentId);
-        }
+        broadcastChannel.Writer.TryWrite(new OutboundPatchItem(documentId, patch));
+        return Task.CompletedTask;
     }
 
     public void Dispose()
     {
+        disposeCts.Cancel();
+        broadcastChannel.Writer.TryComplete();
+        disposeCts.Dispose();
         meter.Dispose();
+    }
+
+    private async Task ProcessBroadcastChannelAsync()
+    {
+        try
+        {
+            await foreach (var item in broadcastChannel.Reader.ReadAllAsync(disposeCts.Token).ConfigureAwait(false))
+            {
+                try
+                {
+                    var patchMsg = new CrdtPatchMessage(replicaContext.ReplicaId, item.Patch);
+                    var payload = serializer.SerializeToBytes(patchMsg);
+                    
+                    var wrapper = new CrdtMessageWrapper(item.DocumentId, "CrdtPatch", payload);
+                    var finalBytes = serializer.SerializeToBytes(wrapper);
+
+                    broadcastBytesCounter.Add(finalBytes.Length, new KeyValuePair<string, object?>("document_id", item.DocumentId));
+
+                    await p2pAlgorithm.BroadcastAsync(finalBytes, disposeCts.Token).ConfigureAwait(false);
+                    
+                    patchesBroadcastedCounter.Add(1, new KeyValuePair<string, object?>("document_id", item.DocumentId));
+                    logger.LogTrace("Broadcasted patch for document {DocumentId}.", item.DocumentId);
+                }
+                catch (OperationCanceledException) when (disposeCts.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    broadcastFailuresCounter.Add(1, new KeyValuePair<string, object?>("document_id", item.DocumentId));
+                    logger.LogError(ex, "Failed to broadcast patch for document {DocumentId}.", item.DocumentId);
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        catch (Exception ex)
+        {
+            logger.LogCritical(ex, "Broadcast background channel failed.");
+        }
     }
 }

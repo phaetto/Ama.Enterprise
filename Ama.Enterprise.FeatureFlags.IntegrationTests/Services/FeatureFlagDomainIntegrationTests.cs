@@ -30,7 +30,7 @@ public sealed class FeatureFlagDomainIntegrationTests
         var exception = await Should.ThrowAsync<InvalidOperationException>(async () => 
             await manager.SetFlagAsync("TestFlag", true, "TestUser", null, null, CancellationToken.None));
             
-        exception.Message.ShouldContain("Cannot evaluate stateless CRDT State");
+        exception.Message.ShouldContain("Orchestrator registry is not initialized");
     }
 
     [IntegrationFact]

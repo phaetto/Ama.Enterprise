@@ -21,7 +21,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Centralized stateless gateway orchestrating global P2P CRDT document bindings eliminating proxy memory dependencies executing stateless async RPCs dynamically.
+/// Centralized gateway that manages distributed CRDT documents and handles remote requests.
 /// </summary>
 public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDisposable
 {
@@ -31,10 +31,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     private readonly IShardDistributionManager distributionManager;
     private readonly IEnumerable<ICrdtOrchestratorObserver> orchestratorObservers;
     private readonly ILogger<CrdtDocumentOrchestrator> logger;
+    private readonly DistributedCrdtOptions options;
     
     private readonly ConcurrentDictionary<string, IDistributedCrdtDocument> activeDocuments = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> shardIdCache = new(StringComparer.Ordinal);
     
-    // Completely replaces lock blockages allowing multi-threaded external awaiting bounds
     private readonly Channel<PooledOrchestratorCommand> commandChannel;
     private readonly ConcurrentQueue<PooledOrchestratorCommand> commandPool = new();
     private readonly CancellationTokenSource disposeCts = new();
@@ -45,6 +46,10 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     private readonly Counter<long> antiEntropySyncCounter;
     private readonly Counter<long> snapshotsDispatchedCounter;
     private readonly Counter<long> snapshotBytesDispatchedCounter;
+    
+    private readonly Counter<long> intentsForwardedCounter;
+    private readonly Counter<long> intentsFailedCounter;
+    private readonly Counter<long> patchesForwardedCounter;
     
     // Channel metrics
     private readonly Counter<long> commandsEnqueuedCounter;
@@ -73,8 +78,9 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         this.distributionManager = distributionManager ?? throw new ArgumentNullException(nameof(distributionManager));
         this.orchestratorObservers = orchestratorObservers ?? throw new ArgumentNullException(nameof(orchestratorObservers));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        this.options = options.Value;
 
-        var capacity = options.Value.ChannelCapacity;
+        var capacity = this.options.ChannelCapacity;
         if (capacity > 0)
         {
             this.commandChannel = Channel.CreateBounded<PooledOrchestratorCommand>(new BoundedChannelOptions(capacity)
@@ -94,15 +100,19 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
 
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.CrdtDocumentOrchestrator") ?? new Meter("Ama.Enterprise.CRDT.Distributed.CrdtDocumentOrchestrator");
-        this.documentCreatedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.documents_created", "documents", "Total CRDT documents mapped dynamically");
-        this.documentDeletedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.documents_deleted", "documents", "Total CRDT documents permanently tombstoned");
-        this.antiEntropySyncCounter = this.meter.CreateCounter<long>("crdt.orchestrator.anti_entropy_syncs", "syncs", "Total anti-entropy point-to-point synchronizations dispatched");
-        this.snapshotsDispatchedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.snapshots_dispatched", "snapshots", "Total full state snapshots explicitly provided responding to log gaps");
-        this.snapshotBytesDispatchedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.snapshot_bytes_dispatched", "bytes", "Total bytes dispatched for full state snapshot fallbacks");
+        this.documentCreatedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.documents_created", "documents", "Total CRDT documents mapped");
+        this.documentDeletedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.documents_deleted", "documents", "Total CRDT documents deleted");
+        this.antiEntropySyncCounter = this.meter.CreateCounter<long>("crdt.orchestrator.anti_entropy_syncs", "syncs", "Total anti-entropy synchronizations dispatched");
+        this.snapshotsDispatchedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.snapshots_dispatched", "snapshots", "Total full state snapshots sent");
+        this.snapshotBytesDispatchedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.snapshot_bytes_dispatched", "bytes", "Total bytes sent for full state snapshots");
 
-        this.commandsEnqueuedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.channel.commands_enqueued", "commands", "Total orchestrator commands enqueued to the lock-free channel");
-        this.commandsProcessedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.channel.commands_processed", "commands", "Total orchestrator commands processed by the channel");
-        this.commandFailuresCounter = this.meter.CreateCounter<long>("crdt.orchestrator.channel.command_failures", "errors", "Total orchestrator command processing failures");
+        this.intentsForwardedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.intents_forwarded", "intents", "Total operation intents forwarded to remote nodes");
+        this.intentsFailedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.intents_failed", "intents", "Total operation intents that failed remote execution");
+        this.patchesForwardedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.patches_forwarded", "patches", "Total CRDT patches forwarded to remote nodes");
+
+        this.commandsEnqueuedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.channel.commands_enqueued", "commands", "Total orchestrator commands enqueued");
+        this.commandsProcessedCounter = this.meter.CreateCounter<long>("crdt.orchestrator.channel.commands_processed", "commands", "Total orchestrator commands processed");
+        this.commandFailuresCounter = this.meter.CreateCounter<long>("crdt.orchestrator.channel.command_failures", "errors", "Total orchestrator command processing errors");
         
         _ = this.meter.CreateObservableGauge("crdt.orchestrator.channel.queue_length", () => this.commandChannel.Reader.CanCount ? this.commandChannel.Reader.Count : 0, "commands", "Current number of pending orchestrator commands");
         _ = this.meter.CreateObservableGauge("crdt.orchestrator.channel.pool_size", () => this.commandPool.Count, "commands", "Current size of the orchestrator command object pool");
@@ -175,6 +185,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
     public IDistributedCrdtDocument<TState>? TryGetLocalDocument<TState>(string documentId) where TState : class, new()
     {
+        if (string.IsNullOrWhiteSpace(documentId)) return null;
+
         if (Registry != null && Registry.DocumentId == documentId && Registry is IDistributedCrdtDocument<TState> registryTyped)
         {
             return registryTyped;
@@ -188,8 +200,50 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         return null;
     }
 
+    /// <inheritdoc />
+    public async ValueTask<string?> TryGetShardIdAsync(string documentId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(documentId)) return null;
+
+        if (shardIdCache.TryGetValue(documentId, out var cachedShardId))
+        {
+            return cachedShardId;
+        }
+
+        if (Registry != null && string.Equals(Registry.DocumentId, documentId, StringComparison.Ordinal))
+        {
+            shardIdCache.TryAdd(documentId, Registry.ShardId);
+            return Registry.ShardId;
+        }
+
+        if (activeDocuments.TryGetValue(documentId, out var activeDoc))
+        {
+            shardIdCache.TryAdd(documentId, activeDoc.ShardId);
+            return activeDoc.ShardId;
+        }
+
+        if (Registry != null)
+        {
+            var registryDoc = await Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            if (registryDoc.Data.Documents.TryGetValue(documentId, out var entry) && !entry.IsDeleted)
+            {
+                var factory = serviceProvider.GetKeyedService<IDocumentFactory>(entry.TypeAlias);
+                if (factory != null)
+                {
+                    var resolvedShardId = factory.GetShardId(serviceProvider, documentId);
+                    shardIdCache.TryAdd(documentId, resolvedShardId);
+                    return resolvedShardId;
+                }
+            }
+        }
+
+        return null;
+    }
+
     public async ValueTask<CrdtDocument<TState>> GetDocumentStateAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
     {
+        if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
+
         if (Registry != null && Registry.DocumentId == documentId && Registry is IDistributedCrdtDocument<TState> registryTyped)
         {
             return await registryTyped.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
@@ -201,110 +255,292 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
 
         var shardId = await GetShardIdAsync<TState>(documentId, cancellationToken).ConfigureAwait(false);
+        var isLocal = await distributionManager.IsShardLocalAsync(shardId, cancellationToken).ConfigureAwait(false);
+
+        if (isLocal)
+        {
+            await SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
+            if (activeDocuments.TryGetValue(documentId, out activeDoc) && activeDoc is IDistributedCrdtDocument<TState> promotedTypedDoc)
+            {
+                return await promotedTypedDoc.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
         
         var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
         var clusterStateTracker = serviceProvider.GetRequiredService<IClusterStateTracker>();
         var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
         var rpcCorrelator = serviceProvider.GetRequiredService<IP2pRpcCorrelator>();
+        var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
 
-        var req = new CrdtReadRequestDto { CorrelationId = Guid.NewGuid(), DocumentId = documentId };
-        var reqPayload = serializer.SerializeToBytes(req);
-        var wrapper = new CrdtMessageWrapper(documentId, "CrdtReadReq", reqPayload);
-        var wrapperBytes = serializer.SerializeToBytes(wrapper);
+        var maxRetries = Math.Max(1, options.RpcMaxRetries);
+        var rpcTimeout = TimeSpan.FromMilliseconds(Math.Max(1, options.RpcTimeoutMilliseconds));
+        var retryDelayMs = Math.Max(0, options.RpcRetryDelayMilliseconds);
+        Exception? lastException = null;
 
-        var activeNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
-        if (activeNodes == null || activeNodes.Count == 0)
+        for (int attempt = 0; attempt < maxRetries; attempt++)
         {
-            throw new InvalidOperationException($"Cannot evaluate stateless CRDT State. No active nodes found mapping strictly for shard {shardId}.");
+            var activeNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
+            if (activeNodes == null || activeNodes.Count == 0)
+            {
+                throw new InvalidOperationException($"Cannot read state: no active nodes found for shard {shardId}.");
+            }
+
+            bool triedAnyPeer = false;
+
+            for (int i = 0; i < activeNodes.Count; i++)
+            {
+                var candidateReplica = activeNodes[(i + attempt) % activeNodes.Count];
+                if (string.Equals(candidateReplica, replicaContext.ReplicaId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var candidatePeer = clusterStateTracker.GetPeerIdByReplicaId(candidateReplica);
+                if (string.IsNullOrWhiteSpace(candidatePeer))
+                {
+                    continue;
+                }
+
+                triedAnyPeer = true;
+                var correlationId = Guid.NewGuid();
+                var req = new CrdtReadRequestDto { CorrelationId = correlationId, DocumentId = documentId };
+                var reqPayload = serializer.SerializeToBytes(req);
+                var wrapper = new CrdtMessageWrapper(documentId, "CrdtReadReq", reqPayload);
+                var wrapperBytes = serializer.SerializeToBytes(wrapper);
+
+                logger.LogTrace("Requesting remote state for document {DocumentId} from replica {TargetReplica} (peer {TargetPeer}).", documentId, candidateReplica, candidatePeer);
+
+                try
+                {
+                    var waitTask = rpcCorrelator.RegisterRequestAsync<CrdtDocument<TState>>(correlationId, rpcTimeout, cancellationToken);
+                    await directSender.SendDirectAsync(new PeerId(Guid.Parse(candidatePeer)), wrapperBytes, cancellationToken).ConfigureAwait(false);
+                    return await waitTask.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    logger.LogDebug(ex, "Read state attempt {Attempt} from replica {TargetReplica} failed for document {DocumentId}.", attempt + 1, candidateReplica, documentId);
+                }
+            }
+
+            if (!triedAnyPeer)
+            {
+                throw new InvalidOperationException($"Cannot read state: no reachable network peer found for shard {shardId}.");
+            }
+
+            if (attempt < maxRetries - 1 && retryDelayMs > 0)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(retryDelayMs * (attempt + 1)), cancellationToken).ConfigureAwait(false);
+            }
         }
-        
-        var targetReplicaId = activeNodes[0]; 
-        var targetPeerId = clusterStateTracker.GetPeerIdByReplicaId(targetReplicaId);
 
-        if (string.IsNullOrWhiteSpace(targetPeerId))
-        {
-            throw new InvalidOperationException($"Cannot evaluate stateless CRDT State. Replica {targetReplicaId} has no active network peer mapping.");
-        }
-
-        logger.LogTrace("Stateless gateway actively querying explicit network RPC bounds addressing document {DocumentId} against replica {TargetReplica} via peer {TargetPeer}.", documentId, targetReplicaId, targetPeerId);
-
-        await directSender.SendDirectAsync(new PeerId(Guid.Parse(targetPeerId)), wrapperBytes, cancellationToken).ConfigureAwait(false);
-
-        return await rpcCorrelator.RegisterRequestAsync<CrdtDocument<TState>>(req.CorrelationId, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+        throw lastException ?? new TimeoutException($"Timed out waiting for remote state of document {documentId} on shard {shardId}.");
     }
 
-    public async Task<bool> ForwardIntentAsync<TState>(string documentId, IOperationIntent intent, string targetProperty, CancellationToken cancellationToken = default) where TState : class, new()
+    public Task<bool> ForwardIntentAsync<TState>(string documentId, IOperationIntent intent, string targetProperty, CancellationToken cancellationToken = default) where TState : class, new()
     {
+        return ForwardIntentAsync<TState>(documentId, intent, targetProperty, IntentDeliveryMode.Acknowledged, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> ForwardIntentAsync<TState>(string documentId, IOperationIntent intent, string targetProperty, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
+        ArgumentNullException.ThrowIfNull(intent);
+
+        if (Registry != null && string.Equals(Registry.DocumentId, documentId, StringComparison.Ordinal) && Registry is IDistributedCrdtDocument<TState> registryTyped)
+        {
+            logger.LogTrace("Applying intent locally to registry document {DocumentId}.", documentId);
+            var applied = await registryTyped.ApplyRemoteIntentAsync(intent, targetProperty, patcher, deliveryMode, cancellationToken).ConfigureAwait(false);
+            if (applied && deliveryMode == IntentDeliveryMode.Acknowledged)
+            {
+                await SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
+            }
+            return applied;
+        }
+
+        if (activeDocuments.TryGetValue(documentId, out var fastDoc) && fastDoc is IDistributedCrdtDocument<TState> fastTypedDoc)
+        {
+            logger.LogTrace("Applying intent locally to active document {DocumentId}.", documentId);
+            return await fastTypedDoc.ApplyRemoteIntentAsync(intent, targetProperty, patcher, deliveryMode, cancellationToken).ConfigureAwait(false);
+        }
+
         var shardId = await GetShardIdAsync<TState>(documentId, cancellationToken).ConfigureAwait(false);
         var isLocal = await distributionManager.IsShardLocalAsync(shardId, cancellationToken).ConfigureAwait(false);
 
         if (isLocal)
         {
-            if (Registry != null && Registry.DocumentId == documentId && Registry is IDistributedCrdtDocument<TState> registryTyped)
+            if (!activeDocuments.TryGetValue(documentId, out var activeDoc))
             {
-                logger.LogTrace("Stateless gateway executing intent directly against local Registry document {DocumentId}.", documentId);
-                return await registryTyped.ApplyRemoteIntentAsync(intent, targetProperty, patcher, cancellationToken).ConfigureAwait(false);
+                await SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
+                activeDocuments.TryGetValue(documentId, out activeDoc);
             }
 
-            if (activeDocuments.TryGetValue(documentId, out var activeDoc) && activeDoc is IDistributedCrdtDocument<TState> typedDoc)
+            if (activeDoc is IDistributedCrdtDocument<TState> typedDoc)
             {
-                logger.LogTrace("Stateless gateway executing intent directly against local active document {DocumentId}.", documentId);
-                return await typedDoc.ApplyRemoteIntentAsync(intent, targetProperty, patcher, cancellationToken).ConfigureAwait(false);
+                logger.LogTrace("Applying intent locally to active document {DocumentId}.", documentId);
+                return await typedDoc.ApplyRemoteIntentAsync(intent, targetProperty, patcher, deliveryMode, cancellationToken).ConfigureAwait(false);
             }
         }
         
         var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
         var clusterStateTracker = serviceProvider.GetRequiredService<IClusterStateTracker>();
         var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
-        var rpcCorrelator = serviceProvider.GetRequiredService<IP2pRpcCorrelator>();
-
-        var req = new CrdtIntentForwardRequestDto
-        {
-            CorrelationId = Guid.NewGuid(),
-            DocumentId = documentId,
-            SerializedIntent = serializer.SerializeToBytes(intent),
-            IntentTypeAlias = intent.GetType().Name,
-            TargetProperty = targetProperty
-        };
-
-        var reqPayload = serializer.SerializeToBytes(req);
-        var wrapper = new CrdtMessageWrapper(documentId, "CrdtIntentReq", reqPayload);
-        var wrapperBytes = serializer.SerializeToBytes(wrapper);
+        var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
 
         var activeNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
         if (activeNodes == null || activeNodes.Count == 0)
         {
-            logger.LogWarning("Forwarding generic intent rejected mapping strict zero node topologies bounding gateway.");
+            logger.LogWarning("Cannot forward intent: no active nodes found for shard {ShardId}.", shardId);
             return false;
         }
 
-        var targetReplicaId = activeNodes[0];
-        var targetPeerId = clusterStateTracker.GetPeerIdByReplicaId(targetReplicaId);
+        var serializedIntent = serializer.SerializeToBytes(intent);
+        var intentTypeAlias = intent.GetType().Name;
 
-        if (string.IsNullOrWhiteSpace(targetPeerId))
+        if (deliveryMode == IntentDeliveryMode.FireAndForget)
         {
-            logger.LogWarning("Forwarding generic intent rejected mapping strict disconnected network peer for replica {ReplicaId}.", targetReplicaId);
+            for (int i = 0; i < activeNodes.Count; i++)
+            {
+                var candidateReplica = activeNodes[i];
+                if (string.Equals(candidateReplica, replicaContext.ReplicaId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var candidatePeer = clusterStateTracker.GetPeerIdByReplicaId(candidateReplica);
+                if (!string.IsNullOrWhiteSpace(candidatePeer))
+                {
+                    var req = new CrdtIntentForwardRequestDto
+                    {
+                        CorrelationId = Guid.Empty,
+                        DocumentId = documentId,
+                        SerializedIntent = serializedIntent,
+                        IntentTypeAlias = intentTypeAlias,
+                        TargetProperty = targetProperty
+                    };
+
+                    var reqPayload = serializer.SerializeToBytes(req);
+                    var wrapper = new CrdtMessageWrapper(documentId, "CrdtIntentReq", reqPayload);
+                    var wrapperBytes = serializer.SerializeToBytes(wrapper);
+
+                    intentsForwardedCounter.Add(1, new KeyValuePair<string, object?>("document_id", documentId));
+                    await directSender.SendDirectAsync(new PeerId(Guid.Parse(candidatePeer)), wrapperBytes, cancellationToken).ConfigureAwait(false);
+                    return true;
+                }
+            }
+
+            logger.LogWarning("Cannot forward fire-and-forget intent: no reachable network peer found for shard {ShardId}.", shardId);
             return false;
         }
-        
-        logger.LogTrace("Stateless gateway forwarding execution intent mapping explicit document {DocumentId} towards remote shard owner {TargetReplica} via peer {TargetPeer}.", documentId, targetReplicaId, targetPeerId);
-        
-        await directSender.SendDirectAsync(new PeerId(Guid.Parse(targetPeerId)), wrapperBytes, cancellationToken).ConfigureAwait(false);
 
-        var response = await rpcCorrelator.RegisterRequestAsync<CrdtIntentForwardResponseDto>(req.CorrelationId, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
-        
-        if (!response.IsSuccess)
+        var rpcCorrelator = serviceProvider.GetRequiredService<IP2pRpcCorrelator>();
+        var maxRetries = Math.Max(1, options.RpcMaxRetries);
+        var rpcTimeout = TimeSpan.FromMilliseconds(Math.Max(1, options.RpcTimeoutMilliseconds));
+        var retryDelayMs = Math.Max(0, options.RpcRetryDelayMilliseconds);
+
+        for (int attempt = 0; attempt < maxRetries; attempt++)
         {
-            logger.LogWarning("Gateway execution explicitly faulting natively traversing intent: {ErrorMessage}", response.ErrorMessage);
+            if (attempt > 0)
+            {
+                activeNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
+                if (activeNodes == null || activeNodes.Count == 0)
+                {
+                    break;
+                }
+            }
+
+            bool triedAnyPeer = false;
+
+            for (int i = 0; i < activeNodes.Count; i++)
+            {
+                var candidateReplica = activeNodes[(i + attempt) % activeNodes.Count];
+                if (string.Equals(candidateReplica, replicaContext.ReplicaId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var candidatePeer = clusterStateTracker.GetPeerIdByReplicaId(candidateReplica);
+                if (string.IsNullOrWhiteSpace(candidatePeer))
+                {
+                    continue;
+                }
+
+                triedAnyPeer = true;
+                var correlationId = Guid.NewGuid();
+                var req = new CrdtIntentForwardRequestDto
+                {
+                    CorrelationId = correlationId,
+                    DocumentId = documentId,
+                    SerializedIntent = serializedIntent,
+                    IntentTypeAlias = intentTypeAlias,
+                    TargetProperty = targetProperty
+                };
+
+                var reqPayload = serializer.SerializeToBytes(req);
+                var wrapper = new CrdtMessageWrapper(documentId, "CrdtIntentReq", reqPayload);
+                var wrapperBytes = serializer.SerializeToBytes(wrapper);
+
+                logger.LogTrace("Forwarding intent for document {DocumentId} to remote replica {TargetReplica} (peer {TargetPeer}), attempt {Attempt}.", documentId, candidateReplica, candidatePeer, attempt + 1);
+                intentsForwardedCounter.Add(1, new KeyValuePair<string, object?>("document_id", documentId));
+
+                try
+                {
+                    var waitTask = rpcCorrelator.RegisterRequestAsync<CrdtIntentForwardResponseDto>(correlationId, rpcTimeout, cancellationToken);
+                    await directSender.SendDirectAsync(new PeerId(Guid.Parse(candidatePeer)), wrapperBytes, cancellationToken).ConfigureAwait(false);
+                    var response = await waitTask.ConfigureAwait(false);
+
+                    if (response.IsSuccess)
+                    {
+                        return true;
+                    }
+
+                    logger.LogWarning("Remote replica {TargetReplica} failed to apply intent: {ErrorMessage}", candidateReplica, response.ErrorMessage);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogDebug(ex, "Intent forwarding attempt {Attempt} to replica {TargetReplica} failed for document {DocumentId}.", attempt + 1, candidateReplica, documentId);
+                }
+            }
+
+            if (!triedAnyPeer)
+            {
+                logger.LogWarning("Cannot forward intent: no reachable network peer found for shard {ShardId}.", shardId);
+                intentsFailedCounter.Add(1, new KeyValuePair<string, object?>("document_id", documentId));
+                return false;
+            }
+
+            if (attempt < maxRetries - 1 && retryDelayMs > 0)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(retryDelayMs * (attempt + 1)), cancellationToken).ConfigureAwait(false);
+            }
         }
 
-        return response.IsSuccess;
+        intentsFailedCounter.Add(1, new KeyValuePair<string, object?>("document_id", documentId));
+        return false;
     }
 
     public async Task ApplyPatchAsync<TState>(string documentId, CrdtPatch patch, CancellationToken cancellationToken = default) where TState : class, new()
     {
+        if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
+
         if (patch.Operations == null || patch.Operations.Count == 0)
         {
+            return;
+        }
+
+        if (Registry != null && string.Equals(Registry.DocumentId, documentId, StringComparison.Ordinal) && Registry is IDistributedCrdtDocument<TState> registryTyped)
+        {
+            await registryTyped.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
+            await SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -313,13 +549,13 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         if (isLocal)
         {
-            if (Registry != null && Registry.DocumentId == documentId && Registry is IDistributedCrdtDocument<TState> registryTyped)
+            if (!activeDocuments.TryGetValue(documentId, out var activeDoc))
             {
-                await registryTyped.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
-                return;
+                await SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
+                activeDocuments.TryGetValue(documentId, out activeDoc);
             }
 
-            if (activeDocuments.TryGetValue(documentId, out var activeDoc) && activeDoc is IDistributedCrdtDocument<TState> typedDoc)
+            if (activeDoc is IDistributedCrdtDocument<TState> typedDoc)
             {
                 await typedDoc.ApplyPatchAsync(patch, cancellationToken).ConfigureAwait(false);
                 return;
@@ -329,6 +565,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
         var clusterStateTracker = serviceProvider.GetRequiredService<IClusterStateTracker>();
         var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
+        var p2pAlgorithm = serviceProvider.GetService<IP2pAlgorithm>();
         var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
 
         var patchMsg = new CrdtPatchMessage(replicaContext.ReplicaId, patch);
@@ -337,42 +574,64 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         var wrapperBytes = serializer.SerializeToBytes(wrapper);
 
         var activeNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
-        if (activeNodes == null || activeNodes.Count == 0)
+        bool sentToTarget = false;
+
+        if (activeNodes != null && activeNodes.Count > 0)
         {
-            logger.LogWarning("Forwarding patch rejected mapping strict zero node topologies bounding gateway for shard {ShardId}.", shardId);
-            return;
+            foreach (var targetReplicaId in activeNodes)
+            {
+                if (string.Equals(targetReplicaId, replicaContext.ReplicaId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var targetPeerId = clusterStateTracker.GetPeerIdByReplicaId(targetReplicaId);
+                if (!string.IsNullOrWhiteSpace(targetPeerId))
+                {
+                    logger.LogTrace("Forwarding patch for document {DocumentId} to remote replica {TargetReplica} (peer {TargetPeer}).", documentId, targetReplicaId, targetPeerId);
+                    patchesForwardedCounter.Add(1, new KeyValuePair<string, object?>("document_id", documentId));
+                    await directSender.SendDirectAsync(new PeerId(Guid.Parse(targetPeerId)), wrapperBytes, cancellationToken).ConfigureAwait(false);
+                    sentToTarget = true;
+                }
+            }
         }
 
-        foreach (var targetReplicaId in activeNodes)
+        if (p2pAlgorithm != null)
         {
-            var targetPeerId = clusterStateTracker.GetPeerIdByReplicaId(targetReplicaId);
-            if (!string.IsNullOrWhiteSpace(targetPeerId))
-            {
-                logger.LogTrace("Stateless gateway forwarding explicit patch for document {DocumentId} towards remote shard owner {TargetReplica} via peer {TargetPeer}.", documentId, targetReplicaId, targetPeerId);
-                await directSender.SendDirectAsync(new PeerId(Guid.Parse(targetPeerId)), wrapperBytes, cancellationToken).ConfigureAwait(false);
-            }
+            await p2pAlgorithm.BroadcastAsync(wrapperBytes, cancellationToken).ConfigureAwait(false);
+            sentToTarget = true;
+        }
+
+        if (!sentToTarget)
+        {
+            logger.LogWarning("Cannot forward patch: no active nodes found for shard {ShardId}.", shardId);
         }
     }
 
     public async Task CreateDocumentAsync(string documentId, string typeAlias, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
+        if (string.IsNullOrWhiteSpace(typeAlias)) throw new ArgumentException("Type alias cannot be null or empty.", nameof(typeAlias));
+
         var registry = Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
         var intent = new MapSetIntent(documentId, new CrdtRegistryEntry(documentId, typeAlias, false));
         
-        var success = await ForwardIntentAsync<CrdtRegistryState>(registry.DocumentId, intent, nameof(CrdtRegistryState.Documents), cancellationToken).ConfigureAwait(false);
+        var success = await ForwardIntentAsync<CrdtRegistryState>(registry.DocumentId, intent, nameof(CrdtRegistryState.Documents), IntentDeliveryMode.Acknowledged, cancellationToken).ConfigureAwait(false);
         
         if (success)
         {
-            logger.LogInformation("Successfully forwarded document creation intent mapping explicit remote bounds for {DocumentId}.", documentId);
+            logger.LogInformation("Forwarded creation intent for document {DocumentId}.", documentId);
         }
         else
         {
-            logger.LogWarning("Failed to forward document creation intent targeting remote shards for {DocumentId}.", documentId);
+            logger.LogWarning("Failed to forward creation intent for document {DocumentId}.", documentId);
         }
     }
 
     public async Task DeleteDocumentAsync(string documentId, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
+
         var registry = Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
 
         var registryDoc = await registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
@@ -380,26 +639,29 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         {
             var intent = new MapSetIntent(documentId, existing with { IsDeleted = true });
             
-            var success = await ForwardIntentAsync<CrdtRegistryState>(registry.DocumentId, intent, nameof(CrdtRegistryState.Documents), cancellationToken).ConfigureAwait(false);
+            var success = await ForwardIntentAsync<CrdtRegistryState>(registry.DocumentId, intent, nameof(CrdtRegistryState.Documents), IntentDeliveryMode.Acknowledged, cancellationToken).ConfigureAwait(false);
             
             if (success)
             {
-                logger.LogInformation("Successfully forwarded document tombstone intent mapping explicit remote bounds for {DocumentId}.", documentId);
+                shardIdCache.TryRemove(documentId, out _);
+                logger.LogInformation("Forwarded delete intent for document {DocumentId}.", documentId);
             }
             else
             {
-                logger.LogWarning("Failed to forward document tombstone intent targeting remote shards for {DocumentId}.", documentId);
+                logger.LogWarning("Failed to forward delete intent for document {DocumentId}.", documentId);
             }
         }
     }
 
     public async Task ProvideSnapshotAsync(string documentId, string targetReplicaId, PeerId targetPeerId, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
+
         var topologyProvider = serviceProvider.GetRequiredService<IScopeTopologyProvider>();
         var isExpected = await topologyProvider.IsPeerExpectedAsync(targetPeerId.Value.ToString(), cancellationToken).ConfigureAwait(false);
         if (!isExpected)
         {
-            logger.LogWarning("Rejected snapshot request for document {DocumentId} from explicitly excluded peer {PeerId}.", documentId, targetPeerId.Value);
+            logger.LogWarning("Rejected snapshot request for document {DocumentId} from excluded peer {PeerId}.", documentId, targetPeerId.Value);
             return;
         }
 
@@ -407,7 +669,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         if (!activeDocuments.TryGetValue(documentId, out var doc) && registry.DocumentId != documentId)
         {
-            logger.LogWarning("Requested snapshot for unknown or completely detached document {DocumentId}.", documentId);
+            logger.LogWarning("Requested snapshot for unknown document {DocumentId}.", documentId);
             return;
         }
 
@@ -431,11 +693,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             
             snapshotsDispatchedCounter.Add(1, new KeyValuePair<string, object?>("document_id", documentId));
             snapshotBytesDispatchedCounter.Add(finalBytes.Length, new KeyValuePair<string, object?>("document_id", documentId));
-            logger.LogInformation("Dispatched targeted complete document snapshot fallback payload for document {DocumentId} to expected peer {PeerId}.", documentId, targetPeerId.Value);
+            logger.LogInformation("Sent full snapshot of document {DocumentId} to peer {PeerId}.", documentId, targetPeerId.Value);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to dispatch snapshot fallback payload for document {DocumentId}.", documentId);
+            logger.LogError(ex, "Failed to send snapshot for document {DocumentId}.", documentId);
         }
     }
 
@@ -468,17 +730,69 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             }
 
             var targetPeerId = validPeers[Random.Shared.Next(validPeers.Count)];
+            await DispatchAntiEntropyStateAsync(targetPeerId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to dispatch state sync to peer.");
+        }
+    }
+
+    public async Task DispatchAntiEntropyStateAsync(PeerId targetPeerId, CancellationToken cancellationToken = default)
+    {
+        if (targetPeerId.Value == Guid.Empty) return;
+
+        try
+        {
+            var topologyProvider = serviceProvider.GetRequiredService<IScopeTopologyProvider>();
+            var isExpected = await topologyProvider.IsPeerExpectedAsync(targetPeerId.Value.ToString(), cancellationToken).ConfigureAwait(false);
+            if (!isExpected)
+            {
+                return;
+            }
 
             var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
             var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
             var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
 
-            var localShards = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var shardKvp in replicaContext.ShardVersionVectors)
+            var knownShardIds = new HashSet<string>(StringComparer.Ordinal);
+            if (Registry != null)
             {
-                if (await distributionManager.IsShardLocalAsync(shardKvp.Key, cancellationToken).ConfigureAwait(false))
+                knownShardIds.Add(Registry.ShardId);
+            }
+
+            foreach (var doc in activeDocuments.Values)
+            {
+                knownShardIds.Add(doc.ShardId);
+            }
+
+            lock (replicaContext.ShardVersionVectors)
+            {
+                foreach (var shardId in knownShardIds)
                 {
-                    localShards.Add(shardKvp.Key);
+                    if (!replicaContext.ShardVersionVectors.ContainsKey(shardId))
+                    {
+                        replicaContext.ShardVersionVectors[shardId] = new DottedVersionVector();
+                    }
+                }
+
+                foreach (var key in replicaContext.ShardVersionVectors.Keys)
+                {
+                    knownShardIds.Add(key);
+                }
+            }
+
+            var localShards = new HashSet<string>(StringComparer.Ordinal);
+            if (Registry != null)
+            {
+                localShards.Add(Registry.ShardId);
+            }
+
+            foreach (var shardId in knownShardIds)
+            {
+                if (await distributionManager.IsShardLocalAsync(shardId, cancellationToken).ConfigureAwait(false))
+                {
+                    localShards.Add(shardId);
                 }
             }
 
@@ -488,7 +802,6 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 globalState = new ShardVersionVectorMap();
                 foreach (var shardKvp in replicaContext.ShardVersionVectors)
                 {
-                    // Route specifically tracking strictly local shards avoiding network saturation limits
                     if (!localShards.Contains(shardKvp.Key))
                     {
                         continue;
@@ -520,12 +833,33 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             await directSender.SendDirectAsync(targetPeerId, finalBytes, cancellationToken).ConfigureAwait(false);
             
             antiEntropySyncCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
-            logger.LogTrace("Dispatched targeted global DVV cluster state sync to expected peer {PeerId}.", targetPeerId.Value);
+            logger.LogTrace("Sent full state sync to peer {PeerId}.", targetPeerId.Value);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to dispatch point-to-point cluster state sync.");
+            logger.LogError(ex, "Failed to dispatch state sync to peer {PeerId}.", targetPeerId.Value);
         }
+    }
+
+    public void Dispose()
+    {
+        disposeCts.Cancel();
+        commandChannel?.Writer.TryComplete();
+        disposeCts.Dispose();
+
+        if (Registry != null)
+        {
+            if (Registry is IDisposable rd) rd.Dispose();
+        }
+        
+        foreach (var doc in activeDocuments.Values)
+        {
+            if (doc is IDisposable d) d.Dispose();
+        }
+        activeDocuments.Clear();
+        shardIdCache.Clear();
+        
+        meter.Dispose();
     }
 
     private async Task NotifyTopologyChangedAsync(CancellationToken cancellationToken)
@@ -538,7 +872,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error notifying orchestrator topology observer.");
+                logger.LogError(ex, "Error notifying orchestrator observer.");
             }
         }
     }
@@ -588,10 +922,10 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 }
             }
         }
-        catch (OperationCanceledException) { /* Clean graceful termination */ }
+        catch (OperationCanceledException) { /* Clean termination */ }
         catch (Exception ex)
         {
-            logger.LogCritical(ex, "Distributed CRDT Orchestrator lock-free processing loop critically faulted.");
+            logger.LogCritical(ex, "Orchestrator background channel failed.");
         }
     }
 
@@ -599,8 +933,18 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     {
         var registryState = new CrdtRegistryState();
         Registry = ActivatorUtilities.CreateInstance<DistributedCrdtDocument<CrdtRegistryState>>(serviceProvider, registryState);
+        shardIdCache.TryAdd(Registry.DocumentId, Registry.ShardId);
         
         await Registry.InitializeAsync(cancellationToken).ConfigureAwait(false);
+
+        var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
+        lock (replicaContext.ShardVersionVectors)
+        {
+            if (!replicaContext.ShardVersionVectors.ContainsKey(Registry.ShardId))
+            {
+                replicaContext.ShardVersionVectors[Registry.ShardId] = new DottedVersionVector();
+            }
+        }
         
         await ProcessSyncDocumentsInternalAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -616,6 +960,14 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             
             var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
 
+            lock (replicaContext.ShardVersionVectors)
+            {
+                if (!replicaContext.ShardVersionVectors.ContainsKey(registry.ShardId))
+                {
+                    replicaContext.ShardVersionVectors[registry.ShardId] = new DottedVersionVector();
+                }
+            }
+
             foreach (var kvp in registryMap)
             {
                 if (!kvp.Value.IsDeleted)
@@ -625,17 +977,22 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                         var factory = serviceProvider.GetKeyedService<IDocumentFactory>(kvp.Value.TypeAlias);
                         if (factory != null)
                         {
-                            var doc = factory.CreateDocument(serviceProvider, kvp.Key);
-                            
-                            if (await distributionManager.IsShardLocalAsync(doc.ShardId, cancellationToken).ConfigureAwait(false))
+                            if (!shardIdCache.TryGetValue(kvp.Key, out var shardId))
                             {
+                                shardId = factory.GetShardId(serviceProvider, kvp.Key);
+                                shardIdCache.TryAdd(kvp.Key, shardId);
+                            }
+                            
+                            if (await distributionManager.IsShardLocalAsync(shardId, cancellationToken).ConfigureAwait(false))
+                            {
+                                var doc = factory.CreateDocument(serviceProvider, kvp.Key);
                                 await doc.InitializeAsync(cancellationToken).ConfigureAwait(false);
                                 
                                 if (activeDocuments.TryAdd(kvp.Key, doc))
                                 {
                                     changed = true;
                                     documentCreatedCounter.Add(1, new KeyValuePair<string, object?>("document_id", kvp.Key));
-                                    logger.LogInformation("Orchestrator dynamically mapped new active CRDT document: {DocumentId}", kvp.Key);
+                                    logger.LogInformation("Mapped new active CRDT document: {DocumentId}", kvp.Key);
                                     
                                     lock (replicaContext.ShardVersionVectors)
                                     {
@@ -654,18 +1011,10 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                                     catch (ObjectDisposedException) { }
                                 }
                             }
-                            else
-                            {
-                                try
-                                {
-                                    if (doc is IDisposable d) d.Dispose();
-                                }
-                                catch (ObjectDisposedException) { }
-                            }
                         }
                         else
                         {
-                            logger.LogWarning("Missing AOT explicit type factory for CRDT alias: {TypeAlias}", kvp.Value.TypeAlias);
+                            logger.LogWarning("Cannot find document factory for type alias: {TypeAlias}", kvp.Value.TypeAlias);
                         }
                     }
                     else if (activeDocuments.TryGetValue(kvp.Key, out var activeDoc))
@@ -681,13 +1030,16 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                                 }
                                 catch (ObjectDisposedException) { }
                                 
-                                bool shardStillInUse = false;
-                                foreach (var remainingDoc in activeDocuments.Values)
+                                bool shardStillInUse = string.Equals(registry.ShardId, demotedShardId, StringComparison.Ordinal);
+                                if (!shardStillInUse)
                                 {
-                                    if (string.Equals(remainingDoc.ShardId, demotedShardId, StringComparison.Ordinal))
+                                    foreach (var remainingDoc in activeDocuments.Values)
                                     {
-                                        shardStillInUse = true;
-                                        break;
+                                        if (string.Equals(remainingDoc.ShardId, demotedShardId, StringComparison.Ordinal))
+                                        {
+                                            shardStillInUse = true;
+                                            break;
+                                        }
                                     }
                                 }
                                 
@@ -700,7 +1052,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                                 }
 
                                 changed = true;
-                                logger.LogInformation("Orchestrator demoted transitioning CRDT document away eliminating footprint: {DocumentId}", kvp.Key);
+                                logger.LogInformation("Removed CRDT document footprint: {DocumentId}", kvp.Key);
                             }
                         }
                     }
@@ -719,6 +1071,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
             foreach (var docId in toRemove)
             {
+                shardIdCache.TryRemove(docId, out _);
+
                 if (activeDocuments.TryRemove(docId, out var doc))
                 {
                     var shardId = doc.ShardId;
@@ -729,13 +1083,16 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                     catch (ObjectDisposedException) { }
                     await storage.DeleteDocumentAsync(shardId, docId, cancellationToken).ConfigureAwait(false);
                     
-                    bool shardStillInUse = false;
-                    foreach (var remainingDoc in activeDocuments.Values)
+                    bool shardStillInUse = string.Equals(registry.ShardId, shardId, StringComparison.Ordinal);
+                    if (!shardStillInUse)
                     {
-                        if (string.Equals(remainingDoc.ShardId, shardId, StringComparison.Ordinal))
+                        foreach (var remainingDoc in activeDocuments.Values)
                         {
-                            shardStillInUse = true;
-                            break;
+                            if (string.Equals(remainingDoc.ShardId, shardId, StringComparison.Ordinal))
+                            {
+                                shardStillInUse = true;
+                                break;
+                            }
                         }
                     }
                     
@@ -749,7 +1106,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
                     changed = true;
                     documentDeletedCounter.Add(1, new KeyValuePair<string, object?>("document_id", docId));
-                    logger.LogInformation("Orchestrator tombstoned active CRDT document: {DocumentId}", docId);
+                    logger.LogInformation("Deleted active CRDT document: {DocumentId}", docId);
                 }
             }
 
@@ -760,70 +1117,28 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "An error occurred synchronizing dynamic P2P orchestrator matrices.");
+            logger.LogError(ex, "Failed to synchronize documents.");
             throw;
         }
     }
 
-    private async ValueTask<string> GetShardIdAsync<TState>(string documentId, CancellationToken cancellationToken) where TState : class, new()
+    private ValueTask<string> GetShardIdAsync<TState>(string documentId, CancellationToken cancellationToken) where TState : class, new()
     {
+        if (shardIdCache.TryGetValue(documentId, out var cachedShardId))
+        {
+            return new ValueTask<string>(cachedShardId);
+        }
+
         var activeDoc = TryGetLocalDocument<TState>(documentId);
         if (activeDoc != null)
         {
-            return activeDoc.ShardId;
+            shardIdCache.TryAdd(documentId, activeDoc.ShardId);
+            return new ValueTask<string>(activeDoc.ShardId);
         }
 
-        if (Registry != null)
-        {
-            var registryDoc = await Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-            if (registryDoc.Data.Documents.TryGetValue(documentId, out var entry))
-            {
-                var factory = serviceProvider.GetKeyedService<IDocumentFactory>(entry.TypeAlias);
-                if (factory != null)
-                {
-                    var doc = factory.CreateDocument(serviceProvider, documentId);
-                    var shardId = doc.ShardId;
-                    if (doc is IDisposable d) d.Dispose();
-                    return shardId;
-                }
-            }
-        }
-
-        var factoryFallback = serviceProvider.GetKeyedService<IDocumentFactory>(typeof(TState).Name);
-        if (factoryFallback != null)
-        {
-            var doc = factoryFallback.CreateDocument(serviceProvider, documentId);
-            var shardId = doc.ShardId;
-            if (doc is IDisposable d) d.Dispose();
-            return shardId;
-        }
-
-        var metadataManager = serviceProvider.GetRequiredService<ICrdtMetadataManager>();
         var shardIdProvider = serviceProvider.GetRequiredService<IShardIdProvider>();
-        
-        var initialState = new TState();
-        var metadata = metadataManager.Initialize(initialState);
-        var dummyDoc = new CrdtDocument<TState>(initialState, metadata);
-        return shardIdProvider.GetShardId(dummyDoc) ?? documentId;
-    }
-
-    public void Dispose()
-    {
-        disposeCts.Cancel();
-        commandChannel?.Writer.TryComplete();
-        disposeCts.Dispose();
-
-        if (Registry != null)
-        {
-            if (Registry is IDisposable rd) rd.Dispose();
-        }
-        
-        foreach (var doc in activeDocuments.Values)
-        {
-            if (doc is IDisposable d) d.Dispose();
-        }
-        activeDocuments.Clear();
-        
-        meter.Dispose();
+        var shardId = shardIdProvider.GetShardId<TState>(documentId) ?? documentId;
+        shardIdCache.TryAdd(documentId, shardId);
+        return new ValueTask<string>(shardId);
     }
 }
