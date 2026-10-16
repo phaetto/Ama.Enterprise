@@ -535,4 +535,173 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         trimmedJournalOps.Count.ShouldBeLessThan(initialJournalOps.Count);
         trimmedJournalOps.Count.ShouldBeLessThanOrEqualTo(5);
     }
+
+    [IntegrationFact]
+    public async Task StorageJournalForwarder_WhenHardThresholdExceededDuringBurst_TriggersImmediateBackgroundAggressiveTrim()
+    {
+        // Arrange
+        var sharedStorage = new MemoryCrdtStorage();
+
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.Configure<DistributedCrdtOptions>(opt =>
+            {
+                opt.JournalHardTrimThreshold = 5;
+                opt.MaintenanceIntervalSeconds = 3600; // Disable periodic maintenance so only StorageJournalForwarder can trim
+            });
+            services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(sharedStorage));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("hard-trim-doc", "journal-doc", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
+        // Act - Apply 8 intents to exceed the hard threshold of 5 on shard "default"
+        for (int i = 0; i < 8; i++)
+        {
+            var intent = new MapSetIntent($"k{i}", $"v{i}");
+            await orchestrator.ApplyIntentAsync<JournalTestState>("hard-trim-doc", intent, "DataMap", CancellationToken.None);
+        }
+
+        // Wait briefly for the background Task.Run aggressive trim in StorageJournalForwarder to complete
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (!cts.Token.IsCancellationRequested)
+        {
+            var count = await sharedStorage.GetJournalCountAsync("default", CancellationToken.None);
+            if (count < 5)
+            {
+                break;
+            }
+            await Task.Delay(50);
+        }
+
+        // Assert - Shard "default" journal was aggressively trimmed without waiting for CrdtMaintenanceService
+        var remainingCount = await sharedStorage.GetJournalCountAsync("default", CancellationToken.None);
+        remainingCount.ShouldBeLessThan(5);
+    }
+
+    [IntegrationFact]
+    public async Task DistributedCrdtDocument_InitializeAsync_ShouldFallbackToOrphanedDocument_WhenPrimaryStorageReturnsNull()
+    {
+        // Arrange
+        var mockStorage = new Mock<IDistributedCrdtStorage>();
+        mockStorage.SetReturnsDefault(Task.CompletedTask);
+
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockStorage.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var metadataManager = scope.ServiceProvider.GetRequiredService<ICrdtMetadataManager>();
+
+        var orphanedState = new JournalTestState { Id = "orphaned-doc" };
+        orphanedState.DataMap["RecoveredKey"] = "RecoveredValue";
+        var orphanedDoc = new CrdtDocument<JournalTestState>(orphanedState, metadataManager.Initialize(orphanedState));
+
+        mockStorage.Setup(s => s.LoadDocumentAsync<JournalTestState>("default", "orphaned-doc", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((CrdtDocument<JournalTestState>?)null);
+
+        mockStorage.Setup(s => s.LoadOrphanedDocumentAsync<JournalTestState>("default", "orphaned-doc", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(orphanedDoc);
+
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        // Act
+        await orchestrator.CreateDocumentAsync("orphaned-doc", "journal-doc", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
+        // Assert
+        var loadedDoc = await orchestrator.GetDocumentStateAsync<JournalTestState>("orphaned-doc", CancellationToken.None);
+        loadedDoc.Data.DataMap.ShouldContainKeyAndValue("RecoveredKey", "RecoveredValue");
+        mockStorage.Verify(s => s.LoadOrphanedDocumentAsync<JournalTestState>("default", "orphaned-doc", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [IntegrationFact]
+    public async Task CrdtP2pPayloadHandler_ProcessSnapshot_WhenRegistrySnapshotMerged_AutomaticallySyncsAndPromotesDiscoveredDocuments()
+    {
+        // Arrange - Node A creates documents in its registry and generates a registry snapshot
+        var spA = BuildNode("ReplicaA");
+        var scopeA = spA.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaA");
+        var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchA.InitializeAsync(CancellationToken.None);
+
+        await orchA.CreateDocumentAsync("snap-discovered-1", "journal-doc", CancellationToken.None);
+        await orchA.CreateDocumentAsync("snap-discovered-2", "journal-doc", CancellationToken.None);
+        await orchA.SyncDocumentsAsync(CancellationToken.None);
+
+        var registrySnapshotDto = await orchA.Registry.GetSnapshotDataAsync(CancellationToken.None);
+
+        // Node B starts completely empty
+        var spB = BuildNode("ReplicaB");
+        var scopeB = spB.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaB");
+        var orchB = scopeB.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchB.InitializeAsync(CancellationToken.None);
+
+        orchB.TryGetLocalDocument<JournalTestState>("snap-discovered-1").ShouldBeNull();
+        orchB.TryGetLocalDocument<JournalTestState>("snap-discovered-2").ShouldBeNull();
+
+        var serializer = spB.GetRequiredService<ICrdtSerializer>();
+        var handlerB = spB.GetRequiredKeyedService<IApplicationPayloadHandler>("TestMesh");
+
+        var snapshotMsg = new CrdtSnapshotMessage("ReplicaA", registrySnapshotDto.SnapshotData, registrySnapshotDto.GlobalState);
+        var wrapper = new CrdtMessageWrapper(orchB.Registry.DocumentId, "CrdtSnapshot", serializer.SerializeToBytes(snapshotMsg));
+        var wrapperBytes = serializer.SerializeToBytes(wrapper);
+
+        // Act - Deliver the registry CrdtSnapshot to Node B
+        await handlerB.HandlePayloadAsync("TestMesh", new PeerId(Guid.NewGuid()), wrapperBytes, CancellationToken.None);
+
+        // Assert - ProcessSnapshotAsync merged the registry and automatically triggered SyncDocumentsAsync to promote both documents
+        orchB.TryGetLocalDocument<JournalTestState>("snap-discovered-1").ShouldNotBeNull();
+        orchB.TryGetLocalDocument<JournalTestState>("snap-discovered-2").ShouldNotBeNull();
+    }
+
+    [IntegrationFact]
+    public async Task CrdtInitializationService_WhenZeroDocumentCheckpointsSaved_ReconstructsRegistryAndChildDocumentsSolelyFromWalJournal()
+    {
+        // Arrange - Node 1 applies registry creation and document mutations, but NEVER runs CrdtCheckpointService
+        var walOnlyStorage = new MemoryCrdtStorage();
+
+        var sp1 = BuildNode("ReplicaWal", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(walOnlyStorage));
+        });
+
+        var scope1 = sp1.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaWal");
+        var orch1 = scope1.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orch1.InitializeAsync(CancellationToken.None);
+
+        await orch1.CreateDocumentAsync("wal-only-doc", "journal-doc", CancellationToken.None);
+        await orch1.SyncDocumentsAsync(CancellationToken.None);
+        await orch1.ApplyIntentAsync<JournalTestState>("wal-only-doc", new MapSetIntent("WalKey", "WalValue"), nameof(JournalTestState.DataMap), CancellationToken.None);
+
+        // Confirm no document checkpoint exists in storage before restart
+        var savedDocCheckpoint = await walOnlyStorage.LoadDocumentAsync<JournalTestState>("default", "wal-only-doc", CancellationToken.None);
+        savedDocCheckpoint.ShouldBeNull();
+
+        // Act - Cold-boot Node 2 against the WAL-only storage
+        var sp2 = BuildNode("ReplicaWal", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(walOnlyStorage));
+        });
+
+        var initService = sp2.GetServices<IHostedService>().OfType<CrdtInitializationService>().Single();
+        await initService.StartAsync(CancellationToken.None);
+
+        // Assert - Registry WAL ops were replayed first, child document was promoted, and child WAL ops were replayed onto it
+        var scope2 = sp2.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaWal");
+        var orch2 = scope2.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+
+        var recoveredDoc = orch2.TryGetLocalDocument<JournalTestState>("wal-only-doc");
+        recoveredDoc.ShouldNotBeNull();
+
+        var state = await recoveredDoc!.GetDocumentAsync(CancellationToken.None);
+        state.Data.DataMap.ShouldContainKeyAndValue("WalKey", "WalValue");
+    }
 }

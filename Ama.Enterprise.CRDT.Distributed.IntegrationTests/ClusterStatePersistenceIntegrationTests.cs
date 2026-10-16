@@ -499,4 +499,237 @@ public sealed class ClusterStatePersistenceIntegrationTests
         saveClusterCount.ShouldBeGreaterThanOrEqualTo(2, "The mutation should have bypassed the blind write rule triggering a persist.");
         saveDvvCount.ShouldBeGreaterThanOrEqualTo(2, "The DVV mutation should have bypassed the blind write rule triggering a persist.");
     }
+
+    [IntegrationFact]
+    public void ClusterStateTracker_UpdatePeerState_WhenPeerReconnectsWithNewNetworkId_ReplacesStaleSessionMapping()
+    {
+        // Arrange
+        var sp = BuildNode("Replica1");
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var tracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
+
+        var dvv = new DottedVersionVector();
+        dvv.Versions["RemoteReplica1"] = 5;
+        var map = new ShardVersionVectorMap { { "default", dvv } };
+
+        tracker.UpdatePeerState("RemoteReplica1", "OldNetworkId", map);
+        tracker.GetPeerIdByReplicaId("RemoteReplica1").ShouldBe("OldNetworkId");
+        tracker.GetReplicaIdByPeerId("OldNetworkId").ShouldBe("RemoteReplica1");
+
+        // Act - Peer reconnects with a new network session ID
+        dvv.Versions["RemoteReplica1"] = 6;
+        tracker.UpdatePeerState("RemoteReplica1", "NewNetworkId", map);
+
+        // Assert - 1:1 bidirectional mapping is enforced and old network ID is evicted
+        tracker.GetPeerIdByReplicaId("RemoteReplica1").ShouldBe("NewNetworkId");
+        tracker.GetReplicaIdByPeerId("NewNetworkId").ShouldBe("RemoteReplica1");
+        tracker.GetReplicaIdByPeerId("OldNetworkId").ShouldBeNull();
+    }
+
+    [IntegrationFact]
+    public async Task CrdtCheckpointService_ShouldDetectDotMutationsInDvv_WhenAvoidBlindWritesIsEnabled()
+    {
+        // Arrange
+        var saveDvvCount = 0;
+        var tcsFirstWrite = new TaskCompletionSource();
+        var tcsSecondWrite = new TaskCompletionSource();
+
+        var storageMock = new Mock<IDistributedCrdtStorage>();
+        storageMock.SetReturnsDefault(Task.CompletedTask);
+
+        storageMock.Setup(s => s.SaveClusterStateAsync(It.IsAny<string>(), It.IsAny<ClusterStateSnapshotDto>(), It.IsAny<CancellationToken>()))
+                   .Returns(Task.CompletedTask);
+
+        storageMock.Setup(s => s.SaveShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<ShardVersionVectorMap>(), It.IsAny<CancellationToken>()))
+                   .Callback(() =>
+                   {
+                       var count = Interlocked.Increment(ref saveDvvCount);
+                       if (count == 1) tcsFirstWrite.TrySetResult();
+                       if (count == 2) tcsSecondWrite.TrySetResult();
+                   })
+                   .Returns(Task.CompletedTask);
+
+        storageMock.Setup(s => s.GetJournalCountAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(0);
+
+        storageMock.Setup(s => s.LoadClusterStateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                   .ReturnsAsync((ClusterStateSnapshotDto?)null);
+
+        storageMock.Setup(s => s.GetAllJournaledOperationsAsync(It.IsAny<CancellationToken>()))
+                   .Returns(EmptyJournalStream());
+
+        storageMock.Setup(s => s.LoadShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(new ShardVersionVectorMap());
+
+        var sp = BuildNodeWithStorage("Replica1", storageMock.Object, services =>
+        {
+            services.Configure<DistributedCrdtOptions>(opt =>
+            {
+                opt.CheckpointIntervalSeconds = 1;
+                opt.AvoidBlindCheckpointWrites = true;
+            });
+        });
+
+        var initService = sp.GetServices<IHostedService>().OfType<CrdtInitializationService>().First();
+        await initService.StartAsync(CancellationToken.None);
+
+        var checkpointService = sp.GetServices<IHostedService>().OfType<CrdtCheckpointService>().First();
+
+        // Act
+        await checkpointService.StartAsync(CancellationToken.None);
+        await Task.WhenAny(tcsFirstWrite.Task, Task.Delay(5000));
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var context = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+
+        // Mutate ONLY the Dots collection (out-of-order causal dot) without changing Versions
+        lock (context.ShardVersionVectors)
+        {
+            if (!context.ShardVersionVectors.TryGetValue("system-document-registry", out var dvv))
+            {
+                dvv = new DottedVersionVector();
+                context.ShardVersionVectors["system-document-registry"] = dvv;
+            }
+            dvv.Add("ReplicaOutOfOrder", 5);
+        }
+
+        var completedSecond = await Task.WhenAny(tcsSecondWrite.Task, Task.Delay(5000));
+        await checkpointService.StopAsync(CancellationToken.None);
+
+        // Assert
+        completedSecond.ShouldBe(tcsSecondWrite.Task, "A mutation in DVV Dots should be detected and persisted even when contiguous Versions are unchanged.");
+        saveDvvCount.ShouldBeGreaterThanOrEqualTo(2);
+    }
+
+    [IntegrationFact]
+    public async Task CrdtCheckpointService_WhenStorageThrowsTransientException_RecoversOnSubsequentCycleAndRetainsDirtyState()
+    {
+        // Arrange
+        var dvvAttemptCount = 0;
+        var tcsRecoveredWrite = new TaskCompletionSource();
+
+        var storageMock = new Mock<IDistributedCrdtStorage>();
+        storageMock.SetReturnsDefault(Task.CompletedTask);
+
+        storageMock.Setup(s => s.SaveShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<ShardVersionVectorMap>(), It.IsAny<CancellationToken>()))
+                   .Returns<string, ShardVersionVectorMap, CancellationToken>((_, _, _) =>
+                   {
+                       var attempt = Interlocked.Increment(ref dvvAttemptCount);
+                       if (attempt == 1)
+                       {
+                           throw new InvalidOperationException("Simulated transient storage outage.");
+                       }
+
+                       tcsRecoveredWrite.TrySetResult();
+                       return Task.CompletedTask;
+                   });
+
+        storageMock.Setup(s => s.SaveClusterStateAsync(It.IsAny<string>(), It.IsAny<ClusterStateSnapshotDto>(), It.IsAny<CancellationToken>()))
+                   .Returns(Task.CompletedTask);
+
+        storageMock.Setup(s => s.GetJournalCountAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(0);
+
+        storageMock.Setup(s => s.LoadClusterStateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                   .ReturnsAsync((ClusterStateSnapshotDto?)null);
+
+        storageMock.Setup(s => s.GetAllJournaledOperationsAsync(It.IsAny<CancellationToken>()))
+                   .Returns(EmptyJournalStream());
+
+        storageMock.Setup(s => s.LoadShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(new ShardVersionVectorMap());
+
+        var sp = BuildNodeWithStorage("Replica1", storageMock.Object, services =>
+        {
+            services.Configure<DistributedCrdtOptions>(opt =>
+            {
+                opt.CheckpointIntervalSeconds = 1;
+                opt.AvoidBlindCheckpointWrites = true;
+            });
+        });
+
+        var initService = sp.GetServices<IHostedService>().OfType<CrdtInitializationService>().First();
+        await initService.StartAsync(CancellationToken.None);
+
+        var checkpointService = sp.GetServices<IHostedService>().OfType<CrdtCheckpointService>().First();
+
+        // Act
+        await checkpointService.StartAsync(CancellationToken.None);
+        var completed = await Task.WhenAny(tcsRecoveredWrite.Task, Task.Delay(5000));
+        await checkpointService.StopAsync(CancellationToken.None);
+
+        // Assert - First cycle threw, cache was not prematurely updated, and second cycle succeeded
+        completed.ShouldBe(tcsRecoveredWrite.Task, "Checkpoint service should survive a transient storage exception and retry on the next cycle.");
+        dvvAttemptCount.ShouldBeGreaterThanOrEqualTo(2);
+    }
+
+    [IntegrationFact]
+    public async Task CrdtCheckpointService_WhenShardAddedOrRemoved_DetectsMapKeyChangeWithAvoidBlindWrites()
+    {
+        // Arrange
+        var saveDvvCount = 0;
+        var tcsFirstWrite = new TaskCompletionSource();
+        var tcsSecondWrite = new TaskCompletionSource();
+
+        var storageMock = new Mock<IDistributedCrdtStorage>();
+        storageMock.SetReturnsDefault(Task.CompletedTask);
+
+        storageMock.Setup(s => s.SaveClusterStateAsync(It.IsAny<string>(), It.IsAny<ClusterStateSnapshotDto>(), It.IsAny<CancellationToken>()))
+                   .Returns(Task.CompletedTask);
+
+        storageMock.Setup(s => s.SaveShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<ShardVersionVectorMap>(), It.IsAny<CancellationToken>()))
+                   .Callback(() =>
+                   {
+                       var count = Interlocked.Increment(ref saveDvvCount);
+                       if (count == 1) tcsFirstWrite.TrySetResult();
+                       if (count == 2) tcsSecondWrite.TrySetResult();
+                   })
+                   .Returns(Task.CompletedTask);
+
+        storageMock.Setup(s => s.GetJournalCountAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(0);
+
+        storageMock.Setup(s => s.LoadClusterStateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                   .ReturnsAsync((ClusterStateSnapshotDto?)null);
+
+        storageMock.Setup(s => s.GetAllJournaledOperationsAsync(It.IsAny<CancellationToken>()))
+                   .Returns(EmptyJournalStream());
+
+        storageMock.Setup(s => s.LoadShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(new ShardVersionVectorMap());
+
+        var sp = BuildNodeWithStorage("Replica1", storageMock.Object, services =>
+        {
+            services.Configure<DistributedCrdtOptions>(opt =>
+            {
+                opt.CheckpointIntervalSeconds = 1;
+                opt.AvoidBlindCheckpointWrites = true;
+            });
+        });
+
+        var initService = sp.GetServices<IHostedService>().OfType<CrdtInitializationService>().First();
+        await initService.StartAsync(CancellationToken.None);
+
+        var checkpointService = sp.GetServices<IHostedService>().OfType<CrdtCheckpointService>().First();
+
+        // Act
+        await checkpointService.StartAsync(CancellationToken.None);
+        await Task.WhenAny(tcsFirstWrite.Task, Task.Delay(5000));
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var versionVectorManager = scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+
+        // Register a brand new empty shard in the map
+        versionVectorManager.EnsureShardRegistered("brand-new-shard");
+
+        var completedSecond = await Task.WhenAny(tcsSecondWrite.Task, Task.Delay(5000));
+        await checkpointService.StopAsync(CancellationToken.None);
+
+        // Assert
+        completedSecond.ShouldBe(tcsSecondWrite.Task, "Adding a new shard key to ShardVersionVectorMap should trigger a checkpoint save.");
+        saveDvvCount.ShouldBeGreaterThanOrEqualTo(2);
+    }
 }

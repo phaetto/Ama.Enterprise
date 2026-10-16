@@ -77,7 +77,7 @@ This repository includes interactive console applications that demonstrate the f
 
 *Tip: While running any showcase, type `clone` into the console. This will automatically start a new node process on a new port that instantly discovers and syncs with your primary node.*
 
-For additional advanced scenarios, tutorials, and complete sample projects, please check out the [Ama.Enterprise.Examples](https://github.com/amuste/Ama.Enterprise.Examples) repository.
+For additional advanced scenarios, tutorials, and complete sample projects, please check out the [Ama.Enterprise.Samples](https://github.com/phaetto/Ama.Enterprise.Samples) repository.
 
 ## Applications Provided Out-Of-The-Box
 

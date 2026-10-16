@@ -763,17 +763,24 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                     docState = currentDocument;
                 }
 
-                var propertySelector = GetOrAddPropertySelector(cmd.TargetProperty);
-                var operation = await cmd.Patcher!.GenerateOperationAsync(docState, propertySelector, cmd.Intent!, cmd.CancellationToken).ConfigureAwait(false);
-                generatedPatch = new CrdtPatch([operation]);
-                cmd.Patch = generatedPatch;
-
-                var result = await applicator.ApplyPatchAsync(docState, generatedPatch).ConfigureAwait(false);
-
-                lock (syncRoot)
+                try
                 {
-                    currentDocument = result.Document;
-                    isDirty = true;
+                    var propertySelector = GetOrAddPropertySelector(cmd.TargetProperty);
+                    var operation = await cmd.Patcher!.GenerateOperationAsync(docState, propertySelector, cmd.Intent!, cmd.CancellationToken).ConfigureAwait(false);
+                    generatedPatch = new CrdtPatch([operation]);
+                    cmd.Patch = generatedPatch;
+
+                    var result = await applicator.ApplyPatchAsync(docState, generatedPatch).ConfigureAwait(false);
+
+                    lock (syncRoot)
+                    {
+                        currentDocument = result.Document;
+                        isDirty = true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    throw;
                 }
             }, cmd.CancellationToken).ConfigureAwait(false);
 

@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
@@ -51,14 +52,23 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver, IDisposable
 
         peersJoinedCounter.Add(1, new KeyValuePair<string, object?>("mesh_id", eventMeshId));
 
-        if (node.Id.Value != Guid.Empty && Interlocked.CompareExchange(ref initialSyncTriggered, 1, 0) == 0)
+        if (node.Id.Value != Guid.Empty && Volatile.Read(ref initialSyncTriggered) == 0)
         {
-            logger.LogInformation("[{MeshId}] Connected to first peer {PeerId}. Triggering immediate DVV state sync for replica {ReplicaId}.", eventMeshId, node.Id, replicaId);
-
             try
             {
                 var scope = scopeManager.GetOrCreateScope(replicaId);
-                await scope.Orchestrator.DispatchAntiEntropyStateAsync(node.Id, cancellationToken).ConfigureAwait(false);
+                var topologyProvider = scope.ServiceProvider.GetRequiredService<IScopeTopologyProvider>();
+                var isExpected = await topologyProvider.IsPeerExpectedAsync(node.Id.Value.ToString(), cancellationToken).ConfigureAwait(false);
+                if (!isExpected)
+                {
+                    return;
+                }
+
+                if (Interlocked.CompareExchange(ref initialSyncTriggered, 1, 0) == 0)
+                {
+                    logger.LogInformation("[{MeshId}] Connected to first peer {PeerId}. Triggering immediate DVV state sync for replica {ReplicaId}.", eventMeshId, node.Id, replicaId);
+                    await scope.Orchestrator.DispatchAntiEntropyStateAsync(node.Id, cancellationToken).ConfigureAwait(false);
+                }
             }
             catch (Exception ex)
             {

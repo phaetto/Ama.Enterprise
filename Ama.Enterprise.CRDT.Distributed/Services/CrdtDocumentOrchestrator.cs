@@ -1210,6 +1210,18 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                                 bool shardStillInUse = string.Equals(registry.ShardId, demotedShardId, StringComparison.Ordinal);
                                 if (!shardStillInUse)
                                 {
+                                    foreach (var remainingDoc in activeDocuments.Values)
+                                    {
+                                        if (string.Equals(remainingDoc.ShardId, demotedShardId, StringComparison.Ordinal))
+                                        {
+                                            shardStillInUse = true;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if (!shardStillInUse)
+                                {
                                     versionVectorManager.RemoveShard(demotedShardId);
                                 }
 
@@ -1221,17 +1233,59 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 }
             }
 
-            var toRemove = new List<string>();
+            var toDelete = new List<string>();
+            var toDemote = new List<string>();
 
             foreach (var active in activeDocuments)
             {
-                if (!registryMap.TryGetValue(active.Key, out var entry) || entry.IsDeleted)
+                if (registryMap.TryGetValue(active.Key, out var entry))
                 {
-                    toRemove.Add(active.Key);
+                    if (entry.IsDeleted)
+                    {
+                        toDelete.Add(active.Key);
+                    }
+                }
+                else if (!await distributionManager.IsShardLocalAsync(active.Value.ShardId, cancellationToken).ConfigureAwait(false))
+                {
+                    toDemote.Add(active.Key);
                 }
             }
 
-            foreach (var docId in toRemove)
+            foreach (var docId in toDemote)
+            {
+                if (activeDocuments.TryRemove(docId, out var doc))
+                {
+                    var demotedShardId = doc.ShardId;
+                    try
+                    {
+                        if (doc is IDisposable d) d.Dispose();
+                    }
+                    catch (ObjectDisposedException) { }
+
+                    bool shardStillInUse = string.Equals(registry.ShardId, demotedShardId, StringComparison.Ordinal);
+                    if (!shardStillInUse)
+                    {
+                        foreach (var remainingDoc in activeDocuments.Values)
+                        {
+                            if (string.Equals(remainingDoc.ShardId, demotedShardId, StringComparison.Ordinal))
+                            {
+                                shardStillInUse = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!shardStillInUse)
+                    {
+                        versionVectorManager.RemoveShard(demotedShardId);
+                    }
+
+                    changed = true;
+                    logger.LogInformation("Removed CRDT document footprint: {DocumentId}", docId);
+                }
+            }
+
+            foreach (var docId in toDelete)
             {
                 shardIdCache.TryRemove(docId, out _);
 
@@ -1246,6 +1300,18 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                     await storage.DeleteDocumentAsync(shardId, docId, cancellationToken).ConfigureAwait(false);
                     
                     bool shardStillInUse = string.Equals(registry.ShardId, shardId, StringComparison.Ordinal);
+                    if (!shardStillInUse)
+                    {
+                        foreach (var remainingDoc in activeDocuments.Values)
+                        {
+                            if (string.Equals(remainingDoc.ShardId, shardId, StringComparison.Ordinal))
+                            {
+                                shardStillInUse = true;
+                                break;
+                            }
+                        }
+                    }
+
                     if (!shardStillInUse)
                     {
                         versionVectorManager.RemoveShard(shardId);

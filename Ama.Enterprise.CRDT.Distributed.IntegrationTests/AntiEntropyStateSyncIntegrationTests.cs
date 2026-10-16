@@ -320,4 +320,257 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         // Should not send direct payload because remote vector covered our local operations
         mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never());
     }
+
+    [IntegrationFact]
+    public async Task ProcessStateSyncAsync_ShouldIgnoreUninstantiatedRemoteShards_WithoutSendingFalseSnapshots()
+    {
+        // Arrange
+        var mockSender = new Mock<IDirectMessageSender>();
+        var capturedDirectSends = new List<ReadOnlyMemory<byte>>();
+        mockSender.Setup(p => p.SendDirectAsync(It.IsAny<PeerId>(), Capture.In(capturedDirectSends), It.IsAny<CancellationToken>()))
+               .Returns(Task.CompletedTask);
+
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var serializer = sp.GetRequiredService<ICrdtSerializer>();
+
+        // Remote advertises a shard "uninstantiated-shard" that local node does not have active documents for
+        var remoteState = new ShardVersionVectorMap
+        {
+            ["uninstantiated-shard"] = new DottedVersionVector(),
+            [orchestrator.Registry.DocumentId] = new DottedVersionVector()
+        };
+
+        var syncMsg = new CrdtStateSyncMessage("RemoteReplica", remoteState);
+        var syncBytes = serializer.SerializeToBytes(syncMsg);
+        var wrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytes);
+        var wrapperBytes = serializer.SerializeToBytes(wrapper);
+
+        // Act
+        await handler.HandlePayloadAsync(TestMeshId, new PeerId(Guid.NewGuid()), wrapperBytes, CancellationToken.None);
+
+        // Assert - No snapshots or patches should be sent for the uninstantiated shard
+        capturedDirectSends.ShouldBeEmpty();
+    }
+
+    [IntegrationFact]
+    public async Task ProcessProxyRpcPayloadsAsync_ShouldLazilyPromoteLocalDocument_WhenDirectRpcOutracesRegistryGossip()
+    {
+        // Arrange
+        var mockSender = new Mock<IDirectMessageSender>();
+        var capturedDirectSends = new List<ReadOnlyMemory<byte>>();
+        mockSender.Setup(p => p.SendDirectAsync(It.IsAny<PeerId>(), Capture.In(capturedDirectSends), It.IsAny<CancellationToken>()))
+               .Returns(Task.CompletedTask);
+
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        // Document "lazy-rpc-doc" is NOT created in the registry yet
+        orchestrator.TryGetLocalDocument<SyncTestState>("lazy-rpc-doc").ShouldBeNull();
+
+        var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var serializer = sp.GetRequiredService<ICrdtSerializer>();
+
+        var intent = new MapSetIntent("RpcKey", "RpcVal");
+        var correlationId = Guid.NewGuid();
+        var req = new CrdtIntentForwardRequestDto
+        {
+            CorrelationId = correlationId,
+            DocumentId = "lazy-rpc-doc",
+            SerializedIntent = serializer.SerializeToBytes<IOperationIntent>(intent),
+            IntentTypeAlias = nameof(MapSetIntent),
+            TargetProperty = nameof(SyncTestState.DataMap),
+            DocumentTypeAlias = "sync-doc-1"
+        };
+
+        var reqBytes = serializer.SerializeToBytes(req);
+        var wrapper = new CrdtMessageWrapper("lazy-rpc-doc", "CrdtIntentReq", reqBytes, "sync-doc-1");
+        var wrapperBytes = serializer.SerializeToBytes(wrapper);
+
+        // Act - Send RPC intent before registry gossip arrives
+        await handler.HandlePayloadAsync(TestMeshId, new PeerId(Guid.NewGuid()), wrapperBytes, CancellationToken.None);
+
+        // Assert - Document was lazily promoted and the intent succeeded
+        var promotedDoc = orchestrator.TryGetLocalDocument<SyncTestState>("lazy-rpc-doc");
+        promotedDoc.ShouldNotBeNull();
+
+        var docState = await promotedDoc!.GetDocumentAsync(CancellationToken.None);
+        docState.Data.DataMap.ShouldContainKeyAndValue("RpcKey", "RpcVal");
+
+        capturedDirectSends.Count.ShouldBe(1);
+        var resWrapper = serializer.DeserializeFromBytes<CrdtMessageWrapper>(capturedDirectSends[0].ToArray());
+        resWrapper.MessageType.ShouldBe("CrdtIntentRes");
+        var resDto = serializer.DeserializeFromBytes<CrdtIntentForwardResponseDto>(resWrapper.Payload!);
+        resDto.CorrelationId.ShouldBe(correlationId);
+        resDto.IsSuccess.ShouldBeTrue();
+    }
+
+    [IntegrationFact]
+    public async Task ProcessPatchAsync_ShouldLazilyRegisterUnknownSenderInClusterTracker_AndPromoteDocument_WhenPatchArrivesBeforeStateSync()
+    {
+        // Arrange
+        var sp = BuildNode("Replica1");
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        var remoteNodeSp = BuildNode("RemoteGossipReplica");
+        var remoteScope = remoteNodeSp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("RemoteGossipReplica");
+        var remoteOrch = remoteScope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var remoteStorage = remoteScope.ServiceProvider.GetRequiredService<IDistributedCrdtStorage>();
+        await remoteOrch.InitializeAsync(CancellationToken.None);
+
+        await remoteOrch.CreateDocumentAsync("gossip-first-doc", "sync-doc-1", CancellationToken.None);
+        await remoteOrch.SyncDocumentsAsync(CancellationToken.None);
+        await remoteOrch.ApplyIntentAsync<SyncTestState>("gossip-first-doc", new MapSetIntent("FastKey", "FastValue"), nameof(SyncTestState.DataMap), CancellationToken.None);
+
+        var remoteOps = await remoteStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
+        var docOps = remoteOps.Where(o => o.DocumentId == "gossip-first-doc").Select(o => o.Operation).ToArray();
+        docOps.ShouldNotBeEmpty();
+
+        var serializer = sp.GetRequiredService<ICrdtSerializer>();
+        var patchMsg = new CrdtPatchMessage("RemoteGossipReplica", new CrdtPatch(docOps));
+        var patchBytes = serializer.SerializeToBytes(patchMsg);
+        var wrapper = new CrdtMessageWrapper("gossip-first-doc", "CrdtPatch", patchBytes, "sync-doc-1");
+        var wrapperBytes = serializer.SerializeToBytes(wrapper);
+
+        var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var senderPeerId = new PeerId(Guid.NewGuid());
+
+        // Verify Replica1 knows neither the peer nor the document before the patch arrives
+        scope.ClusterTracker.GetPeerIdByReplicaId("RemoteGossipReplica").ShouldBeNull();
+        orchestrator.TryGetLocalDocument<SyncTestState>("gossip-first-doc").ShouldBeNull();
+
+        // Act - Deliver gossip patch before any CrdtSync or registry update
+        await handler.HandlePayloadAsync(TestMeshId, senderPeerId, wrapperBytes, CancellationToken.None);
+
+        // Assert - Sender is registered in ClusterTracker and document is lazily promoted with the patch applied
+        scope.ClusterTracker.GetPeerIdByReplicaId("RemoteGossipReplica").ShouldBe(senderPeerId.Value.ToString());
+        scope.ClusterTracker.GetReplicaIdByPeerId(senderPeerId.Value.ToString()).ShouldBe("RemoteGossipReplica");
+
+        var promotedDoc = orchestrator.TryGetLocalDocument<SyncTestState>("gossip-first-doc");
+        promotedDoc.ShouldNotBeNull();
+        var docState = await promotedDoc!.GetDocumentAsync(CancellationToken.None);
+        docState.Data.DataMap.ShouldContainKeyAndValue("FastKey", "FastValue");
+    }
+
+    [IntegrationFact]
+    public async Task DistributedCrdtDocument_ActiveSyncDebounce_ShouldCoalesceRapidMutationsIntoSingleBatchedPatchBroadcast()
+    {
+        // Arrange
+        var mockP2p = new Mock<IP2pAlgorithm>();
+        var capturedBroadcasts = new List<ReadOnlyMemory<byte>>();
+        mockP2p.Setup(p => p.BroadcastAsync(Capture.In(capturedBroadcasts), It.IsAny<CancellationToken>()))
+               .Returns(Task.CompletedTask);
+
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.Configure<DistributedCrdtOptions>(opt =>
+            {
+                opt.ActiveSyncEnabled = true;
+                opt.ActiveSyncDebounceMilliseconds = 150;
+            });
+            services.Replace(ServiceDescriptor.Singleton(mockP2p.Object));
+        }, activeSync: true);
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var serializer = sp.GetRequiredService<ICrdtSerializer>();
+
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
+        // Wait for the registry creation debounce timer to flush and clear captured broadcasts
+        await Task.Delay(300);
+        capturedBroadcasts.Clear();
+
+        // Act - Apply 5 rapid mutations well within the 150ms debounce window
+        for (int i = 0; i < 5; i++)
+        {
+            var intent = new MapSetIntent($"DebounceKey_{i}", $"Val_{i}");
+            await orchestrator.ApplyIntentAsync<SyncTestState>("sync-doc-1", intent, nameof(SyncTestState.DataMap), CancellationToken.None);
+        }
+
+        // Wait for the single debounced timer callback to fire
+        await Task.Delay(350);
+
+        // Assert - All 5 operations were coalesced into a single CrdtPatch broadcast for sync-doc-1
+        var docBroadcasts = capturedBroadcasts
+            .Select(b => serializer.DeserializeFromBytes<CrdtMessageWrapper>(b.ToArray()))
+            .Where(w => w.DocumentId == "sync-doc-1" && w.MessageType == "CrdtPatch")
+            .ToList();
+
+        docBroadcasts.Count.ShouldBe(1);
+        var batchedPatch = serializer.DeserializeFromBytes<CrdtPatchMessage>(docBroadcasts[0].Payload!);
+        batchedPatch.Patch.Operations.Count.ShouldBe(5);
+    }
+
+    [IntegrationFact]
+    public async Task CrdtAntiEntropyService_AdaptiveStartupWindow_ShouldExecuteRapidCyclesBeforeTransitioningToNormalInterval()
+    {
+        // Arrange
+        var dispatchCount = 0;
+        var tcsTwoCycles = new TaskCompletionSource();
+        var mockSender = new Mock<IDirectMessageSender>();
+        mockSender.Setup(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()))
+            .Callback(() =>
+            {
+                if (Interlocked.Increment(ref dispatchCount) >= 2)
+                {
+                    tcsTwoCycles.TrySetResult();
+                }
+            })
+            .Returns(Task.CompletedTask);
+
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.Configure<DistributedCrdtOptions>(opt =>
+            {
+                opt.AntiEntropyInitialDelaySeconds = 0;
+                opt.AntiEntropyInitialMaxJitterMilliseconds = 0;
+                opt.AntiEntropyStartupDurationSeconds = 10;
+                opt.AntiEntropyStartupIntervalSeconds = 1;
+                opt.AntiEntropyIntervalSeconds = 60; // Normal interval is very long
+            });
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        await scope.Orchestrator.InitializeAsync(CancellationToken.None);
+
+        var peerRegistry = sp.GetRequiredService<IPeerRegistry>();
+        var peerNode = new PeerNode(new PeerId(Guid.NewGuid()), new TcpPeerEndpoint("127.0.0.1", 5000));
+        await peerRegistry.AddOrUpdatePeerAsync(TestMeshId, peerNode, PeerStatus.Active, CancellationToken.None);
+
+        var antiEntropyService = sp.GetServices<IHostedService>().OfType<CrdtAntiEntropyService>().Single();
+
+        // Act
+        await antiEntropyService.StartAsync(CancellationToken.None);
+        var completed = await Task.WhenAny(tcsTwoCycles.Task, Task.Delay(3500));
+        await antiEntropyService.StopAsync(CancellationToken.None);
+
+        // Assert - At least 2 cycles ran within 3.5s using the 1s startup interval instead of blocking on the 60s normal interval
+        completed.ShouldBe(tcsTwoCycles.Task);
+        dispatchCount.ShouldBeGreaterThanOrEqualTo(2);
+    }
 }

@@ -297,4 +297,107 @@ public sealed class ScopeTopologyProviderIntegrationTests
         // Ensure the data operations were collected
         opsAfterCheckpoint.Any(o => o.DocumentId == "topo-doc").ShouldBeFalse();
     }
+
+    [IntegrationFact]
+    public async Task Orchestrator_DispatchAntiEntropyStateAsync_ExplicitUnexpectedPeerOverload_ShouldDropDispatch()
+    {
+        // Arrange
+        var topologyProvider = new TestTopologyProvider();
+        var unexpectedPeerGuid = Guid.NewGuid();
+
+        var mockSender = new Mock<IDirectMessageSender>();
+        var sp = BuildNode("Replica1", topologyProvider, services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        // Act - Directly invoke the targeted PeerId overload with an unexpected peer and an empty PeerId
+        await orchestrator.DispatchAntiEntropyStateAsync(new PeerId(unexpectedPeerGuid), CancellationToken.None);
+        await orchestrator.DispatchAntiEntropyStateAsync(new PeerId(Guid.Empty), CancellationToken.None);
+
+        // Assert - Neither call should dispatch a message over the network
+        mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    [IntegrationFact]
+    public async Task CrdtTopologyObserver_WhenUnexpectedPeerJoins_DropsInitialSync_AndStillSyncsWhenExpectedPeerJoins()
+    {
+        // Arrange
+        var topologyProvider = new TestTopologyProvider();
+        var unexpectedPeerGuid = Guid.NewGuid();
+        var expectedPeerGuid = Guid.NewGuid();
+        topologyProvider.ExpectedPeers.Add(expectedPeerGuid.ToString());
+
+        var mockSender = new Mock<IDirectMessageSender>();
+        var sp = BuildNode("Replica1", topologyProvider, services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        await scope.Orchestrator.InitializeAsync(CancellationToken.None);
+
+        var peerRegistry = sp.GetRequiredService<IPeerRegistry>();
+        var observer = sp.GetServices<IPeerTopologyObserver>().OfType<Services.P2p.CrdtTopologyObserver>().Single();
+
+        var unexpectedNode = new PeerNode(new PeerId(unexpectedPeerGuid), new TcpPeerEndpoint("127.0.0.1", 5001));
+        await peerRegistry.AddOrUpdatePeerAsync(TestMeshId, unexpectedNode, PeerStatus.Active, CancellationToken.None);
+
+        // Act 1 - Unexpected peer joins first
+        await observer.OnPeerJoinedAsync(TestMeshId, unexpectedNode, CancellationToken.None);
+
+        // Assert 1 - No direct sync was sent to the unexpected peer
+        mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never());
+
+        // Remove unexpected peer so the active peer count returns to 1 when the expected peer joins
+        await peerRegistry.RemovePeerAsync(TestMeshId, unexpectedNode.Id, CancellationToken.None);
+
+        var expectedNode = new PeerNode(new PeerId(expectedPeerGuid), new TcpPeerEndpoint("127.0.0.1", 5002));
+        await peerRegistry.AddOrUpdatePeerAsync(TestMeshId, expectedNode, PeerStatus.Active, CancellationToken.None);
+
+        // Act 2 - Expected peer joins
+        await observer.OnPeerJoinedAsync(TestMeshId, expectedNode, CancellationToken.None);
+
+        // Assert 2 - Expected peer receives the targeted anti-entropy state sync
+        mockSender.Verify(p => p.SendDirectAsync(It.Is<PeerId>(id => id.Value == expectedPeerGuid), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    [IntegrationFact]
+    public async Task CrdtTopologyObserver_WhenPeerLeaves_UnmapsNetworkSessionIdWhilePreservingPeerDvvState()
+    {
+        // Arrange
+        var topologyProvider = new TestTopologyProvider();
+        var peerGuid = Guid.NewGuid();
+        topologyProvider.ExpectedPeers.Add(peerGuid.ToString());
+
+        var sp = BuildNode("Replica1", topologyProvider);
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        await scope.Orchestrator.InitializeAsync(CancellationToken.None);
+
+        var dvv = new DottedVersionVector();
+        dvv.Versions["ReplicaRemote"] = 42;
+        scope.ClusterTracker.UpdatePeerState("ReplicaRemote", peerGuid.ToString(), new ShardVersionVectorMap { { "default", dvv } });
+
+        var observer = sp.GetServices<IPeerTopologyObserver>().OfType<Services.P2p.CrdtTopologyObserver>().Single();
+        var peerNode = new PeerNode(new PeerId(peerGuid), new TcpPeerEndpoint("127.0.0.1", 5003));
+
+        // Act
+        await observer.OnPeerDepartedAsync(TestMeshId, peerNode.Id, CancellationToken.None);
+
+        // Assert - Ephemeral network session mapping is removed, but the replica's DVV state remains preserved
+        scope.ClusterTracker.GetReplicaIdByPeerId(peerGuid.ToString()).ShouldBeNull();
+        scope.ClusterTracker.GetPeerIdByReplicaId("ReplicaRemote").ShouldBeNull();
+
+        var preservedStates = scope.ClusterTracker.GetClusterStates();
+        preservedStates.Count.ShouldBe(1);
+        preservedStates[0]["default"].Versions["ReplicaRemote"].ShouldBe(42);
+    }
 }

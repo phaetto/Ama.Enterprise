@@ -330,4 +330,164 @@ public sealed class ConcurrencyIntegrationTests
         finalDocs.Count.ShouldBe(1);
         finalDocs[0].DocumentId.ShouldBe("system-document-registry");
     }
+
+    [IntegrationFact]
+    public async Task CrdtDocumentOrchestrator_ConcurrentFireAndForgetAndAcknowledgedIntents_ShouldConvergeWithoutDroppingOperations()
+    {
+        // Arrange
+        var serviceProvider = BuildNode("Replica1");
+        var scopeManager = serviceProvider.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var dvvManager = scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        const int DocCount = 10;
+        const int OpsPerDoc = 20;
+
+        for (int d = 0; d < DocCount; d++)
+        {
+            await orchestrator.CreateDocumentAsync($"ff-doc-{d}", "concurrent-doc", CancellationToken.None);
+        }
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
+        // Act - Mix FireAndForget and Acknowledged intents concurrently across all documents sharing the "default" shard
+        var tasks = new List<Task>();
+        for (int d = 0; d < DocCount; d++)
+        {
+            var docId = $"ff-doc-{d}";
+            for (int op = 0; op < OpsPerDoc; op++)
+            {
+                var currentOp = op;
+                tasks.Add(Task.Run(async () =>
+                {
+                    var mode = currentOp % 2 == 0
+                        ? Models.IntentDeliveryMode.FireAndForget
+                        : Models.IntentDeliveryMode.Acknowledged;
+
+                    var intent = new Ama.CRDT.Models.Intents.SetIntent($"Val_{currentOp}");
+                    await orchestrator.ApplyIntentAsync<ConcurrencyTestState>(docId, intent, nameof(ConcurrencyTestState.Data), mode, CancellationToken.None);
+                }));
+            }
+        }
+
+        await Task.WhenAll(tasks);
+
+        // Flush each document queue with a final Acknowledged intent so all preceding FireAndForget commands have drained
+        for (int d = 0; d < DocCount; d++)
+        {
+            var finalIntent = new Ama.CRDT.Models.Intents.SetIntent($"Final_{d}");
+            await orchestrator.ApplyIntentAsync<ConcurrencyTestState>(
+                $"ff-doc-{d}",
+                finalIntent,
+                nameof(ConcurrencyTestState.Data),
+                Models.IntentDeliveryMode.Acknowledged,
+                CancellationToken.None);
+        }
+
+        // Assert - Every single operation incremented the shard clock contiguously with zero gaps or lost dots
+        var expectedTotalOps = (DocCount * OpsPerDoc) + DocCount;
+        var shardSnapshot = await dvvManager.GetFullSnapshotAsync(CancellationToken.None);
+
+        shardSnapshot.ShouldContainKey("default");
+        shardSnapshot["default"].Versions["Replica1"].ShouldBe(expectedTotalOps);
+        (shardSnapshot["default"].Dots.TryGetValue("Replica1", out var dots) ? dots.Count : 0).ShouldBe(0);
+    }
+
+    [IntegrationFact]
+    public async Task DistributedCrdtDocument_SmallBoundedChannelCapacity_AppliesBackpressureWithoutDroppingOperationsOrDeadlocking()
+    {
+        // Arrange - Set a very small bounded channel capacity (4) to force BoundedChannelFullMode.Wait backpressure
+        var serviceProvider = BuildNode("Replica1", services =>
+        {
+            services.Configure<Models.DistributedCrdtOptions>(opt =>
+            {
+                opt.ChannelCapacity = 4;
+            });
+        });
+
+        var scopeManager = serviceProvider.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var dvvManager = scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        await orchestrator.CreateDocumentAsync("bounded-doc", "concurrent-doc", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
+        const int TotalWriters = 80;
+
+        // Act - 80 concurrent writers flood a channel of capacity 4 with mixed intents, snapshots, and checkpoints
+        var tasks = Enumerable.Range(0, TotalWriters).Select(i => Task.Run(async () =>
+        {
+            var mode = i % 3 == 0
+                ? Models.IntentDeliveryMode.FireAndForget
+                : Models.IntentDeliveryMode.Acknowledged;
+
+            var intent = new Ama.CRDT.Models.Intents.SetIntent($"Backpressure_{i}");
+            await orchestrator.ApplyIntentAsync<ConcurrencyTestState>("bounded-doc", intent, nameof(ConcurrencyTestState.Data), mode, CancellationToken.None);
+
+            if (i % 10 == 0)
+            {
+                var doc = orchestrator.TryGetLocalDocument<ConcurrencyTestState>("bounded-doc")!;
+                _ = await doc.GetSnapshotDataAsync(CancellationToken.None);
+                await doc.CheckpointAsync(CancellationToken.None);
+            }
+        })).ToArray();
+
+        await Task.WhenAll(tasks);
+
+        // Drain any remaining FireAndForget commands with one final Acknowledged intent
+        await orchestrator.ApplyIntentAsync<ConcurrencyTestState>(
+            "bounded-doc",
+            new Ama.CRDT.Models.Intents.SetIntent("FinalDrain"),
+            nameof(ConcurrencyTestState.Data),
+            Models.IntentDeliveryMode.Acknowledged,
+            CancellationToken.None);
+
+        // Assert - All 80 + 1 operations were processed without loss
+        var dvv = await dvvManager.GetFullSnapshotAsync(CancellationToken.None);
+        dvv["default"].Versions["Replica1"].ShouldBe(TotalWriters + 1);
+    }
+
+    [IntegrationFact]
+    public async Task CrdtDocumentOrchestrator_ConcurrentLazyPromotionFromMultipleThreads_InstantiatesSingleDocumentAndAppliesAllIntents()
+    {
+        // Arrange
+        var serviceProvider = BuildNode("Replica1");
+        var scopeManager = serviceProvider.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var dvvManager = scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        // Verify document is not yet in activeDocuments or Registry
+        orchestrator.TryGetLocalDocument<ConcurrencyTestState>("race-promote-doc").ShouldBeNull();
+
+        const int ConcurrentCallers = 50;
+
+        // Act - 50 concurrent threads simultaneously trigger lazy promotion and intent application on the same uncreated document
+        var tasks = Enumerable.Range(0, ConcurrentCallers).Select(i => Task.Run(async () =>
+        {
+            var intent = new Ama.CRDT.Models.Intents.SetIntent($"RaceVal_{i}");
+            return await orchestrator.ApplyIntentAsync<ConcurrencyTestState>(
+                "race-promote-doc",
+                intent,
+                nameof(ConcurrencyTestState.Data),
+                Models.IntentDeliveryMode.Acknowledged,
+                CancellationToken.None);
+        })).ToArray();
+
+        var results = await Task.WhenAll(tasks);
+
+        // Assert - Every caller succeeded, only 1 instance exists, and the shard clock advanced exactly 50 times
+        results.ShouldAllBe(r => r);
+
+        var activeDocs = orchestrator.GetActiveDocuments().Where(d => d.DocumentId == "race-promote-doc").ToList();
+        activeDocs.Count.ShouldBe(1);
+
+        var dvv = await dvvManager.GetFullSnapshotAsync(CancellationToken.None);
+        dvv["default"].Versions["Replica1"].ShouldBe(ConcurrentCallers);
+    }
 }

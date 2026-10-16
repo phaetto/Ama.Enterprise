@@ -360,6 +360,135 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         tracker.IsReplicaTombstoned("ReplicaActive").ShouldBeTrue();
     }
 
+    [IntegrationFact]
+    public async Task TwoReplicas_ShardedRemoteReadAndIntentForwarding_ShouldLazilyPromoteOnOwnerAndExecuteViaRpc()
+    {
+        // Arrange - NodeA owns none of the data shards, NodeB owns "default" shard
+        var nodeA = BuildNodeWithCustomSharding("ReplicaA", isDataShardLocal: false);
+        var nodeB = BuildNodeWithCustomSharding("ReplicaB", isDataShardLocal: true);
+
+        WireMesh(nodeA, nodeB);
+
+        var scopeA = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeA.ReplicaId);
+        var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchA.InitializeAsync(CancellationToken.None);
+
+        var scopeB = nodeB.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeB.ReplicaId);
+        var orchB = scopeB.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchB.InitializeAsync(CancellationToken.None);
+
+        // Register peer mapping on Node A so RPC forwarding knows how to reach ReplicaB
+        scopeA.ClusterTracker.UpdatePeerState("ReplicaB", nodeB.PeerId.Value.ToString(), new ShardVersionVectorMap());
+        scopeB.ClusterTracker.UpdatePeerState("ReplicaA", nodeA.PeerId.Value.ToString(), new ShardVersionVectorMap());
+
+        // Act - Node A (non-owner) forwards an intent for "rpc-sharded-doc" before even creating it in the registry
+        var intent = new MapSetIntent("RemoteKey", "RemoteValue");
+        var applied = await orchA.ApplyIntentAsync<SharedTestState>("rpc-sharded-doc", intent, nameof(SharedTestState.DataMap), IntentDeliveryMode.Acknowledged, CancellationToken.None);
+
+        // Assert - Intent was forwarded over P2P RPC, lazily promoted on Node B, and acknowledged back to Node A
+        applied.ShouldBeTrue();
+        orchA.TryGetLocalDocument<SharedTestState>("rpc-sharded-doc").ShouldBeNull();
+        orchB.TryGetLocalDocument<SharedTestState>("rpc-sharded-doc").ShouldNotBeNull();
+
+        // Act - Node A reads the document state remotely via RPC from Node B
+        var remoteReadDoc = await orchA.GetDocumentStateAsync<SharedTestState>("rpc-sharded-doc", CancellationToken.None);
+
+        // Assert
+        remoteReadDoc.Data.DataMap.ShouldContainKeyAndValue("RemoteKey", "RemoteValue");
+    }
+
+    [IntegrationFact]
+    public async Task TwoReplicas_ShardedRpcFailover_WhenFirstTargetReplicaTimesOut_RetriesAndSucceedsOnHealthyReplica()
+    {
+        // Arrange - Target list for shard has an unresponsive replica ("UnresponsiveReplica") first, followed by healthy "ReplicaB"
+        var nodeA = BuildNodeWithCustomSharding(
+            "ReplicaA",
+            isDataShardLocal: false,
+            targetReplicas: ["UnresponsiveReplica", "ReplicaB"],
+            configureOptions: opt =>
+            {
+                opt.RpcTimeoutMilliseconds = 150;
+                opt.RpcMaxRetries = 3;
+                opt.RpcRetryDelayMilliseconds = 20;
+            });
+        var nodeB = BuildNodeWithCustomSharding("ReplicaB", isDataShardLocal: true, targetReplicas: ["UnresponsiveReplica", "ReplicaB"]);
+
+        WireMesh(nodeA, nodeB);
+
+        var scopeA = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeA.ReplicaId);
+        var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchA.InitializeAsync(CancellationToken.None);
+
+        var scopeB = nodeB.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeB.ReplicaId);
+        var orchB = scopeB.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchB.InitializeAsync(CancellationToken.None);
+
+        // Map both the unresponsive replica (pointing to a blackhole PeerId) and the healthy ReplicaB
+        var blackholePeerId = new PeerId(Guid.NewGuid());
+        scopeA.ClusterTracker.UpdatePeerState("UnresponsiveReplica", blackholePeerId.Value.ToString(), new ShardVersionVectorMap());
+        scopeA.ClusterTracker.UpdatePeerState("ReplicaB", nodeB.PeerId.Value.ToString(), new ShardVersionVectorMap());
+        scopeB.ClusterTracker.UpdatePeerState("ReplicaA", nodeA.PeerId.Value.ToString(), new ShardVersionVectorMap());
+
+        // Act 1 - Forward an acknowledged intent; attempt 0 hits UnresponsiveReplica first (times out), then fails over to ReplicaB
+        var intent = new MapSetIntent("FailoverKey", "FailoverSuccess");
+        var applied = await orchA.ApplyIntentAsync<SharedTestState>("failover-doc", intent, nameof(SharedTestState.DataMap), IntentDeliveryMode.Acknowledged, CancellationToken.None);
+
+        // Assert 1
+        applied.ShouldBeTrue();
+
+        // Act 2 - Read state remotely; also fails over past UnresponsiveReplica to ReplicaB
+        var remoteDoc = await orchA.GetDocumentStateAsync<SharedTestState>("failover-doc", CancellationToken.None);
+
+        // Assert 2
+        remoteDoc.Data.DataMap.ShouldContainKeyAndValue("FailoverKey", "FailoverSuccess");
+    }
+
+    [IntegrationFact]
+    public async Task TwoReplicas_ShardedFireAndForgetIntentForwarding_RoutesDirectWithoutWaitingForRpcAck()
+    {
+        // Arrange
+        var nodeA = BuildNodeWithCustomSharding("ReplicaA", isDataShardLocal: false);
+        var nodeB = BuildNodeWithCustomSharding("ReplicaB", isDataShardLocal: true);
+
+        WireMesh(nodeA, nodeB);
+
+        var scopeA = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeA.ReplicaId);
+        var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchA.InitializeAsync(CancellationToken.None);
+
+        var scopeB = nodeB.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeB.ReplicaId);
+        var orchB = scopeB.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchB.InitializeAsync(CancellationToken.None);
+
+        scopeA.ClusterTracker.UpdatePeerState("ReplicaB", nodeB.PeerId.Value.ToString(), new ShardVersionVectorMap());
+
+        // Act - Forward intent using FireAndForget from non-owner Node A
+        var intent = new MapSetIntent("FFRemoteKey", "FFRemoteVal");
+        var dispatched = await orchA.ApplyIntentAsync<SharedTestState>("ff-remote-doc", intent, nameof(SharedTestState.DataMap), IntentDeliveryMode.FireAndForget, CancellationToken.None);
+
+        // Assert - Returns true immediately and converges asynchronously on Node B without Node B sending any CrdtIntentRes back
+        dispatched.ShouldBeTrue();
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (!cts.Token.IsCancellationRequested)
+        {
+            var localDocB = orchB.TryGetLocalDocument<SharedTestState>("ff-remote-doc");
+            if (localDocB != null)
+            {
+                var docStateB = await localDocB.GetDocumentAsync(CancellationToken.None);
+                if (docStateB.Data.DataMap.ContainsKey("FFRemoteKey"))
+                {
+                    break;
+                }
+            }
+            await Task.Delay(50);
+        }
+
+        var finalDocB = await orchB.GetDocumentStateAsync<SharedTestState>("ff-remote-doc", CancellationToken.None);
+        finalDocB.Data.DataMap.ShouldContainKeyAndValue("FFRemoteKey", "FFRemoteVal");
+        nodeB.Sender.Verify(s => s.SendDirectAsync(nodeA.PeerId, It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private sealed record TestNode(
         IServiceProvider Sp, 
         Mock<IDirectMessageSender> Sender, 
@@ -404,6 +533,61 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         var sp = services.BuildServiceProvider();
 
         // Start all hosted services to explicitly bind the localized mesh orchestrations natively (wiring up Gossip bindings natively)
+        var hostedServices = sp.GetServices<IHostedService>().ToList();
+        foreach (var hs in hostedServices)
+        {
+            hs.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+        }
+
+        var node = new TestNode(sp, senderMock, gossipMock, peerId, replicaId, hostedServices);
+        _nodes.Add(node);
+        return node;
+    }
+
+    private TestNode BuildNodeWithCustomSharding(
+        string replicaId,
+        bool isDataShardLocal,
+        IReadOnlyList<string>? targetReplicas = null,
+        Action<DistributedCrdtOptions>? configureOptions = null)
+    {
+        var senderMock = new Mock<IDirectMessageSender>();
+        var gossipMock = new Mock<IP2pAlgorithm>();
+        var peerId = new PeerId(Guid.NewGuid());
+
+        var mockDist = new Mock<IShardDistributionManager>();
+        mockDist.Setup(d => d.IsShardLocalAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string shardId, CancellationToken _) =>
+                new ValueTask<bool>(shardId == "system-document-registry" || isDataShardLocal));
+        mockDist.Setup(d => d.GetTargetNodesForShardAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(targetReplicas ?? new List<string> { "ReplicaB" });
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddDistributedCrdtCore(opt =>
+        {
+            opt.ActiveSyncEnabled = true;
+            opt.AntiEntropyIntervalSeconds = 60;
+            opt.CheckpointIntervalSeconds = 60;
+            opt.PeerEvictionTtlSeconds = 0;
+
+            configureOptions?.Invoke(opt);
+        });
+        services.AddDistributedCrdtReplica(replicaId);
+
+        services.AddCrdt()
+                .AddCrdtAotContext(new MultiReplicaTestAotContext())
+                .AddCrdtJsonTypeInfoResolver(MultiReplicaTestJsonContext.Default);
+
+        services.AddDistributedDocumentType<SharedTestState>("shared-doc");
+        services.AddDistributedCrdtP2p("TestMesh", replicaId);
+
+        services.AddSingleton(senderMock.Object);
+        services.AddSingleton(gossipMock.Object);
+        services.AddSingleton<IP2pRpcCorrelator, P2pRpcCorrelator>();
+        services.AddScoped<IShardDistributionManager>(_ => mockDist.Object);
+
+        var sp = services.BuildServiceProvider();
+
         var hostedServices = sp.GetServices<IHostedService>().ToList();
         foreach (var hs in hostedServices)
         {

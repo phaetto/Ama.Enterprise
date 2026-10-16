@@ -2,8 +2,13 @@ namespace Ama.Enterprise.CRDT.Distributed.Extensions;
 
 using System;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using Ama.CRDT.Extensions;
 using Ama.CRDT.Models;
+using Ama.CRDT.Models.Intents;
+using Ama.CRDT.Models.Intents.Decorators;
 using Ama.CRDT.Services.Decorators;
 using Ama.CRDT.Services.GarbageCollection;
 using Ama.CRDT.Services.Providers;
@@ -76,7 +81,8 @@ public static class ServiceCollectionExtensions
                 .AddCrdtJsonTypeInfoResolver(DistributedCrdtP2pJsonContext.Default)
                 .AddCrdtJsonTypeInfoResolver(DistributedCrdtSystemJsonContext.Default)
                 .AddCrdtAotContext(new DistributedCrdtSystemAotContext())
-                .AddCrdtSerializableType<CrdtRegistryEntry>("crdt-registry-entry");
+                .AddCrdtSerializableType<CrdtRegistryEntry>("crdt-registry-entry")
+                .AddCrdtJsonModifier(ConfigureOperationIntentPolymorphism);
 
         // Provide memory storage as the default fallback mapped as scoped per replica instance.
         services.TryAddScoped<IDistributedCrdtStorage, MemoryCrdtStorage>();
@@ -202,5 +208,46 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IDistributedCrdtStorage, TStorage>();
         
         return services;
+    }
+
+    private static void ConfigureOperationIntentPolymorphism(JsonTypeInfo typeInfo)
+    {
+        if (typeInfo.Type != typeof(IOperationIntent))
+        {
+            return;
+        }
+
+        typeInfo.PolymorphismOptions ??= new JsonPolymorphismOptions
+        {
+            TypeDiscriminatorPropertyName = "$type",
+            IgnoreUnrecognizedTypeDiscriminators = true,
+            UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization
+        };
+
+        AddDerivedIntentType(typeInfo.PolymorphismOptions, typeof(AddIntent), "intent-add");
+        AddDerivedIntentType(typeInfo.PolymorphismOptions, typeof(AddVertexIntent), "intent-add-vertex");
+        AddDerivedIntentType(typeInfo.PolymorphismOptions, typeof(AddEdgeIntent), "intent-add-edge");
+        AddDerivedIntentType(typeInfo.PolymorphismOptions, typeof(ClearIntent), "intent-clear");
+        AddDerivedIntentType(typeInfo.PolymorphismOptions, typeof(EpochClearIntent), "intent-epoch-clear");
+        AddDerivedIntentType(typeInfo.PolymorphismOptions, typeof(IncrementIntent), "intent-increment");
+        AddDerivedIntentType(typeInfo.PolymorphismOptions, typeof(InsertIntent), "intent-insert");
+        AddDerivedIntentType(typeInfo.PolymorphismOptions, typeof(MapIncrementIntent), "intent-map-increment");
+        AddDerivedIntentType(typeInfo.PolymorphismOptions, typeof(MapRemoveIntent), "intent-map-remove");
+        AddDerivedIntentType(typeInfo.PolymorphismOptions, typeof(MapSetIntent), "intent-map-set");
+        AddDerivedIntentType(typeInfo.PolymorphismOptions, typeof(RemoveEdgeIntent), "intent-remove-edge");
+        AddDerivedIntentType(typeInfo.PolymorphismOptions, typeof(RemoveIntent), "intent-remove");
+        AddDerivedIntentType(typeInfo.PolymorphismOptions, typeof(RemoveValueIntent), "intent-remove-value");
+        AddDerivedIntentType(typeInfo.PolymorphismOptions, typeof(RemoveVertexIntent), "intent-remove-vertex");
+        AddDerivedIntentType(typeInfo.PolymorphismOptions, typeof(SetIndexIntent), "intent-set-index");
+        AddDerivedIntentType(typeInfo.PolymorphismOptions, typeof(SetIntent), "intent-set");
+        AddDerivedIntentType(typeInfo.PolymorphismOptions, typeof(VoteIntent), "intent-vote");
+    }
+
+    private static void AddDerivedIntentType(JsonPolymorphismOptions options, Type derivedType, string discriminator)
+    {
+        if (!options.DerivedTypes.Any(dt => dt.DerivedType == derivedType))
+        {
+            options.DerivedTypes.Add(new JsonDerivedType(derivedType, discriminator));
+        }
     }
 }
