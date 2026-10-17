@@ -8,6 +8,7 @@ using Ama.Enterprise.P2p.Models.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text;
 using Xunit;
@@ -533,6 +534,34 @@ public sealed class MessagePackSerializerIntegrationTests
         var typedResult = (SmartConventionPeerEndpoint)result;
         typedResult.ConventionPort.ShouldBe(9090);
         typedResult.ShouldBe(model);
+    }
+
+    [Fact]
+    public void SerializeDeserialize_ConcurrentDictionary_ReturnsEqualInstance()
+    {
+        // Arrange
+        var map = new ConcurrentDictionary<string, SimpleValueModel>();
+        map["node-1"] = new SimpleValueModel(1, "Alpha", true, 10.5, DateTime.UtcNow, Guid.NewGuid());
+        map["node-2"] = new SimpleValueModel(2, "Beta", false, 20.0, DateTime.UtcNow.AddMinutes(-5), Guid.NewGuid());
+
+        var model = new ConcurrentDictionaryModel(map);
+
+        // Act
+        var bytes = crdtSerializer.SerializeToBytes(model);
+        var result = crdtSerializer.DeserializeFromBytes<ConcurrentDictionaryModel>(bytes);
+
+        // Assert
+        result.ShouldNotBeNull();
+        result.ShouldBe(model);
+
+        // Also verify standalone top-level ConcurrentDictionary serialization
+        var directBytes = crdtSerializer.SerializeToBytes(map);
+        var directResult = crdtSerializer.DeserializeFromBytes<ConcurrentDictionary<string, SimpleValueModel>>(directBytes);
+
+        directResult.ShouldNotBeNull();
+        directResult.Count.ShouldBe(2);
+        directResult["node-1"].ShouldBe(map["node-1"]);
+        directResult["node-2"].ShouldBe(map["node-2"]);
     }
 
     private static ICrdtSerializer InitializeSerializer()

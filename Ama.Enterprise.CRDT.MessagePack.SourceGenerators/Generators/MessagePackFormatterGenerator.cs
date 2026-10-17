@@ -485,6 +485,8 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
                     return $"new global::MessagePack.Formatters.InterfaceReadOnlyCollectionFormatter<{arg0}>()";
                 case "System.Collections.Generic.Dictionary<TKey, TValue>":
                     return $"new global::MessagePack.Formatters.DictionaryFormatter<{arg0}, {arg1}>()";
+                case "System.Collections.Concurrent.ConcurrentDictionary<TKey, TValue>":
+                    return $"new global::MessagePack.Formatters.ConcurrentDictionaryFormatter<{arg0}, {arg1}>()";
                 case "System.Collections.Generic.IDictionary<TKey, TValue>":
                     return $"new global::MessagePack.Formatters.InterfaceDictionaryFormatter<{arg0}, {arg1}>()";
                 case "System.Collections.Generic.IReadOnlyDictionary<TKey, TValue>":

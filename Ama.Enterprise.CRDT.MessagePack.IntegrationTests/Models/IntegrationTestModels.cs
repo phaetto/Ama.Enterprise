@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.CRDT.MessagePack.UnitTests.Models;
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
@@ -616,6 +617,35 @@ public sealed class TolerantReaderPayloadV2 : IExtensibleDistributedPayload
 public sealed record SmartConventionPeerEndpoint(PeerId Id, int ConventionPort) : PeerEndpoint();
 
 /// <summary>
+/// Validates AOT serialization and deserialization of <see cref="ConcurrentDictionary{TKey, TValue}"/>.
+/// </summary>
+public sealed record ConcurrentDictionaryModel(
+    ConcurrentDictionary<string, SimpleValueModel> ConcurrentMap
+) : IEquatable<ConcurrentDictionaryModel>
+{
+    public bool Equals(ConcurrentDictionaryModel? other)
+    {
+        if (other is null) return false;
+        if (ConcurrentMap == null && other.ConcurrentMap != null) return false;
+        if (ConcurrentMap != null && other.ConcurrentMap == null) return false;
+        if (ConcurrentMap != null && other.ConcurrentMap != null)
+        {
+            if (ConcurrentMap.Count != other.ConcurrentMap.Count) return false;
+            foreach (var kvp in ConcurrentMap)
+            {
+                if (!other.ConcurrentMap.TryGetValue(kvp.Key, out var otherVal) || !kvp.Value.Equals(otherVal))
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    public override int GetHashCode() => 0;
+}
+
+/// <summary>
 /// AOT Source Generation bounds intentionally explicit triggering MessagePack mappings via Standard System.Text.Json metadata context boundaries.
 /// </summary>
 [JsonSerializable(typeof(SimpleValueModel))]
@@ -643,6 +673,7 @@ public sealed record SmartConventionPeerEndpoint(PeerId Id, int ConventionPort) 
 [JsonSerializable(typeof(TolerantReaderPayload))]
 [JsonSerializable(typeof(TolerantReaderPayloadV2))]
 [JsonSerializable(typeof(SmartConventionPeerEndpoint))]
+[JsonSerializable(typeof(ConcurrentDictionaryModel))]
 public partial class MessagePackIntegrationTestContext : JsonSerializerContext
 {
 }
