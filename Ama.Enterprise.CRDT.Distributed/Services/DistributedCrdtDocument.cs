@@ -686,6 +686,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 catch (Exception ex)
                 {
                     commandFailuresCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+                    logger.LogError(ex, "Error executing document command {CommandType} for document {DocumentId}.", cmd.Type, DocumentId);
                     if (cmd.IsFireAndForget)
                     {
                         ReturnCommand(cmd);
@@ -800,23 +801,31 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
     private async Task ProcessApplyPatchInternalAsync(PooledDocumentCommand<TState> cmd)
     {
-        await versionVectorManager.ExecuteShardLockedAsync(ShardId, async () =>
+        try
         {
-            CrdtDocument<TState> currentDoc;
-            lock (syncRoot) { currentDoc = currentDocument; }
-
-            var result = await applicator.ApplyPatchAsync(currentDoc, cmd.Patch!.Value).ConfigureAwait(false);
-
-            lock (syncRoot)
+            await versionVectorManager.ExecuteShardLockedAsync(ShardId, async () =>
             {
-                currentDocument = result.Document;
-                isDirty = true;
-            }
-        }, cmd.CancellationToken).ConfigureAwait(false);
+                CrdtDocument<TState> currentDoc;
+                lock (syncRoot) { currentDoc = currentDocument; }
 
-        patchAppliedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-        await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
-        await TriggerActiveSyncBroadcastAsync(cmd.Patch!.Value, cmd.CancellationToken).ConfigureAwait(false);
+                var result = await applicator.ApplyPatchAsync(currentDoc, cmd.Patch!.Value).ConfigureAwait(false);
+
+                lock (syncRoot)
+                {
+                    currentDocument = result.Document;
+                    isDirty = true;
+                }
+            }, cmd.CancellationToken).ConfigureAwait(false);
+
+            patchAppliedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
+            await TriggerActiveSyncBroadcastAsync(cmd.Patch!.Value, cmd.CancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to apply local patch to document {DocumentId}.", DocumentId);
+            throw;
+        }
     }
 
     private async Task TriggerActiveSyncBroadcastAsync(CrdtPatch patch, CancellationToken cancellationToken)
@@ -853,65 +862,99 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         if (opsToBroadcast.Count > 0)
         {
             var batchedPatch = new CrdtPatch(opsToBroadcast);
-            _ = Task.Run(() => NotifyPatchGeneratedAsync(batchedPatch, CancellationToken.None));
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await NotifyPatchGeneratedAsync(batchedPatch, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Unhandled exception while broadcasting debounced patch for document {DocumentId}.", DocumentId);
+                }
+            });
         }
     }
 
     private async Task ProcessApplyRemotePatchInternalAsync(PooledDocumentCommand<TState> cmd)
     {
-        await versionVectorManager.ExecuteShardLockedAsync(ShardId, async () =>
+        try
         {
-            CrdtDocument<TState> currentDoc;
-            lock (syncRoot) { currentDoc = currentDocument; }
-
-            var result = await applicator.ApplyPatchAsync(currentDoc, cmd.Patch!.Value).ConfigureAwait(false);
-
-            lock (syncRoot)
+            await versionVectorManager.ExecuteShardLockedAsync(ShardId, async () =>
             {
-                currentDocument = result.Document;
-                isDirty = true;
-            }
-        }, cmd.CancellationToken).ConfigureAwait(false);
+                CrdtDocument<TState> currentDoc;
+                lock (syncRoot) { currentDoc = currentDocument; }
 
-        patchAppliedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-        await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
+                var result = await applicator.ApplyPatchAsync(currentDoc, cmd.Patch!.Value).ConfigureAwait(false);
+
+                lock (syncRoot)
+                {
+                    currentDocument = result.Document;
+                    isDirty = true;
+                }
+            }, cmd.CancellationToken).ConfigureAwait(false);
+
+            patchAppliedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to apply remote patch to document {DocumentId}.", DocumentId);
+            throw;
+        }
     }
 
     private async Task ProcessApplyJournaledPatchInternalAsync(PooledDocumentCommand<TState> cmd)
     {
-        await versionVectorManager.ExecuteShardLockedAsync(ShardId, () =>
+        try
         {
-            CrdtDocument<TState> currentDoc;
-            lock (syncRoot) { currentDoc = currentDocument; }
-
-            var result = syncApplicator.ApplyPatch(currentDoc, cmd.Patch!.Value);
-
-            lock (syncRoot)
+            await versionVectorManager.ExecuteShardLockedAsync(ShardId, () =>
             {
-                currentDocument = result.Document;
-                isDirty = true;
-            }
+                CrdtDocument<TState> currentDoc;
+                lock (syncRoot) { currentDoc = currentDocument; }
 
-            return Task.CompletedTask;
-        }, cmd.CancellationToken).ConfigureAwait(false);
+                var result = syncApplicator.ApplyPatch(currentDoc, cmd.Patch!.Value);
 
-        patchAppliedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-        await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
+                lock (syncRoot)
+                {
+                    currentDocument = result.Document;
+                    isDirty = true;
+                }
+
+                return Task.CompletedTask;
+            }, cmd.CancellationToken).ConfigureAwait(false);
+
+            patchAppliedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to apply journaled patch to document {DocumentId}.", DocumentId);
+            throw;
+        }
     }
 
     private async Task ProcessGetSnapshotDataInternalAsync(PooledDocumentCommand<TState> cmd)
     {
-        await versionVectorManager.ExecuteShardLockedAsync(ShardId, () =>
+        try
         {
-            CrdtDocument<TState> currentDoc;
-            lock (syncRoot) { currentDoc = currentDocument; }
-            
-            var globalState = GetLocalState(); 
+            await versionVectorManager.ExecuteShardLockedAsync(ShardId, () =>
+            {
+                CrdtDocument<TState> currentDoc;
+                lock (syncRoot) { currentDoc = currentDocument; }
+                
+                var globalState = GetLocalState(); 
 
-            cmd.ResultSnapshotData = serializer.SerializeToBytes(currentDoc);
-            cmd.ResultGlobalState = globalState;
-            return Task.CompletedTask;
-        }, cmd.CancellationToken).ConfigureAwait(false);
+                cmd.ResultSnapshotData = serializer.SerializeToBytes(currentDoc);
+                cmd.ResultGlobalState = globalState;
+                return Task.CompletedTask;
+            }, cmd.CancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to get snapshot data for document {DocumentId}.", DocumentId);
+            throw;
+        }
     }
 
     private async Task ProcessMergeSnapshotInternalAsync(PooledDocumentCommand<TState> cmd)
@@ -1021,36 +1064,53 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             checkPointSavedCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
             logger.LogDebug("Saved checkpoint to storage for document {DocumentId}.", DocumentId);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             lock (syncRoot) { isDirty = true; }
+            logger.LogError(ex, "Failed to save checkpoint to storage for document {DocumentId}.", DocumentId);
             throw;
         }
     }
 
     private async Task ProcessEvictReplicaInternalAsync(PooledDocumentCommand<TState> cmd)
     {
-        lock (syncRoot)
+        try
         {
-            metadataManager.EvictReplica(currentDocument, cmd.ReplicaIdToEvict!);
-            isDirty = true;
+            lock (syncRoot)
+            {
+                metadataManager.EvictReplica(currentDocument, cmd.ReplicaIdToEvict!);
+                isDirty = true;
+            }
+            
+            replicaEvictionsCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
         }
-        
-        replicaEvictionsCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-        await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to evict replica {ReplicaId} from document {DocumentId}.", cmd.ReplicaIdToEvict, DocumentId);
+            throw;
+        }
     }
 
     private async Task ProcessResetLocalStateInternalAsync(CancellationToken cancellationToken)
     {
-        lock (syncRoot)
+        try
         {
-            var metadata = metadataManager.Initialize(initialState);
-            currentDocument = new CrdtDocument<TState>(initialState, metadata);
-            isDirty = true;
+            lock (syncRoot)
+            {
+                var metadata = metadataManager.Initialize(initialState);
+                currentDocument = new CrdtDocument<TState>(initialState, metadata);
+                isDirty = true;
+            }
+            
+            stateResetsCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
+            await NotifyStateChangedAsync(cancellationToken).ConfigureAwait(false);
+            logger.LogInformation("Performed a hard reset for document {DocumentId}.", DocumentId);
         }
-        
-        stateResetsCounter.Add(1, new KeyValuePair<string, object?>("document_id", DocumentId));
-        await NotifyStateChangedAsync(cancellationToken).ConfigureAwait(false);
-        logger.LogInformation("Performed a hard reset for document {DocumentId}.", DocumentId);
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to reset local state for document {DocumentId}.", DocumentId);
+            throw;
+        }
     }
 }

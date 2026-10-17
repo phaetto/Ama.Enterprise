@@ -9,6 +9,7 @@ using System.Threading.Channels;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
 using Ama.CRDT.Models.Intents;
+using Ama.CRDT.Models.Serialization;
 using Ama.CRDT.Services;
 using Ama.CRDT.Services.Providers;
 using Ama.CRDT.Services.Serialization;
@@ -401,6 +402,14 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         var rpcCorrelator = serviceProvider.GetRequiredService<IP2pRpcCorrelator>();
         var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
 
+        var activeNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
+        if (activeNodes == null || activeNodes.Count == 0)
+        {
+            var noNodesEx = new InvalidOperationException($"Cannot read state: no active nodes found for shard {shardId}.");
+            logger.LogError(noNodesEx, "Cannot read state for document {DocumentId}: no active nodes found for shard {ShardId}.", documentId, shardId);
+            throw noNodesEx;
+        }
+
         var maxRetries = Math.Max(1, options.RpcMaxRetries);
         var rpcTimeout = TimeSpan.FromMilliseconds(Math.Max(1, options.RpcTimeoutMilliseconds));
         var retryDelayMs = Math.Max(0, options.RpcRetryDelayMilliseconds);
@@ -408,10 +417,13 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         for (int attempt = 0; attempt < maxRetries; attempt++)
         {
-            var activeNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
-            if (activeNodes == null || activeNodes.Count == 0)
+            if (attempt > 0)
             {
-                throw new InvalidOperationException($"Cannot read state: no active nodes found for shard {shardId}.");
+                activeNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
+                if (activeNodes == null || activeNodes.Count == 0)
+                {
+                    break;
+                }
             }
 
             bool triedAnyPeer = false;
@@ -438,17 +450,28 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                     DocumentId = documentId,
                     DocumentTypeAlias = documentTypeAlias ?? string.Empty
                 };
+
                 var reqPayload = serializer.SerializeToBytes(req);
                 var wrapper = new CrdtMessageWrapper(documentId, "CrdtReadReq", reqPayload, documentTypeAlias);
                 var wrapperBytes = serializer.SerializeToBytes(wrapper);
 
-                logger.LogTrace("Requesting remote state for document {DocumentId} from replica {TargetReplica} (peer {TargetPeer}).", documentId, candidateReplica, candidatePeer);
+                logger.LogTrace("Requesting remote state for document {DocumentId} from replica {TargetReplica} (peer {TargetPeer}), attempt {Attempt}.", documentId, candidateReplica, candidatePeer, attempt + 1);
 
                 try
                 {
-                    var waitTask = rpcCorrelator.RegisterRequestAsync<CrdtDocument<TState>>(correlationId, rpcTimeout, cancellationToken);
+                    var waitTask = rpcCorrelator.RegisterRequestAsync<CrdtReadResponseDto>(correlationId, rpcTimeout, cancellationToken);
                     await directSender.SendDirectAsync(new PeerId(Guid.Parse(candidatePeer)), wrapperBytes, cancellationToken).ConfigureAwait(false);
-                    return await waitTask.ConfigureAwait(false);
+                    var response = await waitTask.ConfigureAwait(false);
+
+                    if (response.StatePayload == null || response.StatePayload.Length == 0)
+                    {
+                        var emptyEx = new InvalidOperationException($"Remote node {candidateReplica} failed to provide state for document {documentId}.");
+                        logger.LogWarning(emptyEx, "Remote node {TargetReplica} returned empty state for document {DocumentId}.", candidateReplica, documentId);
+                        lastException = emptyEx;
+                        continue;
+                    }
+
+                    return serializer.DeserializeFromBytes<CrdtDocument<TState>>(response.StatePayload);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -457,13 +480,15 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 catch (Exception ex)
                 {
                     lastException = ex;
-                    logger.LogDebug(ex, "Read state attempt {Attempt} from replica {TargetReplica} failed for document {DocumentId}.", attempt + 1, candidateReplica, documentId);
+                    logger.LogWarning(ex, "Read state attempt {Attempt} from replica {TargetReplica} failed for document {DocumentId}.", attempt + 1, candidateReplica, documentId);
                 }
             }
 
             if (!triedAnyPeer)
             {
-                throw new InvalidOperationException($"Cannot read state: no reachable network peer found for shard {shardId}.");
+                var noPeerEx = new InvalidOperationException($"Cannot read state: no reachable network peer found for shard {shardId}.");
+                logger.LogError(noPeerEx, "Cannot read state for document {DocumentId}: no reachable network peer found for shard {ShardId}.", documentId, shardId);
+                throw noPeerEx;
             }
 
             if (attempt < maxRetries - 1 && retryDelayMs > 0)
@@ -472,7 +497,9 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             }
         }
 
-        throw lastException ?? new TimeoutException($"Timed out waiting for remote state of document {documentId} on shard {shardId}.");
+        var finalException = lastException ?? new TimeoutException($"Timed out waiting for remote state of document {documentId} on shard {shardId}.");
+        logger.LogError(finalException, "Failed to read remote state for document {DocumentId} on shard {ShardId} after {MaxRetries} attempts.", documentId, shardId, maxRetries);
+        throw finalException;
     }
 
     public Task<bool> ApplyIntentAsync<TState>(string documentId, IOperationIntent intent, string targetProperty, CancellationToken cancellationToken = default) where TState : class, new()
@@ -480,7 +507,6 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         return ApplyIntentAsync<TState>(documentId, intent, targetProperty, IntentDeliveryMode.Acknowledged, cancellationToken);
     }
 
-    /// <inheritdoc />
     public async Task<bool> ApplyIntentAsync<TState>(string documentId, IOperationIntent intent, string targetProperty, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default) where TState : class, new()
     {
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
@@ -488,18 +514,23 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         if (Registry != null && string.Equals(Registry.DocumentId, documentId, StringComparison.Ordinal) && Registry is IDistributedCrdtDocument<TState> registryTyped)
         {
-            logger.LogTrace("Applying intent locally to registry document {DocumentId}.", documentId);
             var applied = await registryTyped.ApplyRemoteIntentAsync(intent, targetProperty, patcher, deliveryMode, cancellationToken).ConfigureAwait(false);
-            if (applied && deliveryMode == IntentDeliveryMode.Acknowledged)
+            if (applied)
             {
-                await SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
+                if (deliveryMode == IntentDeliveryMode.Acknowledged)
+                {
+                    await SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await SyncDocumentsAsync(IntentDeliveryMode.FireAndForget, cancellationToken).ConfigureAwait(false);
+                }
             }
             return applied;
         }
 
         if (activeDocuments.TryGetValue(documentId, out var fastDoc) && fastDoc is IDistributedCrdtDocument<TState> fastTypedDoc)
         {
-            logger.LogTrace("Applying intent locally to active document {DocumentId}.", documentId);
             return await fastTypedDoc.ApplyRemoteIntentAsync(intent, targetProperty, patcher, deliveryMode, cancellationToken).ConfigureAwait(false);
         }
 
@@ -512,7 +543,6 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             var activeDoc = await ResolveOrPromoteLocalDocumentAsync(documentId, documentTypeAlias, cancellationToken).ConfigureAwait(false);
             if (activeDoc is IDistributedCrdtDocument<TState> typedDoc)
             {
-                logger.LogTrace("Applying intent locally to active document {DocumentId}.", documentId);
                 return await typedDoc.ApplyRemoteIntentAsync(intent, targetProperty, patcher, deliveryMode, cancellationToken).ConfigureAwait(false);
             }
         }
@@ -520,17 +550,19 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
         var clusterStateTracker = serviceProvider.GetRequiredService<IClusterStateTracker>();
         var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
+        var rpcCorrelator = serviceProvider.GetRequiredService<IP2pRpcCorrelator>();
         var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
 
         var activeNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
         if (activeNodes == null || activeNodes.Count == 0)
         {
             logger.LogWarning("Cannot forward intent: no active nodes found for shard {ShardId}.", shardId);
+            intentsFailedCounter.Add(1, new KeyValuePair<string, object?>("document_id", documentId));
             return false;
         }
 
-        var serializedIntent = serializer.SerializeToBytes(intent);
-        var intentTypeAlias = intent.GetType().Name;
+        var intentTypeAlias = CrdtTypeRegistry.GetDiscriminator(intent.GetType());
+        var serializedIntent = serializer.SerializeToBytes<IOperationIntent>(intent);
 
         if (deliveryMode == IntentDeliveryMode.FireAndForget)
         {
@@ -543,36 +575,52 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 }
 
                 var candidatePeer = clusterStateTracker.GetPeerIdByReplicaId(candidateReplica);
-                if (!string.IsNullOrWhiteSpace(candidatePeer))
+                if (string.IsNullOrWhiteSpace(candidatePeer))
                 {
-                    var req = new CrdtIntentForwardRequestDto
-                    {
-                        CorrelationId = Guid.Empty,
-                        DocumentId = documentId,
-                        SerializedIntent = serializedIntent,
-                        IntentTypeAlias = intentTypeAlias,
-                        TargetProperty = targetProperty,
-                        DocumentTypeAlias = documentTypeAlias ?? string.Empty
-                    };
+                    continue;
+                }
 
-                    var reqPayload = serializer.SerializeToBytes(req);
-                    var wrapper = new CrdtMessageWrapper(documentId, "CrdtIntentReq", reqPayload, documentTypeAlias);
-                    var wrapperBytes = serializer.SerializeToBytes(wrapper);
+                var ffReq = new CrdtIntentForwardRequestDto
+                {
+                    CorrelationId = Guid.Empty,
+                    DocumentId = documentId,
+                    SerializedIntent = serializedIntent,
+                    IntentTypeAlias = intentTypeAlias,
+                    TargetProperty = targetProperty,
+                    DocumentTypeAlias = documentTypeAlias ?? string.Empty
+                };
 
-                    intentsForwardedCounter.Add(1, new KeyValuePair<string, object?>("document_id", documentId));
-                    await directSender.SendDirectAsync(new PeerId(Guid.Parse(candidatePeer)), wrapperBytes, cancellationToken).ConfigureAwait(false);
+                var ffReqPayload = serializer.SerializeToBytes(ffReq);
+                var ffWrapper = new CrdtMessageWrapper(documentId, "CrdtIntentReq", ffReqPayload, documentTypeAlias);
+                var ffWrapperBytes = serializer.SerializeToBytes(ffWrapper);
+
+                logger.LogTrace("Forwarding fire-and-forget intent for document {DocumentId} to remote replica {TargetReplica} (peer {TargetPeer}).", documentId, candidateReplica, candidatePeer);
+                intentsForwardedCounter.Add(1, new KeyValuePair<string, object?>("document_id", documentId));
+
+                try
+                {
+                    await directSender.SendDirectAsync(new PeerId(Guid.Parse(candidatePeer)), ffWrapperBytes, cancellationToken).ConfigureAwait(false);
                     return true;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Fire-and-forget intent forwarding to replica {TargetReplica} failed for document {DocumentId}.", candidateReplica, documentId);
                 }
             }
 
             logger.LogWarning("Cannot forward fire-and-forget intent: no reachable network peer found for shard {ShardId}.", shardId);
+            intentsFailedCounter.Add(1, new KeyValuePair<string, object?>("document_id", documentId));
             return false;
         }
 
-        var rpcCorrelator = serviceProvider.GetRequiredService<IP2pRpcCorrelator>();
         var maxRetries = Math.Max(1, options.RpcMaxRetries);
         var rpcTimeout = TimeSpan.FromMilliseconds(Math.Max(1, options.RpcTimeoutMilliseconds));
         var retryDelayMs = Math.Max(0, options.RpcRetryDelayMilliseconds);
+        Exception? lastException = null;
 
         for (int attempt = 0; attempt < maxRetries; attempt++)
         {
@@ -639,7 +687,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 }
                 catch (Exception ex)
                 {
-                    logger.LogDebug(ex, "Intent forwarding attempt {Attempt} to replica {TargetReplica} failed for document {DocumentId}.", attempt + 1, candidateReplica, documentId);
+                    lastException = ex;
+                    logger.LogWarning(ex, "Intent forwarding attempt {Attempt} to replica {TargetReplica} failed for document {DocumentId}.", attempt + 1, candidateReplica, documentId);
                 }
             }
 
@@ -654,6 +703,15 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             {
                 await Task.Delay(TimeSpan.FromMilliseconds(retryDelayMs * (attempt + 1)), cancellationToken).ConfigureAwait(false);
             }
+        }
+
+        if (lastException != null)
+        {
+            logger.LogError(lastException, "Failed to forward intent for document {DocumentId} on shard {ShardId} after {MaxRetries} attempts.", documentId, shardId, maxRetries);
+        }
+        else
+        {
+            logger.LogError("Failed to forward intent for document {DocumentId} on shard {ShardId} after {MaxRetries} attempts.", documentId, shardId, maxRetries);
         }
 
         intentsFailedCounter.Add(1, new KeyValuePair<string, object?>("document_id", documentId));
@@ -1053,6 +1111,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 catch (Exception ex)
                 {
                     commandFailuresCounter.Add(1);
+                    logger.LogError(ex, "Error executing orchestrator command {CommandType} for document {DocumentId}.", cmd.Type, cmd.DocumentId);
                     if (cmd.IsFireAndForget)
                     {
                         ReturnCommand(cmd);

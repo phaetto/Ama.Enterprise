@@ -151,21 +151,24 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                 var typeAlias = !string.IsNullOrWhiteSpace(req.DocumentTypeAlias) ? req.DocumentTypeAlias : wrapper.DocumentTypeAlias;
                 var targetDoc = await ResolveLocalDocumentAsync(scope, req.DocumentId, typeAlias, cancellationToken).ConfigureAwait(false);
 
+                byte[] statePayload = [];
                 if (targetDoc != null)
                 {
                     var snapshot = await targetDoc.GetSnapshotDataAsync(cancellationToken).ConfigureAwait(false);
-                    var res = new CrdtReadResponseDto { CorrelationId = req.CorrelationId, StatePayload = snapshot.SnapshotData };
-                    var resPayload = serializer.SerializeToBytes(res);
-                    var resWrapper = new CrdtMessageWrapper(req.DocumentId, "CrdtReadRes", resPayload, typeAlias);
-                    var directSender = scope.ServiceProvider.GetRequiredService<IDirectMessageSender>();
-                    await directSender.SendDirectAsync(senderId, serializer.SerializeToBytes(resWrapper), cancellationToken).ConfigureAwait(false);
+                    statePayload = snapshot.SnapshotData;
                 }
+
+                var res = new CrdtReadResponseDto { CorrelationId = req.CorrelationId, StatePayload = statePayload };
+                var resPayload = serializer.SerializeToBytes(res);
+                var resWrapper = new CrdtMessageWrapper(req.DocumentId, "CrdtReadRes", resPayload, typeAlias);
+                var directSender = scope.ServiceProvider.GetRequiredService<IDirectMessageSender>();
+                await directSender.SendDirectAsync(senderId, serializer.SerializeToBytes(resWrapper), cancellationToken).ConfigureAwait(false);
             }
             else if (wrapper.MessageType == "CrdtReadRes")
             {
                 var res = serializer.DeserializeFromBytes<CrdtReadResponseDto>(wrapper.Payload!);
                 var rpcCorrelator = scope.ServiceProvider.GetRequiredService<IP2pRpcCorrelator>();
-                rpcCorrelator.ResolveRequest(res.CorrelationId, res.StatePayload);
+                rpcCorrelator.ResolveRequest(res.CorrelationId, wrapper.Payload!);
             }
             else if (wrapper.MessageType == "CrdtIntentReq")
             {
@@ -210,8 +213,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             {
                 var res = serializer.DeserializeFromBytes<CrdtIntentForwardResponseDto>(wrapper.Payload!);
                 var rpcCorrelator = scope.ServiceProvider.GetRequiredService<IP2pRpcCorrelator>();
-                var resBytes = serializer.SerializeToBytes(res);
-                rpcCorrelator.ResolveRequest(res.CorrelationId, resBytes);
+                rpcCorrelator.ResolveRequest(res.CorrelationId, wrapper.Payload!);
             }
         }
         catch (Exception ex)
