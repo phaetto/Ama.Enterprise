@@ -500,7 +500,9 @@ public sealed class JournalingAndSnapshottingIntegrationTests
             services.Configure<DistributedCrdtOptions>(opt =>
             {
                 opt.CheckpointIntervalSeconds = 1;
-                opt.JournalSoftTrimThreshold = 5;
+                opt.MaintenanceIntervalSeconds = 1;
+                // Keep soft threshold disabled during initial setup so StorageJournalForwarder does not reactively trim during the loop
+                opt.JournalSoftTrimThreshold = 0;
             });
             services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(sharedStorage));
         });
@@ -521,6 +523,10 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         var initialJournalOps = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
         initialJournalOps.Count.ShouldBeGreaterThan(10);
+
+        // Enable the soft trim threshold before starting CrdtMaintenanceService
+        var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<DistributedCrdtOptions>>().Value;
+        options.JournalSoftTrimThreshold = 5;
 
         var maintenanceService = sp.GetServices<IHostedService>().OfType<CrdtMaintenanceService>().First();
         

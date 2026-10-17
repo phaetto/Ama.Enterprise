@@ -260,6 +260,15 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                 }
             }
 
+            var documents = scope.Orchestrator.GetActiveDocuments();
+            var localActiveShards = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var doc in documents)
+            {
+                localActiveShards.Add(doc.ShardId);
+            }
+
+            allShardsToEvaluate.IntersectWith(localActiveShards);
+
             var requirements = new List<ReplicaSyncRequirement>();
             var missingOpsStreams = new List<IAsyncEnumerable<JournaledOperation>>();
 
@@ -296,8 +305,6 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                     allOps.AddRange(syncResult.Operations);
                 }
             }
-
-            var documents = scope.Orchestrator.GetActiveDocuments();
 
             if (shardsRequiringSnapshot.Count > 0)
             {

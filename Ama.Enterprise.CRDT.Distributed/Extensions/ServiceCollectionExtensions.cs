@@ -120,6 +120,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICrdtDocumentOrchestrator, CrdtDocumentOrchestrator>();
         services.AddScoped<IClusterStateTracker, ClusterStateTracker>();
         services.AddScoped<ICrdtEvictionService, CrdtEvictionService>();
+
+        DecorateShardIdProviderResolutions(services);
         
         // Register topology observer
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IClusterStateObserver, OrchestratorClusterStateObserver>());
@@ -248,6 +250,59 @@ public static class ServiceCollectionExtensions
         if (!options.DerivedTypes.Any(dt => dt.DerivedType == derivedType))
         {
             options.DerivedTypes.Add(new JsonDerivedType(derivedType, discriminator));
+        }
+    }
+
+    [UnconditionalSuppressMessage("Trimming", "IL2067", Justification = "Target types are already registered in the DI container with preserved constructors.")]
+    private static void DecorateShardIdProviderResolutions(IServiceCollection services)
+    {
+        var shardProviderDescriptor = services.LastOrDefault(d => d.ServiceType == typeof(IShardIdProvider));
+        if (shardProviderDescriptor != null)
+        {
+            services.Remove(shardProviderDescriptor);
+            services.Add(ServiceDescriptor.Describe(
+                typeof(IShardIdProvider),
+                sp =>
+                {
+                    var inner = shardProviderDescriptor.ImplementationInstance as IShardIdProvider
+                        ?? (shardProviderDescriptor.ImplementationFactory != null
+                            ? (IShardIdProvider)shardProviderDescriptor.ImplementationFactory(sp)
+                            : (IShardIdProvider)ActivatorUtilities.CreateInstance(sp, shardProviderDescriptor.ImplementationType!));
+                    return inner as SystemRegistryShardIdProviderDecorator
+                        ?? new SystemRegistryShardIdProviderDecorator(inner);
+                },
+                shardProviderDescriptor.Lifetime));
+        }
+
+        for (int i = 0; i < services.Count; i++)
+        {
+            var descriptor = services[i];
+            if (descriptor.IsKeyedService ||
+                descriptor.ServiceType == typeof(IShardIdProvider) ||
+                descriptor.ServiceType.IsGenericTypeDefinition ||
+                descriptor.ImplementationInstance != null ||
+                descriptor.ServiceType.Namespace == null ||
+                !descriptor.ServiceType.Namespace.StartsWith("Ama.", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (descriptor.ImplementationFactory != null)
+            {
+                var originalFactory = descriptor.ImplementationFactory;
+                services[i] = ServiceDescriptor.Describe(
+                    descriptor.ServiceType,
+                    sp => originalFactory(new SystemRegistryServiceProvider(sp)),
+                    descriptor.Lifetime);
+            }
+            else if (descriptor.ImplementationType != null)
+            {
+                var implementationType = descriptor.ImplementationType;
+                services[i] = ServiceDescriptor.Describe(
+                    descriptor.ServiceType,
+                    sp => ActivatorUtilities.CreateInstance(new SystemRegistryServiceProvider(sp), implementationType),
+                    descriptor.Lifetime);
+            }
         }
     }
 }

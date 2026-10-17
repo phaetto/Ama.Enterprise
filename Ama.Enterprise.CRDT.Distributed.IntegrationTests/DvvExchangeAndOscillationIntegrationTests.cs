@@ -87,9 +87,6 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         var nodeA = BuildNode("ReplicaA", opt => opt.ActiveSyncEnabled = false);
         var nodeB = BuildNode("ReplicaB", opt => opt.ActiveSyncEnabled = false);
 
-        var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
-        WireMeshWithInspection(recordedMessages, nodeA, nodeB);
-
         var scopeA = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeA.ReplicaId);
         var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         var dvvManagerA = scopeA.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
@@ -115,9 +112,13 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         await orchB.ApplyIntentAsync<DvvTestState>("doc-dvv-1", new MapSetIntent("B1", "ValB1"), "DataMap", CancellationToken.None);
         await orchB.ApplyIntentAsync<DvvTestState>("doc-dvv-2", new MapSetIntent("B2", "ValB2"), "DataMap", CancellationToken.None);
 
+        var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
+        using var network = WireMeshWithInspection(recordedMessages, nodeA, nodeB);
+
         // Act - Round 1: Exchange DVVs in both directions and allow patches to be applied
         await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
         await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
+        await network.DrainAsync();
 
         await WaitForConvergenceAsync(async () =>
         {
@@ -140,6 +141,11 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         snapshotB["default"].Versions["ReplicaA"].ShouldBe(2);
         snapshotB["default"].Versions["ReplicaB"].ShouldBe(2);
 
+        // Ensure registry shards are also converged before testing steady-state exchanges
+        await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
+        await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
+        await network.DrainAsync();
+
         // Clear recorded messages after initial convergence to verify zero oscillations in subsequent exchanges
         recordedMessages.Clear();
 
@@ -148,7 +154,7 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         {
             await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
             await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
-            await Task.Delay(100);
+            await network.DrainAsync();
         }
 
         // Assert - Only CrdtSync messages were sent; zero CrdtPatch or CrdtSnapshot messages were triggered
@@ -219,12 +225,16 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
 
         // Step 3: Wire mesh and run multiple bidirectional DVV exchanges to prove zero snapshot or patch oscillation
         var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
-        WireMeshWithInspection(recordedMessages, nodeA, nodeB);
+        using var network = WireMeshWithInspection(recordedMessages, nodeA, nodeB);
 
         // Let registry sync first if needed
         await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
         await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
-        await Task.Delay(200);
+        await network.DrainAsync();
+
+        await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
+        await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
+        await network.DrainAsync();
 
         recordedMessages.Clear();
 
@@ -232,7 +242,7 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         {
             await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
             await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
-            await Task.Delay(100);
+            await network.DrainAsync();
         }
 
         // Assert - Neither node requests or dispatches any further snapshots or patches for the shard
@@ -247,9 +257,6 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         // Arrange
         var nodeA = BuildNode("ReplicaA", opt => opt.ActiveSyncEnabled = false);
         var nodeB = BuildNode("ReplicaB", opt => opt.ActiveSyncEnabled = false);
-
-        var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
-        WireMeshWithInspection(recordedMessages, nodeA, nodeB);
 
         var scopeA = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeA.ReplicaId);
         var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
@@ -266,6 +273,14 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         await orchB.CreateDocumentAsync("doc-conc-1", "dvv-doc", CancellationToken.None);
         await orchB.CreateDocumentAsync("doc-conc-2", "dvv-doc", CancellationToken.None);
         await orchB.SyncDocumentsAsync(CancellationToken.None);
+
+        var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
+        using var network = WireMeshWithInspection(recordedMessages, nodeA, nodeB);
+
+        // Synchronize initial registry state before starting concurrent writers
+        await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
+        await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
+        await network.DrainAsync();
 
         using var syncLoopCts = new CancellationTokenSource();
 
@@ -302,10 +317,12 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         await Task.WhenAll(writerATask, writerBTask);
         await syncLoopCts.CancelAsync();
         await continuousSyncTask;
+        await network.DrainAsync();
 
         // Final settling anti-entropy exchange
         await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
         await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
+        await network.DrainAsync();
 
         await WaitForConvergenceAsync(async () =>
         {
@@ -320,6 +337,10 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
                    docB2.Data.DataMap.Count == 20;
         }, TimeSpan.FromSeconds(5));
 
+        await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
+        await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
+        await network.DrainAsync();
+
         // Assert 1 - No false-positive CrdtSnapshot was ever triggered by in-flight DVV reads
         recordedMessages.ShouldNotContain(m => m.MessageType == "CrdtSnapshot");
 
@@ -330,7 +351,7 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         {
             await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
             await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
-            await Task.Delay(100);
+            await network.DrainAsync();
         }
 
         var steadyStateMessages = recordedMessages.ToList();
@@ -345,9 +366,6 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         var nodeA = BuildNode("ReplicaA", opt => opt.ActiveSyncEnabled = false);
         var nodeB = BuildNode("ReplicaB", opt => opt.ActiveSyncEnabled = false);
         var nodeC = BuildNode("ReplicaC", opt => opt.ActiveSyncEnabled = false);
-
-        var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
-        WireMeshWithInspection(recordedMessages, nodeA, nodeB, nodeC);
 
         var scopeA = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeA.ReplicaId);
         var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
@@ -381,21 +399,25 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         await orchC.ApplyIntentAsync<DvvTestState>("doc-ring-1", new MapSetIntent("KC1", "VC1"), "DataMap", CancellationToken.None);
         await orchC.ApplyIntentAsync<DvvTestState>("doc-ring-2", new MapSetIntent("KC2", "VC2"), "DataMap", CancellationToken.None);
 
+        var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
+        using var network = WireMeshWithInspection(recordedMessages, nodeA, nodeB, nodeC);
+
         // Act - Perform directed ring DVV exchanges (A -> B -> C -> A -> B)
         await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
         await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
-        await Task.Delay(150);
+        await network.DrainAsync();
 
         await orchB.DispatchAntiEntropyStateAsync(nodeC.PeerId, CancellationToken.None);
         await orchC.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
-        await Task.Delay(150);
+        await network.DrainAsync();
 
         await orchC.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
         await orchA.DispatchAntiEntropyStateAsync(nodeC.PeerId, CancellationToken.None);
-        await Task.Delay(150);
+        await network.DrainAsync();
 
         await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
         await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
+        await network.DrainAsync();
 
         await WaitForConvergenceAsync(async () =>
         {
@@ -432,7 +454,7 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
             await orchB.DispatchAntiEntropyStateAsync(nodeC.PeerId, CancellationToken.None);
             await orchC.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
             await orchC.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
-            await Task.Delay(100);
+            await network.DrainAsync();
         }
 
         // Assert - 5 rounds * 6 directed pairs = 30 CrdtSync messages, 0 CrdtPatch, 0 CrdtSnapshot
@@ -488,10 +510,11 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         gappedDvvB.Dots["ReplicaA"].ShouldContain(3L);
 
         var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
-        WireMeshWithInspection(recordedMessages, nodeA, nodeB);
+        using var network = WireMeshWithInspection(recordedMessages, nodeA, nodeB);
 
         // Act - Node B sends its gapped DVV to Node A
         await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
+        await network.DrainAsync();
 
         await WaitForConvergenceAsync(async () =>
         {
@@ -508,7 +531,8 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
 
         // Sync A -> B as well so both sides have identical registry & shard states
         await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
-        await Task.Delay(150);
+        await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
+        await network.DrainAsync();
 
         recordedMessages.Clear();
 
@@ -517,7 +541,7 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         {
             await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
             await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
-            await Task.Delay(100);
+            await network.DrainAsync();
         }
 
         var steadyMessages = recordedMessages.ToList();
@@ -553,11 +577,12 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         await orchA.ApplyIntentAsync<DvvTestState>("alpha-2", new MapSetIntent("K2", "V2"), "DataMap", CancellationToken.None);
 
         var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
-        WireMeshWithInspection(recordedMessages, nodeA, nodeB);
+        using var network = WireMeshWithInspection(recordedMessages, nodeA, nodeB);
 
         // Initial convergence
         await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
         await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
+        await network.DrainAsync();
 
         await WaitForConvergenceAsync(async () =>
         {
@@ -581,6 +606,7 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         // Sync deletion and new mutation to Node B
         await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
         await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
+        await network.DrainAsync();
 
         await WaitForConvergenceAsync(async () =>
         {
@@ -601,7 +627,7 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         {
             await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
             await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
-            await Task.Delay(100);
+            await network.DrainAsync();
         }
 
         var steadyMessages = recordedMessages.ToList();
@@ -637,14 +663,14 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         await storageA.TrimAsync("shard-alpha", new Dictionary<string, long> { { "ReplicaA", 10 } }, CancellationToken.None);
 
         var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
-        WireMeshWithInspection(recordedMessages, nodeA, nodeB);
+        using var network = WireMeshWithInspection(recordedMessages, nodeA, nodeB);
 
         // Act - Bidirectional DVV exchange allows Node B to learn registry first, instantiate documents, and pull data on subsequent sync
         for (int round = 0; round < 3; round++)
         {
             await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
             await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
-            await Task.Delay(150);
+            await network.DrainAsync();
         }
 
         await WaitForConvergenceAsync(async () =>
@@ -668,7 +694,7 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         {
             await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
             await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
-            await Task.Delay(100);
+            await network.DrainAsync();
         }
 
         var steadyMessages = recordedMessages.ToList();
@@ -683,9 +709,6 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         var nodeA = BuildNode("ReplicaA", opt => opt.ActiveSyncEnabled = false);
         var nodeB = BuildNode("ReplicaB", opt => opt.ActiveSyncEnabled = false);
         var nodeC = BuildNode("ReplicaC", opt => opt.ActiveSyncEnabled = false);
-
-        var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
-        WireMeshWithInspection(recordedMessages, nodeA, nodeB, nodeC);
 
         var scopeA = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeA.ReplicaId);
         var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
@@ -712,6 +735,9 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         await orchB.ApplyIntentAsync<DvvTestState>("doc-evict-dvv", new MapSetIntent("KB", "VB"), "DataMap", CancellationToken.None);
         await orchC.ApplyIntentAsync<DvvTestState>("doc-evict-dvv", new MapSetIntent("KC_Old", "VC_Old"), "DataMap", CancellationToken.None);
 
+        var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
+        using var network = WireMeshWithInspection(recordedMessages, nodeA, nodeB, nodeC);
+
         // Initial convergence across A, B, C
         for (int round = 0; round < 2; round++)
         {
@@ -721,7 +747,7 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
             await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
             await orchC.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
             await orchA.DispatchAntiEntropyStateAsync(nodeC.PeerId, CancellationToken.None);
-            await Task.Delay(150);
+            await network.DrainAsync();
         }
 
         // Act - Node A and Node B tombstone and evict ReplicaC
@@ -732,6 +758,7 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
 
         // Node C (unaware it was evicted) sends a DVV sync to Node A -> Node A broadcasts CrdtEviction -> Node C reboots its identity
         await orchC.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
+        await network.DrainAsync();
 
         await WaitForConvergenceAsync(
             () => Task.FromResult(!string.Equals(contextC.ReplicaId, "ReplicaC", StringComparison.Ordinal)),
@@ -751,7 +778,7 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
             await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
             await orchC.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
             await orchA.DispatchAntiEntropyStateAsync(nodeC.PeerId, CancellationToken.None);
-            await Task.Delay(150);
+            await network.DrainAsync();
         }
 
         await WaitForConvergenceAsync(async () =>
@@ -781,7 +808,7 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
             await orchB.DispatchAntiEntropyStateAsync(nodeC.PeerId, CancellationToken.None);
             await orchC.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
             await orchC.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
-            await Task.Delay(100);
+            await network.DrainAsync();
         }
 
         var steadyMessages = recordedMessages.ToList();
@@ -864,8 +891,10 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         services.AddDistributedCrdtCore(opt =>
         {
             opt.ActiveSyncEnabled = false;
-            opt.AntiEntropyIntervalSeconds = 60;
-            opt.CheckpointIntervalSeconds = 60;
+            opt.AntiEntropyInitialDelaySeconds = 3600;
+            opt.AntiEntropyIntervalSeconds = 3600;
+            opt.CheckpointIntervalSeconds = 3600;
+            opt.MaintenanceIntervalSeconds = 3600;
             opt.PeerEvictionTtlSeconds = 0;
 
             configureOptions?.Invoke(opt);
@@ -875,6 +904,11 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         var crdtBuilder = services.AddCrdt()
                 .AddCrdtAotContext(new DvvExchangeTestAotContext())
                 .AddCrdtJsonTypeInfoResolver(DvvExchangeTestJsonContext.Default);
+
+        if (usePrefixShardProvider)
+        {
+            crdtBuilder.AddCrdtShardIdProvider<PrefixShardIdProvider>();
+        }
 
         services.AddDistributedDocumentType<DvvTestState>("dvv-doc");
         services.AddDistributedCrdtP2p("TestMesh", replicaId);
@@ -899,11 +933,51 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         return node;
     }
 
-    private static void WireMeshWithInspection(ConcurrentQueue<CapturedMessageDto> recordedMessages, params TestNode[] meshNodes)
+    private sealed class NetworkSimulationTracker : IDisposable
+    {
+        private readonly ConcurrentBag<Task> inFlightTasks = new();
+        private volatile bool isDisposed;
+
+        public void Track(Func<Task> work)
+        {
+            if (isDisposed)
+            {
+                return;
+            }
+
+            var task = Task.Run(async () =>
+            {
+                if (isDisposed)
+                {
+                    return;
+                }
+
+                await work().ConfigureAwait(false);
+            });
+
+            inFlightTasks.Add(task);
+        }
+
+        public async Task DrainAsync()
+        {
+            while (inFlightTasks.TryTake(out var task))
+            {
+                await task.ConfigureAwait(false);
+            }
+        }
+
+        public void Dispose()
+        {
+            isDisposed = true;
+        }
+    }
+
+    private static NetworkSimulationTracker WireMeshWithInspection(ConcurrentQueue<CapturedMessageDto> recordedMessages, params TestNode[] meshNodes)
     {
         ArgumentNullException.ThrowIfNull(recordedMessages);
         ArgumentNullException.ThrowIfNull(meshNodes);
 
+        var tracker = new NetworkSimulationTracker();
         var handlers = meshNodes.ToDictionary(
             n => n.PeerId,
             n => n.Sp.GetRequiredKeyedService<IApplicationPayloadHandler>("TestMesh")
@@ -921,7 +995,7 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
                     var wrapper = serializer.DeserializeFromBytes<CrdtMessageWrapper>(payloadArray);
                     recordedMessages.Enqueue(new CapturedMessageDto(node.PeerId, target, wrapper.DocumentId, wrapper.MessageType));
 
-                    _ = Task.Run(async () =>
+                    tracker.Track(async () =>
                     {
                         if (handlers.TryGetValue(target, out var targetHandler))
                         {
@@ -941,7 +1015,7 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
                         recordedMessages.Enqueue(new CapturedMessageDto(node.PeerId, other.PeerId, wrapper.DocumentId, wrapper.MessageType));
                     }
 
-                    _ = Task.Run(async () =>
+                    tracker.Track(async () =>
                     {
                         var tasks = others.Select(other => handlers[other.PeerId].HandlePayloadAsync("TestMesh", node.PeerId, payloadArray, CancellationToken.None));
                         await Task.WhenAll(tasks);
@@ -949,6 +1023,8 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
                     return Task.CompletedTask;
                 });
         }
+
+        return tracker;
     }
 
     private static async Task WaitForConvergenceAsync(Func<Task<bool>> condition, TimeSpan timeout)

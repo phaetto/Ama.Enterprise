@@ -234,11 +234,24 @@ public sealed class ConcurrencyIntegrationTests
 
         await Task.WhenAll(broadcastTasks);
 
-        // Assert - The single reader should gracefully process all generic network constraints natively without dropping or blocking
-        mockP2p.Verify(x => x.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Exactly(TotalTasks / 3));
+        // CrdtPatchBroadcaster dispatches outbound patches on an asynchronous background channel;
+        // wait briefly for the last enqueued items to be consumed by ProcessBroadcastChannelAsync.
+        var expectedCount = TotalTasks / 3;
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (!cts.Token.IsCancellationRequested)
+        {
+            if (mockP2p.Invocations.Count >= expectedCount && mockSender.Invocations.Count >= expectedCount)
+            {
+                break;
+            }
+            await Task.Delay(25);
+        }
+
+        // Assert - The single reader should process all network constraints without dropping or blocking
+        mockP2p.Verify(x => x.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Exactly(expectedCount));
         
-        // Direct sender is actively bounded by ProvideSnapshot and DispatchAntiEntropyState ensuring direct point-to-point payload pushes securely avoiding Thundering Herd
-        mockSender.Verify(x => x.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Exactly(TotalTasks / 3));
+        // Direct sender is actively bounded by ProvideSnapshot and DispatchAntiEntropyState ensuring direct point-to-point payload pushes avoiding Thundering Herd
+        mockSender.Verify(x => x.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Exactly(expectedCount));
     }
 
     [IntegrationFact]
