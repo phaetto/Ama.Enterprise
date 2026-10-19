@@ -25,7 +25,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/ShowCaseJsonContext.cs` | AOT JSON context for the showcase multi-CRDT models. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskItem.cs` | Data structure representing an individual task item. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskListState.cs` | Root CRDT document model representing a task list, updated to inherit `IDistributedCrdtState`. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Re-enabled `AddCrdtShardIdProvider<ShowCaseShardIdProvider>()` to demonstrate grouped multi-document shards. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Updated `DrawMemoryStatsAsync` (`mem` command) to use `EstimateMemoryFootprintAsync` instead of `GetSnapshotDataAsync`, avoiding MessagePack serialization. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetManager.cs` | Added `IntentDeliveryMode` support when forwarding device intents to `ICrdtDocumentOrchestrator.ApplyIntentAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/IFleetManager.cs` | Added overloads accepting `IntentDeliveryMode` for setting and removing devices. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ITaskManager.cs` | Added overloads accepting `IntentDeliveryMode` for setting and removing tasks. |
@@ -76,6 +76,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtReplicaRegistration.cs` | Represents a dynamically registered Replica ID enforcing discrete CRDT multi-mesh state architectures. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtSystemAotContext.cs` | Added `ConcurrentDictionary<string, CrdtRegistryEntry>` to the AOT reflection context for the internal registry state. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/DistributedCrdtSystemJsonContext.cs` | Added `ConcurrentDictionary<string, CrdtRegistryEntry>` to the AOT JSON serialization context for the internal registry state. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/DocumentMemoryFootprintDto.cs` | Data structure representing the estimated in-memory footprint of a distributed CRDT document without serialization. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/IntentDeliveryMode.cs` | Enum specifying `Acknowledged` vs `FireAndForget` delivery modes when forwarding operation intents to distributed CRDT shards. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/PooledDocumentCommand.cs` | Added `IsFireAndForget` flag to support zero-allocation object pool recycling when commands are enqueued without awaiting completion. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/PooledOrchestratorCommand.cs` | Added `IsFireAndForget` flag to support zero-allocation object pool recycling for non-blocking orchestrator commands. |
@@ -88,13 +89,13 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtMaintenanceService.cs` | Delegated version vector replica eviction and snapshot extraction to `IShardVersionVectorManager`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtTrimCoordinator.cs` | Coordinates trimming operations across the entire node to ensure only one aggressive or maintenance trim runs at a time, preventing IO and memory saturation. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DefaultScopeTopologyProvider.cs` | Updated to implement the asynchronous `IsPeerExpectedAsync` method returning synchronous wrappers. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Added explicit `LogError` logging across internal command handlers, checkpoint failures, debounced broadcasts, and the background command channel loop so exceptions and fire-and-forget failures are captured by Application Insights. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Updated `EstimateObjectSizeAsync` and added `EstimateMemoryFootprintAsync` to traverse the live object and metadata graph using registered `CrdtAotContext` providers instead of serializing to bytes. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeFactory.cs` | Implemented the missing `Storage` property on `DistributedCrdtScope` to fulfill the `IDistributedCrdtScope` interface contract. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeManager.cs` | Centralized singleton tracker managing long-lived background scopes per instantiated replica. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IClusterStateTracker.cs` | Restored unified global generic replica tracking and appended mapping capability identifying `ReplicaId` natively from underlying network topologies. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ICrdtDocumentOrchestrator.cs` | Added `ResolveOrPromoteLocalDocumentAsync` to resolve or lazily promote authoritative shard documents. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ICrdtEvictionService.cs` | Interface for a dedicated service that orchestrates replica eviction and local identity re-bootstrapping across all CRDT documents. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtDocument.cs` | Added `IntentDeliveryMode` overloads for `ApplyPatchAsync`, `ApplyRemotePatchAsync`, `MergeSnapshotAsync`, and `EvictReplicaAsync`. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtDocument.cs` | Added `EstimateMemoryFootprintAsync` to estimate document memory footprint without serialization. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtScope.cs` | Encapsulates the long-lived structural boundaries for a strictly identified generic localized CRDT replica. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtScopeFactory.cs` | Factory interface tracking CRDT scope instantiations and resolving bounds. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtStorage.cs` | Updated `LoadDocumentAsync`, `SaveDocumentAsync`, `LoadOrphanedDocumentAsync` and `DeleteDocumentAsync` to enforce `shardId` boundaries matching localized causal document mappings. |

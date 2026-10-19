@@ -118,6 +118,20 @@ public interface IDistributedCrdtDocument
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     Task ResetLocalStateAsync(string oldReplicaId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Estimates the total in-memory size in bytes of the entire document manager instance, including state, metadata, channels, pools, and telemetry.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task that represents the asynchronous operation and contains the estimated size in bytes.</returns>
+    ValueTask<long> EstimateObjectSizeAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Estimates the detailed in-memory footprint of the document data, CRDT metadata, whole document manager instance, and shard version vector without serializing.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task that represents the asynchronous operation and contains the detailed memory footprint estimates.</returns>
+    ValueTask<DocumentMemoryFootprintDto> EstimateMemoryFootprintAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>

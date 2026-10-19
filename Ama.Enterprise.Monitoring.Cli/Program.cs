@@ -120,6 +120,9 @@ internal sealed class Program
         // Start background host completely decoupled from UI
         await host.StartAsync().ConfigureAwait(false);
 
+        // TODO: Use IWebRtcHttpPeerDiscovery to connect to the URL
+
+        // TODO: Information needed: DVV, replicas, network names, peer registry, shards
         var uiOrchestrator = host.Services.GetRequiredService<IUserInterfaceOrchestrator>();
         uiOrchestrator.Run();
 

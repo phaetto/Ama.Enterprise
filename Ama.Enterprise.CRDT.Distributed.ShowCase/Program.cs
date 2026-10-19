@@ -18,6 +18,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Net.NetworkInformation;
+using System.Runtime;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -33,6 +34,8 @@ public static class Program
 
     // DTO for representing the state output instead of using tuples
     private readonly record struct DocumentStateDto<T>(string Id, IReadOnlyDictionary<string, T> Items);
+
+    private readonly record struct DocumentMemoryStatsDto(string Id, string ShardId, string DocumentType, long StateSizeBytes, long WholeObjectSizeBytes, long GlobalStateSizeBytes);
 
     public static async Task Main(string[] args)
     {
@@ -122,6 +125,7 @@ public static class Program
             {
                 options.ListenPort = currentPort;
                 options.ListenHost = "127.0.0.1";
+                options.MaxMessageSize = int.MaxValue;
             })
             .AddUdpPeerDiscovery(options =>
             {
@@ -211,7 +215,7 @@ public static class Program
                         if (_needsRedraw)
                         {
                             _needsRedraw = false;
-                            await DrawStateAsync(replicaId, orchestrator, taskManager, fleetManager, cts.Token).ConfigureAwait(false);
+                            //await DrawStateAsync(replicaId, orchestrator, taskManager, fleetManager, cts.Token).ConfigureAwait(false);
                         }
                     }
                 }
@@ -461,6 +465,10 @@ public static class Program
                             await DrawStateAsync(replicaId, orchestrator, taskManager, fleetManager, cts.Token).ConfigureAwait(false);
                             break;
 
+                        case "mem":
+                            await DrawMemoryStatsAsync(replicaId, orchestrator, cts.Token).ConfigureAwait(false);
+                            break;
+
                         case "clone":
                             int cloneCount = 1;
                             if (parts.Length >= 2 && int.TryParse(parts[1], out var parsedCount) && parsedCount > 0)
@@ -541,10 +549,100 @@ public static class Program
             Console.WriteLine(" gen-fleets <count> <devices>                   - Generates <count> fleets with <devices> devices each");
             Console.WriteLine(" hammer <cps>                                   - Pumps <cps> changes/sec into 5 sharded documents (0 to stop)");
             Console.WriteLine(" print                                          - Prints the current state of documents hosted on this node");
+            Console.WriteLine(" mem                                            - Prints the serialized memory footprint of active and registry documents");
             Console.WriteLine(" clone [count]                                  - Spawns new node process(es) (default 1)");
             Console.WriteLine(" exit                                           - Shuts down the node");
             Console.WriteLine("=================================================\n");
         }
+    }
+
+    private static async Task DrawMemoryStatsAsync(string replicaId, ICrdtDocumentOrchestrator orchestrator, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(replicaId);
+        ArgumentNullException.ThrowIfNull(orchestrator);
+
+        var docs = orchestrator.GetActiveDocuments();
+        var stats = new List<DocumentMemoryStatsDto>(docs.Count);
+        var shardDvvBytesCache = new Dictionary<string, long>(StringComparer.Ordinal);
+
+        long totalStateBytes = 0;
+        long totalWholeObjectBytes = 0;
+        long totalGlobalStateBytes = 0;
+
+        foreach (var doc in docs)
+        {
+            var footprint = await doc.EstimateMemoryFootprintAsync(cancellationToken).ConfigureAwait(false);
+            var stateBytes = footprint.DataAndMetadataBytes;
+            var wholeObjectBytes = footprint.WholeDocumentBytes;
+
+            if (!shardDvvBytesCache.TryGetValue(doc.ShardId, out var globalStateBytes))
+            {
+                globalStateBytes = footprint.ShardVersionVectorBytes;
+                shardDvvBytesCache[doc.ShardId] = globalStateBytes;
+            }
+
+            var docType = string.Equals(doc.DocumentId, orchestrator.Registry.DocumentId, StringComparison.Ordinal)
+                ? "Registry"
+                : doc switch
+                {
+                    IDistributedCrdtDocument<TaskListState> => "TaskList",
+                    IDistributedCrdtDocument<FleetState> => "FleetList",
+                    _ => "Document"
+                };
+
+            totalStateBytes += stateBytes;
+            totalWholeObjectBytes += wholeObjectBytes;
+            totalGlobalStateBytes += globalStateBytes;
+
+            stats.Add(new DocumentMemoryStatsDto(doc.DocumentId, doc.ShardId, docType, stateBytes, wholeObjectBytes, globalStateBytes));
+        }
+
+        // Reclaim any temporary buffers before sampling GC heap and working set
+        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+
+        var gcAllocatedBytes = GC.GetTotalMemory(forceFullCollection: true);
+        var workingSetBytes = Environment.WorkingSet;
+
+        lock (ConsoleLock)
+        {
+            Console.WriteLine($"\n--- [Document Memory Footprint: {replicaId}] ---");
+            Console.WriteLine($" {"Document ID",-25} | {"Type",-10} | {"Shard ID",-26} | {"Data + CRDT Meta",18} | {"Whole Doc Obj Est.",18} | {"Shard DVV Est.",15}");
+            Console.WriteLine(new string('-', 127));
+
+            foreach (var stat in stats.OrderBy(s => s.DocumentType == "Registry" ? 0 : 1).ThenBy(s => s.Id, StringComparer.Ordinal))
+            {
+                Console.WriteLine($" {stat.Id,-25} | {stat.DocumentType,-10} | {stat.ShardId,-26} | {FormatBytes(stat.StateSizeBytes),18} | {FormatBytes(stat.WholeObjectSizeBytes),18} | {FormatBytes(stat.GlobalStateSizeBytes),15}");
+            }
+
+            Console.WriteLine(new string('-', 127));
+            Console.WriteLine($" Total Active Documents : {stats.Count} (1 Registry + {Math.Max(0, stats.Count - 1)} Active)");
+            Console.WriteLine($" Total Documents Data   : {FormatBytes(totalStateBytes)} ({totalStateBytes:N0} B)");
+            Console.WriteLine($" Total Whole Doc Objs   : {FormatBytes(totalWholeObjectBytes)} ({totalWholeObjectBytes:N0} B)");
+            Console.WriteLine($" Total Shard DVV Est.   : {FormatBytes(totalGlobalStateBytes)} ({totalGlobalStateBytes:N0} B)");
+            Console.WriteLine($" Total Managed GC Heap  : {FormatBytes(gcAllocatedBytes)} ({gcAllocatedBytes:N0} B)");
+            Console.WriteLine($" Process Working Set    : {FormatBytes(workingSetBytes)} ({workingSetBytes:N0} B)");
+            Console.WriteLine("------------------------------------\n> ");
+        }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024)
+        {
+            return $"{bytes} B";
+        }
+
+        var kb = bytes / 1024.0;
+        if (kb < 1024.0)
+        {
+            return $"{kb:F2} KB";
+        }
+
+        var mb = kb / 1024.0;
+        return $"{mb:F2} MB";
     }
 
     private static async Task DrawStateAsync(string replicaId, ICrdtDocumentOrchestrator orchestrator, ITaskManager taskManager, IFleetManager fleetManager, CancellationToken cancellationToken)
