@@ -7,11 +7,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services;
 using Ama.CRDT.Services.Versioning;
+using Ama.Enterprise.CRDT.Distributed.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Implementation explicitly enforcing bounded mapping limits structurally natively.
+/// Implementation explicitly enforcing bounded mapping limits.
 /// </summary>
 public sealed class CrdtEvictionService : ICrdtEvictionService, IDisposable
 {
@@ -36,7 +37,13 @@ public sealed class CrdtEvictionService : ICrdtEvictionService, IDisposable
     }
 
     /// <inheritdoc />
-    public async Task EvictPeersAsync(IReadOnlyList<string> replicaIds, CancellationToken cancellationToken = default)
+    public Task EvictPeersAsync(IReadOnlyList<string> replicaIds, CancellationToken cancellationToken = default)
+    {
+        return EvictPeersAsync(replicaIds, IntentDeliveryMode.Acknowledged, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task EvictPeersAsync(IReadOnlyList<string> replicaIds, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default)
     {
         if (replicaIds == null || replicaIds.Count == 0) return;
 
@@ -49,14 +56,14 @@ public sealed class CrdtEvictionService : ICrdtEvictionService, IDisposable
         {
             foreach (var replicaId in replicaIds)
             {
-                await document.EvictReplicaAsync(replicaId, cancellationToken).ConfigureAwait(false);
+                await document.EvictReplicaAsync(replicaId, deliveryMode, cancellationToken).ConfigureAwait(false);
             }
         }
 
         versionVectorManager.EvictReplicas(replicaIds);
         
         replicasEvictedCounter.Add(replicaIds.Count, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
-        logger.LogInformation("[{LocalReplicaId}] Successfully applied eviction across {DocCount} documents for {ReplicaCount} replicas.", replicaContext.ReplicaId, documents.Count, replicaIds.Count);
+        logger.LogInformation("[{LocalReplicaId}] Applied eviction across {DocCount} documents for {ReplicaCount} replicas.", replicaContext.ReplicaId, documents.Count, replicaIds.Count);
     }
 
     /// <inheritdoc />

@@ -89,7 +89,6 @@ public static class ServiceCollectionExtensions
 
         services.AddCrdtJournaling<StorageJournalForwarder>();
 
-        services.AddCrdtApplicatorDecorator<JournalingApplicatorDecorator>(DecoratorBehavior.Before);
         services.AddCrdtPatcherDecorator<JournalingPatcherDecorator>(DecoratorBehavior.After);
         services.AddCrdtApplicatorDecorator<CompactingApplicatorDecorator>(DecoratorBehavior.After);
         services.AddCrdtMergerDecorator<CompactingMergerDecorator>(DecoratorBehavior.After);
@@ -108,10 +107,12 @@ public static class ServiceCollectionExtensions
             return new ThresholdCompactionPolicyFactory(() => new EpochTimestamp(long.MinValue));
         });
 
+        services.TryAddSingleton<IDistributedCrdtTelemetry, DistributedCrdtTelemetry>();
         services.TryAddSingleton<IDistributedCrdtScopeFactory, DistributedCrdtScopeFactory>();
         services.TryAddSingleton<DistributedCrdtScopeManager>();
 
         services.TryAddScoped<IScopeTopologyProvider, DefaultScopeTopologyProvider>();
+        services.TryAddScoped<IDocumentCommandPipeline, DocumentCommandPipeline>();
         
         // Register Consistent Hashing Distribution mappings
         services.TryAddScoped<IShardDistributionManager, ConsistentHashShardDistributionManager>();

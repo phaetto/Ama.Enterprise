@@ -117,6 +117,8 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
     {
         if (string.IsNullOrEmpty(documentId)) return;
 
+        var rawDocId = ExtractRawDocumentId(documentId);
+
         await writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -131,8 +133,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
 
             using var cmd2 = writeConnection.CreateCommand();
             cmd2.Transaction = transaction;
-            cmd2.CommandText = "DELETE FROM Journal WHERE DocumentId = @DocId";
+            cmd2.CommandText = "DELETE FROM Journal WHERE ShardId = @ShardId AND (DocumentId = @DocId OR DocumentId = @RawDocId)";
+            AddParameter(cmd2, "@ShardId", shardId);
             AddParameter(cmd2, "@DocId", documentId);
+            AddParameter(cmd2, "@RawDocId", rawDocId);
             await cmd2.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -673,6 +677,14 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         parameter.ParameterName = name;
         parameter.Value = value ?? DBNull.Value;
         command.Parameters.Add(parameter);
+    }
+
+    private static string ExtractRawDocumentId(string documentId)
+    {
+        var colonIndex = documentId.IndexOf(':', StringComparison.Ordinal);
+        return colonIndex >= 0 && colonIndex < documentId.Length - 1
+            ? documentId[(colonIndex + 1)..]
+            : documentId;
     }
 
     public void Dispose()

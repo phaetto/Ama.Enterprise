@@ -103,20 +103,6 @@ public sealed class P2pNetworkIntegrationTests(ITestOutputHelper testOutputHelpe
     }
 
     [IntegrationFact]
-    public async Task BroadcastAsync_ShouldThrow_WhenPayloadExceedsLimit()
-    {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await using var nodeA = CreateTestNode(resourceManager.GetNextPort());
-
-        var largePayload = new byte[Constants.MaximumPayloadSizeBytes + 1];
-
-        await Should.ThrowAsync<ArgumentException>(async () =>
-        {
-            await nodeA.Protocol.BroadcastAsync(largePayload, cts.Token);
-        });
-    }
-
-    [IntegrationFact]
     public async Task Network_ShouldAdapt_WhenNodesJoinAndDrop()
     {
         // Generous timeout for a multi-phase lifecycle test

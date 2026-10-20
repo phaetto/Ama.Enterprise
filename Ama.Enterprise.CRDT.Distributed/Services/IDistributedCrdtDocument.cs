@@ -30,6 +30,11 @@ public interface IDistributedCrdtDocument
     string DocumentId { get; }
 
     /// <summary>
+    /// Gets the registered string alias for the document state type.
+    /// </summary>
+    string TypeAlias { get; }
+
+    /// <summary>
     /// Initializes the document, loading initial state from persistent storage if configured.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>

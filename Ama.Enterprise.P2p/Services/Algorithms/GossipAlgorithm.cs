@@ -154,11 +154,6 @@ public sealed class GossipAlgorithm : IP2pAlgorithm, IDisposable
             throw new ArgumentException("Payload cannot be empty.", nameof(payload));
         }
 
-        if (payload.Length > Constants.MaximumPayloadSizeBytes)
-        {
-            throw new ArgumentException($"Payload exceeds maximum size of {Constants.MaximumPayloadSizeBytes} bytes.", nameof(payload));
-        }
-
         if (activeMeshes.IsEmpty)
         {
             return Task.CompletedTask;

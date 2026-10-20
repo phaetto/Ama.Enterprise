@@ -315,16 +315,15 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                 {
                     if (shardsRequiringSnapshot.Contains(targetDoc.ShardId))
                     {
-                        await scope.Orchestrator.ProvideSnapshotAsync(targetDoc.DocumentId, syncMsg.ReplicaId, senderId, cancellationToken).ConfigureAwait(false);
+                        await scope.Orchestrator.ProvideSnapshotAsync(targetDoc.DocumentId, targetDoc.TypeAlias, syncMsg.ReplicaId, senderId, cancellationToken).ConfigureAwait(false);
                     }
                 }
             }
 
             if (allOps.Count > 0 && directSender != null)
             {
-                var registryDoc = await scope.Orchestrator.Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
                 var opsByDoc = allOps
-                    .GroupBy(x => x.DocumentId)
+                    .GroupBy(x => (Key: x.DocumentId?.ToString() ?? string.Empty, ShardId: x.Operation.ShardId ?? string.Empty))
                     .ToDictionary(g => g.Key, g => g.Select(x => x.Operation).ToArray());
 
                 foreach (var targetDoc in documents)
@@ -334,16 +333,21 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                         continue;
                     }
 
-                    if (opsByDoc.TryGetValue(targetDoc.DocumentId, out var docOps) && docOps.Length > 0)
+                    var compositeKey = CrdtRegistryEntry.GetRegistryKey(targetDoc.TypeAlias, targetDoc.DocumentId);
+                    if (!opsByDoc.TryGetValue((compositeKey, targetDoc.ShardId), out var docOps) &&
+                        !opsByDoc.TryGetValue((targetDoc.DocumentId, targetDoc.ShardId), out docOps) &&
+                        !opsByDoc.TryGetValue((compositeKey, string.Empty), out docOps))
+                    {
+                        opsByDoc.TryGetValue((targetDoc.DocumentId, string.Empty), out docOps);
+                    }
+
+                    if (docOps != null && docOps.Length > 0)
                     {
                         var patchMsg = new CrdtPatchMessage(replicaContext.ReplicaId, new CrdtPatch(docOps));
                         var patchPayload = serializer.SerializeToBytes(patchMsg);
-                        
-                        string? docTypeAlias = null;
-                        if (registryDoc.Data.Documents.TryGetValue(targetDoc.DocumentId, out var entry))
-                        {
-                            docTypeAlias = entry.TypeAlias;
-                        }
+                        var docTypeAlias = string.Equals(targetDoc.DocumentId, scope.Orchestrator.Registry.DocumentId, StringComparison.Ordinal)
+                            ? null
+                            : targetDoc.TypeAlias;
 
                         var replyWrapper = new CrdtMessageWrapper(targetDoc.DocumentId, "CrdtPatch", patchPayload, docTypeAlias);
                         var replyBytes = serializer.SerializeToBytes(replyWrapper);

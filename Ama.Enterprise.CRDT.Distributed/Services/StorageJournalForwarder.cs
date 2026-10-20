@@ -123,7 +123,7 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         await this.storage.AppendAsync(documentId, operations, cancellationToken).ConfigureAwait(false);
         this.appendedOperationsCounter.Add(operations.Count, new KeyValuePair<string, object?>("document_id", docIdString));
         
-        await this.EvaluateTriggersAndApplyBackpressureAsync(operations.Count, cancellationToken).ConfigureAwait(false);
+        this.EvaluateTriggersAndApplyBackpressureSync(operations.Count);
     }
 
     public IAsyncEnumerable<JournaledOperation> GetOperationsByRangeAsync(string shardId, string originReplicaId, long minShardClock, long maxShardClock, CancellationToken cancellationToken = default) 
@@ -251,7 +251,7 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
                     Interlocked.Exchange(ref this.isTrimming, 0);
                     return;
                 }
-
+                
                 this.StartBackgroundSoftTrim();
             }
         }
@@ -312,15 +312,7 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
                     return;
                 }
 
-                var countAtTrimStart = Volatile.Read(ref this.estimatedJournalCount);
-                
                 await this.ExecuteAggressiveTrimAsync(cancellationToken).ConfigureAwait(false);
-                
-                Interlocked.Add(ref this.estimatedJournalCount, -countAtTrimStart);
-                if (Volatile.Read(ref this.estimatedJournalCount) < 0)
-                {
-                    Interlocked.Exchange(ref this.estimatedJournalCount, 0);
-                }
             }
             catch (OperationCanceledException)
             {
@@ -349,8 +341,6 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         var cts = new CancellationTokenSource();
         this.softTrimCts = cts;
 
-        var countAtTrimStart = Volatile.Read(ref this.estimatedJournalCount);
-
         _ = Task.Run(async () =>
         {
             try
@@ -365,12 +355,6 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
                     }
 
                     await this.ExecuteAggressiveTrimAsync(cts.Token).ConfigureAwait(false);
-                    
-                    Interlocked.Add(ref this.estimatedJournalCount, -countAtTrimStart);
-                    if (Volatile.Read(ref this.estimatedJournalCount) < 0)
-                    {
-                        Interlocked.Exchange(ref this.estimatedJournalCount, 0);
-                    }
                 }
                 finally
                 {
@@ -411,26 +395,25 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         var orchestrator = this.serviceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         
         var safelyPersistedMap = versionVectorManager.GetFullSnapshot();
-        
-        // Parallelize checkpointing across active documents to drastically reduce the trim duration lock time
-        var documents = orchestrator.GetActiveDocuments().ToList();
-        var chunks = documents.Chunk(Environment.ProcessorCount);
-        
-        foreach (var chunk in chunks)
-        {
-            await Task.WhenAll(chunk.Select(document => document.CheckpointAsync(cancellationToken))).ConfigureAwait(false);
-        }
+        var documents = orchestrator.GetActiveDocuments();
+
+        await Task.WhenAll(documents.Select(document => document.CheckpointAsync(cancellationToken))).ConfigureAwait(false);
 
         await this.storage.SaveShardVersionVectorMapAsync(replicaContext.ReplicaId, safelyPersistedMap, cancellationToken).ConfigureAwait(false);
 
+        long remainingCount = 0;
         foreach (var shardKvp in safelyPersistedMap)
         {
             await this.storage.TrimAsync(shardKvp.Key, shardKvp.Value.Versions.AsReadOnly(), cancellationToken).ConfigureAwait(false);
+            remainingCount += await this.storage.GetJournalCountAsync(shardKvp.Key, cancellationToken).ConfigureAwait(false);
         }
+
+        var countBeforeUpdate = Volatile.Read(ref this.estimatedJournalCount);
+        Interlocked.Exchange(ref this.estimatedJournalCount, remainingCount);
         
         this.aggressiveTrimsCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
 
-        var thresholdUsed = (this.options.Value.JournalSoftTrimThreshold > 0 && Volatile.Read(ref this.estimatedJournalCount) >= this.options.Value.JournalSoftTrimThreshold) 
+        var thresholdUsed = (this.options.Value.JournalSoftTrimThreshold > 0 && countBeforeUpdate >= this.options.Value.JournalSoftTrimThreshold) 
             ? this.options.Value.JournalSoftTrimThreshold 
             : this.options.Value.JournalHardTrimThreshold;
 

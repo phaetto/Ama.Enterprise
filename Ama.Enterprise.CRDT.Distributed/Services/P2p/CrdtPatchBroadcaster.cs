@@ -21,7 +21,7 @@ using Microsoft.Extensions.Logging;
 /// </summary>
 public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
 {
-    private readonly record struct OutboundPatchItem(string DocumentId, CrdtPatch Patch);
+    private readonly record struct OutboundPatchItem(string DocumentId, string? DocumentTypeAlias, CrdtPatch Patch);
 
     private readonly IServiceProvider serviceProvider;
     private readonly IP2pAlgorithm p2pAlgorithm;
@@ -66,11 +66,11 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
     }
 
     /// <inheritdoc />
-    public Task OnPatchGeneratedAsync(string documentId, CrdtPatch patch, CancellationToken cancellationToken = default)
+    public Task OnPatchGeneratedAsync(string documentId, string? documentTypeAlias, CrdtPatch patch, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
 
-        broadcastChannel.Writer.TryWrite(new OutboundPatchItem(documentId, patch));
+        broadcastChannel.Writer.TryWrite(new OutboundPatchItem(documentId, documentTypeAlias, patch));
         return Task.CompletedTask;
     }
 
@@ -90,14 +90,21 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
             {
                 try
                 {
-                    string? documentTypeAlias = null;
-                    var orchestrator = serviceProvider.GetService<ICrdtDocumentOrchestrator>();
-                    if (orchestrator?.Registry != null && !string.Equals(item.DocumentId, orchestrator.Registry.DocumentId, StringComparison.Ordinal))
+                    var documentTypeAlias = item.DocumentTypeAlias;
+                    if (string.IsNullOrWhiteSpace(documentTypeAlias))
                     {
-                        var registryDoc = await orchestrator.Registry.GetDocumentAsync(disposeCts.Token).ConfigureAwait(false);
-                        if (registryDoc.Data.Documents.TryGetValue(item.DocumentId, out var entry))
+                        var orchestrator = serviceProvider.GetService<ICrdtDocumentOrchestrator>();
+                        if (orchestrator?.Registry != null && !string.Equals(item.DocumentId, orchestrator.Registry.DocumentId, StringComparison.Ordinal))
                         {
-                            documentTypeAlias = entry.TypeAlias;
+                            var registryDoc = await orchestrator.Registry.GetDocumentAsync(disposeCts.Token).ConfigureAwait(false);
+                            foreach (var entry in registryDoc.Data.Documents.Values)
+                            {
+                                if (string.Equals(entry.DocumentId, item.DocumentId, StringComparison.Ordinal) && !entry.IsDeleted)
+                                {
+                                    documentTypeAlias = entry.TypeAlias;
+                                    break;
+                                }
+                            }
                         }
                     }
 

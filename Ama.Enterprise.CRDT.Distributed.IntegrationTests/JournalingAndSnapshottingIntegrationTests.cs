@@ -429,7 +429,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         // Assert
         // In a true state CRDT merge, it shouldn't generate diff patches as it directly merges state in place natively
-        patchObserverMock.Verify(x => x.OnPatchGeneratedAsync(It.IsAny<string>(), It.IsAny<CrdtPatch>(), It.IsAny<CancellationToken>()), Times.Never);
+        patchObserverMock.Verify(x => x.OnPatchGeneratedAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CrdtPatch>(), It.IsAny<CancellationToken>()), Times.Never);
 
         // Both keys should exist as a true state merge unions divergent mapped states logically
         var crdtDocAAfter = await orchestrator.GetDocumentStateAsync<JournalTestState>("journal-doc", CancellationToken.None);

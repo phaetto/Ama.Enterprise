@@ -10,10 +10,4 @@ public static class Constants
     /// Derived from the assembly version at runtime.
     /// </summary>
     public static readonly string ProtocolVersion = typeof(Constants).Assembly.GetName().Version?.ToString() ?? "0.0.0";
-
-    /// <summary>
-    /// The maximum allowable size for a gossip message payload in bytes (1MB).
-    /// Prevents network flooding and memory exhaustion attacks.
-    /// </summary>
-    public const int MaximumPayloadSizeBytes = 1048576;
 }

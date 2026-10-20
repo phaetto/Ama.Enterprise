@@ -20,12 +20,15 @@ using System.Threading;
 using System.Threading.Tasks;
 
 [CrdtAotType(typeof(DocumentOrchestratorIntegrationTests.DynamicTestState))]
+[CrdtAotType(typeof(DocumentOrchestratorIntegrationTests.AlternateTestState))]
 public sealed partial class DynamicTestAotContext : CrdtAotContext
 {
 }
 
 [JsonSerializable(typeof(DocumentOrchestratorIntegrationTests.DynamicTestState))]
 [JsonSerializable(typeof(CrdtDocument<DocumentOrchestratorIntegrationTests.DynamicTestState>))]
+[JsonSerializable(typeof(DocumentOrchestratorIntegrationTests.AlternateTestState))]
+[JsonSerializable(typeof(CrdtDocument<DocumentOrchestratorIntegrationTests.AlternateTestState>))]
 public sealed partial class DynamicTestJsonContext : JsonSerializerContext
 {
 }
@@ -36,6 +39,12 @@ public sealed class DocumentOrchestratorIntegrationTests
     {
         public string Id { get; set; } = "default";
         public int Value { get; set; }
+    }
+
+    public sealed class AlternateTestState
+    {
+        public string Id { get; set; } = "default";
+        public string Label { get; set; } = string.Empty;
     }
 
     private IServiceProvider BuildNode(Action<IServiceCollection>? configureExtra = null)
@@ -51,6 +60,7 @@ public sealed class DocumentOrchestratorIntegrationTests
                 .AddCrdtJsonTypeInfoResolver(DynamicTestJsonContext.Default);
 
         services.AddDistributedDocumentType<DynamicTestState>("dynamic-type");
+        services.AddDistributedDocumentType<AlternateTestState>("alternate-type");
 
         var mockP2p = new Mock<IP2pAlgorithm>();
         mockP2p.SetReturnsDefault(Task.CompletedTask);
@@ -152,10 +162,55 @@ public sealed class DocumentOrchestratorIntegrationTests
         deletedDoc.ShouldBeNull();
         
         var registryDocs = (await orchestrator.Registry.GetDocumentAsync()).Data!.Documents;
-        registryDocs.TryGetValue("doc-to-delete", out var entry).ShouldBeTrue();
-        entry.IsDeleted.ShouldBeTrue();
+        registryDocs.TryGetValue(CrdtRegistryEntry.GetRegistryKey("dynamic-type", "doc-to-delete"), out var entry).ShouldBeTrue();
+        entry!.IsDeleted.ShouldBeTrue();
 
         mockStorage.Verify(x => x.DeleteDocumentAsync(It.IsAny<string>(), "doc-to-delete", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [IntegrationFact]
+    public async Task Orchestrator_ShouldIsolateSameDocumentId_AcrossDifferentDocumentTypes()
+    {
+        // Arrange
+        var sp = BuildNode();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("ReplicaA");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        const string sharedId = "shared-doc-id";
+
+        // Act - Create two documents with the exact same ID but different types
+        await orchestrator.CreateDocumentAsync(sharedId, "dynamic-type", CancellationToken.None);
+        await orchestrator.CreateDocumentAsync(sharedId, "alternate-type", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
+        await orchestrator.ApplyIntentAsync<DynamicTestState>(sharedId, new Ama.CRDT.Models.Intents.SetIntent(42), nameof(DynamicTestState.Value), CancellationToken.None);
+        await orchestrator.ApplyIntentAsync<AlternateTestState>(sharedId, new Ama.CRDT.Models.Intents.SetIntent("hello-world"), nameof(AlternateTestState.Label), CancellationToken.None);
+
+        // Assert - Both documents exist simultaneously without colliding
+        var dynamicDoc = orchestrator.TryGetLocalDocument<DynamicTestState>(sharedId);
+        var alternateDoc = orchestrator.TryGetLocalDocument<AlternateTestState>(sharedId);
+
+        dynamicDoc.ShouldNotBeNull();
+        alternateDoc.ShouldNotBeNull();
+        dynamicDoc!.TypeAlias.ShouldBe("dynamic-type");
+        alternateDoc!.TypeAlias.ShouldBe("alternate-type");
+
+        var dynamicState = await orchestrator.GetDocumentStateAsync<DynamicTestState>(sharedId, CancellationToken.None);
+        var alternateState = await orchestrator.GetDocumentStateAsync<AlternateTestState>(sharedId, CancellationToken.None);
+
+        dynamicState.Data.Value.ShouldBe(42);
+        alternateState.Data.Label.ShouldBe("hello-world");
+
+        // Act 2 - Delete only the DynamicTestState document with sharedId
+        await orchestrator.DeleteDocumentAsync(sharedId, "dynamic-type", CancellationToken.None);
+        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
+
+        // Assert 2 - DynamicTestState is deleted while AlternateTestState remains intact
+        orchestrator.TryGetLocalDocument<DynamicTestState>(sharedId).ShouldBeNull();
+        orchestrator.TryGetLocalDocument<AlternateTestState>(sharedId).ShouldNotBeNull();
     }
 
     [IntegrationFact]

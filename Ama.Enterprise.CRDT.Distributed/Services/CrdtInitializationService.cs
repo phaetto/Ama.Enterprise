@@ -79,26 +79,29 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
                 await orchestrator.InitializeAsync(cancellationToken).ConfigureAwait(false);
 
                 // 4. Replay uncheckpointed WAL boundaries seamlessly projecting generic recovery logic directly
-                IDictionary<string, List<CrdtOperation>> operationsByDoc = new Dictionary<string, List<CrdtOperation>>();
+                var operationsByDocAndShard = new Dictionary<(string DocKey, string ShardId), List<CrdtOperation>>();
                 
                 await foreach (var jOp in globalStorage.GetAllJournaledOperationsAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    var docIdStr = jOp.DocumentId.ToString();
-                    if (!operationsByDoc.TryGetValue(docIdStr, out var opList))
+                    var docIdStr = jOp.DocumentId?.ToString() ?? string.Empty;
+                    var shardIdStr = jOp.Operation.ShardId ?? string.Empty;
+                    var key = (docIdStr, shardIdStr);
+                    if (!operationsByDocAndShard.TryGetValue(key, out var opList))
                     {
                         opList = new List<CrdtOperation>();
-                        operationsByDoc[docIdStr] = opList;
+                        operationsByDocAndShard[key] = opList;
                     }
                     opList.Add(jOp.Operation);
                 }
 
-                if (operationsByDoc.Count > 0)
+                if (operationsByDocAndShard.Count > 0)
                 {
-                    var totalReplayed = operationsByDoc.Values.Sum(l => l.Count);
+                    var totalReplayed = operationsByDocAndShard.Values.Sum(l => l.Count);
                     replayedOperationsCounter.Add(totalReplayed, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
                     logger.LogInformation("Replaying {Count} journaled operations for replica {ReplicaId}.", totalReplayed, replicaContext.ReplicaId);
                     
-                    if (operationsByDoc.TryGetValue(orchestrator.Registry.DocumentId, out var registryOps))
+                    var registryOps = GetMatchingOperations(operationsByDocAndShard, orchestrator.Registry);
+                    if (registryOps.Count > 0)
                     {
                         await orchestrator.Registry.ApplyJournaledPatchAsync(new CrdtPatch(registryOps), cancellationToken).ConfigureAwait(false);
                         await orchestrator.SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
@@ -108,9 +111,13 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
                     
                     foreach (var document in documents)
                     {
-                        if (document.DocumentId != orchestrator.Registry.DocumentId && operationsByDoc.TryGetValue(document.DocumentId, out var docOps))
+                        if (document.DocumentId != orchestrator.Registry.DocumentId)
                         {
-                            await document.ApplyJournaledPatchAsync(new CrdtPatch(docOps), cancellationToken).ConfigureAwait(false);
+                            var docOps = GetMatchingOperations(operationsByDocAndShard, document);
+                            if (docOps.Count > 0)
+                            {
+                                await document.ApplyJournaledPatchAsync(new CrdtPatch(docOps), cancellationToken).ConfigureAwait(false);
+                            }
                         }
                     }
                 }
@@ -133,5 +140,34 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
     public void Dispose()
     {
         meter.Dispose();
+    }
+
+    private static List<CrdtOperation> GetMatchingOperations(
+        Dictionary<(string DocKey, string ShardId), List<CrdtOperation>> operationsByDocAndShard,
+        IDistributedCrdtDocument document)
+    {
+        var compositeKey = CrdtRegistryEntry.GetRegistryKey(document.TypeAlias, document.DocumentId);
+
+        if (operationsByDocAndShard.TryGetValue((compositeKey, document.ShardId), out var exactCompositeOps))
+        {
+            return exactCompositeOps;
+        }
+
+        if (operationsByDocAndShard.TryGetValue((document.DocumentId, document.ShardId), out var exactShardOps))
+        {
+            return exactShardOps;
+        }
+
+        if (operationsByDocAndShard.TryGetValue((compositeKey, string.Empty), out var fallbackCompositeOps))
+        {
+            return fallbackCompositeOps;
+        }
+
+        if (operationsByDocAndShard.TryGetValue((document.DocumentId, string.Empty), out var fallbackDocOps))
+        {
+            return fallbackDocOps;
+        }
+
+        return [];
     }
 }

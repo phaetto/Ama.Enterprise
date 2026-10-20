@@ -46,6 +46,11 @@ public interface ICrdtDocumentOrchestrator
     ValueTask<string?> TryGetShardIdAsync(string documentId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Resolves the shard identifier for a specific document ID and type alias using the registry and cached mappings.
+    /// </summary>
+    ValueTask<string?> TryGetShardIdAsync(string documentId, string? typeAlias, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Resolves a local active document or lazily instantiates and promotes it if the local node is an authoritative shard owner and the document is not tombstoned.
     /// </summary>
     ValueTask<IDistributedCrdtDocument?> ResolveOrPromoteLocalDocumentAsync(string documentId, string? typeAlias = null, CancellationToken cancellationToken = default);
@@ -81,9 +86,29 @@ public interface ICrdtDocumentOrchestrator
     Task CreateDocumentAsync(string documentId, string typeAlias, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Manually creates mapped distributed state models across the P2P network with the specified delivery mode.
+    /// </summary>
+    Task CreateDocumentAsync(string documentId, string typeAlias, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Issues a permanent cluster tombstone.
     /// </summary>
     Task DeleteDocumentAsync(string documentId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Issues a permanent cluster tombstone with the specified delivery mode.
+    /// </summary>
+    Task DeleteDocumentAsync(string documentId, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Issues a permanent cluster tombstone for a specific document type alias and identifier.
+    /// </summary>
+    Task DeleteDocumentAsync(string documentId, string typeAlias, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Issues a permanent cluster tombstone for a specific document type alias and identifier with the specified delivery mode.
+    /// </summary>
+    Task DeleteDocumentAsync(string documentId, string typeAlias, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Processes localized matrix modifications dynamically promoting assigned structural bounds.
@@ -109,6 +134,11 @@ public interface ICrdtDocumentOrchestrator
     /// Serializes the current local state and dispatches it directly as a targeted snapshot following an unrecoverable journal truncation gap.
     /// </summary>
     Task ProvideSnapshotAsync(string documentId, string targetReplicaId, PeerId targetPeerId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Serializes the current local state for a specific document type and dispatches it directly as a targeted snapshot following an unrecoverable journal truncation gap.
+    /// </summary>
+    Task ProvideSnapshotAsync(string documentId, string? typeAlias, string targetReplicaId, PeerId targetPeerId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Dispatches a targeted point-to-point synchronization request mapping peer topologies extracting random active peers internally.

@@ -1,22 +1,18 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System;
-using System.Diagnostics.Metrics;
 using Ama.CRDT.Services;
 using Microsoft.Extensions.DependencyInjection;
 
-internal sealed class DistributedCrdtScopeFactory : IDistributedCrdtScopeFactory, IDisposable
+internal sealed class DistributedCrdtScopeFactory : IDistributedCrdtScopeFactory
 {
     private readonly ICrdtScopeFactory coreScopeFactory;
-    private readonly Meter meter;
-    private readonly Counter<long> scopesGeneratedCounter;
+    private readonly IDistributedCrdtTelemetry telemetry;
 
-    public DistributedCrdtScopeFactory(ICrdtScopeFactory coreScopeFactory, IMeterFactory? meterFactory = null)
+    public DistributedCrdtScopeFactory(ICrdtScopeFactory coreScopeFactory, IDistributedCrdtTelemetry telemetry)
     {
         this.coreScopeFactory = coreScopeFactory ?? throw new ArgumentNullException(nameof(coreScopeFactory));
-        
-        this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.DistributedCrdtScopeFactory") ?? new Meter("Ama.Enterprise.CRDT.Distributed.DistributedCrdtScopeFactory");
-        this.scopesGeneratedCounter = this.meter.CreateCounter<long>("crdt.scope.generated", "scopes", "Total explicitly distinct internal generic bounds generated dynamically");
+        this.telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
     }
 
     public IDistributedCrdtScope CreateScope(string replicaId)
@@ -25,13 +21,8 @@ internal sealed class DistributedCrdtScopeFactory : IDistributedCrdtScopeFactory
         
         var scope = coreScopeFactory.CreateScope(replicaId);
         
-        scopesGeneratedCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaId));
+        telemetry.RecordScopeGenerated(replicaId);
         return new DistributedCrdtScope(scope, replicaId);
-    }
-
-    public void Dispose()
-    {
-        meter.Dispose();
     }
 }
 

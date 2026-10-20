@@ -26,6 +26,18 @@ public sealed record CrdtRegistryEntry : IEquatable<CrdtRegistryEntry>, IExtensi
     /// </summary>
     public bool IsDeleted { get; init; }
 
+    /// <summary>
+    /// Formats a composite registry key combining the type alias and document identifier.
+    /// </summary>
+    /// <param name="typeAlias">The document type alias.</param>
+    /// <param name="documentId">The document identifier.</param>
+    /// <returns>The composite key string.</returns>
+    public static string GetRegistryKey(string? typeAlias, string documentId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
+        return string.IsNullOrWhiteSpace(typeAlias) ? documentId : $"{typeAlias}:{documentId}";
+    }
+
     /// <inheritdoc />
     [JsonExtensionData]
     public IDictionary<string, JsonElement>? JsonExtensionData { get; set; }

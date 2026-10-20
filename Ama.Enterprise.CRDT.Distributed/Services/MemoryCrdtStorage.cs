@@ -18,6 +18,7 @@ using Ama.Enterprise.CRDT.Distributed.Models;
 public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
 {
     private readonly Dictionary<string, List<JournaledOperation>> shardedOperations = new();
+    private readonly Dictionary<string, HashSet<Guid>> shardedOperationIds = new();
     private readonly Dictionary<string, ClusterStateSnapshotDto> clusterStates = new();
     private readonly Dictionary<string, ShardVersionVectorMap> globalVersionVectors = new();
     private readonly Dictionary<string, object> documents = new();
@@ -51,7 +52,13 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
                     shardedOperations[shardId] = shardList;
                 }
 
-                if (!shardList.Any(o => o.Operation.Id == op.Id))
+                if (!shardedOperationIds.TryGetValue(shardId, out var shardOpIds))
+                {
+                    shardOpIds = new HashSet<Guid>();
+                    shardedOperationIds[shardId] = shardOpIds;
+                }
+
+                if (shardOpIds.Add(op.Id))
                 {
                     shardList.Add(new JournaledOperation(documentId, op));
                 }
@@ -143,21 +150,34 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
         ArgumentException.ThrowIfNullOrEmpty(shardId);
         ArgumentNullException.ThrowIfNull(globalMinimumVersionVector);
 
+        if (globalMinimumVersionVector.Count == 0)
+        {
+            trimsExecutedCounter.Add(1);
+            return Task.CompletedTask;
+        }
+
         lock (syncRoot)
         {
             if (shardedOperations.TryGetValue(shardId, out var shardList))
             {
-                foreach (var kvp in globalMinimumVersionVector)
+                shardedOperationIds.TryGetValue(shardId, out var shardOpIds);
+
+                shardList.RemoveAll(op =>
                 {
-                    var originReplicaId = kvp.Key;
-                    var maxClock = kvp.Value;
-                    
-                    shardList.RemoveAll(op => op.Operation.ReplicaId == originReplicaId && op.Operation.ShardClock <= maxClock);
-                }
+                    if (globalMinimumVersionVector.TryGetValue(op.Operation.ReplicaId, out var maxClock) &&
+                        op.Operation.ShardClock <= maxClock)
+                    {
+                        shardOpIds?.Remove(op.Operation.Id);
+                        return true;
+                    }
+
+                    return false;
+                });
                 
                 if (shardList.Count == 0)
                 {
                     shardedOperations.Remove(shardId);
+                    shardedOperationIds.Remove(shardId);
                 }
             }
         }
@@ -262,12 +282,48 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
         if (string.IsNullOrWhiteSpace(documentId)) return Task.CompletedTask;
 
         var key = $"{shardId}_{documentId}";
+        var rawDocId = ExtractRawDocumentId(documentId);
         lock (syncRoot)
         {
-            foreach (var list in shardedOperations.Values)
+            if (!string.IsNullOrWhiteSpace(shardId))
             {
-                list.RemoveAll(op => op.DocumentId.ToString() == documentId);
+                if (shardedOperations.TryGetValue(shardId, out var shardList))
+                {
+                    shardedOperationIds.TryGetValue(shardId, out var shardOpIds);
+                    shardList.RemoveAll(op =>
+                    {
+                        var opDocId = op.DocumentId?.ToString();
+                        var match = string.Equals(opDocId, documentId, StringComparison.Ordinal) ||
+                                    string.Equals(opDocId, rawDocId, StringComparison.Ordinal);
+                        if (match)
+                        {
+                            shardOpIds?.Remove(op.Operation.Id);
+                        }
+
+                        return match;
+                    });
+                }
             }
+            else
+            {
+                foreach (var kvp in shardedOperations)
+                {
+                    shardedOperationIds.TryGetValue(kvp.Key, out var shardOpIds);
+                    kvp.Value.RemoveAll(op =>
+                    {
+                        var opDocId = op.DocumentId?.ToString();
+                        var match = string.Equals(opDocId, documentId, StringComparison.Ordinal) ||
+                                    string.Equals(opDocId, rawDocId, StringComparison.Ordinal);
+                        if (match)
+                        {
+                            shardOpIds?.Remove(op.Operation.Id);
+                        }
+
+                        return match;
+                    });
+                }
+            }
+
             documents.Remove(key);
         }
 
@@ -277,5 +333,13 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     public void Dispose()
     {
         meter.Dispose();
+    }
+
+    private static string ExtractRawDocumentId(string documentId)
+    {
+        var colonIndex = documentId.IndexOf(':', StringComparison.Ordinal);
+        return colonIndex >= 0 && colonIndex < documentId.Length - 1
+            ? documentId[(colonIndex + 1)..]
+            : documentId;
     }
 }
