@@ -6,7 +6,6 @@ using System.Diagnostics.Metrics;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services;
-using Ama.CRDT.Services.Versioning;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;

@@ -15,7 +15,7 @@ public sealed class CrdtRegistryState : IExtensibleDistributedPayload, IEquatabl
     /// <summary>
     /// Gets or sets the mapped sequence identifier routing this registry state across P2P limits.
     /// </summary>
-    public string Id { get; set; } = "system-document-registry";
+    public string Id { get; set; } = Constants.SystemRegistryDocumentId;
 
     /// <summary>
     /// Gets or sets the registry map dynamically identifying active and tombstoned document scopes across the cluster.

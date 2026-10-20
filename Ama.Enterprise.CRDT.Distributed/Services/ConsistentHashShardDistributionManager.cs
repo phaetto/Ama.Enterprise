@@ -19,8 +19,6 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed class ConsistentHashShardDistributionManager : IShardDistributionManager
 {
-    private const string SystemRegistryDocumentId = "system-document-registry";
-
     private readonly IClusterStateTracker clusterTracker;
     private readonly string localReplicaId;
     private readonly IServiceProvider serviceProvider;
@@ -234,10 +232,10 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
     private static bool IsSystemRegistryShard(string shardId)
     {
         return !string.IsNullOrWhiteSpace(shardId) &&
-               (string.Equals(shardId, SystemRegistryDocumentId, StringComparison.Ordinal) ||
+               (string.Equals(shardId, Constants.SystemRegistryDocumentId, StringComparison.Ordinal) ||
                string.Equals(shardId, nameof(CrdtRegistryState), StringComparison.Ordinal) ||
-               shardId.EndsWith($"_{SystemRegistryDocumentId}", StringComparison.Ordinal) ||
-               shardId.EndsWith($":{SystemRegistryDocumentId}", StringComparison.Ordinal));
+               shardId.EndsWith($"_{Constants.SystemRegistryDocumentId}", StringComparison.Ordinal) ||
+               shardId.EndsWith($":{Constants.SystemRegistryDocumentId}", StringComparison.Ordinal));
     }
 
     private static uint ComputeHash(string input)

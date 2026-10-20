@@ -3,7 +3,6 @@ namespace Ama.Enterprise.CRDT.Distributed.Models;
 using System.Text.Json.Serialization;
 using Ama.CRDT.Models;
 using Ama.CRDT.Models.Intents;
-using Ama.CRDT.Models.Intents.Decorators;
 
 /// <summary>
 /// JSON serialization context for the generic Distributed CRDT P2P models.

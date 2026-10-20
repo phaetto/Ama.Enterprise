@@ -1618,7 +1618,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     {
         if (typeof(TState) == typeof(CrdtRegistryState))
         {
-            return "system-document-registry";
+            return Constants.SystemRegistryDocumentId;
         }
 
         return stateTypeAliases.TryGetValue(typeof(TState), out var alias) ? alias : null;

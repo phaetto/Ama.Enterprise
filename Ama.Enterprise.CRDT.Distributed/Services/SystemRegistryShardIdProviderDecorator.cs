@@ -28,7 +28,7 @@ public sealed class SystemRegistryShardIdProviderDecorator : IShardIdProvider
     {
         if (typeof(T) == typeof(CrdtRegistryState) || document.Data is CrdtRegistryState)
         {
-            return "system-document-registry";
+            return Constants.SystemRegistryDocumentId;
         }
 
         return inner.GetShardId(document);
@@ -39,9 +39,9 @@ public sealed class SystemRegistryShardIdProviderDecorator : IShardIdProvider
     {
         ArgumentNullException.ThrowIfNull(documentId);
 
-        if (typeof(T) == typeof(CrdtRegistryState) || string.Equals(documentId.ToString(), "system-document-registry", StringComparison.Ordinal))
+        if (typeof(T) == typeof(CrdtRegistryState) || string.Equals(documentId.ToString(), Constants.SystemRegistryDocumentId, StringComparison.Ordinal))
         {
-            return "system-document-registry";
+            return Constants.SystemRegistryDocumentId;
         }
 
         return inner.GetShardId<T>(documentId);
@@ -53,9 +53,9 @@ public sealed class SystemRegistryShardIdProviderDecorator : IShardIdProvider
         ArgumentNullException.ThrowIfNull(documentId);
         ArgumentNullException.ThrowIfNull(documentType);
 
-        if (documentType == typeof(CrdtRegistryState) || string.Equals(documentId.ToString(), "system-document-registry", StringComparison.Ordinal))
+        if (documentType == typeof(CrdtRegistryState) || string.Equals(documentId.ToString(), Constants.SystemRegistryDocumentId, StringComparison.Ordinal))
         {
-            return "system-document-registry";
+            return Constants.SystemRegistryDocumentId;
         }
 
         return inner.GetShardId(documentId, documentType);

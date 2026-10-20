@@ -56,6 +56,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/ShowCaseTokenValidator.cs` | Refactored token validator evaluating structured session constraints to resolve Keyed DI construction limits. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/TaskManager.cs` | Refactored to use `ICrdtDocumentOrchestrator` as a stateless gateway for reading states and forwarding intents directly, avoiding local patch generation limits. |
 | `$/Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
+| `$/Ama.Enterprise.CRDT.Distributed/Constants.cs` | Global constants for the distributed CRDT module, including the reserved `SystemRegistryDocumentId` (`system-document-registry`). |
 | `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | Registered `IDistributedCrdtTelemetry` as a singleton and `IDocumentCommandPipeline` as a scoped service to share a single command channel and centralized meters across all documents. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/ClusterStateSnapshotDto.cs` | Updated to map tombstoned replicas to their eviction timestamp tracking the exact eviction moment for safe cooldown expirations. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtEvictionRejectionMessage.cs` | Message broadcasted to forcefully reject and re-bootstrap nodes that have been tombstoned by the cluster, preventing amnesia edge cases. |
@@ -66,7 +67,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtReadRequestDto.cs` | Added `DocumentTypeAlias` property to support lazy document instantiation on remote read requests. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtReadResponseDto.cs` | DTO returning the isolated serialized materialized CRDT payload natively mapped against an RPC correlation boundary. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtRegistryEntry.cs` | Added `GetRegistryKey` helper to format composite `{typeAlias}:{documentId}` keys for multi-type document isolation. |
-| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtRegistryState.cs` | Implemented `IDistributedCrdtState` so the default shard ID provider resolves the registry shard ID to `system-document-registry`. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtRegistryState.cs` | Added `IDistributedCrdtState` implementation so default `IShardIdProvider` and `IDocumentIdProvider` implementations extract `Id` (`system-document-registry`) directly without reflection. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtSnapshotDataDto.cs` | DTO representing a serialized snapshot payload, avoiding tuple usage across generic bounds. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtSnapshotMessage.cs` | Message payload containing a complete materialized CRDT document snapshot, used as a fallback synchronization mechanism when log truncation gaps are detected. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtStateSyncMessage.cs` | Structure carrying generic synchronization states formatted across anti-entropy operations representing document DVV. |
@@ -81,15 +82,15 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Models/PooledDocumentCommand.cs` | Converted `PooledDocumentCommand` to a non-generic pooled command carrying an `IDocumentCommandTarget` reference so a single channel and object pool can serve all document state types. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/PooledOrchestratorCommand.cs` | Added `IsFireAndForget` flag to support zero-allocation object pool recycling for non-blocking orchestrator commands. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ClusterStateTracker.cs` | Fixed proxy routing amnesia by enforcing a 1:1 mapping between ReplicaId and PeerId and blocking the persistence of ephemeral network session mappings into storage. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/ConsistentHashShardDistributionManager.cs` | Updated `IsShardLocalAsync` and `GetTargetNodesForShardAsync` to treat the system registry shard (`system-document-registry`) as globally replicated across all cluster nodes even when sharding is enabled, and kept `cachedAllReplicas` updated across ring refreshes. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/ConsistentHashShardDistributionManager.cs` | Replaced local registry constant with `Constants.SystemRegistryDocumentId`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtCheckpointService.cs` | Delegated shard version vector snapshot creation to `IShardVersionVectorManager`. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Keyed active documents, registry entries, and shard ID caches by composite `{typeAlias}:{documentId}` keys so documents of different types can share the same document ID without collisions. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Referenced `Constants.SystemRegistryDocumentId` when resolving the type alias for `CrdtRegistryState`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtEvictionService.cs` | Implemented `EvictPeersAsync` overload accepting `IntentDeliveryMode` and forwarding it to `IDistributedCrdtDocument.EvictReplicaAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtInitializationService.cs` | Updated journal replay matching to disambiguate operations by composite key and `ShardId`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtMaintenanceService.cs` | Delegated version vector replica eviction and snapshot extraction to `IShardVersionVectorManager`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtTrimCoordinator.cs` | Coordinates trimming operations across the entire node to ensure only one aggressive or maintenance trim runs at a time, preventing IO and memory saturation. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DefaultScopeTopologyProvider.cs` | Updated to implement the asynchronous `IsPeerExpectedAsync` method returning synchronous wrappers. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Synchronized checkpoint snapshot extraction, replica eviction, and state resets with the per-shard lock to prevent concurrent collection modification exceptions during background serialization. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Referenced `Constants.SystemRegistryDocumentId` when resolving the type alias and filtering the system registry document. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeFactory.cs` | Delegated scope creation metrics to the centralized `IDistributedCrdtTelemetry` service. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeManager.cs` | Centralized singleton tracker managing long-lived background scopes per instantiated replica. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtTelemetry.cs` | Singleton service centralizing all `Meter`, `Counter<long>`, and `ObservableGauge<int>` instances for scopes, orchestrators, and documents. |
@@ -121,7 +122,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ShardVersionVectorManager.cs` | Implemented per-shard `SemaphoreSlim` execution locks and multi-document snapshot merge tracking to prevent in-flight journal gaps and partial snapshot DVV pollution. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/StorageJournalForwarder.cs` | Removed hot-path `Task.Yield` backpressure stalls, eliminated sequential chunking during checkpointing, and synchronized `estimatedJournalCount` with actual post-trim shard journal counts. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/SystemRegistryServiceProvider.cs` | Internal `IServiceProvider` wrapper ensuring resolved `IShardIdProvider` instances are decorated with `SystemRegistryShardIdProviderDecorator` regardless of DI registration order. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/SystemRegistryShardIdProviderDecorator.cs` | Updated to implement `GetShardId(IComparable documentId, Type documentType)` matching `IShardIdProvider`. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/SystemRegistryShardIdProviderDecorator.cs` | Referenced `Constants.SystemRegistryDocumentId` when resolving the shard ID for `CrdtRegistryState`. |
 | `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Ama.Enterprise.CRDT.MessagePack.IntegrationTests.csproj` | Switched references to newly renamed `.SourceGenerators` and `.Tests.Common` projects mapping logic. |
 | `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Models/IntegrationTestModels.cs` | Added `ConcurrentDictionaryModel` to test `ConcurrentDictionary<TKey, TValue>` AOT MessagePack serialization. |
 | `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Services/MessagePackSerializerIntegrationTests.cs` | Added integration test verifying `ConcurrentDictionary<TKey, TValue>` serialization and deserialization. |

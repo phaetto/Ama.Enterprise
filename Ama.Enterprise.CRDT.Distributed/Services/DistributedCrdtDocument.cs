@@ -5,7 +5,6 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq.Expressions;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
@@ -902,7 +901,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             var list = new List<string>();
             foreach (var doc in docs)
             {
-                if (string.Equals(doc.ShardId, ShardId, StringComparison.Ordinal))
+                if (string.Equals(doc.ShardId, ShardId, StringComparison.Ordinal)
+                    && !string.Equals(doc.DocumentId, Constants.SystemRegistryDocumentId, StringComparison.Ordinal))
                 {
                     list.Add(CrdtRegistryEntry.GetRegistryKey(doc.TypeAlias, doc.DocumentId));
                 }
@@ -1301,7 +1301,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         if (typeof(TState) == typeof(CrdtRegistryState))
         {
-            return "system-document-registry";
+            return Constants.SystemRegistryDocumentId;
         }
 
         foreach (var factory in sp.GetServices<IDocumentFactory>())
