@@ -931,6 +931,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private async Task ExecuteCheckpointDirectAsync(CancellationToken cancellationToken)
     {
         CrdtDocument<TState> currentDoc = default;
+        byte[]? snapshotBytes = null;
         var shouldSave = false;
 
         try
@@ -946,8 +947,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
                     if (storage is MemoryCrdtStorage)
                     {
-                        var snapshotBytes = serializer.SerializeToBytes(currentDocument);
-                        currentDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(snapshotBytes);
+                        snapshotBytes = serializer.SerializeToBytes(currentDocument);
                     }
                     else
                     {
@@ -964,6 +964,11 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             if (!shouldSave)
             {
                 return;
+            }
+
+            if (snapshotBytes != null)
+            {
+                currentDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(snapshotBytes);
             }
 
             var storageDocKey = GetStorageDocumentKey();

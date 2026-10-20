@@ -314,11 +314,35 @@ public static class Program
                             if (parts.Length >= 3 && int.TryParse(parts[1], out var fleetCount) && int.TryParse(parts[2], out var devicesPerFleet))
                             {
                                 logger.LogInformation("Generating {FleetCount} fleets with {DevicesPerFleet} devices each...", fleetCount, devicesPerFleet);
+                                var genSw = Stopwatch.StartNew();
+
+                                var createTasks = new List<Task>(Math.Min(fleetCount, 512));
                                 for (int i = 1; i <= fleetCount; i++)
                                 {
                                     if (cts.Token.IsCancellationRequested) break;
                                     var docId = $"auto-fleet-{i}";
-                                    await orchestrator.CreateDocumentAsync(docId, "fleet-list", cts.Token).ConfigureAwait(false);
+                                    createTasks.Add(orchestrator.CreateDocumentAsync(docId, "fleet-list", IntentDeliveryMode.FireAndForget, cts.Token));
+
+                                    if (createTasks.Count >= 512)
+                                    {
+                                        await Task.WhenAll(createTasks).ConfigureAwait(false);
+                                        createTasks.Clear();
+                                    }
+                                }
+
+                                if (createTasks.Count > 0)
+                                {
+                                    await Task.WhenAll(createTasks).ConfigureAwait(false);
+                                    createTasks.Clear();
+                                }
+
+                                await orchestrator.SyncDocumentsAsync(IntentDeliveryMode.Acknowledged, cts.Token).ConfigureAwait(false);
+
+                                var deviceTasks = new List<Task>(Math.Min(fleetCount * Math.Max(1, devicesPerFleet), 2048));
+                                for (int i = 1; i <= fleetCount; i++)
+                                {
+                                    if (cts.Token.IsCancellationRequested) break;
+                                    var docId = $"auto-fleet-{i}";
                                     
                                     for (int j = 1; j <= devicesPerFleet; j++)
                                     {
@@ -326,10 +350,26 @@ public static class Program
                                         var deviceId = $"dev-{j}";
                                         var isDevOnline = Random.Shared.NextDouble() > 0.5;
                                         var deviceBattery = Random.Shared.Next(0, 101);
-                                        await fleetManager.SetDeviceAsync(docId, deviceId, isDevOnline, deviceBattery, IntentDeliveryMode.FireAndForget, cts.Token).ConfigureAwait(false);
+                                        deviceTasks.Add(fleetManager.SetDeviceAsync(docId, deviceId, isDevOnline, deviceBattery, IntentDeliveryMode.FireAndForget, cts.Token));
+
+                                        if (deviceTasks.Count >= 2048)
+                                        {
+                                            await Task.WhenAll(deviceTasks).ConfigureAwait(false);
+                                            deviceTasks.Clear();
+                                        }
                                     }
                                 }
-                                logger.LogInformation("Finished generating fleets.");
+
+                                if (deviceTasks.Count > 0)
+                                {
+                                    await Task.WhenAll(deviceTasks).ConfigureAwait(false);
+                                    deviceTasks.Clear();
+                                }
+
+                                genSw.Stop();
+                                var totalOps = fleetCount + ((long)fleetCount * devicesPerFleet);
+                                var opsPerSec = genSw.Elapsed.TotalSeconds > 0 ? (long)(totalOps / genSw.Elapsed.TotalSeconds) : totalOps;
+                                logger.LogInformation("Finished generating {FleetCount} fleets ({TotalOps} total ops) in {ElapsedMs} ms (~{OpsPerSec} ops/sec).", fleetCount, totalOps, genSw.ElapsedMilliseconds, opsPerSec);
                             }
                             else
                             {

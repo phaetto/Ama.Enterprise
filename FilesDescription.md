@@ -25,7 +25,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/ShowCaseJsonContext.cs` | AOT JSON context for the showcase multi-CRDT models. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskItem.cs` | Data structure representing an individual task item. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskListState.cs` | Root CRDT document model representing a task list, updated to inherit `IDistributedCrdtState`. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Enabled `AvoidBlindCheckpointWrites` and bounded `ChannelCapacity` to prevent unbounded fire-and-forget queue allocations and redundant checkpoints. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Optimized `gen-fleets` command to batch fleet creations with `IntentDeliveryMode.FireAndForget`, perform a single registry sync, and pipeline device updates concurrently. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetManager.cs` | Added `IntentDeliveryMode` support when forwarding device intents to `ICrdtDocumentOrchestrator.ApplyIntentAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/IFleetManager.cs` | Added overloads accepting `IntentDeliveryMode` for setting and removing devices. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ITaskManager.cs` | Added overloads accepting `IntentDeliveryMode` for setting and removing tasks. |
@@ -84,13 +84,13 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ClusterStateTracker.cs` | Fixed proxy routing amnesia by enforcing a 1:1 mapping between ReplicaId and PeerId and blocking the persistence of ephemeral network session mappings into storage. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ConsistentHashShardDistributionManager.cs` | Replaced local registry constant with `Constants.SystemRegistryDocumentId`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtCheckpointService.cs` | Delegated shard version vector snapshot creation to `IShardVersionVectorManager`. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Referenced `Constants.SystemRegistryDocumentId` when resolving the type alias for `CrdtRegistryState`. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Optimized `CreateDocumentAsync` to promote single documents in $O(1)$ instead of scanning the full registry, coalesced `FireAndForget` `SyncDocumentsAsync` calls, and downgraded per-document creation/sync logs to `Debug`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtEvictionService.cs` | Implemented `EvictPeersAsync` overload accepting `IntentDeliveryMode` and forwarding it to `IDistributedCrdtDocument.EvictReplicaAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtInitializationService.cs` | Updated journal replay matching to disambiguate operations by composite key and `ShardId`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtMaintenanceService.cs` | Delegated version vector replica eviction and snapshot extraction to `IShardVersionVectorManager`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtTrimCoordinator.cs` | Coordinates trimming operations across the entire node to ensure only one aggressive or maintenance trim runs at a time, preventing IO and memory saturation. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DefaultScopeTopologyProvider.cs` | Updated to implement the asynchronous `IsPeerExpectedAsync` method returning synchronous wrappers. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Shared and trimmed `HashSet<object>` during memory footprint estimation and skipped redundant serialize/deserialize deep-cloning during checkpoints when using persistent storage. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Kept `SerializeToBytes` inside `syncRoot` during `MemoryCrdtStorage` checkpoints while leaving `DeserializeFromBytes` outside the shard lock to prevent concurrent collection modification exceptions. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeFactory.cs` | Delegated scope creation metrics to the centralized `IDistributedCrdtTelemetry` service. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeManager.cs` | Centralized singleton tracker managing long-lived background scopes per instantiated replica. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtTelemetry.cs` | Singleton service centralizing all `Meter`, `Counter<long>`, and `ObservableGauge<int>` instances for scopes, orchestrators, and documents. |

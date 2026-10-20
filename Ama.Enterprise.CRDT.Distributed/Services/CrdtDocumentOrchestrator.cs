@@ -42,6 +42,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     private readonly Channel<PooledOrchestratorCommand> commandChannel;
     private readonly ConcurrentQueue<PooledOrchestratorCommand> commandPool = new();
     private readonly CancellationTokenSource disposeCts = new();
+    private int syncPending;
     
     public IDistributedCrdtDocument<CrdtRegistryState> Registry { get; private set; } = null!;
 
@@ -126,6 +127,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     {
         if (deliveryMode == IntentDeliveryMode.FireAndForget)
         {
+            if (Interlocked.Exchange(ref syncPending, 1) == 1)
+            {
+                return;
+            }
+
             var ffCmd = GetCommand();
             ffCmd.Type = OrchestratorCommandType.SyncDocuments;
             ffCmd.IsFireAndForget = true;
@@ -869,11 +875,35 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         var registryKey = CrdtRegistryEntry.GetRegistryKey(typeAlias, documentId);
         var intent = new MapSetIntent(registryKey, new CrdtRegistryEntry(documentId, typeAlias, false));
         
+        if (Registry is IDistributedCrdtDocument<CrdtRegistryState> registryTyped)
+        {
+            var applied = await registryTyped.ApplyRemoteIntentAsync(intent, nameof(CrdtRegistryState.Documents), patcher, deliveryMode, cancellationToken).ConfigureAwait(false);
+            if (applied)
+            {
+                if (deliveryMode == IntentDeliveryMode.Acknowledged)
+                {
+                    await PromoteSingleDocumentAsync(documentId, typeAlias, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await SyncDocumentsAsync(IntentDeliveryMode.FireAndForget, cancellationToken).ConfigureAwait(false);
+                }
+
+                logger.LogDebug("Forwarded creation intent for document {DocumentId} ({TypeAlias}).", documentId, typeAlias);
+            }
+            else
+            {
+                logger.LogWarning("Failed to forward creation intent for document {DocumentId} ({TypeAlias}).", documentId, typeAlias);
+            }
+
+            return;
+        }
+
         var success = await ApplyIntentAsync<CrdtRegistryState>(registry.DocumentId, intent, nameof(CrdtRegistryState.Documents), deliveryMode, cancellationToken).ConfigureAwait(false);
         
         if (success)
         {
-            logger.LogInformation("Forwarded creation intent for document {DocumentId} ({TypeAlias}).", documentId, typeAlias);
+            logger.LogDebug("Forwarded creation intent for document {DocumentId} ({TypeAlias}).", documentId, typeAlias);
         }
         else
         {
@@ -1144,12 +1174,14 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                             await ProcessInitializeInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
                             break;
                         case OrchestratorCommandType.SyncDocuments:
+                            Interlocked.Exchange(ref syncPending, 0);
                             await ProcessSyncDocumentsInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
                             break;
                         case OrchestratorCommandType.CreateDocument:
                             await ProcessPromoteDocumentInternalAsync(cmd.DocumentId!, cmd.TypeAlias!, cmd.CancellationToken).ConfigureAwait(false);
                             break;
                         case OrchestratorCommandType.ReevaluateTopology:
+                            Interlocked.Exchange(ref syncPending, 0);
                             await ProcessSyncDocumentsInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
                             break;
                     }
@@ -1254,7 +1286,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             versionVectorManager.EnsureShardRegistered(doc.ShardId);
 
             telemetry.RecordOrchestratorDocumentCreated(documentId);
-            logger.LogInformation("Lazily promoted active CRDT document: {DocumentId} ({TypeAlias})", documentId, typeAlias);
+            logger.LogDebug("Lazily promoted active CRDT document: {DocumentId} ({TypeAlias})", documentId, typeAlias);
             await NotifyTopologyChangedAsync(cancellationToken).ConfigureAwait(false);
         }
         else
@@ -1264,6 +1296,49 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 if (doc is IDisposable d) d.Dispose();
             }
             catch (ObjectDisposedException) { }
+        }
+    }
+
+    private async Task PromoteSingleDocumentAsync(string documentId, string typeAlias, CancellationToken cancellationToken)
+    {
+        var compositeKey = CrdtRegistryEntry.GetRegistryKey(typeAlias, documentId);
+        if (activeDocuments.ContainsKey(compositeKey))
+        {
+            return;
+        }
+
+        var factory = serviceProvider.GetKeyedService<IDocumentFactory>(typeAlias);
+        if (factory == null)
+        {
+            return;
+        }
+
+        if (!shardIdCache.TryGetValue(compositeKey, out var shardId))
+        {
+            shardId = factory.GetShardId(serviceProvider, documentId);
+            shardIdCache.TryAdd(compositeKey, shardId);
+        }
+
+        if (!await distributionManager.IsShardLocalAsync(shardId, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        var cmd = GetCommand();
+        cmd.Type = OrchestratorCommandType.CreateDocument;
+        cmd.DocumentId = documentId;
+        cmd.TypeAlias = typeAlias;
+        cmd.CancellationToken = cancellationToken;
+
+        try
+        {
+            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            telemetry.RecordOrchestratorCommandEnqueued();
+            await cmd.ExecuteAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            ReturnCommand(cmd);
         }
     }
 
@@ -1306,7 +1381,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                                 {
                                     changed = true;
                                     telemetry.RecordOrchestratorDocumentCreated(entry.DocumentId);
-                                    logger.LogInformation("Mapped new active CRDT document: {DocumentId} ({TypeAlias})", entry.DocumentId, entry.TypeAlias);
+                                    logger.LogDebug("Mapped new active CRDT document: {DocumentId} ({TypeAlias})", entry.DocumentId, entry.TypeAlias);
                                     
                                     versionVectorManager.EnsureShardRegistered(doc.ShardId);
                                 }
@@ -1357,7 +1432,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                                 }
 
                                 changed = true;
-                                logger.LogInformation("Removed CRDT document footprint: {DocumentId} ({TypeAlias})", entry.DocumentId, entry.TypeAlias);
+                                logger.LogDebug("Removed CRDT document footprint: {DocumentId} ({TypeAlias})", entry.DocumentId, entry.TypeAlias);
                             }
                         }
                     }
@@ -1412,7 +1487,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                     }
 
                     changed = true;
-                    logger.LogInformation("Removed CRDT document footprint: {DocumentId} ({TypeAlias})", doc.DocumentId, doc.TypeAlias);
+                    logger.LogDebug("Removed CRDT document footprint: {DocumentId} ({TypeAlias})", doc.DocumentId, doc.TypeAlias);
                 }
             }
 
@@ -1456,7 +1531,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
                     changed = true;
                     telemetry.RecordOrchestratorDocumentDeleted(doc.DocumentId);
-                    logger.LogInformation("Deleted active CRDT document: {DocumentId} ({TypeAlias})", doc.DocumentId, doc.TypeAlias);
+                    logger.LogDebug("Deleted active CRDT document: {DocumentId} ({TypeAlias})", doc.DocumentId, doc.TypeAlias);
                 }
             }
 
@@ -1518,7 +1593,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 shardIdCache.TryRemove(compositeKey, out _);
                 shardIdCache.TryRemove(match.Key, out _);
                 shardIdCache.TryRemove(documentId, out _);
-                logger.LogInformation("Forwarded delete intent for document {DocumentId} ({TypeAlias}).", match.Value.DocumentId, match.Value.TypeAlias);
+                logger.LogDebug("Forwarded delete intent for document {DocumentId} ({TypeAlias}).", match.Value.DocumentId, match.Value.TypeAlias);
             }
             else
             {
