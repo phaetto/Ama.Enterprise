@@ -26,6 +26,10 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 {
     private static readonly ConcurrentDictionary<string, Expression<Func<TState, object>>> PropertySelectorCache = new(StringComparer.Ordinal);
 
+    // Shared static estimation resources to prevent per-document HashSet retention and LOH bloat
+    private static readonly object EstimationSyncRoot = new();
+    private static readonly HashSet<object> SharedEstimationVisitedSet = new(ReferenceEqualityComparer.Instance);
+
     private readonly IServiceProvider serviceProvider;
     private readonly IShardVersionVectorManager versionVectorManager;
     private readonly IAsyncCrdtApplicator applicator;
@@ -57,9 +61,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private volatile bool isDirty;
     private volatile bool isDisposed;
 
-    // Reusable estimation resources to prevent allocations during memory footprint checks
-    private readonly object estimationSyncRoot = new();
-    private readonly HashSet<object> estimationVisitedSet = new(ReferenceEqualityComparer.Instance);
     private CrdtAotContext[]? cachedAotContexts;
 
     /// <inheritdoc />
@@ -471,12 +472,12 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         long dataAndMetaBytes;
         long wholeObjectBytes;
 
-        lock (estimationSyncRoot)
+        lock (EstimationSyncRoot)
         {
-            estimationVisitedSet.Clear();
+            SharedEstimationVisitedSet.Clear();
 
-            dataBytes = EstimateGraphSize(currentDoc.Data, estimationVisitedSet, aotContexts);
-            metadataBytes = EstimateGraphSize(currentDoc.Metadata, estimationVisitedSet, aotContexts);
+            dataBytes = EstimateGraphSize(currentDoc.Data, SharedEstimationVisitedSet, aotContexts);
+            metadataBytes = EstimateGraphSize(currentDoc.Metadata, SharedEstimationVisitedSet, aotContexts);
             dataAndMetaBytes = 32L + dataBytes + metadataBytes;
 
             // Base overhead for DistributedCrdtDocument instance, references, and locks
@@ -497,7 +498,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
             wholeObjectBytes = managerOverheadBytes + dataAndMetaBytes;
 
-            estimationVisitedSet.Clear();
+            SharedEstimationVisitedSet.Clear();
+            SharedEstimationVisitedSet.TrimExcess(64);
         }
 
         var globalState = GetLocalState();
@@ -942,8 +944,16 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                         return Task.CompletedTask;
                     }
 
-                    var snapshotBytes = serializer.SerializeToBytes(currentDocument);
-                    currentDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(snapshotBytes);
+                    if (storage is MemoryCrdtStorage)
+                    {
+                        var snapshotBytes = serializer.SerializeToBytes(currentDocument);
+                        currentDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(snapshotBytes);
+                    }
+                    else
+                    {
+                        currentDoc = currentDocument;
+                    }
+
                     isDirty = false;
                     shouldSave = true;
                 }
@@ -1095,11 +1105,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         if (obj is string str)
         {
-            if (!visited.Add(str))
-            {
-                return 0;
-            }
-
             return EstimateStringSize(str);
         }
 

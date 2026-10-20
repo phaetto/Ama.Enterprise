@@ -588,7 +588,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             connection.Open();
             
             using var initCommand = connection.CreateCommand();
-            initCommand.CommandText = "PRAGMA journal_mode = 'wal'; PRAGMA synchronous = OFF; PRAGMA temp_store = MEMORY;";
+            initCommand.CommandText = "PRAGMA journal_mode = 'wal'; PRAGMA synchronous = OFF; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -8000;";
             initCommand.ExecuteNonQuery();
 
             using var command = connection.CreateCommand();

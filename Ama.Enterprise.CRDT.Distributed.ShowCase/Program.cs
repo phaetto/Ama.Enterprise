@@ -85,6 +85,8 @@ public static class Program
         services.AddDistributedCrdtCore(options =>
         {
             options.ActiveSyncEnabled = true;
+            options.AvoidBlindCheckpointWrites = true;
+            options.ChannelCapacity = 10000;
             options.PeerEvictionTtlSeconds = 0;
             options.AntiEntropyInitialDelaySeconds = 0;
             options.AntiEntropyIntervalSeconds = 5;

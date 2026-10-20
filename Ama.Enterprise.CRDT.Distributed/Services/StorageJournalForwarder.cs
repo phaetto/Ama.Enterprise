@@ -394,10 +394,25 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         var versionVectorManager = this.serviceProvider.GetRequiredService<IShardVersionVectorManager>();
         var orchestrator = this.serviceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         
-        var safelyPersistedMap = versionVectorManager.GetFullSnapshot();
         var documents = orchestrator.GetActiveDocuments();
+        var safelyPersistedMap = versionVectorManager.GetFullSnapshot();
 
-        await Task.WhenAll(documents.Select(document => document.CheckpointAsync(cancellationToken))).ConfigureAwait(false);
+        foreach (var shardGroup in documents.GroupBy(d => d.ShardId, StringComparer.Ordinal))
+        {
+            if (!string.IsNullOrEmpty(shardGroup.Key))
+            {
+                var freshShardSnapshot = versionVectorManager.GetShardSnapshot(shardGroup.Key);
+                if (freshShardSnapshot.TryGetValue(shardGroup.Key, out var freshDvv))
+                {
+                    safelyPersistedMap[shardGroup.Key] = freshDvv;
+                }
+            }
+
+            foreach (var document in shardGroup)
+            {
+                await document.CheckpointAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
 
         await this.storage.SaveShardVersionVectorMapAsync(replicaContext.ReplicaId, safelyPersistedMap, cancellationToken).ConfigureAwait(false);
 

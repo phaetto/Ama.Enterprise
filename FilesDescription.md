@@ -25,11 +25,11 @@
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/ShowCaseJsonContext.cs` | AOT JSON context for the showcase multi-CRDT models. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskItem.cs` | Data structure representing an individual task item. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskListState.cs` | Root CRDT document model representing a task list, updated to inherit `IDistributedCrdtState`. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Removed forced `GC.Collect` from `DrawMemoryStatsAsync` and reused pre-allocated buffers and comparers for non-intrusive memory monitoring. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Enabled `AvoidBlindCheckpointWrites` and bounded `ChannelCapacity` to prevent unbounded fire-and-forget queue allocations and redundant checkpoints. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetManager.cs` | Added `IntentDeliveryMode` support when forwarding device intents to `ICrdtDocumentOrchestrator.ApplyIntentAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/IFleetManager.cs` | Added overloads accepting `IntentDeliveryMode` for setting and removing devices. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ITaskManager.cs` | Added overloads accepting `IntentDeliveryMode` for setting and removing tasks. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseCrdtStorage.cs` | Scoped SQLite journal deletion to the target `ShardId` and document key. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseCrdtStorage.cs` | Bounded SQLite page cache memory via `PRAGMA cache_size = -8000`. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseShardIdProvider.cs` | Custom shard ID provider decoupling overarching multi-document structures into isolated causal tracking domains. Implemented lightweight `GetShardId` overloads avoiding document allocations. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/TaskManager.cs` | Added `IntentDeliveryMode` support when forwarding task intents to `ICrdtDocumentOrchestrator.ApplyIntentAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Ama.Enterprise.CRDT.Distributed.TableStorage.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
@@ -90,7 +90,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtMaintenanceService.cs` | Delegated version vector replica eviction and snapshot extraction to `IShardVersionVectorManager`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtTrimCoordinator.cs` | Coordinates trimming operations across the entire node to ensure only one aggressive or maintenance trim runs at a time, preventing IO and memory saturation. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DefaultScopeTopologyProvider.cs` | Updated to implement the asynchronous `IsPeerExpectedAsync` method returning synchronous wrappers. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Referenced `Constants.SystemRegistryDocumentId` when resolving the type alias and filtering the system registry document. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Shared and trimmed `HashSet<object>` during memory footprint estimation and skipped redundant serialize/deserialize deep-cloning during checkpoints when using persistent storage. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeFactory.cs` | Delegated scope creation metrics to the centralized `IDistributedCrdtTelemetry` service. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeManager.cs` | Centralized singleton tracker managing long-lived background scopes per instantiated replica. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtTelemetry.cs` | Singleton service centralizing all `Meter`, `Counter<long>`, and `ObservableGauge<int>` instances for scopes, orchestrators, and documents. |
@@ -120,7 +120,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtPatchBroadcaster.cs` | Updated patch broadcaster channel to carry `DocumentTypeAlias` directly from the source document. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtTopologyObserver.cs` | Updated `OnPeerJoinedAsync` to check `IScopeTopologyProvider.IsPeerExpectedAsync` before consuming the one-time initial state sync trigger. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ShardVersionVectorManager.cs` | Implemented per-shard `SemaphoreSlim` execution locks and multi-document snapshot merge tracking to prevent in-flight journal gaps and partial snapshot DVV pollution. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/StorageJournalForwarder.cs` | Removed hot-path `Task.Yield` backpressure stalls, eliminated sequential chunking during checkpointing, and synchronized `estimatedJournalCount` with actual post-trim shard journal counts. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/StorageJournalForwarder.cs` | Replaced parallel `Task.WhenAll` document checkpointing with sequential shard-grouped checkpoints and refreshed per-shard DVV snapshots immediately before each shard checkpoint. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/SystemRegistryServiceProvider.cs` | Internal `IServiceProvider` wrapper ensuring resolved `IShardIdProvider` instances are decorated with `SystemRegistryShardIdProviderDecorator` regardless of DI registration order. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/SystemRegistryShardIdProviderDecorator.cs` | Referenced `Constants.SystemRegistryDocumentId` when resolving the shard ID for `CrdtRegistryState`. |
 | `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Ama.Enterprise.CRDT.MessagePack.IntegrationTests.csproj` | Switched references to newly renamed `.SourceGenerators` and `.Tests.Common` projects mapping logic. |

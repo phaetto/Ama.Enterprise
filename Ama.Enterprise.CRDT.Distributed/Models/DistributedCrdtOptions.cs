@@ -113,9 +113,9 @@ public sealed class DistributedCrdtOptions
     /// Gets or sets the maximum capacity of the lock-free document and orchestrator channels.
     /// When set to 0 or negative, the channel is unbounded.
     /// When set to a positive value, the channel is bounded to prevent unbounded memory growth under heavy load.
-    /// Defaults to 0 (unbounded).
+    /// Defaults to 100.
     /// </summary>
-    public int ChannelCapacity { get; set; } = 0;
+    public int ChannelCapacity { get; set; } = 100;
 
     /// <summary>
     /// Gets or sets the target replication factor determining how many active replica nodes should host a given isolated shard.
