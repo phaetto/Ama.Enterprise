@@ -1,9 +1,10 @@
 namespace Ama.Enterprise.P2p.Services.Core;
 
+using System;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
-/// Interface for encoding and decoding mesh messages, evaluating optional cryptographic data-in-transit boundaries safely.
+/// Interface for encoding and decoding mesh messages, evaluating optional cryptographic data-in-transit boundaries.
 /// </summary>
 /// <remarks>
 /// SECURITY EXPECTATIONS AND LIMITATIONS:
@@ -20,10 +21,16 @@ using Ama.Enterprise.P2p.Models.Core;
 /// This custom wire encoder then serves as an additional zero-trust boundary, ensuring that payloads remain encrypted 
 /// against infrastructure-level packet inspection or intermediate multi-hop routing intercepts.
 /// </remarks>
+/// <example>
+/// <code>
+/// byte[] encoded = wireEncoder.Encode(message);
+/// IMeshMessage? decoded = wireEncoder.Decode(encoded.AsSpan());
+/// </code>
+/// </example>
 public interface IMeshWireEncoder
 {
     /// <summary>
-    /// Encodes the P2P mesh message securely handling optional mapped encryption routines.
+    /// Encodes the P2P mesh message handling optional mapped encryption routines.
     /// </summary>
     /// <param name="message">The target message to encode.</param>
     /// <returns>The encoded wire-ready byte payload.</returns>
@@ -32,7 +39,7 @@ public interface IMeshWireEncoder
     /// <summary>
     /// Decodes the byte payload into a generic mesh message mapping decryption natively.
     /// </summary>
-    /// <param name="payload">The byte array payload to decode.</param>
-    /// <returns>The parsed mesh message, or null if gracefully rejected.</returns>
-    IMeshMessage? Decode(byte[] payload);
+    /// <param name="payload">The byte span payload to decode.</param>
+    /// <returns>The parsed mesh message, or null if rejected.</returns>
+    IMeshMessage? Decode(ReadOnlySpan<byte> payload);
 }

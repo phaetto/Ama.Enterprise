@@ -201,22 +201,27 @@ public sealed class QuicTransportListener : ITransportListener, IDisposable
         {
             await using (stream)
             {
-                var lengthBytes = new byte[4];
-                
+                byte[] lengthBytes = ArrayPool<byte>.Shared.Rent(4);
+                int payloadLength;
+
                 try
                 {
-                    await stream.ReadExactlyAsync(lengthBytes, cancellationToken).ConfigureAwait(false);
+                    await stream.ReadExactlyAsync(lengthBytes.AsMemory(0, 4), cancellationToken).ConfigureAwait(false);
+                    payloadLength = BinaryPrimitives.ReadInt32LittleEndian(lengthBytes.AsSpan(0, 4));
                 }
                 catch (EndOfStreamException)
                 {
-                    return; // Graceful close natively
+                    return; // Close natively
                 }
                 catch (IOException ex) when (ex.InnerException is QuicException)
                 {
                     return; // Dropped connection
                 }
-                
-                int payloadLength = BinaryPrimitives.ReadInt32LittleEndian(lengthBytes);
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(lengthBytes);
+                }
+
                 var options = optionsMonitor.Get(meshId);
                 
                 if (payloadLength <= 0 || payloadLength > options.MaxMessageSize)
@@ -234,7 +239,7 @@ public sealed class QuicTransportListener : ITransportListener, IDisposable
                     messagesReceivedCounter.Add(1, tags);
                     payloadBytesHistogram.Record(payloadLength, tags);
 
-                    var message = wireEncoder.Decode(rentedBuffer.AsSpan(0, payloadLength).ToArray());
+                    var message = wireEncoder.Decode(rentedBuffer.AsSpan(0, payloadLength));
                     
                     if (message is not null)
                     {

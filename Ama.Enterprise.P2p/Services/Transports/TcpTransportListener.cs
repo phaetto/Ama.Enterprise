@@ -157,78 +157,84 @@ public sealed class TcpTransportListener : ITransportListener, IDisposable
                 client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
                 await using var stream = client.GetStream();
                 
-                var lengthBytes = new byte[4];
-
-                while (!cancellationToken.IsCancellationRequested)
+                byte[] lengthBytes = ArrayPool<byte>.Shared.Rent(4);
+                try
                 {
-                    try
+                    while (!cancellationToken.IsCancellationRequested)
                     {
-                        await stream.ReadExactlyAsync(lengthBytes, cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (EndOfStreamException)
-                    {
-                        logger.LogDebug("[{MeshId}] Target node closed TCP socket cleanly.", meshId);
-                        break;
-                    }
-                    catch (IOException ex) when (ex.InnerException is SocketException)
-                    {
-                        logger.LogDebug("[{MeshId}] Target node connection dropped.", meshId);
-                        break;
-                    }
-                    
-                    int payloadLength = BinaryPrimitives.ReadInt32LittleEndian(lengthBytes);
-                    var options = optionsMonitor.Get(meshId);
-                    
-                    if (payloadLength <= 0 || payloadLength > options.MaxMessageSize)
-                    {
-                        logger.LogWarning("[{MeshId}] Rejecting invalidly mapped TCP payload structured over bounding length limits: {Length} bytes. Dropping connection.", meshId, payloadLength);
-                        break;
-                    }
-
-                    byte[] rentedBuffer = ArrayPool<byte>.Shared.Rent(payloadLength);
-                    try
-                    {
-                        await stream.ReadExactlyAsync(rentedBuffer.AsMemory(0, payloadLength), cancellationToken).ConfigureAwait(false);
-
-                        var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
-                        messagesReceivedCounter.Add(1, tags);
-                        payloadBytesHistogram.Record(payloadLength, tags);
-
-                        var message = wireEncoder.Decode(rentedBuffer.AsSpan(0, payloadLength).ToArray());
+                        try
+                        {
+                            await stream.ReadExactlyAsync(lengthBytes.AsMemory(0, 4), cancellationToken).ConfigureAwait(false);
+                        }
+                        catch (EndOfStreamException)
+                        {
+                            logger.LogDebug("[{MeshId}] Target node closed TCP socket.", meshId);
+                            break;
+                        }
+                        catch (IOException ex) when (ex.InnerException is SocketException)
+                        {
+                            logger.LogDebug("[{MeshId}] Target node connection dropped.", meshId);
+                            break;
+                        }
                         
-                        if (message is not null)
+                        int payloadLength = BinaryPrimitives.ReadInt32LittleEndian(lengthBytes.AsSpan(0, 4));
+                        var options = optionsMonitor.Get(meshId);
+                        
+                        if (payloadLength <= 0 || payloadLength > options.MaxMessageSize)
                         {
-                            if (!IsMajorVersionCompatible(message.ProtocolVersion, Constants.ProtocolVersion))
-                            {
-                                logger.LogWarning("[{MeshId}] Rejected message explicitly: Decoded version {MsgVersion} mismatches localized constraints {LocalVersion}.", 
-                                    meshId, message.ProtocolVersion, Constants.ProtocolVersion);
-                                continue;
-                            }
-
-                            if (!string.Equals(message.MeshId, meshId, StringComparison.Ordinal))
-                            {
-                                logger.LogWarning("[{MeshId}] Dropped TCP payload resolving foreign architectural target {ForeignMeshId}.", meshId, message.MeshId);
-                                continue;
-                            }
-
-                            await onMessageReceived(message).ConfigureAwait(false);
+                            logger.LogWarning("[{MeshId}] Rejecting invalidly mapped TCP payload structured over bounding length limits: {Length} bytes. Dropping connection.", meshId, payloadLength);
+                            break;
                         }
-                        else
+
+                        byte[] rentedBuffer = ArrayPool<byte>.Shared.Rent(payloadLength);
+                        try
                         {
-                            logger.LogWarning("[{MeshId}] Rejected corrupt localized TCP envelope bridging natively unreadable bounds.", meshId);
+                            await stream.ReadExactlyAsync(rentedBuffer.AsMemory(0, payloadLength), cancellationToken).ConfigureAwait(false);
+
+                            var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
+                            messagesReceivedCounter.Add(1, tags);
+                            payloadBytesHistogram.Record(payloadLength, tags);
+
+                            var message = wireEncoder.Decode(rentedBuffer.AsSpan(0, payloadLength));
+                            
+                            if (message is not null)
+                            {
+                                if (!IsMajorVersionCompatible(message.ProtocolVersion, Constants.ProtocolVersion))
+                                {
+                                    logger.LogWarning("[{MeshId}] Rejected message explicitly: Decoded version {MsgVersion} mismatches localized constraints {LocalVersion}.", 
+                                        meshId, message.ProtocolVersion, Constants.ProtocolVersion);
+                                    continue;
+                                }
+
+                                if (!string.Equals(message.MeshId, meshId, StringComparison.Ordinal))
+                                {
+                                    logger.LogWarning("[{MeshId}] Dropped TCP payload resolving foreign architectural target {ForeignMeshId}.", meshId, message.MeshId);
+                                    continue;
+                                }
+
+                                await onMessageReceived(message).ConfigureAwait(false);
+                            }
+                            else
+                            {
+                                logger.LogWarning("[{MeshId}] Rejected corrupt localized TCP envelope bridging natively unreadable bounds.", meshId);
+                            }
+                        }
+                        finally
+                        {
+                            ArrayPool<byte>.Shared.Return(rentedBuffer);
                         }
                     }
-                    finally
-                    {
-                        ArrayPool<byte>.Shared.Return(rentedBuffer);
-                    }
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(lengthBytes);
                 }
             }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            logger.LogError(ex, "[{MeshId}] Exception isolating explicitly mapped stream parsing safely natively.", meshId);
+            logger.LogError(ex, "[{MeshId}] Exception isolating explicitly mapped stream parsing natively.", meshId);
         }
     }
 

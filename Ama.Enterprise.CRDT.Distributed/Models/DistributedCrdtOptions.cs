@@ -115,7 +115,7 @@ public sealed class DistributedCrdtOptions
     /// When set to a positive value, the channel is bounded to prevent unbounded memory growth under heavy load.
     /// Defaults to 100.
     /// </summary>
-    public int ChannelCapacity { get; set; } = 100;
+    public int ChannelCapacity { get; set; } = 1000;
 
     /// <summary>
     /// Gets or sets the target replication factor determining how many active replica nodes should host a given isolated shard.

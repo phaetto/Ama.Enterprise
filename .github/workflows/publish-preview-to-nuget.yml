@@ -100,6 +100,14 @@ jobs:
           dotnet pack Ama.Enterprise.P2p.WebRTC.AspNetCore/Ama.Enterprise.P2p.WebRTC.AspNetCore.csproj --configuration Release --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} -p:PackageVersion=${{ env.PACKAGE_VERSION }} -p:AssemblyVersion=${{ env.ASSEMBLY_VERSION }}
           dotnet pack Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Ama.Enterprise.P2p.WebRTC.DistributedSignaling.csproj --configuration Release --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} -p:PackageVersion=${{ env.PACKAGE_VERSION }} -p:AssemblyVersion=${{ env.ASSEMBLY_VERSION }}
 
+      - name: Verify Analyzers
+        run: |
+          for nupkg in ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/Ama.Enterprise.CRDT.MessagePack.*.nupkg; do
+            echo "Inspecting $nupkg..."
+            CONTENTS=$(unzip -l "$nupkg")
+            echo "$CONTENTS" | grep -q "analyzers/dotnet/cs/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.dll" || { echo "Error: Ama.Enterprise.CRDT.MessagePack.SourceGenerators.dll is missing from $nupkg!"; exit 1; }
+          done
+
       - name: List created packages
         run: ls -R ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
 

@@ -114,12 +114,20 @@ public sealed class TcpTransport : ITransport, IDisposable
             }
 
             var payload = wireEncoder.Encode(message);
-            var lengthBytes = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(lengthBytes, payload.Length);
 
-            await connection.Stream.WriteAsync(lengthBytes, cts.Token).ConfigureAwait(false);
-            await connection.Stream.WriteAsync(payload, cts.Token).ConfigureAwait(false);
-            await connection.Stream.FlushAsync(cts.Token).ConfigureAwait(false);
+            byte[] lengthBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(4);
+            try
+            {
+                BinaryPrimitives.WriteInt32LittleEndian(lengthBuffer.AsSpan(0, 4), payload.Length);
+
+                await connection.Stream.WriteAsync(lengthBuffer.AsMemory(0, 4), cts.Token).ConfigureAwait(false);
+                await connection.Stream.WriteAsync(payload, cts.Token).ConfigureAwait(false);
+                await connection.Stream.FlushAsync(cts.Token).ConfigureAwait(false);
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(lengthBuffer);
+            }
 
             var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
             messagesSentCounter.Add(1, tags);

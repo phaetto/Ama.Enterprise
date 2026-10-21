@@ -40,13 +40,16 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        this.connectionString = $"Data Source=showcase_crdt_{replicaContext.ReplicaId}.db;Cache=Shared;Pooling=True;";
+        this.connectionString = $"Data Source=showcase_crdt_{replicaContext.ReplicaId}.db;Pooling=True;";
         
         InitializeDatabase();
 
         // Establish the dedicated write connection
         this.writeConnection = new SqliteConnection(connectionString);
         this.writeConnection.Open();
+        using var pragmaCmd = this.writeConnection.CreateCommand();
+        pragmaCmd.CommandText = "PRAGMA synchronous = OFF; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -8000; PRAGMA mmap_size = 0; PRAGMA journal_size_limit = 67108864;";
+        pragmaCmd.ExecuteNonQuery();
     }
 
     public async Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new()
@@ -588,7 +591,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             connection.Open();
             
             using var initCommand = connection.CreateCommand();
-            initCommand.CommandText = "PRAGMA journal_mode = 'wal'; PRAGMA synchronous = OFF; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -8000;";
+            initCommand.CommandText = "PRAGMA journal_mode = 'wal'; PRAGMA synchronous = OFF; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -8000; PRAGMA mmap_size = 0; PRAGMA journal_size_limit = 67108864;";
             initCommand.ExecuteNonQuery();
 
             using var command = connection.CreateCommand();

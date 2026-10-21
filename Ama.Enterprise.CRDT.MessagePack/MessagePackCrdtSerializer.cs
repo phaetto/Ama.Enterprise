@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.CRDT.MessagePack;
 
 using System;
+using System.Buffers;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,7 +10,7 @@ using global::MessagePack;
 using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
-/// A highly optimized, Native AOT compatible binary implementation of <see cref="ICrdtSerializer"/>
+/// A Native AOT compatible binary implementation of <see cref="ICrdtSerializer"/>
 /// utilizing MessagePack and external source-generated formatters.
 /// </summary>
 public sealed class MessagePackCrdtSerializer : ICrdtSerializer
@@ -54,15 +55,33 @@ public sealed class MessagePackCrdtSerializer : ICrdtSerializer
     /// <inheritdoc/>
     public T? DeserializeFromBytes<T>(ReadOnlySpan<byte> bytes)
     {
-        // MessagePack doesn't natively support deserializing directly from ReadOnlySpan<byte>.
-        // To avoid unsafe memory pinning, we convert to an array to satisfy ReadOnlyMemory<byte> requirements.
-        return MessagePackSerializer.Deserialize<T>(bytes.ToArray(), options);
+        byte[] rented = ArrayPool<byte>.Shared.Rent(bytes.Length);
+        try
+        {
+            bytes.CopyTo(rented);
+            return MessagePackSerializer.Deserialize<T>(rented.AsMemory(0, bytes.Length), options);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
     }
 
     /// <inheritdoc/>
     public object? DeserializeFromBytes(ReadOnlySpan<byte> bytes, Type returnType)
     {
-        return MessagePackSerializer.Deserialize(returnType, bytes.ToArray(), options);
+        ArgumentNullException.ThrowIfNull(returnType);
+
+        byte[] rented = ArrayPool<byte>.Shared.Rent(bytes.Length);
+        try
+        {
+            bytes.CopyTo(rented);
+            return MessagePackSerializer.Deserialize(returnType, rented.AsMemory(0, bytes.Length), options);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
     }
 
     /// <inheritdoc/>

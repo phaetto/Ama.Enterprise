@@ -36,7 +36,6 @@ public static class ServiceCollectionExtensions
                 // Bridging dynamically mapped string polymorphism cleanly over to MessagePack binary format
                 new CrdtPolymorphicMessagePackFormatter<object>(),
                 new CrdtPolymorphicMessagePackFormatter<IComparable>(),
-                new CrdtPolymorphicMessagePackFormatter<ICrdtTimestamp>(),
                 new CrdtPolymorphicMessagePackFormatter<IChunk>(),
                 new CrdtPolymorphicMessagePackFormatter<ICrdtMetadataState>()
             };

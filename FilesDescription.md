@@ -1,10 +1,10 @@
 | File Path | Description |
 | --- | --- |
 | `$/.editorconfig` | No description provided. |
-| `$/.github/workflows/ci.yml` | GitHub Actions workflow for building and testing the solution on PRs and non-master branch pushes. |
+| `$/.github/workflows/ci.yml` | Added a step to pack `Ama.Enterprise.CRDT.MessagePack` and verify that `Ama.Enterprise.CRDT.MessagePack.SourceGenerators.dll` is included in the generated NuGet package. |
 | `$/.github/workflows/codeql.yml` | No description provided. |
-| `$/.github/workflows/publish-preview-to-nuget.yml` | Added a step to inject base64 encoded certificate secrets directly into the licensing project prior to building. |
-| `$/.github/workflows/publish-release-to-nuget-manual.yml` | Added a step to inject base64 encoded certificate secrets directly into the licensing project prior to building. |
+| `$/.github/workflows/publish-preview-to-nuget.yml` | Added a verification step ensuring `Ama.Enterprise.CRDT.MessagePack.SourceGenerators.dll` is present in the packed `Ama.Enterprise.CRDT.MessagePack` NuGet package before publishing. |
+| `$/.github/workflows/publish-release-to-nuget-manual.yml` | Added a verification step ensuring `Ama.Enterprise.CRDT.MessagePack.SourceGenerators.dll` is present in the packed `Ama.Enterprise.CRDT.MessagePack` NuGet package before publishing. |
 | `$/.gitignore` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/Ama.Enterprise.CRDT.Distributed.IntegrationTests.csproj` | Updated reference from `Ama.Enterprise.UnitTests` to the renamed `Ama.Enterprise.Project.Tests.Common`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/AntiEntropyStateSyncIntegrationTests.cs` | Added edge-case tests for lazy sender registration and document promotion on out-of-order gossip patches, active-sync debounce batching, and adaptive startup anti-entropy intervals. |
@@ -25,11 +25,11 @@
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/ShowCaseJsonContext.cs` | AOT JSON context for the showcase multi-CRDT models. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskItem.cs` | Data structure representing an individual task item. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskListState.cs` | Root CRDT document model representing a task list, updated to inherit `IDistributedCrdtState`. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Optimized `gen-fleets` command to batch fleet creations with `IntentDeliveryMode.FireAndForget`, perform a single registry sync, and pipeline device updates concurrently. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Added `Total GC Committed` and `Process Private Bytes` to the `mem` command output to distinguish .NET GC retained segments from native SQLite/OS memory. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetManager.cs` | Added `IntentDeliveryMode` support when forwarding device intents to `ICrdtDocumentOrchestrator.ApplyIntentAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/IFleetManager.cs` | Added overloads accepting `IntentDeliveryMode` for setting and removing devices. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ITaskManager.cs` | Added overloads accepting `IntentDeliveryMode` for setting and removing tasks. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseCrdtStorage.cs` | Bounded SQLite page cache memory via `PRAGMA cache_size = -8000`. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseCrdtStorage.cs` | Removed `Cache=Shared`, applied per-connection PRAGMAs on the persistent write connection, disabled SQLite `mmap_size`, and capped `journal_size_limit`. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseShardIdProvider.cs` | Custom shard ID provider decoupling overarching multi-document structures into isolated causal tracking domains. Implemented lightweight `GetShardId` overloads avoiding document allocations. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/TaskManager.cs` | Added `IntentDeliveryMode` support when forwarding task intents to `ICrdtDocumentOrchestrator.ApplyIntentAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Ama.Enterprise.CRDT.Distributed.TableStorage.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
@@ -140,7 +140,7 @@
 | `$/Ama.Enterprise.CRDT.MessagePack/Extensions/ServiceCollectionExtensions.cs` | Dependency injection extensions bootstrapping the decoupled custom `MessagePackCrdtSerializer` instance globally. Exposed `params` overload bridging multi-assembly mapped bounds and chaining execution fallback boundaries. |
 | `$/Ama.Enterprise.CRDT.MessagePack/Formatters/CrdtPolymorphicMessagePackFormatter.cs` | Robust fallback polymorphic converter intercepting binary payload encoding/decoding mapping directly to `CrdtTypeRegistry` string bounds avoiding complex reflection. |
 | `$/Ama.Enterprise.CRDT.MessagePack/Formatters/CrdtPolymorphicMessagePackRegistry.cs` | Centralized registry caching typed AOT polymorphic serialization delegates for MessagePack. |
-| `$/Ama.Enterprise.CRDT.MessagePack/MessagePackCrdtSerializer.cs` | Implementation wrapping `ICrdtSerializer` targeting Native AOT structured MessagePack arrays and abstract Base64 fallbacks for string constraints. |
+| `$/Ama.Enterprise.CRDT.MessagePack/MessagePackCrdtSerializer.cs` | Replaced `bytes.ToArray()` allocations in `DeserializeFromBytes` with `ArrayPool<byte>.Shared` buffers. |
 | `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Ama.Enterprise.FeatureFlags.IntegrationTests.csproj` | Redirected shared tests project reference pointing to renamed `Ama.Enterprise.Project.Tests.Common`. |
 | `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Services/FeatureFlagDomainIntegrationTests.cs` | Replaced legacy C# event subscription assertions with decoupled testing observers mapping to the new async `IFeatureFlagStateObserver` architecture. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj` | Appended an MSBuild target to automatically execute the local native Azurite startup batch script during the build process. Added `DisableFastUpToDateCheck` to ensure Visual Studio always evaluates the pre-build Azurite checks even when C# files haven't changed. |
@@ -207,7 +207,7 @@
 | `$/Ama.Enterprise.P2p.AspNetCore/Services/AspNetCoreTransportListener.cs` | Refactored standalone listener initialization formatting standard library path constraints guaranteeing distinct execution spaces. |
 | `$/Ama.Enterprise.P2p.AspNetCore/Services/Discovery/AspNetCorePeerDiscovery.cs` | Refactored discovery orchestrator computing polling URIs dynamically leveraging structured targeting definitions isolating bounds explicitly matching isolated prefixes. |
 | `$/Ama.Enterprise.P2p.AspNetCore/Services/Discovery/AspNetCorePeerHandshaker.cs` | Updated ASP.NET Core handshaker integrating registry and failure detector. Evaluates inbound HTTP handshake requests, dynamically establishing explicit bidirectional peer mappings instantly without relying on delayed discovery loops. |
-| `$/Ama.Enterprise.P2p.AspNetCore/Services/HttpInboundDispatcher.cs` | Removed rigid `ICrdtSerializer` injecting decoupled `IServiceProvider` extracting scoped keyed architectures executing internal formats. |
+| `$/Ama.Enterprise.P2p.AspNetCore/Services/HttpInboundDispatcher.cs` | Used `MemoryStream.TryGetBuffer` to pass a `ReadOnlySpan<byte>` to `IMeshWireEncoder.Decode` without allocating a duplicate byte array. |
 | `$/Ama.Enterprise.P2p.AspNetCore/Services/IHttpInboundDispatcher.cs` | Contract decoupling generic abstract HTTP routing frameworks. Consolidated from removed Http.Core package. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/CertificateNetworkIntegrationTests.cs` | Integration tests verifying network connectivity and drop routines mapping dynamically evaluated certificate authentication boundaries resolving decentralized topological rules. Appended E2E end-to-end multi-node tests verifying deduplication mechanics and dynamic adaptability when nodes join and drop using strict certificate authentication. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/Handlers/TestMessageHandler.cs` | No description provided. |
@@ -377,7 +377,7 @@
 | `$/Ama.Enterprise.P2p/Services/Core/IFailureDetector.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IInboundMessageQueue.cs` | Defines an internal queue for decoupling inbound network listeners from the protocol logic. |
 | `$/Ama.Enterprise.P2p/Services/Core/IMeshRoutingPolicy.cs` | Interface for defining zero-trust routing policies that accept or reject messages based on session contexts. |
-| `$/Ama.Enterprise.P2p/Services/Core/IMeshWireEncoder.cs` | Interface for encoding and decoding mesh messages. Updated with explicit XML documentation clarifying security limitations and HTTPS tunneling requirements. |
+| `$/Ama.Enterprise.P2p/Services/Core/IMeshWireEncoder.cs` | Updated `Decode` to accept `ReadOnlySpan<byte>` instead of `byte[]`. |
 | `$/Ama.Enterprise.P2p/Services/Core/IP2pAlgorithm.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Services/Core/IP2pRpcCorrelator.cs` | Contract for correlating asynchronous outbound P2P requests with inbound network responses enforcing strict stateless async mappings. |
 | `$/Ama.Enterprise.P2p/Services/Core/IPeerAuthenticator.cs` | Expanded evaluating explicit outgoing local data arrays actively traversing generic topologies. |
@@ -394,7 +394,7 @@
 | `$/Ama.Enterprise.P2p/Services/Core/InMemoryPeerRegistry.cs` | Implements an in-memory thread-safe registry tracking peering topology globally using a flat dictionary mapping. |
 | `$/Ama.Enterprise.P2p/Services/Core/InMemoryPeerSessionRegistry.cs` | Thread-safe singleton mapping dynamically extracted session contexts per Peer across partitioned boundaries. |
 | `$/Ama.Enterprise.P2p/Services/Core/InboundMessageQueue.cs` | Channel-backed implementation of the inbound message queue. |
-| `$/Ama.Enterprise.P2p/Services/Core/MeshWireEncoder.cs` | Implements the wire encoding pipeline bridging raw serialization to optional AES-GCM encryption. Removed legacy fallback for unformatted payload and added strict unencrypted payload rejection when encryption is mandated, neutralizing downgrade attacks. |
+| `$/Ama.Enterprise.P2p/Services/Core/MeshWireEncoder.cs` | Eliminated intermediate `byte[]` allocations for encryption keys, nonces, unencrypted payload slices, and decrypted buffers by using `ReadOnlySpan<byte>`, `stackalloc`, and `ArrayPool<byte>.Shared`. |
 | `$/Ama.Enterprise.P2p/Services/Core/P2pRpcCorrelator.cs` | Updated payload deserialization invoking correct `DeserializeFromBytes<T>` boundaries executing dynamically extracted generic spans. |
 | `$/Ama.Enterprise.P2p/Services/Core/PassThroughPeerAuthenticator.cs` | Implemented required generic local array boundaries resolving mapping. |
 | `$/Ama.Enterprise.P2p/Services/Core/PolicyEnforcingPayloadDispatcher.cs` | Decorator implementation over the application dispatcher executing strict inbound policy boundaries preventing unauthorized data evaluation. |
@@ -408,10 +408,10 @@
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerDiscovery.cs` | Integrated Phase 2 negotiations executing `GetLocalHandshakeDataAsync` routing encapsulated structures mapping. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerHandshaker.cs` | Updated UDP handshaker injecting registry and failure detector bounds. Evaluates inbound handshake requests dynamically establishing explicit bidirectional peer registration mimicking outbound mappings without relying on disconnected Phase 1 multicast discovery loops. |
 | `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | Implemented adaptive exponential backoff in the background discovery loop evaluating local peer counts against defined high/low watermarks, saving network resources while preventing isolated islands. |
-| `$/Ama.Enterprise.P2p/Services/Transports/QuicTransport.cs` | High-performance natively multiplexed implementation of the ITransport explicitly mapping QUIC unidirectional streams avoiding standard head-of-line blocking inherently. |
-| `$/Ama.Enterprise.P2p/Services/Transports/QuicTransportListener.cs` | Inbound decentralized listener evaluating distinct multiplexed QUIC streams enforcing native TLS 1.3 arrays naturally without third-party overrides. |
-| `$/Ama.Enterprise.P2p/Services/Transports/TcpTransport.cs` | Replaced internal `ICrdtSerializer` serialization directly mapping via the secure generalized `IMeshWireEncoder` architecture. |
-| `$/Ama.Enterprise.P2p/Services/Transports/TcpTransportListener.cs` | Upgraded generic stream extraction dynamically reading wire formatted encoded inputs. |
+| `$/Ama.Enterprise.P2p/Services/Transports/QuicTransport.cs` | Used `ArrayPool<byte>.Shared` for the 4-byte length prefix buffer instead of allocating a new `byte[4]` per message. |
+| `$/Ama.Enterprise.P2p/Services/Transports/QuicTransportListener.cs` | Passed the rented buffer slice directly as `ReadOnlySpan<byte>` to `IMeshWireEncoder.Decode` and pooled the 4-byte length buffer. |
+| `$/Ama.Enterprise.P2p/Services/Transports/TcpTransport.cs` | Used `ArrayPool<byte>.Shared` for the 4-byte length prefix buffer instead of allocating a new `byte[4]` per message. |
+| `$/Ama.Enterprise.P2p/Services/Transports/TcpTransportListener.cs` | Passed the rented buffer slice directly as `ReadOnlySpan<byte>` to `IMeshWireEncoder.Decode` and pooled the 4-byte length buffer. |
 | `$/Ama.Enterprise.P2p/Services/Transports/UdpTransport.cs` | Bounded data-in-transit payloads traversing network streams through explicit generic structured formatting. |
 | `$/Ama.Enterprise.P2p/Services/Transports/UdpTransportListener.cs` | Overhauled byte extraction evaluating mapped decryptions via injected structural `IMeshWireEncoder` dependencies. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj` | No description provided. |

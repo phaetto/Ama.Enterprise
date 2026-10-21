@@ -33,7 +33,7 @@ internal sealed class PooledOrchestratorCommand : IValueTaskSource
     public OrchestratorCommandType Type { get; set; }
     public string? DocumentId { get; set; }
     public string? TypeAlias { get; set; }
-    public ICrdtTimestamp? ExplicitTimestamp { get; set; }
+    public CrdtTimestamp? ExplicitTimestamp { get; set; }
     public bool IsFireAndForget { get; set; }
     public CancellationToken CancellationToken { get; set; }
 

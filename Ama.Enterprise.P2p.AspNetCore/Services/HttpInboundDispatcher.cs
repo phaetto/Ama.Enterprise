@@ -97,11 +97,13 @@ public sealed class HttpInboundDispatcher : IHttpInboundDispatcher, IDisposable
             using var memoryStream = new MemoryStream();
             await bodyStream.CopyToAsync(memoryStream, cancellationToken).ConfigureAwait(false);
             
-            var payload = memoryStream.ToArray();
+            ReadOnlySpan<byte> payloadSpan = memoryStream.TryGetBuffer(out var bufferSegment)
+                ? bufferSegment.AsSpan()
+                : memoryStream.ToArray();
 
             var tags = new KeyValuePair<string, object?>[] { new("mesh_id", targetMeshId) };
             messagesReceivedCounter.Add(1, tags);
-            payloadBytesHistogram.Record(payload.Length, tags);
+            payloadBytesHistogram.Record(payloadSpan.Length, tags);
 
             var wireEncoder = serviceProvider.GetKeyedService<IMeshWireEncoder>(targetMeshId);
             if (wireEncoder is null)
@@ -110,7 +112,7 @@ public sealed class HttpInboundDispatcher : IHttpInboundDispatcher, IDisposable
                 return HttpPayloadProcessResult.InternalServerError;
             }
 
-            var message = wireEncoder.Decode(payload);
+            var message = wireEncoder.Decode(payloadSpan);
 
             if (message is null) 
             {

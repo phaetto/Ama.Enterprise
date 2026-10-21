@@ -126,7 +126,7 @@ public sealed class PooledDocumentCommand : IValueTaskSource
     /// <summary>
     /// Gets or sets an optional explicit timestamp.
     /// </summary>
-    public ICrdtTimestamp? ExplicitTimestamp { get; set; }
+    public CrdtTimestamp? ExplicitTimestamp { get; set; }
 
     /// <summary>
     /// Gets or sets the replica identifier to evict.

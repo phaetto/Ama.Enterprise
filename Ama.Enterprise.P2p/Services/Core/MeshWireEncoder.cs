@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.Services.Core;
 
 using System;
+using System.Buffers;
 using System.Security.Cryptography;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
@@ -70,20 +71,19 @@ public sealed class MeshWireEncoder : IMeshWireEncoder
             throw new InvalidOperationException($"Encryption is enabled for mesh {meshId} but no EncryptionKeyBase64 is configured.");
         }
 
-        byte[] key = Convert.FromBase64String(options.EncryptionKeyBase64);
-        if (key.Length != 32)
+        Span<byte> key = stackalloc byte[64];
+        if (!Convert.TryFromBase64String(options.EncryptionKeyBase64, key, out int keyBytesWritten) || keyBytesWritten != 32)
         {
             throw new InvalidOperationException($"Encryption key for mesh {meshId} must bridge a valid 256-bit (32 bytes) Base64 string bounds.");
         }
 
-        var nonce = new byte[12];
-        RandomNumberGenerator.Fill(nonce);
-
         var resultBytes = new byte[1 + 12 + 16 + plaintext.Length];
         resultBytes[0] = 0x01;
-        nonce.CopyTo(resultBytes.AsSpan(1, 12));
 
-        using var aes = new AesGcm(key, 16);
+        var nonce = resultBytes.AsSpan(1, 12);
+        RandomNumberGenerator.Fill(nonce);
+
+        using var aes = new AesGcm(key.Slice(0, 32), 16);
         aes.Encrypt(
             nonce: nonce,
             plaintext: plaintext,
@@ -95,9 +95,9 @@ public sealed class MeshWireEncoder : IMeshWireEncoder
     }
 
     /// <inheritdoc />
-    public IMeshMessage? Decode(byte[] payload)
+    public IMeshMessage? Decode(ReadOnlySpan<byte> payload)
     {
-        if (payload == null || payload.Length == 0)
+        if (payload.IsEmpty)
         {
             return null;
         }
@@ -112,7 +112,7 @@ public sealed class MeshWireEncoder : IMeshWireEncoder
                 return null;
             }
             
-            return serializer.DeserializeFromBytes<IMeshMessage>(payload.AsSpan(1).ToArray());
+            return serializer.DeserializeFromBytes<IMeshMessage>(payload.Slice(1));
         }
 
         if (payload[0] == 0x01)
@@ -123,32 +123,51 @@ public sealed class MeshWireEncoder : IMeshWireEncoder
                 return null;
             }
 
+            if (payload.Length < 29)
+            {
+                logger.LogWarning("[{MeshId}] Received encrypted payload shorter than the minimum header length.", meshId);
+                return null;
+            }
+
             if (string.IsNullOrWhiteSpace(options.EncryptionKeyBase64))
             {
                 logger.LogError("[{MeshId}] Received encrypted payload inherently bypassing generic configuration since no key is distinctly mapped.", meshId);
                 return null;
             }
 
-            byte[] key = Convert.FromBase64String(options.EncryptionKeyBase64);
-            using var aes = new AesGcm(key, 16);
-
-            var nonce = payload.AsSpan(1, 12);
-            var tag = payload.AsSpan(13, 16);
-            var ciphertext = payload.AsSpan(29);
-
-            var plaintext = new byte[ciphertext.Length];
-
-            try
+            Span<byte> key = stackalloc byte[64];
+            if (!Convert.TryFromBase64String(options.EncryptionKeyBase64, key, out int keyBytesWritten) || keyBytesWritten != 32)
             {
-                aes.Decrypt(nonce, ciphertext, tag, plaintext);
-            }
-            catch (CryptographicException ex)
-            {
-                logger.LogWarning(ex, "[{MeshId}] Failed to decrypt incoming structurally mapped payload natively. Invalid bounds or authentication mismatch.", meshId);
+                logger.LogError("[{MeshId}] Configured encryption key is not a valid 256-bit Base64 string.", meshId);
                 return null;
             }
 
-            return serializer.DeserializeFromBytes<IMeshMessage>(plaintext);
+            using var aes = new AesGcm(key.Slice(0, 32), 16);
+
+            var nonce = payload.Slice(1, 12);
+            var tag = payload.Slice(13, 16);
+            var ciphertext = payload.Slice(29);
+
+            byte[] rentedPlaintext = ArrayPool<byte>.Shared.Rent(ciphertext.Length);
+            try
+            {
+                var plaintextSpan = rentedPlaintext.AsSpan(0, ciphertext.Length);
+                try
+                {
+                    aes.Decrypt(nonce, ciphertext, tag, plaintextSpan);
+                }
+                catch (CryptographicException ex)
+                {
+                    logger.LogWarning(ex, "[{MeshId}] Failed to decrypt incoming structurally mapped payload natively. Invalid bounds or authentication mismatch.", meshId);
+                    return null;
+                }
+
+                return serializer.DeserializeFromBytes<IMeshMessage>(plaintextSpan);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(rentedPlaintext);
+            }
         }
 
         logger.LogWarning("[{MeshId}] Received payload with an unknown prefix byte. Payload rejected to prevent downgrade attacks.", meshId);

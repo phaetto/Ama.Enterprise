@@ -85,8 +85,6 @@ public static class Program
         services.AddDistributedCrdtCore(options =>
         {
             options.ActiveSyncEnabled = true;
-            options.AvoidBlindCheckpointWrites = true;
-            options.ChannelCapacity = 10000;
             options.PeerEvictionTtlSeconds = 0;
             options.AntiEntropyInitialDelaySeconds = 0;
             options.AntiEntropyIntervalSeconds = 5;
@@ -140,7 +138,7 @@ public static class Program
             {
                 options.ListenPort = currentPort;
                 options.ListenHost = "127.0.0.1";
-                options.MaxMessageSize = int.MaxValue;
+                //options.MaxMessageSize = int.MaxValue;
             })
             .AddUdpPeerDiscovery(options =>
             {
@@ -617,6 +615,10 @@ public static class Program
         ArgumentNullException.ThrowIfNull(orchestrator);
 
         var gcAllocatedBytes = GC.GetTotalMemory(forceFullCollection: false);
+        var gcInfo = GC.GetGCMemoryInfo();
+        var gcCommittedBytes = gcInfo.TotalCommittedBytes;
+        using var currentProcess = Process.GetCurrentProcess();
+        var privateBytes = currentProcess.PrivateMemorySize64;
         var workingSetBytes = Environment.WorkingSet;
 
         var docs = orchestrator.GetActiveDocuments();
@@ -684,6 +686,8 @@ public static class Program
             Console.WriteLine($" Total Whole Doc Objs   : {FormatBytes(totalWholeObjectBytes)} ({totalWholeObjectBytes:N0} B)");
             Console.WriteLine($" Total Shard DVV Est.   : {FormatBytes(totalGlobalStateBytes)} ({totalGlobalStateBytes:N0} B)");
             Console.WriteLine($" Total Managed GC Heap  : {FormatBytes(gcAllocatedBytes)} ({gcAllocatedBytes:N0} B)");
+            Console.WriteLine($" Total GC Committed     : {FormatBytes(gcCommittedBytes)} ({gcCommittedBytes:N0} B)");
+            Console.WriteLine($" Process Private Bytes  : {FormatBytes(privateBytes)} ({privateBytes:N0} B)");
             Console.WriteLine($" Process Working Set    : {FormatBytes(workingSetBytes)} ({workingSetBytes:N0} B)");
             Console.WriteLine("------------------------------------\n> ");
         }

@@ -139,16 +139,24 @@ public sealed class QuicTransport : ITransport, IDisposable
             }
 
             var payload = wireEncoder.Encode(message);
-            var lengthBytes = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(lengthBytes, payload.Length);
+            
+            byte[] lengthBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(4);
+            try
+            {
+                BinaryPrimitives.WriteInt32LittleEndian(lengthBuffer.AsSpan(0, 4), payload.Length);
 
-            // QUIC takes advantage of opening a distinct unidirectional stream per payload 
-            // completely circumventing TCP head-of-line blocking inherently.
-            await using var stream = await connection.OpenOutboundStreamAsync(QuicStreamType.Unidirectional, cts.Token).ConfigureAwait(false);
+                // QUIC takes advantage of opening a distinct unidirectional stream per payload 
+                // circumventing TCP head-of-line blocking inherently.
+                await using var stream = await connection.OpenOutboundStreamAsync(QuicStreamType.Unidirectional, cts.Token).ConfigureAwait(false);
 
-            await stream.WriteAsync(lengthBytes, cts.Token).ConfigureAwait(false);
-            await stream.WriteAsync(payload, cts.Token).ConfigureAwait(false);
-            stream.CompleteWrites(); // Signal EOF for this explicit payload stream securely
+                await stream.WriteAsync(lengthBuffer.AsMemory(0, 4), cts.Token).ConfigureAwait(false);
+                await stream.WriteAsync(payload, cts.Token).ConfigureAwait(false);
+                stream.CompleteWrites(); // Signal EOF for this explicit payload stream
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(lengthBuffer);
+            }
 
             var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };
             messagesSentCounter.Add(1, tags);

@@ -104,7 +104,7 @@ public static class ServiceCollectionExtensions
             }
 
             // Disabled compaction (threshold is minimal possible timestamp, never compacts)
-            return new ThresholdCompactionPolicyFactory(() => new EpochTimestamp(long.MinValue));
+            return new ThresholdCompactionPolicyFactory(() => new CrdtTimestamp(long.MinValue));
         });
 
         services.TryAddSingleton<IDistributedCrdtTelemetry, DistributedCrdtTelemetry>();

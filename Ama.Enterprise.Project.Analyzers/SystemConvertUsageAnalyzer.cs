@@ -42,7 +42,7 @@ public sealed class SystemConvertUsageAnalyzer : DiagnosticAnalyzer
 
         if (targetMethod.ContainingType?.ToDisplayString() == "System.Convert")
         {
-            if (targetMethod.Name is "FromBase64String" or "ToBase64String" or "FromBase64CharArray" or "ToBase64CharArray" or "FromHexString" or "ToHexString")
+            if (targetMethod.Name is "TryFromBase64String" or "FromBase64String" or "ToBase64String" or "FromBase64CharArray" or "ToBase64CharArray" or "FromHexString" or "ToHexString")
             {
                 return;
             }
