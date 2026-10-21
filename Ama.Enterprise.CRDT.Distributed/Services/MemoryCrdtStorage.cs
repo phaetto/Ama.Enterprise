@@ -22,6 +22,7 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     private readonly Dictionary<string, ClusterStateSnapshotDto> clusterStates = new();
     private readonly Dictionary<string, ShardVersionVectorMap> globalVersionVectors = new();
     private readonly Dictionary<string, object> documents = new();
+    private readonly Dictionary<string, byte[]> serializedDocuments = new();
     private readonly object syncRoot = new();
 
     private readonly Meter meter;
@@ -272,6 +273,20 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
         lock (syncRoot)
         {
             documents[key] = document;
+            serializedDocuments.Remove(key);
+        }
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task SaveSerializedDocumentAsync<TState>(string shardId, string documentId, byte[] serializedDocument, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        ArgumentNullException.ThrowIfNull(serializedDocument);
+
+        var key = $"{shardId}_{documentId}";
+        lock (syncRoot)
+        {
+            serializedDocuments[key] = serializedDocument;
         }
         return Task.CompletedTask;
     }
@@ -325,6 +340,7 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
             }
 
             documents.Remove(key);
+            serializedDocuments.Remove(key);
         }
 
         return Task.CompletedTask;

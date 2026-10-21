@@ -36,6 +36,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
     private readonly TableServiceClient tableServiceClient;
     private readonly TableClient tableClient;
     private readonly ICrdtSerializer serializer;
+    private readonly bool useBinarySerialization;
     private readonly ILogger<TableStorageDistributedCrdtStorage> logger;
 
     private readonly Meter meter;
@@ -68,6 +69,8 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
         ArgumentException.ThrowIfNullOrEmpty(storageOptions.ConnectionString);
         ArgumentException.ThrowIfNullOrEmpty(storageOptions.TableName);
+
+        this.useBinarySerialization = storageOptions.UseBinarySerialization;
 
         if (storageOptions.UseBinarySerialization)
         {
@@ -316,27 +319,25 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         ArgumentException.ThrowIfNullOrEmpty(documentId);
         ArgumentNullException.ThrowIfNull(document);
 
-        try
+        var payload = this.serializer.SerializeToBytes(document);
+        await this.SavePayloadCoreAsync(shardId, documentId, payload, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task SaveSerializedDocumentAsync<TState>(string shardId, string documentId, byte[] serializedDocument, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        ArgumentException.ThrowIfNullOrEmpty(documentId);
+        ArgumentNullException.ThrowIfNull(serializedDocument);
+
+        byte[] payload = serializedDocument;
+
+        if (!this.useBinarySerialization && (serializedDocument.Length == 0 || serializedDocument[0] != (byte)'{'))
         {
-            var tags = new KeyValuePair<string, object?>[] { new("type", "document") };
-            this.operationsWriteCounter.Add(1, tags);
-
-            var payload = this.serializer.SerializeToBytes(document);
-            if (payload != null)
-            {
-                this.payloadBytesHistogram.Record(payload.Length, tags);
-            }
-
-            var entity = new TableEntity(this.GetDocumentStatePartitionKey(shardId), documentId);
-            CrdtTableEntity.SetPayload(entity, payload);
-
-            await this.tableClient.UpsertEntityAsync(entity, TableUpdateMode.Replace, cancellationToken).ConfigureAwait(false);
+            var defaultSerializer = this.serviceProvider.GetRequiredService<ICrdtSerializer>();
+            var doc = defaultSerializer.DeserializeFromBytes<CrdtDocument<TState>>(serializedDocument);
+            payload = this.serializer.SerializeToBytes(doc);
         }
-        catch (Exception ex)
-        {
-            this.logger.LogError(ex, "Storage connection failed during SaveDocumentAsync.");
-            throw;
-        }
+
+        await this.SavePayloadCoreAsync(shardId, documentId, payload, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task DeleteDocumentAsync(string shardId, string documentId, CancellationToken cancellationToken = default)
@@ -681,6 +682,30 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
     {
         var localId = this.GetLocalReplicaId();
         return localId != null ? $"{localId}_{JournalPartitionPrefix}~" : JournalPartitionPrefix + "~";
+    }
+
+    private async Task SavePayloadCoreAsync(string shardId, string documentId, byte[] payload, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var tags = new KeyValuePair<string, object?>[] { new("type", "document") };
+            this.operationsWriteCounter.Add(1, tags);
+
+            if (payload != null)
+            {
+                this.payloadBytesHistogram.Record(payload.Length, tags);
+            }
+
+            var entity = new TableEntity(this.GetDocumentStatePartitionKey(shardId), documentId);
+            CrdtTableEntity.SetPayload(entity, payload);
+
+            await this.tableClient.UpsertEntityAsync(entity, TableUpdateMode.Replace, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            this.logger.LogError(ex, "Storage connection failed during SaveDocumentAsync.");
+            throw;
+        }
     }
     
     private static string GetJournalRowKey(long shardClock, string replicaId) => $"{shardClock.ToString("D20", CultureInfo.InvariantCulture)}_{replicaId}";

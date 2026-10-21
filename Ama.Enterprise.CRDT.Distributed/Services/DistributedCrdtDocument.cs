@@ -947,7 +947,9 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private async Task ExecuteCheckpointDirectAsync(CancellationToken cancellationToken)
     {
         CrdtDocument<TState> currentDoc = default;
+        byte[]? snapshotBytes = null;
         var shouldSave = false;
+        var isMemoryStorage = storage is MemoryCrdtStorage;
 
         try
         {
@@ -960,10 +962,16 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                         return Task.CompletedTask;
                     }
 
-                    // Materialize an isolated snapshot copy inside the shard and document locks
-                    // so storage backends can serialize or persist it without concurrent collection mutation.
-                    var snapshotBytes = serializer.SerializeToBytes(currentDocument);
-                    currentDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(snapshotBytes);
+                    if (isMemoryStorage)
+                    {
+                        currentDoc = currentDocument;
+                    }
+                    else
+                    {
+                        // Serialize once inside the shard and document locks so storage backends
+                        // can persist the exact byte array without re-serializing or hitting concurrent mutations.
+                        snapshotBytes = serializer.SerializeToBytes(currentDocument);
+                    }
 
                     isDirty = false;
                     shouldSave = true;
@@ -978,7 +986,14 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             }
 
             var storageDocKey = GetStorageDocumentKey();
-            await storage.SaveDocumentAsync(ShardId, storageDocKey, currentDoc, cancellationToken).ConfigureAwait(false);
+            if (isMemoryStorage)
+            {
+                await storage.SaveDocumentAsync(ShardId, storageDocKey, currentDoc, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await storage.SaveSerializedDocumentAsync<TState>(ShardId, storageDocKey, snapshotBytes!, cancellationToken).ConfigureAwait(false);
+            }
 
             telemetry.RecordDocumentCheckpointSaved(DocumentId);
             logger.LogDebug("Saved checkpoint to storage for document {DocumentId}.", DocumentId);

@@ -85,11 +85,18 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         return Task.FromResult<CrdtDocument<TState>?>(null);
     }
 
-    public async Task SaveDocumentAsync<TState>(string shardId, string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new()
+    public Task SaveDocumentAsync<TState>(string shardId, string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new()
     {
         if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
 
         var bytes = serializer.SerializeToBytes(document);
+        return SaveSerializedDocumentAsync<TState>(shardId, documentId, bytes, cancellationToken);
+    }
+
+    public async Task SaveSerializedDocumentAsync<TState>(string shardId, string documentId, byte[] serializedDocument, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
+        ArgumentNullException.ThrowIfNull(serializedDocument);
 
         await writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -98,7 +105,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             command.CommandText = "INSERT OR REPLACE INTO Documents (DocumentId, ShardId, Payload) VALUES (@DocId, @ShardId, @Payload)";
             AddParameter(command, "@DocId", documentId);
             AddParameter(command, "@ShardId", shardId);
-            AddParameter(command, "@Payload", bytes);
+            AddParameter(command, "@Payload", serializedDocument);
             
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }

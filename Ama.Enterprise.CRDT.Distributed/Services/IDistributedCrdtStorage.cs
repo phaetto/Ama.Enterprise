@@ -80,6 +80,17 @@ public interface IDistributedCrdtStorage : ICrdtOperationJournal
     Task SaveDocumentAsync<TState>(string shardId, string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new();
 
     /// <summary>
+    /// Persists a pre-serialized CRDT document snapshot so checkpointing can serialize once inside the document lock and write the bytes directly to storage.
+    /// </summary>
+    /// <typeparam name="TState">The application state bounded by the document.</typeparam>
+    /// <param name="shardId">The shard identifier isolating document bounds.</param>
+    /// <param name="documentId">The globally unique identifier for this document type (Topic).</param>
+    /// <param name="serializedDocument">The pre-serialized document payload bytes.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous save operation.</returns>
+    Task SaveSerializedDocumentAsync<TState>(string shardId, string documentId, byte[] serializedDocument, CancellationToken cancellationToken = default) where TState : class, new();
+
+    /// <summary>
     /// Permanently deletes the document state and unloads its specific journal operations.
     /// </summary>
     /// <param name="shardId">The shard identifier isolating document bounds.</param>

@@ -20,6 +20,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Net.NetworkInformation;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 
 /// <summary>
@@ -28,6 +29,12 @@ using System.Threading.Tasks;
 public static class Program
 {
     private static readonly object ConsoleLock = new();
+    private static readonly Channel<string> ConsoleLogChannel = Channel.CreateUnbounded<string>(new UnboundedChannelOptions
+    {
+        SingleReader = true,
+        SingleWriter = false,
+        AllowSynchronousContinuations = false
+    });
     private static readonly string TableSeparatorLine = new('-', 154);
     private static readonly List<DocumentMemoryStatsDto> ReusableMemoryStatsList = new(32);
     private static readonly Dictionary<string, long> ReusableShardDvvBytesCache = new(StringComparer.Ordinal);
@@ -35,7 +42,7 @@ public static class Program
 
     private static int currentPort;
     private static int currentAdminPort;
-    private static volatile bool _needsRedraw;
+    private static volatile bool needsRedraw;
 
     // DTO for representing the state output instead of using tuples
     private readonly record struct DocumentStateDto<T>(string Id, IReadOnlyDictionary<string, T> Items);
@@ -194,6 +201,7 @@ public static class Program
         var hostedServices = provider.GetServices<IHostedService>().ToList();
         
         using var cts = new CancellationTokenSource();
+        var logPumpTask = RunConsoleLogPumpAsync();
 
         Console.CancelKeyPress += (sender, e) =>
         {
@@ -225,9 +233,9 @@ public static class Program
                     using var uiTimer = new PeriodicTimer(TimeSpan.FromMilliseconds(500));
                     while (await uiTimer.WaitForNextTickAsync(cts.Token).ConfigureAwait(false))
                     {
-                        if (_needsRedraw)
+                        if (needsRedraw)
                         {
-                            _needsRedraw = false;
+                            needsRedraw = false;
                             //await DrawStateAsync(replicaId, orchestrator, taskManager, fleetManager, cts.Token).ConfigureAwait(false);
                         }
                     }
@@ -311,7 +319,7 @@ public static class Program
                         case "gen-fleets":
                             if (parts.Length >= 3 && int.TryParse(parts[1], out var fleetCount) && int.TryParse(parts[2], out var devicesPerFleet))
                             {
-                                logger.LogInformation("Generating {FleetCount} fleets with {DevicesPerFleet} devices each...", fleetCount, devicesPerFleet);
+                                WriteLineLocked($"[INFO] ShowCase: Generating {fleetCount} fleets with {devicesPerFleet} devices each...");
                                 var genSw = Stopwatch.StartNew();
 
                                 var createTasks = new List<Task>(Math.Min(fleetCount, 512));
@@ -365,9 +373,10 @@ public static class Program
                                 }
 
                                 genSw.Stop();
+
                                 var totalOps = fleetCount + ((long)fleetCount * devicesPerFleet);
                                 var opsPerSec = genSw.Elapsed.TotalSeconds > 0 ? (long)(totalOps / genSw.Elapsed.TotalSeconds) : totalOps;
-                                logger.LogInformation("Finished generating {FleetCount} fleets ({TotalOps} total ops) in {ElapsedMs} ms (~{OpsPerSec} ops/sec).", fleetCount, totalOps, genSw.ElapsedMilliseconds, opsPerSec);
+                                WriteLineLocked($"[INFO] ShowCase: Finished generating {fleetCount} fleets ({totalOps} total ops) in {genSw.ElapsedMilliseconds} ms (~{opsPerSec} ops/sec).");
                             }
                             else
                             {
@@ -380,7 +389,7 @@ public static class Program
                             {
                                 if (hammerCts is not null)
                                 {
-                                    logger.LogInformation("Stopping hammer mode... Please wait, draining pending operations (this may take a moment)...");
+                                    WriteLineLocked("[INFO] ShowCase: Stopping hammer mode... Please wait, draining pending operations (this may take a moment)...");
                                     await hammerCts.CancelAsync().ConfigureAwait(false);
                                     
                                     if (hammerTask is not null)
@@ -398,7 +407,7 @@ public static class Program
                                     hammerCts.Dispose();
                                     hammerCts = null;
                                     hammerTask = null;
-                                    logger.LogInformation("Hammer mode stopped successfully.");
+                                    WriteLineLocked("[INFO] ShowCase: Hammer mode stopped.");
                                 }
 
                                 if (cps > 0)
@@ -417,7 +426,7 @@ public static class Program
                                                 await orchestrator.CreateDocumentAsync(doc, "task-list", token).ConfigureAwait(false);
                                             }
 
-                                            logger.LogInformation("Hammer mode activated. Target: {Cps} ops/sec sharded across {DocCount} nail documents...", cps, targetDocs.Length);
+                                            WriteLineLocked($"[INFO] ShowCase: Hammer mode activated. Target: {cps} ops/sec sharded across {targetDocs.Length} nail documents...");
 
                                             var sw = Stopwatch.StartNew();
                                             var reportSw = Stopwatch.StartNew();
@@ -441,7 +450,7 @@ public static class Program
                                                     }
                                                     else
                                                     {
-                                                        await taskManager.SetTaskAsync(dId, tId, $"Hammered payload {index}", done).ConfigureAwait(false);
+                                                        await taskManager.SetTaskAsync(dId, tId, description: $"Hammered payload {index}", isDone: done).ConfigureAwait(false);
                                                     }
                                                 }
                                                 // Suppress cancellation exceptions to avoid massive unwinding delays when stopping heavy loads
@@ -493,7 +502,7 @@ public static class Program
                                                     var currentCps = opsCompleted - lastReportedOps;
                                                     lastReportedOps = opsCompleted;
                                                     reportSw.Restart();
-                                                    logger.LogInformation("[Hammer Telemetry] Target: {TargetCps}/s | Actual: {ActualCps}/s | Total Ops: {Total}", cps, currentCps, opsCompleted);
+                                                    WriteLineLocked($"[Hammer Telemetry] Target: {cps}/s | Actual: {currentCps}/s | Total Ops: {opsCompleted}");
                                                 }
                                             }
                                         }
@@ -503,7 +512,7 @@ public static class Program
                                         }
                                         catch (Exception ex)
                                         {
-                                            logger.LogError(ex, "Hammer generator failed.");
+                                            WriteLineLocked($"[ERROR] ShowCase: Hammer generator failed.{Environment.NewLine}{ex}");
                                         }
                                     }, token);
                                 }
@@ -554,6 +563,9 @@ public static class Program
             {
                 await service.StopAsync(CancellationToken.None).ConfigureAwait(false);
             }
+
+            ConsoleLogChannel.Writer.TryComplete();
+            await logPumpTask.ConfigureAwait(false);
         }
     }
 
@@ -798,9 +810,21 @@ public static class Program
 
     private static void WriteLineLocked(string message)
     {
-        lock (ConsoleLock)
+        ConsoleLogChannel.Writer.TryWrite(message);
+    }
+
+    private static async Task RunConsoleLogPumpAsync()
+    {
+        var reader = ConsoleLogChannel.Reader;
+        while (await reader.WaitToReadAsync().ConfigureAwait(false))
         {
-            Console.WriteLine(message);
+            lock (ConsoleLock)
+            {
+                while (reader.TryRead(out var line))
+                {
+                    Console.WriteLine(line);
+                }
+            }
         }
     }
 
@@ -826,13 +850,13 @@ public static class Program
     {
         public Task OnStateChangedAsync(string documentId, CancellationToken cancellationToken = default)
         {
-            _needsRedraw = true;
+            needsRedraw = true;
             return Task.CompletedTask;
         }
 
         public Task OnTopologyChangedAsync(CancellationToken cancellationToken = default)
         {
-            _needsRedraw = true;
+            needsRedraw = true;
             return Task.CompletedTask;
         }
     }
@@ -845,6 +869,8 @@ public static class Program
 
     private sealed class LockedConsoleLogger(string categoryName) : ILogger
     {
+        private readonly string shortCategory = categoryName.Split('.').LastOrDefault() ?? categoryName;
+
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
         public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Information;
@@ -862,7 +888,6 @@ public static class Program
                 return;
             }
 
-            var shortCategory = categoryName.Split('.').LastOrDefault() ?? categoryName;
             var logLine = $"[{logLevel.ToString().ToUpperInvariant()}] {shortCategory}: {message}";
             
             if (exception is not null)
@@ -870,7 +895,7 @@ public static class Program
                 logLine += Environment.NewLine + exception;
             }
 
-            WriteLineLocked(logLine);
+            ConsoleLogChannel.Writer.TryWrite(logLine);
         }
     }
 }
