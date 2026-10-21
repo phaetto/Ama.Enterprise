@@ -62,7 +62,12 @@ public enum DocumentCommandType
     /// <summary>
     /// Resets the local state of the document to its initial state.
     /// </summary>
-    ResetLocalState
+    ResetLocalState,
+
+    /// <summary>
+    /// Compacts CRDT metadata using the configured compaction policy.
+    /// </summary>
+    CompactMetadata
 }
 
 /// <summary>

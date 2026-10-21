@@ -125,6 +125,21 @@ public interface IDistributedCrdtDocument
     Task ResetLocalStateAsync(string oldReplicaId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Compacts the internal CRDT metadata (such as tombstones and seen exceptions) of this document according to the configured compaction policy.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task CompactMetadataAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Compacts the internal CRDT metadata (such as tombstones and seen exceptions) of this document with the specified delivery mode.
+    /// </summary>
+    /// <param name="deliveryMode">The delivery mode specifying whether to wait for completion or enqueue as fire-and-forget.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task CompactMetadataAsync(IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Estimates the total in-memory size in bytes of the entire document manager instance, including state, metadata, channels, pools, and telemetry.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>

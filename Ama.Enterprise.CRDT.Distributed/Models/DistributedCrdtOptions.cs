@@ -102,6 +102,12 @@ public sealed class DistributedCrdtOptions
     public int CompactionTtlSeconds { get; set; } = 0;
 
     /// <summary>
+    /// Gets or sets the interval in seconds at which the background compaction service periodically compacts CRDT metadata across active documents.
+    /// Defaults to 300 seconds (5 minutes). Must be greater than 0.
+    /// </summary>
+    public int CompactionIntervalSeconds { get; set; } = 300;
+
+    /// <summary>
     /// Gets or sets a value indicating whether to avoid blind checkpoint writes to storage.
     /// When enabled, the checkpoint service will maintain an in-memory last-known state cache 
     /// and skip storage saves if the payload has not mutated.

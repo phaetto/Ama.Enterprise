@@ -136,6 +136,12 @@ public interface IDistributedCrdtTelemetry
     void RecordDocumentStateReset(string documentId);
 
     /// <summary>
+    /// Records that CRDT metadata compaction was executed on a document.
+    /// </summary>
+    /// <param name="documentId">The document identifier.</param>
+    void RecordDocumentMetadataCompacted(string documentId);
+
+    /// <summary>
     /// Records that a document command was enqueued into the shared pipeline.
     /// </summary>
     /// <param name="documentId">The document identifier.</param>

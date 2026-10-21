@@ -184,7 +184,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         // Assert
         mockStorage.Verify(s => s.SaveShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<ShardVersionVectorMap>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
-        mockStorage.Verify(s => s.SaveDocumentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CrdtDocument<JournalTestState>>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        mockStorage.Verify(s => s.SaveSerializedDocumentAsync<JournalTestState>(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
 
     [IntegrationFact]

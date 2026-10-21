@@ -39,6 +39,7 @@ public sealed class DistributedCrdtTelemetry : IDistributedCrdtTelemetry, IDispo
     private readonly Counter<long> documentIntentsFailedCounter;
     private readonly Counter<long> replicaEvictionsCounter;
     private readonly Counter<long> stateResetsCounter;
+    private readonly Counter<long> metadataCompactedCounter;
     private readonly Counter<long> documentCommandsEnqueuedCounter;
     private readonly Counter<long> documentCommandsProcessedCounter;
     private readonly Counter<long> documentCommandFailuresCounter;
@@ -151,6 +152,10 @@ public sealed class DistributedCrdtTelemetry : IDistributedCrdtTelemetry, IDispo
             "crdt.document.state_resets",
             "resets",
             "Total local state resets performed on this document");
+        this.metadataCompactedCounter = this.documentMeter.CreateCounter<long>(
+            "crdt.document.metadata_compactions",
+            "compactions",
+            "Total CRDT metadata compactions executed on this document");
         this.documentCommandsEnqueuedCounter = this.documentMeter.CreateCounter<long>(
             "crdt.document.channel.commands_enqueued",
             "commands",
@@ -312,6 +317,13 @@ public sealed class DistributedCrdtTelemetry : IDistributedCrdtTelemetry, IDispo
     {
         if (string.IsNullOrWhiteSpace(documentId)) return;
         stateResetsCounter.Add(1, new KeyValuePair<string, object?>("document_id", documentId));
+    }
+
+    /// <inheritdoc />
+    public void RecordDocumentMetadataCompacted(string documentId)
+    {
+        if (string.IsNullOrWhiteSpace(documentId)) return;
+        metadataCompactedCounter.Add(1, new KeyValuePair<string, object?>("document_id", documentId));
     }
 
     /// <inheritdoc />

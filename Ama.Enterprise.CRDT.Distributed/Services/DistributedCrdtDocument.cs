@@ -11,6 +11,7 @@ using Ama.CRDT.Models;
 using Ama.CRDT.Models.Aot;
 using Ama.CRDT.Models.Intents;
 using Ama.CRDT.Services;
+using Ama.CRDT.Services.GarbageCollection;
 using Ama.CRDT.Services.Pooling;
 using Ama.CRDT.Services.Providers;
 using Ama.CRDT.Services.Serialization;
@@ -463,6 +464,42 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     }
 
     /// <inheritdoc />
+    public Task CompactMetadataAsync(CancellationToken cancellationToken = default)
+    {
+        return CompactMetadataAsync(IntentDeliveryMode.Acknowledged, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task CompactMetadataAsync(IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default)
+    {
+        if (isDisposed) return;
+
+        if (deliveryMode == IntentDeliveryMode.FireAndForget)
+        {
+            var ffCmd = commandPipeline.RentCommand();
+            ffCmd.Target = this;
+            ffCmd.Type = DocumentCommandType.CompactMetadata;
+
+            await commandPipeline.EnqueueFireAndForgetAsync(ffCmd, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var cmd = commandPipeline.RentCommand();
+        cmd.Target = this;
+        cmd.Type = DocumentCommandType.CompactMetadata;
+        cmd.CancellationToken = cancellationToken;
+
+        try
+        {
+            await commandPipeline.EnqueueAndWaitAsync(cmd, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            commandPipeline.ReturnCommand(cmd);
+        }
+    }
+
+    /// <inheritdoc />
     public async ValueTask<long> EstimateObjectSizeAsync(CancellationToken cancellationToken = default)
     {
         var footprint = await EstimateMemoryFootprintAsync(cancellationToken).ConfigureAwait(false);
@@ -561,6 +598,9 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 break;
             case DocumentCommandType.ResetLocalState:
                 await ProcessResetLocalStateInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
+                break;
+            case DocumentCommandType.CompactMetadata:
+                await ProcessCompactMetadataInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
                 break;
         }
     }
@@ -1065,6 +1105,43 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to reset local state for document {DocumentId}.", DocumentId);
+            throw;
+        }
+    }
+
+    private async Task ProcessCompactMetadataInternalAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var policyFactories = serviceProvider.GetServices<ICompactionPolicyFactory>();
+
+            await versionVectorManager.ExecuteShardLockedAsync(ShardId, () =>
+            {
+                lock (syncRoot)
+                {
+                    var compactedAny = false;
+                    foreach (var factory in policyFactories)
+                    {
+                        var policy = factory.CreatePolicy();
+                        metadataManager.Compact(currentDocument, policy);
+                        compactedAny = true;
+                    }
+
+                    if (compactedAny)
+                    {
+                        isDirty = true;
+                    }
+                }
+
+                return Task.CompletedTask;
+            }, cancellationToken).ConfigureAwait(false);
+
+            telemetry.RecordDocumentMetadataCompacted(DocumentId);
+            logger.LogTrace("Compacted CRDT metadata for document {DocumentId}.", DocumentId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to compact metadata for document {DocumentId}.", DocumentId);
             throw;
         }
     }

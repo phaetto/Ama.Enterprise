@@ -66,6 +66,8 @@ public static class ServiceCollectionExtensions
                 "JournalHardTrimThreshold cannot be negative.")
             .Validate(options => options.CompactionTtlSeconds >= 0, 
                 "CompactionTtlSeconds cannot be negative.")
+            .Validate(options => options.CompactionIntervalSeconds > 0,
+                "CompactionIntervalSeconds must be greater than zero.")
             .Validate(options => options.ShardReplicationFactor > 0,
                 "ShardReplicationFactor must be greater than zero.")
             .Validate(options => options.VirtualNodesPerReplica > 0,
@@ -91,8 +93,6 @@ public static class ServiceCollectionExtensions
         services.AddCrdtJournaling<StorageJournalForwarder>();
 
         services.AddCrdtPatcherDecorator<JournalingPatcherDecorator>(DecoratorBehavior.After);
-        services.AddCrdtApplicatorDecorator<CompactingApplicatorDecorator>(DecoratorBehavior.After);
-        services.AddCrdtMergerDecorator<CompactingMergerDecorator>(DecoratorBehavior.After);
 
         services.AddCrdtCompactionPolicyFactory(sp =>
         {
@@ -134,6 +134,7 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<CrdtInitializationService>();
         services.AddHostedService<CrdtCheckpointService>();
         services.AddHostedService<CrdtMaintenanceService>();
+        services.AddHostedService<CrdtCompactionService>();
 
         return services;
     }
