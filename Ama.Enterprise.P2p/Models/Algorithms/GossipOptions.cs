@@ -22,6 +22,21 @@ public sealed class GossipOptions : IEquatable<GossipOptions>
     /// </summary>
     public int DefaultTimeToLive { get; set; } = 10;
 
+    /// <summary>
+    /// Gets or sets the duration for which seen message identifiers are retained for deduplication.
+    /// </summary>
+    public TimeSpan SeenMessageRetention { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Gets or sets the maximum number of seen message identifiers to retain in memory per mesh.
+    /// </summary>
+    public int MaxSeenMessages { get; set; } = 10_000;
+
+    /// <summary>
+    /// Gets or sets the maximum number of outbound messages queued between gossip ticks per mesh.
+    /// </summary>
+    public int MaxOutboundQueueSize { get; set; } = 2_048;
+
     /// <inheritdoc />
     public bool Equals(GossipOptions? other)
     {
@@ -30,7 +45,10 @@ public sealed class GossipOptions : IEquatable<GossipOptions>
         
         return GossipInterval.Equals(other.GossipInterval) && 
                Fanout == other.Fanout && 
-               DefaultTimeToLive == other.DefaultTimeToLive;
+               DefaultTimeToLive == other.DefaultTimeToLive &&
+               SeenMessageRetention.Equals(other.SeenMessageRetention) &&
+               MaxSeenMessages == other.MaxSeenMessages &&
+               MaxOutboundQueueSize == other.MaxOutboundQueueSize;
     }
 
     /// <inheritdoc />
@@ -39,7 +57,10 @@ public sealed class GossipOptions : IEquatable<GossipOptions>
         return HashCode.Combine(
             GossipInterval, 
             Fanout, 
-            DefaultTimeToLive);
+            DefaultTimeToLive,
+            SeenMessageRetention,
+            MaxSeenMessages,
+            MaxOutboundQueueSize);
     }
 
     /// <inheritdoc />

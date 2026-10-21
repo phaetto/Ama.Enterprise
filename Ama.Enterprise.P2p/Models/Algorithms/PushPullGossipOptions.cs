@@ -42,6 +42,21 @@ public sealed class PushPullGossipOptions : IEquatable<PushPullGossipOptions>
     /// </summary>
     public TimeSpan PushPullDisabledDelay { get; set; } = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// Gets or sets the duration for which messages are retained in the push-pull fulfillment cache.
+    /// </summary>
+    public TimeSpan MessageCacheRetention { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Gets or sets the maximum number of messages to retain in the push-pull fulfillment cache per mesh.
+    /// </summary>
+    public int MaxCachedMessages { get; set; } = 2_048;
+
+    /// <summary>
+    /// Gets or sets the maximum number of outbound messages queued between gossip ticks per mesh.
+    /// </summary>
+    public int MaxOutboundQueueSize { get; set; } = 2_048;
+
     /// <inheritdoc />
     public bool Equals(PushPullGossipOptions? other)
     {
@@ -54,20 +69,27 @@ public sealed class PushPullGossipOptions : IEquatable<PushPullGossipOptions>
                EnablePushPull == other.EnablePushPull &&
                PushPullInterval.Equals(other.PushPullInterval) &&
                MaxDigestSize == other.MaxDigestSize &&
-               PushPullDisabledDelay.Equals(other.PushPullDisabledDelay);
+               PushPullDisabledDelay.Equals(other.PushPullDisabledDelay) &&
+               MessageCacheRetention.Equals(other.MessageCacheRetention) &&
+               MaxCachedMessages == other.MaxCachedMessages &&
+               MaxOutboundQueueSize == other.MaxOutboundQueueSize;
     }
 
     /// <inheritdoc />
     public override int GetHashCode()
     {
-        return HashCode.Combine(
-            GossipInterval, 
-            Fanout, 
-            DefaultTimeToLive,
-            EnablePushPull,
-            PushPullInterval,
-            MaxDigestSize,
-            PushPullDisabledDelay);
+        var hash = new HashCode();
+        hash.Add(GossipInterval);
+        hash.Add(Fanout);
+        hash.Add(DefaultTimeToLive);
+        hash.Add(EnablePushPull);
+        hash.Add(PushPullInterval);
+        hash.Add(MaxDigestSize);
+        hash.Add(PushPullDisabledDelay);
+        hash.Add(MessageCacheRetention);
+        hash.Add(MaxCachedMessages);
+        hash.Add(MaxOutboundQueueSize);
+        return hash.ToHashCode();
     }
 
     /// <inheritdoc />

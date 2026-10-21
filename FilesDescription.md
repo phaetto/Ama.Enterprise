@@ -117,7 +117,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/Observers/OrchestratorClusterStateObserver.cs` | Replaced `Task.Run` background task allocation with `ReevaluateTopologyAsync(IntentDeliveryMode.FireAndForget)`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtAntiEntropyService.cs` | Implemented adaptive polling interval evaluation during background looping utilizing `Stopwatch` boundaries to enforce faster initial startup sync phases avoiding long delays on load. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtP2pPayloadHandler.cs` | Updated anti-entropy snapshot and missing operations routing to disambiguate documents by both `DocumentId` and `TypeAlias`/`ShardId`. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtPatchBroadcaster.cs` | Updated patch broadcaster channel to carry `DocumentTypeAlias` directly from the source document. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtPatchBroadcaster.cs` | Bounded `broadcastChannel` using `DistributedCrdtOptions.ChannelCapacity` so high-volume patch generation applies backpressure instead of buffering unbounded patches in memory. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtTopologyObserver.cs` | Updated `OnPeerJoinedAsync` to check `IScopeTopologyProvider.IsPeerExpectedAsync` before consuming the one-time initial state sync trigger. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ShardVersionVectorManager.cs` | Pooled `shardId`, `documentId`, and version vector replica ID keys across shard snapshots and merges using `ICrdtStringPool`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/StorageJournalForwarder.cs` | Replaced parallel `Task.WhenAll` document checkpointing with sequential shard-grouped checkpoints and refreshed per-shard DVV snapshots immediately before each shard checkpoint. |
@@ -336,8 +336,8 @@
 | `$/Ama.Enterprise.P2p/Extensions/ZeroTrustRoutingServiceCollectionExtensions.cs` | Pooled `meshId` and keyed service identifiers via `CrdtStringPool.Shared`. |
 | `$/Ama.Enterprise.P2p/Models/Algorithms/GossipMessage.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Algorithms/GossipMessageType.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Models/Algorithms/GossipOptions.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p/Models/Algorithms/PushPullGossipOptions.cs` | No description provided. |
+| `$/Ama.Enterprise.P2p/Models/Algorithms/GossipOptions.cs` | Added `SeenMessageRetention`, `MaxSeenMessages`, and `MaxOutboundQueueSize` to bound gossip memory usage. |
+| `$/Ama.Enterprise.P2p/Models/Algorithms/PushPullGossipOptions.cs` | Added `MessageCacheRetention`, `MaxCachedMessages`, and `MaxOutboundQueueSize` to bound push-pull gossip memory usage. |
 | `$/Ama.Enterprise.P2p/Models/Core/CertificateAuthenticatorOptions.cs` | Added `RevocationMode` property allowing configuration of X509 certificate revocation checks (e.g., NoCheck for air-gapped environments). |
 | `$/Ama.Enterprise.P2p/Models/Core/FailureDetectorOptions.cs` | Configuration options for tuning generic protocol-agnostic failure detection components. |
 | `$/Ama.Enterprise.P2p/Models/Core/IExtensibleDistributedPayload.cs` | Added `[JsonIgnore]` attribute to the `BinaryExtensionData` property explicitly avoiding System.Text.Json serializing empty or unmapped internal binary structures, correctly encapsulating STJ from MessagePack behaviors. |
@@ -366,8 +366,8 @@
 | `$/Ama.Enterprise.P2p/Models/Transports/UdpPeerEndpoint.cs` | Represents a UDP network address endpoint. |
 | `$/Ama.Enterprise.P2p/Models/Transports/UdpTransportOptions.cs` | Removed `IsEnabled` isolating specific activation tracking, decoupling standard mapped pipelines. |
 | `$/Ama.Enterprise.P2p/README.md` | Primary introduction documentation explaining the core architecture, capabilities, getting started guide, and configuration options reflecting .NET Keyed DI bindings. |
-| `$/Ama.Enterprise.P2p/Services/Algorithms/GossipAlgorithm.cs` | Added `SeenMessages` deduplication cache to prevent duplicate local dispatching and cyclic network amplification storms under high throughput, and decoupled TTL forwarding from local handler exceptions. |
-| `$/Ama.Enterprise.P2p/Services/Algorithms/PushPullGossipAlgorithm.cs` | Added deduplication check on `MessageCache` in `ProcessMessageAsync` to avoid duplicate dispatching and re-gossiping of already seen messages, and replaced tuple usage with a `CachedGossipMessage` record struct. |
+| `$/Ama.Enterprise.P2p/Services/Algorithms/GossipAlgorithm.cs` | Drained `MessageQueue` when no peers are connected, capped `SeenMessages` and `MessageQueue` sizes with FIFO eviction, and grouped outbound forwarding tasks per peer. |
+| `$/Ama.Enterprise.P2p/Services/Algorithms/PushPullGossipAlgorithm.cs` | Drained `MessageQueue` when no peers are connected, capped `MessageCache` and `MessageQueue` sizes with FIFO eviction, and grouped outbound forwarding tasks per peer. |
 | `$/Ama.Enterprise.P2p/Services/Core/ApplicationPayloadDispatcher.cs` | Composite orchestrator dispatching to abstract domain observers. |
 | `$/Ama.Enterprise.P2p/Services/Core/CertificatePeerAuthenticator.cs` | Updated certificate chain validation to respect the configured `RevocationMode` from options, enabling offline support. |
 | `$/Ama.Enterprise.P2p/Services/Core/DirectMessageSender.cs` | Implements localized targeted point-to-point generic delivery fetching active peering bindings avoiding overarching network broadcast storms. |

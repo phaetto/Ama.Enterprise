@@ -222,8 +222,8 @@ public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
 
             logger.LogDebug("[{MeshId}] Wrapping payload and broadcasting newly mapped envelope {MessageId} locally from {NodeId}.", meshId, message.MessageId, nodeOptions.LocalPeerId);
 
-            state.MessageCache.TryAdd(message.MessageId, new CachedGossipMessage(message, DateTimeOffset.UtcNow));
-            state.MessageQueue.Enqueue(message);
+            TryCacheMessage(state, message, options);
+            EnqueueOutboundMessage(state, message, options.MaxOutboundQueueSize);
 
             dispatchTasks.Add(state.Dispatcher.DispatchAsync(message.MeshId, message.SenderId, message.Payload, cancellationToken));
         }
@@ -255,8 +255,8 @@ public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
 
             logger.LogDebug("[{MeshId}] Analyzing mapped P2P algorithm payload {MessageId} from {SenderId}. TTL: {Ttl}", gossipMsg.MeshId, gossipMsg.MessageId, gossipMsg.SenderId.Value, gossipMsg.TimeToLive);
 
-            bool isNewMessage = state.MessageCache.TryAdd(gossipMsg.MessageId, new CachedGossipMessage(gossipMsg, DateTimeOffset.UtcNow));
-            if (!isNewMessage)
+            var options = pushPullOptionsMonitor.Get(gossipMsg.MeshId);
+            if (!TryCacheMessage(state, gossipMsg, options))
             {
                 return;
             }
@@ -276,7 +276,7 @@ public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
             if (gossipMsg.TimeToLive > 1)
             {
                 var forwardedMessage = gossipMsg with { TimeToLive = gossipMsg.TimeToLive - 1 };
-                state.MessageQueue.Enqueue(forwardedMessage);
+                EnqueueOutboundMessage(state, forwardedMessage, options.MaxOutboundQueueSize);
             }
         }
     }
@@ -302,9 +302,9 @@ public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
                 var options = pushPullOptionsMonitor.Get(meshId);
                 await Task.Delay(options.GossipInterval, cancellationToken).ConfigureAwait(false);
 
-                await PerformGossipTickAsync(meshId, state, cancellationToken).ConfigureAwait(false);
+                await PerformGossipTickAsync(meshId, state, options, cancellationToken).ConfigureAwait(false);
                 
-                CleanupMessageCache(state);
+                CleanupMessageCache(state, options);
             }
             catch (OperationCanceledException)
             {
@@ -345,14 +345,19 @@ public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
         }
     }
 
-    private async Task PerformGossipTickAsync(string meshId, ProtocolState state, CancellationToken cancellationToken)
+    private async Task PerformGossipTickAsync(string meshId, ProtocolState state, PushPullGossipOptions options, CancellationToken cancellationToken)
     {
         if (state.MessageQueue.IsEmpty) return;
 
-        var options = pushPullOptionsMonitor.Get(meshId);
         var peers = (await state.PeerSelector.GetPeersAsync(options.Fanout, cancellationToken).ConfigureAwait(false)).ToList();
         
-        if (peers.Count == 0) return;
+        if (peers.Count == 0)
+        {
+            while (state.MessageQueue.TryDequeue(out _))
+            {
+            }
+            return;
+        }
 
         var messagesToForward = new List<GossipMessage>();
         while (state.MessageQueue.TryDequeue(out var msg))
@@ -360,18 +365,21 @@ public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
             messagesToForward.Add(msg);
         }
 
-        var sendTasks = new List<Task>();
+        if (messagesToForward.Count == 0) return;
+
+        var sendTasks = new List<Task>(peers.Count);
         var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId), new("message_type", "forward") };
 
         foreach (var peer in peers)
         {
-            foreach (var message in messagesToForward)
-            {
-                var currentPeer = peer;
-                var currentMessage = message;
+            var currentPeer = peer;
 
-                sendTasks.Add(Task.Run(async () =>
+            sendTasks.Add(Task.Run(async () =>
+            {
+                foreach (var currentMessage in messagesToForward)
                 {
+                    if (cancellationToken.IsCancellationRequested) break;
+
                     try
                     {
                         messagesSentCounter.Add(1, tags);
@@ -381,8 +389,8 @@ public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
                     {
                         logger.LogWarning(ex, "[{MeshId}] Failed to send algorithm envelope {MessageId} to peer.", meshId, currentMessage.MessageId);
                     }
-                }, cancellationToken));
-            }
+                }
+            }, cancellationToken));
         }
 
         await Task.WhenAll(sendTasks).ConfigureAwait(false);
@@ -508,14 +516,66 @@ public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
         }
     }
 
-    private static void CleanupMessageCache(ProtocolState state)
+    private static void EnqueueOutboundMessage(ProtocolState state, GossipMessage message, int maxQueueSize)
     {
-        var threshold = DateTimeOffset.UtcNow.AddMinutes(-5);
-        foreach (var kvp in state.MessageCache)
+        if (maxQueueSize > 0)
         {
-            if (kvp.Value.ReceivedAt < threshold)
+            while (state.MessageQueue.Count >= maxQueueSize && state.MessageQueue.TryDequeue(out _))
             {
-                state.MessageCache.TryRemove(kvp.Key, out _);
+            }
+        }
+
+        state.MessageQueue.Enqueue(message);
+    }
+
+    private static bool TryCacheMessage(ProtocolState state, GossipMessage message, PushPullGossipOptions options)
+    {
+        if (state.MessageCache.ContainsKey(message.MessageId))
+        {
+            return false;
+        }
+
+        var maxCached = options.MaxCachedMessages;
+        if (maxCached > 0)
+        {
+            while (state.MessageCache.Count >= maxCached && state.CachedMessageOrder.TryDequeue(out var oldestId))
+            {
+                state.MessageCache.TryRemove(oldestId, out _);
+            }
+        }
+
+        if (state.MessageCache.TryAdd(message.MessageId, new CachedGossipMessage(message, DateTimeOffset.UtcNow)))
+        {
+            state.CachedMessageOrder.Enqueue(message.MessageId);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static void CleanupMessageCache(ProtocolState state, PushPullGossipOptions options)
+    {
+        var retention = options.MessageCacheRetention > TimeSpan.Zero
+            ? options.MessageCacheRetention
+            : TimeSpan.FromSeconds(30);
+        var threshold = DateTimeOffset.UtcNow - retention;
+
+        while (state.CachedMessageOrder.TryPeek(out var oldestId))
+        {
+            if (!state.MessageCache.TryGetValue(oldestId, out var cached))
+            {
+                state.CachedMessageOrder.TryDequeue(out _);
+                continue;
+            }
+
+            if (cached.ReceivedAt < threshold)
+            {
+                state.CachedMessageOrder.TryDequeue(out _);
+                state.MessageCache.TryRemove(oldestId, out _);
+            }
+            else
+            {
+                break;
             }
         }
     }
@@ -530,6 +590,7 @@ public sealed class PushPullGossipAlgorithm : IP2pAlgorithm, IDisposable
         public IPeerRegistry PeerRegistry { get; }
 
         public ConcurrentDictionary<Guid, CachedGossipMessage> MessageCache { get; } = new();
+        public ConcurrentQueue<Guid> CachedMessageOrder { get; } = new();
         public ConcurrentQueue<GossipMessage> MessageQueue { get; } = new();
 
         public CancellationTokenSource? LoopCts { get; set; }

@@ -15,6 +15,7 @@ using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Decoupled observer handling the P2P broadcast propagation of locally generated document patches via an asynchronous background channel.
@@ -43,7 +44,8 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
         ReplicaContext replicaContext,
         ICrdtSerializer serializer,
         ILogger<CrdtPatchBroadcaster> logger,
-        IMeterFactory? meterFactory = null)
+        IMeterFactory? meterFactory = null,
+        IOptions<DistributedCrdtOptions>? options = null)
     {
         this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         this.p2pAlgorithm = p2pAlgorithm ?? throw new ArgumentNullException(nameof(p2pAlgorithm));
@@ -51,11 +53,24 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        this.broadcastChannel = Channel.CreateUnbounded<OutboundPatchItem>(new UnboundedChannelOptions
+        var capacity = options?.Value.ChannelCapacity ?? 0;
+        if (capacity > 0)
         {
-            SingleReader = true,
-            SingleWriter = false
-        });
+            this.broadcastChannel = Channel.CreateBounded<OutboundPatchItem>(new BoundedChannelOptions(capacity)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.Wait
+            });
+        }
+        else
+        {
+            this.broadcastChannel = Channel.CreateUnbounded<OutboundPatchItem>(new UnboundedChannelOptions
+            {
+                SingleReader = true,
+                SingleWriter = false
+            });
+        }
 
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.CrdtPatchBroadcaster") ?? new Meter("Ama.Enterprise.CRDT.Distributed.CrdtPatchBroadcaster");
         this.broadcastBytesCounter = this.meter.CreateCounter<long>("crdt.broadcaster.broadcast_bytes", "bytes", "Total bytes broadcasted for patches");
@@ -70,8 +85,13 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
     {
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
 
-        broadcastChannel.Writer.TryWrite(new OutboundPatchItem(documentId, documentTypeAlias, patch));
-        return Task.CompletedTask;
+        var item = new OutboundPatchItem(documentId, documentTypeAlias, patch);
+        if (broadcastChannel.Writer.TryWrite(item))
+        {
+            return Task.CompletedTask;
+        }
+
+        return broadcastChannel.Writer.WriteAsync(item, cancellationToken).AsTask();
     }
 
     public void Dispose()
