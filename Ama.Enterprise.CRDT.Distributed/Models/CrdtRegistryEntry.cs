@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Ama.CRDT.Services.Pooling;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
@@ -35,7 +36,15 @@ public sealed record CrdtRegistryEntry : IEquatable<CrdtRegistryEntry>, IExtensi
     public static string GetRegistryKey(string? typeAlias, string documentId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
-        return string.IsNullOrWhiteSpace(typeAlias) ? documentId : $"{typeAlias}:{documentId}";
+        documentId = CrdtStringPool.Shared.GetOrAdd(documentId);
+
+        if (string.IsNullOrWhiteSpace(typeAlias))
+        {
+            return documentId;
+        }
+
+        typeAlias = CrdtStringPool.Shared.GetOrAdd(typeAlias);
+        return CrdtStringPool.Shared.GetOrAdd($"{typeAlias}:{documentId}");
     }
 
     /// <inheritdoc />
@@ -49,8 +58,11 @@ public sealed record CrdtRegistryEntry : IEquatable<CrdtRegistryEntry>, IExtensi
     [JsonConstructor]
     public CrdtRegistryEntry(string documentId, string typeAlias, bool isDeleted)
     {
-        DocumentId = documentId ?? throw new ArgumentNullException(nameof(documentId));
-        TypeAlias = typeAlias ?? throw new ArgumentNullException(nameof(typeAlias));
+        ArgumentNullException.ThrowIfNull(documentId);
+        ArgumentNullException.ThrowIfNull(typeAlias);
+
+        DocumentId = CrdtStringPool.Shared.GetOrAdd(documentId);
+        TypeAlias = CrdtStringPool.Shared.GetOrAdd(typeAlias);
         IsDeleted = isDeleted;
     }
 

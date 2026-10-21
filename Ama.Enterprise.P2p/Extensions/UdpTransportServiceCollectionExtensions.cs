@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.Extensions;
 
 using System;
+using Ama.CRDT.Services.Pooling;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.Services.Core;
@@ -23,39 +24,40 @@ public static class UdpTransportServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
+        var meshId = CrdtStringPool.Shared.GetOrAdd(builder.MeshId);
         Action<UdpTransportOptions> configAction = options => 
         {
             configureOptions?.Invoke(options);
         };
 
         var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
-        if (!tracker.TryRegister($"{builder.MeshId}_UdpTransport", configAction))
+        if (!tracker.TryRegister(CrdtStringPool.Shared.GetOrAdd($"{meshId}_UdpTransport"), configAction))
         {
             return builder;
         }
 
-        builder.Services.Configure(builder.MeshId, configAction);
+        builder.Services.Configure(meshId, configAction);
 
-        builder.Services.AddKeyedSingleton<PeerEndpoint>(builder.MeshId, (sp, key) =>
+        builder.Services.AddKeyedSingleton<PeerEndpoint>(meshId, (sp, key) =>
         {
             var options = sp.GetRequiredService<IOptionsMonitor<UdpTransportOptions>>().Get((string)key!);
             var host = string.Equals(options.ListenHost, "+", StringComparison.OrdinalIgnoreCase) 
                 ? "localhost" 
                 : options.ListenHost;
                 
-            return new UdpPeerEndpoint(host, options.ListenPort);
+            return new UdpPeerEndpoint(CrdtStringPool.Shared.GetOrAdd(host), options.ListenPort);
         });
 
-        builder.Services.AddKeyedSingleton<ITransport>(builder.MeshId, (sp, key) =>
+        builder.Services.AddKeyedSingleton<ITransport>(meshId, (sp, key) =>
             new UdpTransport(
-                (string)key!,
+                CrdtStringPool.Shared.GetOrAdd((string)key!),
                 sp.GetRequiredKeyedService<IMeshWireEncoder>(key),
                 sp.GetRequiredService<IPeerRegistry>(),
                 sp.GetRequiredService<ILogger<UdpTransport>>()));
 
-        builder.Services.AddKeyedSingleton<ITransportListener>(builder.MeshId, (sp, key) =>
+        builder.Services.AddKeyedSingleton<ITransportListener>(meshId, (sp, key) =>
             new UdpTransportListener(
-                (string)key!,
+                CrdtStringPool.Shared.GetOrAdd((string)key!),
                 sp.GetRequiredService<IOptionsMonitor<UdpTransportOptions>>(),
                 sp.GetRequiredKeyedService<IMeshWireEncoder>(key),
                 sp.GetRequiredService<ILogger<UdpTransportListener>>()));

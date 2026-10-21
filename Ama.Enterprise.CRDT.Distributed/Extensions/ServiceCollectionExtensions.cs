@@ -11,6 +11,7 @@ using Ama.CRDT.Models.Intents;
 using Ama.CRDT.Models.Intents.Decorators;
 using Ama.CRDT.Services.Decorators;
 using Ama.CRDT.Services.GarbageCollection;
+using Ama.CRDT.Services.Pooling;
 using Ama.CRDT.Services.Providers;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
@@ -145,6 +146,7 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         if (string.IsNullOrWhiteSpace(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
 
+        replicaId = CrdtStringPool.Shared.GetOrAdd(replicaId);
         services.AddSingleton(new DistributedCrdtReplicaRegistration(replicaId));
         return services;
     }
@@ -157,6 +159,7 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         if (string.IsNullOrWhiteSpace(typeAlias)) throw new ArgumentException("Type alias cannot be null or empty.", nameof(typeAlias));
 
+        typeAlias = CrdtStringPool.Shared.GetOrAdd(typeAlias);
         var factory = new DocumentFactory<TState>(typeAlias);
         services.AddKeyedSingleton<IDocumentFactory>(typeAlias, factory);
         services.AddSingleton<IDocumentFactory>(factory);
@@ -185,6 +188,9 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         if (string.IsNullOrWhiteSpace(meshId)) throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshId));
         if (string.IsNullOrWhiteSpace(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
+
+        meshId = CrdtStringPool.Shared.GetOrAdd(meshId);
+        replicaId = CrdtStringPool.Shared.GetOrAdd(replicaId);
 
         services.AddSingleton(new DistributedCrdtP2pRegistration(meshId, replicaId));
 

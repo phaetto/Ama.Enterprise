@@ -3,6 +3,7 @@ namespace Ama.Enterprise.P2p.Extensions;
 using System;
 using System.Linq;
 using System.Text.Json.Serialization.Metadata;
+using Ama.CRDT.Services.Pooling;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.Licensing.Extensions;
 using Ama.Enterprise.P2p.Models;
@@ -31,6 +32,8 @@ public static class ServiceCollectionExtensions
         {
             throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshId));
         }
+
+        meshId = CrdtStringPool.Shared.GetOrAdd(meshId);
 
         var tracker = P2pMeshRegistrationTracker.GetOrCreate(services);
         if (!tracker.TryRegister(meshId, configureNodeOptions))
@@ -66,16 +69,17 @@ public static class ServiceCollectionExtensions
             services.TryAddSingleton<IP2pRpcCorrelator, P2pRpcCorrelator>();
         }
 
-        if (!services.Any(s => s.ServiceType == typeof(IJsonTypeInfoResolver) && s.ServiceKey as string == "Ama.CRDT" && s.ImplementationInstance == P2pJsonSerializerContext.Default))
+        var crdtKey = CrdtStringPool.Shared.GetOrAdd("Ama.CRDT");
+        if (!services.Any(s => s.ServiceType == typeof(IJsonTypeInfoResolver) && s.ServiceKey as string == crdtKey && s.ImplementationInstance == P2pJsonSerializerContext.Default))
         {
-            services.AddKeyedSingleton<IJsonTypeInfoResolver>("Ama.CRDT", P2pJsonSerializerContext.Default);
+            services.AddKeyedSingleton<IJsonTypeInfoResolver>(crdtKey, P2pJsonSerializerContext.Default);
         }
 
         services.TryAddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
 
         services.TryAddKeyedSingleton<IMeshWireEncoder>(meshId, (sp, key) =>
             new MeshWireEncoder(
-                (string)key!,
+                CrdtStringPool.Shared.GetOrAdd((string)key!),
                 sp.GetRequiredService<IOptionsMonitor<WireEncoderOptions>>(),
                 sp.GetRequiredService<ICrdtSerializer>(),
                 sp.GetRequiredService<ILogger<MeshWireEncoder>>()));
@@ -85,18 +89,18 @@ public static class ServiceCollectionExtensions
 
         services.AddKeyedSingleton<IPeerAuthenticator>(meshId, (sp, key) =>
             new PassThroughPeerAuthenticator(
-                (string)key!, 
+                CrdtStringPool.Shared.GetOrAdd((string)key!), 
                 sp.GetRequiredService<ILogger<PassThroughPeerAuthenticator>>()));
 
         services.AddKeyedSingleton<IPeerSelector>(meshId, (sp, key) =>
             new RandomPeerSelector(
-                (string)key!,
+                CrdtStringPool.Shared.GetOrAdd((string)key!),
                 sp.GetRequiredService<IPeerRegistry>(),
                 sp.GetRequiredService<ILogger<RandomPeerSelector>>()));
 
         services.AddKeyedSingleton<IFailureDetector>(meshId, (sp, key) =>
             new TimeBasedFailureDetector(
-                (string)key!,
+                CrdtStringPool.Shared.GetOrAdd((string)key!),
                 sp.GetRequiredService<IOptionsMonitor<FailureDetectorOptions>>(),
                 sp.GetRequiredService<ILogger<TimeBasedFailureDetector>>()));
         
@@ -105,7 +109,7 @@ public static class ServiceCollectionExtensions
 
         services.AddKeyedSingleton<IApplicationPayloadDispatcher>(meshId, (sp, key) =>
             new ApplicationPayloadDispatcher(
-                (string)key!,
+                CrdtStringPool.Shared.GetOrAdd((string)key!),
                 sp.GetKeyedServices<IApplicationPayloadHandler>(key),
                 sp.GetRequiredService<ILogger<ApplicationPayloadDispatcher>>()));
 
@@ -123,13 +127,14 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(configureOptions);
 
+        var meshId = CrdtStringPool.Shared.GetOrAdd(builder.MeshId);
         var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
-        if (!tracker.TryRegister(builder.MeshId, configureOptions))
+        if (!tracker.TryRegister(meshId, configureOptions))
         {
             return builder;
         }
 
-        builder.Services.Configure(builder.MeshId, configureOptions);
+        builder.Services.Configure(meshId, configureOptions);
 
         return builder;
     }

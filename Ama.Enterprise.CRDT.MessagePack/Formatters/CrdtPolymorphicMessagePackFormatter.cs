@@ -4,6 +4,7 @@ using System;
 using global::MessagePack;
 using global::MessagePack.Formatters;
 using Ama.CRDT.Models.Serialization;
+using Ama.CRDT.Services.Pooling;
 
 /// <summary>
 /// A dynamically mapped MessagePack formatter for handling generic or abstract payloads
@@ -56,6 +57,11 @@ public sealed class CrdtPolymorphicMessagePackFormatter<T> : IMessagePackFormatt
         }
 
         var discriminator = reader.ReadString();
+        if (discriminator is not null)
+        {
+            discriminator = CrdtStringPool.Shared.GetOrAdd(discriminator);
+        }
+
         if (discriminator is null || !CrdtTypeRegistry.TryGetType(discriminator, out var targetType))
         {
             throw new NotSupportedException($"Type with discriminator '{discriminator}' is not registered in CrdtTypeRegistry.");
@@ -64,6 +70,11 @@ public sealed class CrdtPolymorphicMessagePackFormatter<T> : IMessagePackFormatt
         if (CrdtPolymorphicMessagePackRegistry.TryGetDeserializer(targetType, out var deserializer) && deserializer != null)
         {
             var deserialized = deserializer(ref reader, options);
+            if (deserialized is string str)
+            {
+                deserialized = CrdtStringPool.Shared.GetOrAdd(str);
+            }
+
             return (T?)deserialized;
         }
 

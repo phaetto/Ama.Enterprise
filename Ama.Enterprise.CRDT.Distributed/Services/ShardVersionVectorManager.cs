@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
 using Ama.CRDT.Services;
+using Ama.CRDT.Services.Pooling;
 using Ama.CRDT.Services.Versioning;
 
 /// <summary>
@@ -17,15 +18,18 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
 {
     private readonly ReplicaContext replicaContext;
     private readonly IVersionVectorSyncService syncService;
+    private readonly ICrdtStringPool stringPool;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> shardLocks = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, DottedVersionVector>> pendingDocumentSnapshots = new(StringComparer.Ordinal);
 
     public ShardVersionVectorManager(
         ReplicaContext replicaContext,
-        IVersionVectorSyncService syncService)
+        IVersionVectorSyncService syncService,
+        ICrdtStringPool? stringPool = null)
     {
         this.replicaContext = replicaContext ?? throw new ArgumentNullException(nameof(replicaContext));
         this.syncService = syncService ?? throw new ArgumentNullException(nameof(syncService));
+        this.stringPool = stringPool ?? CrdtStringPool.Shared;
     }
 
     /// <inheritdoc />
@@ -37,7 +41,7 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
             var list = new List<string>(sourceMap.Count);
             foreach (var key in sourceMap.Keys)
             {
-                list.Add(key);
+                list.Add(stringPool.GetOrAdd(key));
             }
             return list;
         }
@@ -51,13 +55,14 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
             throw new ArgumentException("Shard ID cannot be null or empty.", nameof(shardId));
         }
 
+        shardId = stringPool.GetOrAdd(shardId);
         var sourceMap = replicaContext.ShardVersionVectors;
         lock (sourceMap)
         {
             var map = new ShardVersionVectorMap();
             if (sourceMap.TryGetValue(shardId, out var dvv))
             {
-                map[shardId] = CloneDvv(dvv);
+                map[shardId] = CloneDvv(dvv, stringPool);
             }
             return map;
         }
@@ -80,7 +85,7 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
                     continue;
                 }
 
-                map[shardKvp.Key] = CloneDvv(shardKvp.Value);
+                map[stringPool.GetOrAdd(shardKvp.Key)] = CloneDvv(shardKvp.Value, stringPool);
             }
             return map;
         }
@@ -95,7 +100,7 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
             var map = new ShardVersionVectorMap();
             foreach (var shardKvp in sourceMap)
             {
-                map[shardKvp.Key] = CloneDvv(shardKvp.Value);
+                map[stringPool.GetOrAdd(shardKvp.Key)] = CloneDvv(shardKvp.Value, stringPool);
             }
             return map;
         }
@@ -108,6 +113,7 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
 
         var sortedShards = shardIds
             .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => stringPool.GetOrAdd(s))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(s => s, StringComparer.Ordinal)
             .ToList();
@@ -148,6 +154,7 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
             throw new ArgumentException("Shard ID cannot be null or empty.", nameof(shardId));
         }
 
+        shardId = stringPool.GetOrAdd(shardId);
         _ = GetShardSemaphore(shardId);
 
         var sourceMap = replicaContext.ShardVersionVectors;
@@ -169,10 +176,11 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         var sourceMap = replicaContext.ShardVersionVectors;
         lock (sourceMap)
         {
-            foreach (var shardId in shardIds)
+            foreach (var rawShardId in shardIds)
             {
-                if (!string.IsNullOrWhiteSpace(shardId))
+                if (!string.IsNullOrWhiteSpace(rawShardId))
                 {
+                    var shardId = stringPool.GetOrAdd(rawShardId);
                     _ = GetShardSemaphore(shardId);
                     if (!sourceMap.ContainsKey(shardId))
                     {
@@ -184,8 +192,9 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
 
             foreach (var key in sourceMap.Keys)
             {
-                _ = GetShardSemaphore(key);
-                result.Add(key);
+                var pooledKey = stringPool.GetOrAdd(key);
+                _ = GetShardSemaphore(pooledKey);
+                result.Add(pooledKey);
             }
         }
 
@@ -201,6 +210,7 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         }
         ArgumentNullException.ThrowIfNull(incomingState);
 
+        shardId = stringPool.GetOrAdd(shardId);
         if (!incomingState.TryGetValue(shardId, out var incomingDvv))
         {
             return;
@@ -223,6 +233,9 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         ArgumentNullException.ThrowIfNull(incomingState);
         ArgumentNullException.ThrowIfNull(activeShardDocumentIds);
 
+        shardId = stringPool.GetOrAdd(shardId);
+        documentId = stringPool.GetOrAdd(documentId);
+
         if (!incomingState.TryGetValue(shardId, out var incomingDvv))
         {
             return;
@@ -236,7 +249,7 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         }
 
         var docMap = pendingDocumentSnapshots.GetOrAdd(shardId, _ => new ConcurrentDictionary<string, DottedVersionVector>(StringComparer.Ordinal));
-        var clonedIncoming = CloneDvv(incomingDvv);
+        var clonedIncoming = CloneDvv(incomingDvv, stringPool);
         docMap.AddOrUpdate(
             documentId,
             clonedIncoming,
@@ -286,8 +299,9 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
             sourceMap.Clear();
             foreach (var kvp in savedMap)
             {
-                _ = GetShardSemaphore(kvp.Key);
-                sourceMap[kvp.Key] = CloneDvv(kvp.Value);
+                var pooledKey = stringPool.GetOrAdd(kvp.Key);
+                _ = GetShardSemaphore(pooledKey);
+                sourceMap[pooledKey] = CloneDvv(kvp.Value, stringPool);
             }
         }
     }
@@ -300,6 +314,7 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
             throw new ArgumentException("Shard ID cannot be null or empty.", nameof(shardId));
         }
 
+        shardId = stringPool.GetOrAdd(shardId);
         pendingDocumentSnapshots.TryRemove(shardId, out _);
 
         var sourceMap = replicaContext.ShardVersionVectors;
@@ -330,7 +345,7 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
                     dvv.Versions.Clear();
                     foreach (var versionKvp in cleanedDvv.Versions)
                     {
-                        dvv.Versions[versionKvp.Key] = versionKvp.Value;
+                        dvv.Versions[stringPool.GetOrAdd(versionKvp.Key)] = versionKvp.Value;
                     }
 
                     dvv.Dots.Clear();
@@ -338,7 +353,7 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
                     {
                         foreach (var dotKvp in cleanedDvv.Dots)
                         {
-                            dvv.Dots[dotKvp.Key] = new HashSet<long>(dotKvp.Value);
+                            dvv.Dots[stringPool.GetOrAdd(dotKvp.Key)] = new HashSet<long>(dotKvp.Value);
                         }
                     }
                 }
@@ -367,6 +382,7 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         }
         ArgumentNullException.ThrowIfNull(action);
 
+        shardId = stringPool.GetOrAdd(shardId);
         var sem = GetShardSemaphore(shardId);
         await sem.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -392,11 +408,12 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
 
     private SemaphoreSlim GetShardSemaphore(string shardId)
     {
-        return shardLocks.GetOrAdd(shardId, _ => new SemaphoreSlim(1, 1));
+        return shardLocks.GetOrAdd(stringPool.GetOrAdd(shardId), _ => new SemaphoreSlim(1, 1));
     }
 
     private void MergeDvvIntoShard(string shardId, DottedVersionVector incomingDvv)
     {
+        shardId = stringPool.GetOrAdd(shardId);
         var sourceMap = replicaContext.ShardVersionVectors;
         lock (sourceMap)
         {
@@ -413,23 +430,23 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         }
     }
 
-    private static DottedVersionVector CloneDvv(DottedVersionVector dvv)
+    private static DottedVersionVector CloneDvv(DottedVersionVector dvv, ICrdtStringPool stringPool)
     {
-        var copiedVersions = new Dictionary<string, long>();
-        var copiedDots = new Dictionary<string, ISet<long>>();
+        var copiedVersions = new Dictionary<string, long>(StringComparer.Ordinal);
+        var copiedDots = new Dictionary<string, ISet<long>>(StringComparer.Ordinal);
 
         lock (dvv)
         {
             foreach (var kvp in dvv.Versions)
             {
-                copiedVersions[kvp.Key] = kvp.Value;
+                copiedVersions[stringPool.GetOrAdd(kvp.Key)] = kvp.Value;
             }
 
             if (dvv.Dots != null)
             {
                 foreach (var kvp in dvv.Dots)
                 {
-                    copiedDots[kvp.Key] = new HashSet<long>(kvp.Value);
+                    copiedDots[stringPool.GetOrAdd(kvp.Key)] = new HashSet<long>(kvp.Value);
                 }
             }
         }

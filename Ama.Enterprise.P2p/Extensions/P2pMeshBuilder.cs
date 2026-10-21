@@ -1,5 +1,6 @@
 namespace Ama.Enterprise.P2p.Extensions;
 
+using Ama.CRDT.Services.Pooling;
 using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
@@ -12,10 +13,9 @@ using Microsoft.Extensions.DependencyInjection;
 /// <param name="meshId">The mesh identifier.</param>
 internal sealed class P2pMeshBuilder(IServiceCollection services, string meshId) : IP2pMeshBuilder
 {
-
     /// <inheritdoc />
     public IServiceCollection Services { get; } = services;
 
     /// <inheritdoc />
-    public string MeshId { get; } = meshId;
+    public string MeshId { get; } = CrdtStringPool.Shared.GetOrAdd(meshId);
 }

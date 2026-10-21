@@ -57,7 +57,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/TaskManager.cs` | Refactored to use `ICrdtDocumentOrchestrator` as a stateless gateway for reading states and forwarding intents directly, avoiding local patch generation limits. |
 | `$/Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
 | `$/Ama.Enterprise.CRDT.Distributed/Constants.cs` | Global constants for the distributed CRDT module, including the reserved `SystemRegistryDocumentId` (`system-document-registry`). |
-| `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | Registered `IDistributedCrdtTelemetry` as a singleton and `IDocumentCommandPipeline` as a scoped service to share a single command channel and centralized meters across all documents. |
+| `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | Pooled repeatable `replicaId`, `typeAlias`, and `meshId` strings during DI registration using `CrdtStringPool`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/ClusterStateSnapshotDto.cs` | Updated to map tombstoned replicas to their eviction timestamp tracking the exact eviction moment for safe cooldown expirations. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtEvictionRejectionMessage.cs` | Message broadcasted to forcefully reject and re-bootstrap nodes that have been tombstoned by the cluster, preventing amnesia edge cases. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtIntentForwardRequestDto.cs` | Added `DocumentTypeAlias` property to support lazy document instantiation on target shards when direct RPCs outrace registry gossip. |
@@ -66,8 +66,8 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtPatchMessage.cs` | Transmission model conveying replicated CRDT patches targeted asynchronously across active nodes. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtReadRequestDto.cs` | Added `DocumentTypeAlias` property to support lazy document instantiation on remote read requests. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtReadResponseDto.cs` | DTO returning the isolated serialized materialized CRDT payload natively mapped against an RPC correlation boundary. |
-| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtRegistryEntry.cs` | Added `GetRegistryKey` helper to format composite `{typeAlias}:{documentId}` keys for multi-type document isolation. |
-| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtRegistryState.cs` | Added `IDistributedCrdtState` implementation so default `IShardIdProvider` and `IDocumentIdProvider` implementations extract `Id` (`system-document-registry`) directly without reflection. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtRegistryEntry.cs` | Pooled `DocumentId`, `TypeAlias`, and composite registry keys via `CrdtStringPool.Shared`. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtRegistryState.cs` | Added `IDistributedCrdtState` and pooled the `Id` property via `CrdtStringPool.Shared`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtSnapshotDataDto.cs` | DTO representing a serialized snapshot payload, avoiding tuple usage across generic bounds. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtSnapshotMessage.cs` | Message payload containing a complete materialized CRDT document snapshot, used as a fallback synchronization mechanism when log truncation gaps are detected. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtStateSyncMessage.cs` | Structure carrying generic synchronization states formatted across anti-entropy operations representing document DVV. |
@@ -81,16 +81,16 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Models/IntentDeliveryMode.cs` | Enum specifying `Acknowledged` vs `FireAndForget` delivery modes when forwarding operation intents to distributed CRDT shards. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/PooledDocumentCommand.cs` | Converted `PooledDocumentCommand` to a non-generic pooled command carrying an `IDocumentCommandTarget` reference so a single channel and object pool can serve all document state types. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/PooledOrchestratorCommand.cs` | Added `IsFireAndForget` flag to support zero-allocation object pool recycling for non-blocking orchestrator commands. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/ClusterStateTracker.cs` | Fixed proxy routing amnesia by enforcing a 1:1 mapping between ReplicaId and PeerId and blocking the persistence of ephemeral network session mappings into storage. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/ClusterStateTracker.cs` | Pooled replica IDs, peer IDs, and shard keys across state tracking, export, and import operations using `ICrdtStringPool`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ConsistentHashShardDistributionManager.cs` | Replaced local registry constant with `Constants.SystemRegistryDocumentId`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtCheckpointService.cs` | Delegated shard version vector snapshot creation to `IShardVersionVectorManager`. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Optimized `CreateDocumentAsync` to promote single documents in $O(1)$ instead of scanning the full registry, coalesced `FireAndForget` `SyncDocumentsAsync` calls, and downgraded per-document creation/sync logs to `Debug`. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Pooled repeatable `documentId`, `typeAlias`, `shardId`, and `targetProperty` strings across orchestrator lookups and commands using `ICrdtStringPool`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtEvictionService.cs` | Implemented `EvictPeersAsync` overload accepting `IntentDeliveryMode` and forwarding it to `IDistributedCrdtDocument.EvictReplicaAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtInitializationService.cs` | Updated journal replay matching to disambiguate operations by composite key and `ShardId`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtMaintenanceService.cs` | Delegated version vector replica eviction and snapshot extraction to `IShardVersionVectorManager`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtTrimCoordinator.cs` | Coordinates trimming operations across the entire node to ensure only one aggressive or maintenance trim runs at a time, preventing IO and memory saturation. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DefaultScopeTopologyProvider.cs` | Updated to implement the asynchronous `IsPeerExpectedAsync` method returning synchronous wrappers. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Kept `SerializeToBytes` inside `syncRoot` during `MemoryCrdtStorage` checkpoints while leaving `DeserializeFromBytes` outside the shard lock to prevent concurrent collection modification exceptions. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Updated `ExecuteCheckpointDirectAsync` to materialize a snapshot copy of `currentDocument` inside the shard and document locks for all storage implementations, preventing `InvalidOperationException` from concurrent collection modifications during checkpoint serialization. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeFactory.cs` | Delegated scope creation metrics to the centralized `IDistributedCrdtTelemetry` service. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeManager.cs` | Centralized singleton tracker managing long-lived background scopes per instantiated replica. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtTelemetry.cs` | Singleton service centralizing all `Meter`, `Counter<long>`, and `ObservableGauge<int>` instances for scopes, orchestrators, and documents. |
@@ -105,7 +105,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtTelemetry.cs` | Interface for centralized telemetry recording and pipeline gauge registration in the distributed CRDT module. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDocumentCommandPipeline.cs` | Interface for the shared document command channel pipeline and command object pool. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDocumentCommandTarget.cs` | Interface implemented by `DistributedCrdtDocument<TState>` allowing the shared `DocumentCommandPipeline` to dispatch commands without reflection or per-document channels. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/IDocumentFactory.cs` | Passed `TypeAlias` when instantiating `DistributedCrdtDocument<TState>`. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/IDocumentFactory.cs` | Pooled `TypeAlias`, `documentId`, and resolved `shardId` strings via `CrdtStringPool.Shared`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IScopeTopologyProvider.cs` | Converted `IsPeerExpected` to `IsPeerExpectedAsync` returning a `ValueTask<bool>` to allow asynchronous network and session lookups. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IShardDistributionManager.cs` | Converted targeted explicit evaluation structures natively executing `ValueTask` dynamically mapping active peer registries asynchronously. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IShardVersionVectorManager.cs` | Added `ExecuteShardLockedAsync`, `GetShardsSnapshotAsync`, `GetFullSnapshotAsync`, and `RecordDocumentSnapshotMerge` to synchronize per-shard mutations and coordinate multi-document shard snapshots. |
@@ -119,7 +119,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtP2pPayloadHandler.cs` | Updated anti-entropy snapshot and missing operations routing to disambiguate documents by both `DocumentId` and `TypeAlias`/`ShardId`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtPatchBroadcaster.cs` | Updated patch broadcaster channel to carry `DocumentTypeAlias` directly from the source document. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtTopologyObserver.cs` | Updated `OnPeerJoinedAsync` to check `IScopeTopologyProvider.IsPeerExpectedAsync` before consuming the one-time initial state sync trigger. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/ShardVersionVectorManager.cs` | Implemented per-shard `SemaphoreSlim` execution locks and multi-document snapshot merge tracking to prevent in-flight journal gaps and partial snapshot DVV pollution. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/ShardVersionVectorManager.cs` | Pooled `shardId`, `documentId`, and version vector replica ID keys across shard snapshots and merges using `ICrdtStringPool`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/StorageJournalForwarder.cs` | Replaced parallel `Task.WhenAll` document checkpointing with sequential shard-grouped checkpoints and refreshed per-shard DVV snapshots immediately before each shard checkpoint. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/SystemRegistryServiceProvider.cs` | Internal `IServiceProvider` wrapper ensuring resolved `IShardIdProvider` instances are decorated with `SystemRegistryShardIdProviderDecorator` regardless of DI registration order. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/SystemRegistryShardIdProviderDecorator.cs` | Referenced `Constants.SystemRegistryDocumentId` when resolving the shard ID for `CrdtRegistryState`. |
@@ -130,7 +130,7 @@
 | `$/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.UnitTests/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.UnitTests.csproj` | Updated project reference to the renamed `Ama.Enterprise.CRDT.MessagePack.SourceGenerators` project. |
 | `$/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.UnitTests/Architecture/KnownContextsArchitectureTests.cs` | No description provided. |
 | `$/Ama.Enterprise.CRDT.MessagePack.SourceGenerators/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.csproj` | No description provided. |
-| `$/Ama.Enterprise.CRDT.MessagePack.SourceGenerators/Generators/MessagePackFormatterGenerator.cs` | Added `System.Collections.Concurrent.ConcurrentDictionary<TKey, TValue>` mapping to `ConcurrentDictionaryFormatter<TKey, TValue>` in `GetFormatterInstantiation`. |
+| `$/Ama.Enterprise.CRDT.MessagePack.SourceGenerators/Generators/MessagePackFormatterGenerator.cs` | Updated generated MessagePack deserializers to pool deserialized `string` properties and constructor arguments via `CrdtStringPool.Shared`. |
 | `$/Ama.Enterprise.CRDT.MessagePack.UnitTests/Ama.Enterprise.CRDT.MessagePack.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.MessagePack.UnitTests/Formatters/CrdtPolymorphicMessagePackFormatterTests.cs` | Unit tests for `CrdtPolymorphicMessagePackFormatter` verifying array formatting logic and unregistered polymorphic bounds throwing. |
 | `$/Ama.Enterprise.CRDT.MessagePack.UnitTests/Formatters/CrdtPolymorphicMessagePackRegistryTests.cs` | Unit tests verifying generic AOT delegate caching and resolution bounded in CrdtPolymorphicMessagePackRegistry. |
@@ -138,7 +138,7 @@
 | `$/Ama.Enterprise.CRDT.MessagePack.UnitTests/Services/MessagePackCrdtSerializerTests.cs` | Appended structural serialization boundaries verifying `byte[]` arrays convert to MessagePack BIN formats rather than polymorphic generics. |
 | `$/Ama.Enterprise.CRDT.MessagePack/Ama.Enterprise.CRDT.MessagePack.csproj` | Modified analyzer bindings replacing references to use renamed `Ama.Enterprise.CRDT.MessagePack.SourceGenerators`. |
 | `$/Ama.Enterprise.CRDT.MessagePack/Extensions/ServiceCollectionExtensions.cs` | Dependency injection extensions bootstrapping the decoupled custom `MessagePackCrdtSerializer` instance globally. Exposed `params` overload bridging multi-assembly mapped bounds and chaining execution fallback boundaries. |
-| `$/Ama.Enterprise.CRDT.MessagePack/Formatters/CrdtPolymorphicMessagePackFormatter.cs` | Robust fallback polymorphic converter intercepting binary payload encoding/decoding mapping directly to `CrdtTypeRegistry` string bounds avoiding complex reflection. |
+| `$/Ama.Enterprise.CRDT.MessagePack/Formatters/CrdtPolymorphicMessagePackFormatter.cs` | Pooled polymorphic type discriminators and deserialized string payloads via `CrdtStringPool.Shared`. |
 | `$/Ama.Enterprise.CRDT.MessagePack/Formatters/CrdtPolymorphicMessagePackRegistry.cs` | Centralized registry caching typed AOT polymorphic serialization delegates for MessagePack. |
 | `$/Ama.Enterprise.CRDT.MessagePack/MessagePackCrdtSerializer.cs` | Replaced `bytes.ToArray()` allocations in `DeserializeFromBytes` with `ArrayPool<byte>.Shared` buffers. |
 | `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Ama.Enterprise.FeatureFlags.IntegrationTests.csproj` | Redirected shared tests project reference pointing to renamed `Ama.Enterprise.Project.Tests.Common`. |
@@ -256,15 +256,15 @@
 | `$/Ama.Enterprise.P2p.Telemetry/Constants.cs` | Defines the core meter names evaluated by the telemetry network listeners isolating generic algorithms. |
 | `$/Ama.Enterprise.P2p.Telemetry/Extensions/ServiceCollectionExtensions.cs` | Updated DI to map singletons for the `TelemetryPushProtocol` ensuring generic instance isolation matching background network hooks. |
 | `$/Ama.Enterprise.P2p.Telemetry/Models/ClusterMetricAggregation.cs` | Data structure representing the computed aggregated statistics for a specific metric across a cluster of nodes. |
-| `$/Ama.Enterprise.P2p.Telemetry/Models/MetricSnapshotDto.cs` | AOT friendly DTO holding scoped aggregated metrics structures decoupling logic. |
-| `$/Ama.Enterprise.P2p.Telemetry/Models/MetricTagDto.cs` | AOT friendly structure representing a metric dimension tracking generic mappings. |
+| `$/Ama.Enterprise.P2p.Telemetry/Models/MetricSnapshotDto.cs` | Pooled `Name` and `Type` strings via `CrdtStringPool.Shared` in constructor and `init` accessors. |
+| `$/Ama.Enterprise.P2p.Telemetry/Models/MetricTagDto.cs` | Pooled `Key` and `Value` strings via `CrdtStringPool.Shared` in constructor and `init` accessors. |
 | `$/Ama.Enterprise.P2p.Telemetry/Models/TelemetryJsonContext.cs` | AOT generic bindings resolving metric serialization evaluating pure DTO constraints. |
 | `$/Ama.Enterprise.P2p.Telemetry/Models/TelemetryOptions.cs` | Updated to expose tracking configuration enabling generic meter dimension scopes via an `IEquatable` bounds implementation. |
 | `$/Ama.Enterprise.P2p.Telemetry/Models/TelemetryPayloadDto.cs` | Appended `MagicHeader` constant enabling fast-path binary stream identification prior to entering deserialization pipelines. |
-| `$/Ama.Enterprise.P2p.Telemetry/Services/ClusterMetricsAggregator.cs` | Thread-safe service responsible for computing rates, deltas, and multi-node aggregations over mapped telemetry boundaries. Fixed histogram and counter aggregation logic enforcing structural delta classifications, eliminating jumping sums and errant negative throughput derivatives. |
+| `$/Ama.Enterprise.P2p.Telemetry/Services/ClusterMetricsAggregator.cs` | Pooled repeatable metric names, metric types, tag keys/values, and composite metric keys using `ICrdtStringPool`. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/IClusterMetricsAggregator.cs` | Contract for aggregating cluster-wide telemetry metrics across active nodes tracking mathematical trends. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/ITelemetryAggregator.cs` | Interface for centrally aggregating and retrieving in-memory telemetry network states. |
-| `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryAggregator.cs` | Thread-safe in-memory aggregator holding the latest telemetry network metrics. |
+| `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryAggregator.cs` | Removed post-creation mutation of `init`-only metric properties now that `MetricSnapshotDto` and `MetricTagDto` pool strings upon construction. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryForwarderService.cs` | Prepended the fixed `MagicHeader` bytes to outgoing metric broadcasts ensuring compatibility with the fast-path telemetry boundary evaluation mechanism. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryPayloadHandler.cs` | Implemented binary header slicing, evaluating payloads for magic bytes and dropping unknown streams, bypassing heavy `MessagePackSerializationException` CPU spikes. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryPushAlgorithm.cs` | No description provided. |
@@ -319,21 +319,21 @@
 | `$/Ama.Enterprise.P2p.WebRTC/Services/WebRtcTransportListener.cs` | Transformed evaluation pipeline mapping directly generic structural decryption. |
 | `$/Ama.Enterprise.P2p/Ama.Enterprise.P2p.csproj` | Updated the NuGet description representing the core generic peer-to-peer mechanisms while extending metadata tag values to include 'networking'. |
 | `$/Ama.Enterprise.P2p/Constants.cs` | Global constants for the P2P module, including protocol versions and payload size limits. |
-| `$/Ama.Enterprise.P2p/Extensions/CertificateAuthenticatorServiceCollectionExtensions.cs` | Extension methods configuring the explicit dependency injection mapping for certificate-based peer authentication. |
-| `$/Ama.Enterprise.P2p/Extensions/DnsDiscoveryServiceCollectionExtensions.cs` | Extension methods for registering DNS-based active peer discovery components isolated via Keyed dependencies to specific mesh profiles. |
-| `$/Ama.Enterprise.P2p/Extensions/GossipNetworkServiceCollectionExtensions.cs` | Extension methods for registering generic Gossip algorithm components. |
+| `$/Ama.Enterprise.P2p/Extensions/CertificateAuthenticatorServiceCollectionExtensions.cs` | Pooled `meshId` and registration keys via `CrdtStringPool.Shared`. |
+| `$/Ama.Enterprise.P2p/Extensions/DnsDiscoveryServiceCollectionExtensions.cs` | Pooled `meshId` and keyed service identifiers via `CrdtStringPool.Shared`. |
+| `$/Ama.Enterprise.P2p/Extensions/GossipNetworkServiceCollectionExtensions.cs` | Pooled `meshId` via `CrdtStringPool.Shared`. |
 | `$/Ama.Enterprise.P2p/Extensions/IP2pMeshBuilder.cs` | Interface for building and configuring specific Keyed DI mesh profiles. |
-| `$/Ama.Enterprise.P2p/Extensions/P2pMeshBuilder.cs` | Implementation of `IP2pMeshBuilder` handling multi-mesh dependency injection tracking. |
-| `$/Ama.Enterprise.P2p/Extensions/P2pMeshRegistrationTracker.cs` | Centralized tracking mechanism guaranteeing idempotent mesh registrations evaluating identical configurations, bypassing duplicates. |
-| `$/Ama.Enterprise.P2p/Extensions/PushPullGossipNetworkServiceCollectionExtensions.cs` | Extension methods for registering generic Push-Pull Gossip algorithm components. |
-| `$/Ama.Enterprise.P2p/Extensions/QuicTransportServiceCollectionExtensions.cs` | Dedicated P2P dependency injection extensions exposing decoupled QUIC transport configurations bounded seamlessly into the existing builder architectures. |
-| `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Extension methods for registering generic P2P meshes. Refactored to extract specific algorithm and transport registrations into separate distinct files. |
-| `$/Ama.Enterprise.P2p/Extensions/SessionAuthenticationServiceCollectionExtensions.cs` | Dependency injection extensions to configure token-based session authentication for a P2P mesh. |
-| `$/Ama.Enterprise.P2p/Extensions/TcpTransportServiceCollectionExtensions.cs` | Extension methods for registering TCP transports dynamically mapped to multi-mesh pipelines. |
-| `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Removed tightly coupled injected Handshaker Options isolating generic P2P mesh parameters decoupling configuration. |
-| `$/Ama.Enterprise.P2p/Extensions/UdpTransportServiceCollectionExtensions.cs` | Extension methods for registering robust UDP datagram transports decoupled to multi-mesh pipelines. |
-| `$/Ama.Enterprise.P2p/Extensions/WireEncoderServiceCollectionExtensions.cs` | Extension methods for registering structural wire encoders. Updated with explicit XML documentation warning developers about the security guarantees and transport prerequisites. |
-| `$/Ama.Enterprise.P2p/Extensions/ZeroTrustRoutingServiceCollectionExtensions.cs` | Dependency injection extensions to configure zero-trust routing policies and decorators. |
+| `$/Ama.Enterprise.P2p/Extensions/P2pMeshBuilder.cs` | Pooled `MeshId` on `P2pMeshBuilder` initialization via `CrdtStringPool.Shared`. |
+| `$/Ama.Enterprise.P2p/Extensions/P2pMeshRegistrationTracker.cs` | Pooled `meshId` and composite registration keys via `CrdtStringPool.Shared`. |
+| `$/Ama.Enterprise.P2p/Extensions/PushPullGossipNetworkServiceCollectionExtensions.cs` | Pooled `meshId` via `CrdtStringPool.Shared`. |
+| `$/Ama.Enterprise.P2p/Extensions/QuicTransportServiceCollectionExtensions.cs` | Pooled `meshId`, registration keys, and endpoint host strings via `CrdtStringPool.Shared`. |
+| `$/Ama.Enterprise.P2p/Extensions/ServiceCollectionExtensions.cs` | Pooled `meshId` and keyed service identifiers via `CrdtStringPool.Shared`. |
+| `$/Ama.Enterprise.P2p/Extensions/SessionAuthenticationServiceCollectionExtensions.cs` | Pooled `meshId` and keyed service identifiers via `CrdtStringPool.Shared`. |
+| `$/Ama.Enterprise.P2p/Extensions/TcpTransportServiceCollectionExtensions.cs` | Pooled `meshId`, registration keys, and endpoint host strings via `CrdtStringPool.Shared`. |
+| `$/Ama.Enterprise.P2p/Extensions/UdpDiscoveryServiceCollectionExtensions.cs` | Pooled `meshId` and registration keys via `CrdtStringPool.Shared`. |
+| `$/Ama.Enterprise.P2p/Extensions/UdpTransportServiceCollectionExtensions.cs` | Pooled `meshId`, registration keys, and endpoint host strings via `CrdtStringPool.Shared`. |
+| `$/Ama.Enterprise.P2p/Extensions/WireEncoderServiceCollectionExtensions.cs` | Pooled `meshId` and registration keys via `CrdtStringPool.Shared`. |
+| `$/Ama.Enterprise.P2p/Extensions/ZeroTrustRoutingServiceCollectionExtensions.cs` | Pooled `meshId` and keyed service identifiers via `CrdtStringPool.Shared`. |
 | `$/Ama.Enterprise.P2p/Models/Algorithms/GossipMessage.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Algorithms/GossipMessageType.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p/Models/Algorithms/GossipOptions.cs` | No description provided. |
@@ -391,7 +391,7 @@
 | `$/Ama.Enterprise.P2p/Services/Core/ITransport.cs` | Generic interface defining the outbound network transport capabilities, augmented with endpoint routing capabilities. |
 | `$/Ama.Enterprise.P2p/Services/Core/ITransportListener.cs` | Generic interface defining the inbound network listener capabilities for receiving protocol messages. |
 | `$/Ama.Enterprise.P2p/Services/Core/ITransportRouter.cs` | Interface for routing outgoing messages to the appropriate transport based on the endpoint type. |
-| `$/Ama.Enterprise.P2p/Services/Core/InMemoryPeerRegistry.cs` | Implements an in-memory thread-safe registry tracking peering topology globally using a flat dictionary mapping. |
+| `$/Ama.Enterprise.P2p/Services/Core/InMemoryPeerRegistry.cs` | Pooled `meshId` across peer registry operations using `ICrdtStringPool`. |
 | `$/Ama.Enterprise.P2p/Services/Core/InMemoryPeerSessionRegistry.cs` | Thread-safe singleton mapping dynamically extracted session contexts per Peer across partitioned boundaries. |
 | `$/Ama.Enterprise.P2p/Services/Core/InboundMessageQueue.cs` | Channel-backed implementation of the inbound message queue. |
 | `$/Ama.Enterprise.P2p/Services/Core/MeshWireEncoder.cs` | Eliminated intermediate `byte[]` allocations for encryption keys, nonces, unencrypted payload slices, and decrypted buffers by using `ReadOnlySpan<byte>`, `stackalloc`, and `ArrayPool<byte>.Shared`. |

@@ -2,6 +2,7 @@ namespace Ama.Enterprise.P2p.Extensions;
 
 using System;
 using System.Linq;
+using Ama.CRDT.Services.Pooling;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
@@ -41,23 +42,24 @@ public static class WireEncoderServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
+        var meshId = CrdtStringPool.Shared.GetOrAdd(builder.MeshId);
         var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
-        if (!tracker.TryRegister($"{builder.MeshId}_WireEncoder", configureOptions))
+        if (!tracker.TryRegister(CrdtStringPool.Shared.GetOrAdd($"{meshId}_WireEncoder"), configureOptions))
         {
             return builder;
         }
 
         if (configureOptions is null)
         {
-            builder.Services.Configure<WireEncoderOptions>(builder.MeshId, _ => { });
+            builder.Services.Configure<WireEncoderOptions>(meshId, _ => { });
         }
         else
         {
-            builder.Services.Configure(builder.MeshId, configureOptions);
+            builder.Services.Configure(meshId, configureOptions);
         }
 
         var existingDescriptors = builder.Services
-            .Where(d => d.ServiceType == typeof(IMeshWireEncoder) && object.Equals(d.ServiceKey, builder.MeshId))
+            .Where(d => d.ServiceType == typeof(IMeshWireEncoder) && object.Equals(d.ServiceKey, meshId))
             .ToList();
             
         foreach (var descriptor in existingDescriptors)
@@ -65,9 +67,9 @@ public static class WireEncoderServiceCollectionExtensions
             builder.Services.Remove(descriptor);
         }
 
-        builder.Services.AddKeyedSingleton<IMeshWireEncoder>(builder.MeshId, (sp, key) =>
+        builder.Services.AddKeyedSingleton<IMeshWireEncoder>(meshId, (sp, key) =>
             new MeshWireEncoder(
-                (string)key!,
+                CrdtStringPool.Shared.GetOrAdd((string)key!),
                 sp.GetRequiredService<IOptionsMonitor<WireEncoderOptions>>(),
                 sp.GetRequiredService<ICrdtSerializer>(),
                 sp.GetRequiredService<ILogger<MeshWireEncoder>>()));

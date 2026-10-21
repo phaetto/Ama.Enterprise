@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.CRDT.Services.Pooling;
 using Ama.Enterprise.P2p.Models.Core;
 using Microsoft.Extensions.Logging;
 
@@ -14,10 +15,12 @@ using Microsoft.Extensions.Logging;
 /// </summary>
 public sealed class InMemoryPeerRegistry(
     IEnumerable<IPeerTopologyObserver> topologyObservers,
-    ILogger<InMemoryPeerRegistry> logger) : IPeerRegistry
+    ILogger<InMemoryPeerRegistry> logger,
+    ICrdtStringPool? stringPool = null) : IPeerRegistry
 {
     private readonly IEnumerable<IPeerTopologyObserver> topologyObservers = topologyObservers ?? throw new ArgumentNullException(nameof(topologyObservers));
     private readonly ILogger<InMemoryPeerRegistry> logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ICrdtStringPool stringPool = stringPool ?? CrdtStringPool.Shared;
 
     private readonly ConcurrentDictionary<PeerRegistryKey, PeerEntry> peers = new();
 
@@ -34,6 +37,7 @@ public sealed class InMemoryPeerRegistry(
             throw new ArgumentException("Peer ID cannot be empty.", nameof(node));
         }
 
+        meshId = stringPool.GetOrAdd(meshId);
         var key = new PeerRegistryKey(meshId, node.Id);
         var entry = new PeerEntry(meshId, node, status);
         var isNew = false;
@@ -77,6 +81,7 @@ public sealed class InMemoryPeerRegistry(
             throw new ArgumentException("Peer ID cannot be empty.", nameof(peerId));
         }
 
+        meshId = stringPool.GetOrAdd(meshId);
         var key = new PeerRegistryKey(meshId, peerId);
         if (peers.TryRemove(key, out _))
         {
@@ -94,6 +99,7 @@ public sealed class InMemoryPeerRegistry(
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+        meshId = stringPool.GetOrAdd(meshId);
         
         var result = peers.Values
             .Where(entry => string.Equals(entry.MeshId, meshId, StringComparison.Ordinal))
@@ -112,6 +118,7 @@ public sealed class InMemoryPeerRegistry(
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+        meshId = stringPool.GetOrAdd(meshId);
         
         var result = peers.Values
             .Where(entry => string.Equals(entry.MeshId, meshId, StringComparison.Ordinal) && entry.Status == status)

@@ -11,6 +11,7 @@ using Ama.CRDT.Models;
 using Ama.CRDT.Models.Aot;
 using Ama.CRDT.Models.Intents;
 using Ama.CRDT.Services;
+using Ama.CRDT.Services.Pooling;
 using Ama.CRDT.Services.Providers;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Models;
@@ -41,6 +42,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly IShardDistributionManager distributionManager;
     private readonly IDocumentCommandPipeline commandPipeline;
     private readonly IDistributedCrdtTelemetry telemetry;
+    private readonly ICrdtStringPool stringPool;
     private readonly ILogger<DistributedCrdtDocument<TState>> logger;
     
     private readonly IEnumerable<IDocumentStateObserver<TState>> stateObservers;
@@ -91,7 +93,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         IDistributedCrdtTelemetry telemetry,
         IEnumerable<IDocumentStateObserver<TState>> stateObservers,
         IEnumerable<IDocumentPatchObserver> patchObservers,
-        string? typeAlias = null)
+        string? typeAlias = null,
+        ICrdtStringPool? stringPool = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(initialState);
@@ -110,6 +113,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         this.distributionManager = distributionManager;
         this.commandPipeline = commandPipeline ?? throw new ArgumentNullException(nameof(commandPipeline));
         this.telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
+        this.stringPool = stringPool ?? CrdtStringPool.Shared;
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
         
         this.stateObservers = stateObservers ?? throw new ArgumentNullException(nameof(stateObservers));
@@ -123,11 +127,11 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         var metadata = metadataManager.Initialize(initialState);
         currentDocument = new CrdtDocument<TState>(initialState, metadata);
 
-        DocumentId = documentIdProvider.GetDocumentId(initialState).ToString() ?? string.Empty;
-        TypeAlias = ResolveTypeAlias(serviceProvider, typeAlias);
-        ShardId = initialState is CrdtRegistryState
+        DocumentId = this.stringPool.GetOrAdd(documentIdProvider.GetDocumentId(initialState).ToString() ?? string.Empty);
+        TypeAlias = this.stringPool.GetOrAdd(ResolveTypeAlias(serviceProvider, typeAlias));
+        ShardId = this.stringPool.GetOrAdd(initialState is CrdtRegistryState
             ? DocumentId
-            : shardIdProvider.GetShardId(currentDocument) ?? string.Empty;
+            : shardIdProvider.GetShardId(currentDocument) ?? string.Empty);
 
         if (this.activeSyncEnabled && this.activeSyncDebounceMs > 0)
         {
@@ -172,6 +176,11 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         ArgumentNullException.ThrowIfNull(patcher);
 
         if (isDisposed) return false;
+
+        if (!string.IsNullOrEmpty(targetProperty))
+        {
+            targetProperty = stringPool.GetOrAdd(targetProperty);
+        }
 
         if (deliveryMode == IntentDeliveryMode.FireAndForget)
         {
@@ -398,6 +407,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         if (isDisposed) return;
 
+        replicaId = stringPool.GetOrAdd(replicaId);
+
         if (deliveryMode == IntentDeliveryMode.FireAndForget)
         {
             var ffCmd = commandPipeline.RentCommand();
@@ -429,6 +440,11 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     public async Task ResetLocalStateAsync(string oldReplicaId, CancellationToken cancellationToken = default)
     {
         if (isDisposed) return;
+
+        if (!string.IsNullOrEmpty(oldReplicaId))
+        {
+            oldReplicaId = stringPool.GetOrAdd(oldReplicaId);
+        }
 
         var cmd = commandPipeline.RentCommand();
         cmd.Target = this;
@@ -558,7 +574,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
     private static Expression<Func<TState, object>> GetOrAddPropertySelector(string? targetProperty)
     {
-        var key = targetProperty ?? string.Empty;
+        var key = targetProperty is not null ? CrdtStringPool.Shared.GetOrAdd(targetProperty) : string.Empty;
         return PropertySelectorCache.GetOrAdd(key, prop =>
         {
             var parameter = Expression.Parameter(typeof(TState), "x");
@@ -931,7 +947,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private async Task ExecuteCheckpointDirectAsync(CancellationToken cancellationToken)
     {
         CrdtDocument<TState> currentDoc = default;
-        byte[]? snapshotBytes = null;
         var shouldSave = false;
 
         try
@@ -945,14 +960,10 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                         return Task.CompletedTask;
                     }
 
-                    if (storage is MemoryCrdtStorage)
-                    {
-                        snapshotBytes = serializer.SerializeToBytes(currentDocument);
-                    }
-                    else
-                    {
-                        currentDoc = currentDocument;
-                    }
+                    // Materialize an isolated snapshot copy inside the shard and document locks
+                    // so storage backends can serialize or persist it without concurrent collection mutation.
+                    var snapshotBytes = serializer.SerializeToBytes(currentDocument);
+                    currentDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(snapshotBytes);
 
                     isDirty = false;
                     shouldSave = true;
@@ -964,11 +975,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             if (!shouldSave)
             {
                 return;
-            }
-
-            if (snapshotBytes != null)
-            {
-                currentDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(snapshotBytes);
             }
 
             var storageDocKey = GetStorageDocumentKey();

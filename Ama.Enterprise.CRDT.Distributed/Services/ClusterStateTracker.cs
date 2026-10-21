@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Diagnostics.Metrics;
 using System.Linq;
 using Ama.CRDT.Models;
+using Ama.CRDT.Services.Pooling;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 using Microsoft.Extensions.Logging;
@@ -16,10 +17,11 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
 {
     private readonly IEnumerable<IClusterStateObserver> observers;
     private readonly ILogger<ClusterStateTracker> logger;
+    private readonly ICrdtStringPool stringPool;
     
-    private readonly Dictionary<string, PeerStateEntry> peerStates = new();
-    private readonly Dictionary<string, string> networkIdToReplicaId = new();
-    private readonly Dictionary<string, DateTime> tombstonedReplicas = new();
+    private readonly Dictionary<string, PeerStateEntry> peerStates = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> networkIdToReplicaId = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DateTime> tombstonedReplicas = new(StringComparer.Ordinal);
     private readonly object syncRoot = new();
 
     private readonly Meter meter;
@@ -31,10 +33,12 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
     public ClusterStateTracker(
         IEnumerable<IClusterStateObserver> observers,
         ILogger<ClusterStateTracker> logger,
-        IMeterFactory? meterFactory = null)
+        IMeterFactory? meterFactory = null,
+        ICrdtStringPool? stringPool = null)
     {
         this.observers = observers ?? throw new ArgumentNullException(nameof(observers));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        this.stringPool = stringPool ?? CrdtStringPool.Shared;
         
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.ClusterStateTracker") ?? new Meter("Ama.Enterprise.CRDT.Distributed.ClusterStateTracker");
         this.stateUpdatesCounter = this.meter.CreateCounter<long>("crdt.cluster.state_updates", "updates", "Number of cluster state updates");
@@ -49,6 +53,9 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
         if (string.IsNullOrWhiteSpace(peerReplicaId)) throw new ArgumentException("Peer Replica ID cannot be null or empty.", nameof(peerReplicaId));
         if (string.IsNullOrWhiteSpace(peerId)) throw new ArgumentException("Peer ID cannot be null or empty.", nameof(peerId));
         ArgumentNullException.ThrowIfNull(globalState);
+
+        peerReplicaId = stringPool.GetOrAdd(peerReplicaId);
+        peerId = stringPool.GetOrAdd(peerId);
 
         bool topologyChanged = false;
 
@@ -144,6 +151,7 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
     {
         if (string.IsNullOrWhiteSpace(peerId)) throw new ArgumentException("Peer ID cannot be null or empty.", nameof(peerId));
 
+        peerId = stringPool.GetOrAdd(peerId);
         bool removed = false;
 
         lock (syncRoot)
@@ -165,7 +173,8 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
     public void TombstoneReplica(string replicaId)
     {
         if (string.IsNullOrWhiteSpace(replicaId)) return;
-        
+
+        replicaId = stringPool.GetOrAdd(replicaId);
         bool topologyChanged = false;
 
         lock (syncRoot)
@@ -309,14 +318,15 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
                 
                 foreach (var shardKvp in kvp.Value.State)
                 {
-                    var safeStateVersions = shardKvp.Value.Versions.ToDictionary(v => v.Key, v => v.Value);
-                    var safeStateDots = shardKvp.Value.Dots?.ToDictionary(d => d.Key, d => (ISet<long>)new HashSet<long>(d.Value)) 
-                                        ?? new Dictionary<string, ISet<long>>();
+                    var pooledShardKey = stringPool.GetOrAdd(shardKvp.Key);
+                    var safeStateVersions = shardKvp.Value.Versions.ToDictionary(v => stringPool.GetOrAdd(v.Key), v => v.Value, StringComparer.Ordinal);
+                    var safeStateDots = shardKvp.Value.Dots?.ToDictionary(d => stringPool.GetOrAdd(d.Key), d => (ISet<long>)new HashSet<long>(d.Value), StringComparer.Ordinal) 
+                                        ?? new Dictionary<string, ISet<long>>(StringComparer.Ordinal);
 
-                    safeMap[shardKvp.Key] = new DottedVersionVector(safeStateVersions, safeStateDots);
+                    safeMap[pooledShardKey] = new DottedVersionVector(safeStateVersions, safeStateDots);
                 }
 
-                dto.PeerStates[kvp.Key] = new ClusterPeerStateDto
+                dto.PeerStates[stringPool.GetOrAdd(kvp.Key)] = new ClusterPeerStateDto
                 {
                     State = safeMap,
                     LastSeen = kvp.Value.LastSeen
@@ -341,7 +351,7 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
             tombstonedReplicas.Clear();
             foreach (var kvp in state.TombstonedReplicas)
             {
-                tombstonedReplicas[kvp.Key] = kvp.Value;
+                tombstonedReplicas[stringPool.GetOrAdd(kvp.Key)] = kvp.Value;
             }
 
             peerStates.Clear();
@@ -351,13 +361,14 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
                 
                 foreach (var shardKvp in kvp.Value.State)
                 {
-                    var safeStateVersions = shardKvp.Value.Versions.ToDictionary(v => v.Key, v => v.Value);
-                    var safeStateDots = shardKvp.Value.Dots?.ToDictionary(d => d.Key, d => (ISet<long>)new HashSet<long>(d.Value));
+                    var pooledShardKey = stringPool.GetOrAdd(shardKvp.Key);
+                    var safeStateVersions = shardKvp.Value.Versions.ToDictionary(v => stringPool.GetOrAdd(v.Key), v => v.Value, StringComparer.Ordinal);
+                    var safeStateDots = shardKvp.Value.Dots?.ToDictionary(d => stringPool.GetOrAdd(d.Key), d => (ISet<long>)new HashSet<long>(d.Value), StringComparer.Ordinal);
 
-                    safeMap[shardKvp.Key] = new DottedVersionVector(safeStateVersions, safeStateDots);
+                    safeMap[pooledShardKey] = new DottedVersionVector(safeStateVersions, safeStateDots);
                 }
 
-                peerStates[kvp.Key] = new PeerStateEntry(
+                peerStates[stringPool.GetOrAdd(kvp.Key)] = new PeerStateEntry(
                     safeMap,
                     kvp.Value.LastSeen);
             }

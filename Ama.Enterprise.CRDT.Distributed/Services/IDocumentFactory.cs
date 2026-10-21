@@ -1,5 +1,6 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services;
 
+using Ama.CRDT.Services.Pooling;
 using Ama.CRDT.Services.Providers;
 using Microsoft.Extensions.DependencyInjection;
 using System;
@@ -50,7 +51,7 @@ internal sealed class DocumentFactory<TState> : IDocumentFactory where TState : 
     public DocumentFactory(string typeAlias)
     {
         if (string.IsNullOrWhiteSpace(typeAlias)) throw new ArgumentException("Type alias cannot be null or empty.", nameof(typeAlias));
-        TypeAlias = typeAlias;
+        TypeAlias = CrdtStringPool.Shared.GetOrAdd(typeAlias);
     }
 
     /// <inheritdoc />
@@ -65,8 +66,10 @@ internal sealed class DocumentFactory<TState> : IDocumentFactory where TState : 
         ArgumentNullException.ThrowIfNull(serviceProvider);
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
 
+        documentId = CrdtStringPool.Shared.GetOrAdd(documentId);
         var shardIdProvider = serviceProvider.GetRequiredService<IShardIdProvider>();
-        return shardIdProvider.GetShardId<TState>(documentId) ?? documentId;
+        var shardId = shardIdProvider.GetShardId<TState>(documentId) ?? documentId;
+        return CrdtStringPool.Shared.GetOrAdd(shardId);
     }
 
     /// <inheritdoc />
@@ -75,9 +78,10 @@ internal sealed class DocumentFactory<TState> : IDocumentFactory where TState : 
         ArgumentNullException.ThrowIfNull(serviceProvider);
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
 
+        documentId = CrdtStringPool.Shared.GetOrAdd(documentId);
         var documentIdProvider = serviceProvider.GetRequiredService<IDocumentIdProvider>();
         var state = documentIdProvider.CreateDocumentWithId<TState>(documentId);
         
-        return ActivatorUtilities.CreateInstance<DistributedCrdtDocument<TState>>(serviceProvider, state);
+        return ActivatorUtilities.CreateInstance<DistributedCrdtDocument<TState>>(serviceProvider, state, TypeAlias);
     }
 }

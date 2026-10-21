@@ -3,6 +3,7 @@ namespace Ama.Enterprise.P2p.Extensions;
 using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using Ama.CRDT.Services.Pooling;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -30,7 +31,7 @@ public static class ZeroTrustRoutingServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        var meshId = builder.MeshId;
+        var meshId = CrdtStringPool.Shared.GetOrAdd(builder.MeshId);
         var services = builder.Services;
 
         var routerDescriptor = services.FirstOrDefault(s => s.ServiceType == typeof(ITransportRouter) && Equals(s.ServiceKey, meshId));
@@ -41,7 +42,7 @@ public static class ZeroTrustRoutingServiceCollectionExtensions
             {
                 var inner = new TransportRouter(sp.GetKeyedServices<ITransport>(key));
                 return new PolicyEnforcingTransportRouter(
-                    (string)key!,
+                    CrdtStringPool.Shared.GetOrAdd((string)key!),
                     inner,
                     sp.GetKeyedServices<IMeshRoutingPolicy>(key),
                     sp.GetRequiredService<IPeerRegistry>(),
@@ -58,12 +59,12 @@ public static class ZeroTrustRoutingServiceCollectionExtensions
             services.AddKeyedSingleton<IApplicationPayloadDispatcher>(meshId, (sp, key) =>
             {
                 var inner = new ApplicationPayloadDispatcher(
-                    (string)key!,
+                    CrdtStringPool.Shared.GetOrAdd((string)key!),
                     sp.GetKeyedServices<IApplicationPayloadHandler>(key),
                     sp.GetRequiredService<ILogger<ApplicationPayloadDispatcher>>());
                     
                 return new PolicyEnforcingPayloadDispatcher(
-                    (string)key!,
+                    CrdtStringPool.Shared.GetOrAdd((string)key!),
                     inner,
                     sp.GetKeyedServices<IMeshRoutingPolicy>(key),
                     sp.GetRequiredService<IPeerSessionRegistry>(),
@@ -86,7 +87,7 @@ public static class ZeroTrustRoutingServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
         
-        builder.Services.AddKeyedSingleton<IMeshRoutingPolicy, TPolicy>(builder.MeshId);
+        builder.Services.AddKeyedSingleton<IMeshRoutingPolicy, TPolicy>(CrdtStringPool.Shared.GetOrAdd(builder.MeshId));
         
         return builder;
     }

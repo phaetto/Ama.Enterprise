@@ -3,6 +3,7 @@ namespace Ama.Enterprise.P2p.Extensions;
 using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using Ama.CRDT.Services.Pooling;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -37,25 +38,26 @@ public static class SessionAuthenticationServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
+        var meshId = CrdtStringPool.Shared.GetOrAdd(builder.MeshId);
         var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
         
         if (configureOptions is not null)
         {
-            builder.Services.Configure(builder.MeshId, configureOptions);
+            builder.Services.Configure(meshId, configureOptions);
         }
 
         builder.Services.TryAddSingleton<IPeerSessionRegistry, InMemoryPeerSessionRegistry>();
-        builder.Services.TryAddKeyedSingleton<ISessionTokenValidator, TValidator>(builder.MeshId);
+        builder.Services.TryAddKeyedSingleton<ISessionTokenValidator, TValidator>(meshId);
 
-        var existingAuth = builder.Services.FirstOrDefault(s => s.ServiceType == typeof(IPeerAuthenticator) && Equals(s.ServiceKey, builder.MeshId));
+        var existingAuth = builder.Services.FirstOrDefault(s => s.ServiceType == typeof(IPeerAuthenticator) && Equals(s.ServiceKey, meshId));
         if (existingAuth is not null)
         {
             builder.Services.Remove(existingAuth);
         }
 
-        builder.Services.AddKeyedSingleton<IPeerAuthenticator>(builder.MeshId, (sp, key) =>
+        builder.Services.AddKeyedSingleton<IPeerAuthenticator>(meshId, (sp, key) =>
             new SessionPeerAuthenticator(
-                (string)key!,
+                CrdtStringPool.Shared.GetOrAdd((string)key!),
                 sp.GetRequiredKeyedService<ISessionTokenValidator>(key),
                 sp.GetRequiredService<IPeerSessionRegistry>(),
                 sp.GetRequiredService<ILogger<SessionPeerAuthenticator>>()));

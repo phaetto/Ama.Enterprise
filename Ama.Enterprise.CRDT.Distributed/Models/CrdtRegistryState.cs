@@ -5,6 +5,8 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Ama.CRDT.Models;
+using Ama.CRDT.Services.Pooling;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
@@ -12,10 +14,16 @@ using Ama.Enterprise.P2p.Models.Core;
 /// </summary>
 public sealed class CrdtRegistryState : IExtensibleDistributedPayload, IEquatable<CrdtRegistryState>
 {
+    private string id = CrdtStringPool.Shared.GetOrAdd(Constants.SystemRegistryDocumentId);
+
     /// <summary>
     /// Gets or sets the mapped sequence identifier routing this registry state across P2P limits.
     /// </summary>
-    public string Id { get; set; } = Constants.SystemRegistryDocumentId;
+    public string Id
+    {
+        get => id;
+        set => id = value is not null ? CrdtStringPool.Shared.GetOrAdd(value) : string.Empty;
+    }
 
     /// <summary>
     /// Gets or sets the registry map dynamically identifying active and tombstoned document scopes across the cluster.

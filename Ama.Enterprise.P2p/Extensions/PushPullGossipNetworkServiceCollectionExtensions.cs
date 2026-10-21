@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.Extensions;
 
 using System;
+using Ama.CRDT.Services.Pooling;
 using Ama.Enterprise.P2p.Models.Algorithms;
 using Ama.Enterprise.P2p.Services.Algorithms;
 using Ama.Enterprise.P2p.Services.Core;
@@ -21,19 +22,20 @@ public static class PushPullGossipNetworkServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
+        var meshId = CrdtStringPool.Shared.GetOrAdd(builder.MeshId);
         var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
-        if (!tracker.TryRegister(builder.MeshId, configureOptions))
+        if (!tracker.TryRegister(meshId, configureOptions))
         {
             return builder;
         }
 
         if (configureOptions is null)
         {
-            builder.Services.Configure<PushPullGossipOptions>(builder.MeshId, _ => { });
+            builder.Services.Configure<PushPullGossipOptions>(meshId, _ => { });
         }
         else
         {
-            builder.Services.Configure(builder.MeshId, configureOptions);
+            builder.Services.Configure(meshId, configureOptions);
         }
         
         builder.Services.TryAddSingleton<IP2pAlgorithm, PushPullGossipAlgorithm>();

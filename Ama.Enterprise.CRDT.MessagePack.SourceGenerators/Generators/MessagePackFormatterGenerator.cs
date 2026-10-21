@@ -93,8 +93,9 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
 
         var assemblyName = source.Compilation.AssemblyName?.Replace(".", "_").Replace("-", "_") ?? "App";
         var resolverName = $"{assemblyName}_MessagePackResolver";
+        var hasStringPool = source.Compilation.GetTypeByMetadataName("Ama.CRDT.Services.Pooling.CrdtStringPool") != null;
 
-        GenerateResolver(context, discoveredCustomTypes, discoveredCollectionTypes, resolverName);
+        GenerateResolver(context, discoveredCustomTypes, discoveredCollectionTypes, resolverName, hasStringPool);
     }
 
     private static void ExtractTargetTypes(INamedTypeSymbol contextSymbol, HashSet<ITypeSymbol> targetTypes)
@@ -269,7 +270,7 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
         return false;
     }
 
-    private static void GenerateResolver(SourceProductionContext context, HashSet<INamedTypeSymbol> customTypes, HashSet<ITypeSymbol> collectionTypes, string resolverName)
+    private static void GenerateResolver(SourceProductionContext context, HashSet<INamedTypeSymbol> customTypes, HashSet<ITypeSymbol> collectionTypes, string resolverName, bool hasStringPool)
     {
         var uniqueCollectionTypes = collectionTypes
             .GroupBy(t => t.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))
@@ -278,7 +279,6 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
         var uniqueCustomTypes = customTypes
             .GroupBy(t => t.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))
             .ToDictionary(g => g.Key, g => g.First());
-
         // Ensure mutually exclusive bounds safely resolving overlapping generic instances cleanly.
         foreach (var key in uniqueCollectionTypes.Keys)
         {
@@ -415,7 +415,7 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
 
             if ((type.TypeKind == TypeKind.Interface || type.IsAbstract) && !hasJsonDerived && !hasDynamicDerived) continue;
             
-            GenerateFormatter(sb, type, resolverName, sortedCustoms);
+            GenerateFormatter(sb, type, resolverName, sortedCustoms, hasStringPool);
         }
 
         sb.AppendLine("}");
@@ -531,7 +531,7 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
         return 0;
     }
 
-    private static void GenerateFormatter(StringBuilder sb, INamedTypeSymbol typeSymbol, string resolverName, IEnumerable<INamedTypeSymbol> allCustomTypes)
+    private static void GenerateFormatter(StringBuilder sb, INamedTypeSymbol typeSymbol, string resolverName, IEnumerable<INamedTypeSymbol> allCustomTypes, bool hasStringPool)
     {
         if (typeSymbol.TypeKind == TypeKind.Enum)
         {
@@ -862,6 +862,14 @@ public sealed class MessagePackFormatterGenerator : IIncrementalGenerator
                 sb.AppendLine("            {");
                 sb.AppendLine("                var seq = reader.ReadBytes();");
                 sb.AppendLine($"                if (seq.HasValue) {varName} = new global::System.ReadOnlyMemory<byte>(seq.Value.ToArray());");
+                sb.AppendLine("            }");
+            }
+            else if (hasStringPool && (member.Type == "string" || member.Type == "global::System.String"))
+            {
+                sb.AppendLine($"            if (count > {i})");
+                sb.AppendLine("            {");
+                sb.AppendLine($"                {varName} = options.Resolver.GetFormatterWithVerify<{member.Type}>().Deserialize(ref reader, options);");
+                sb.AppendLine($"                if ({varName} != null) {varName} = global::Ama.CRDT.Services.Pooling.CrdtStringPool.Shared.GetOrAdd({varName});");
                 sb.AppendLine("            }");
             }
             else

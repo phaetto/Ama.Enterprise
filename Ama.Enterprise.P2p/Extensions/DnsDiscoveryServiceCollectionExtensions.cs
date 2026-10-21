@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.P2p.Extensions;
 
 using System;
+using Ama.CRDT.Services.Pooling;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Discovery;
 using Ama.Enterprise.P2p.Services.Core;
@@ -29,17 +30,18 @@ public static class DnsDiscoveryServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(configureOptions);
 
+        var meshId = CrdtStringPool.Shared.GetOrAdd(builder.MeshId);
         var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
-        if (!tracker.TryRegister(builder.MeshId, configureOptions))
+        if (!tracker.TryRegister(meshId, configureOptions))
         {
             return builder;
         }
 
-        builder.Services.Configure(builder.MeshId, configureOptions);
+        builder.Services.Configure(meshId, configureOptions);
 
-        builder.Services.AddKeyedSingleton<IPeerDiscovery>(builder.MeshId, (sp, key) =>
+        builder.Services.AddKeyedSingleton<IPeerDiscovery>(meshId, (sp, key) =>
             new DnsPeerDiscovery(
-                (string)key!,
+                CrdtStringPool.Shared.GetOrAdd((string)key!),
                 sp.GetRequiredService<IOptionsMonitor<DnsDiscoveryOptions>>(),
                 sp.GetRequiredService<IOptionsMonitor<P2pNodeOptions>>(),
                 sp.GetRequiredKeyedService<PeerEndpoint>(key),

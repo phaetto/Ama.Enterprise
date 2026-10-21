@@ -3,6 +3,7 @@ namespace Ama.Enterprise.P2p.Extensions;
 using System;
 using System.Collections.Concurrent;
 using System.Linq;
+using Ama.CRDT.Services.Pooling;
 using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
@@ -10,7 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 /// </summary>
 public sealed class P2pMeshRegistrationTracker
 {
-    private readonly ConcurrentDictionary<string, object> registeredOptions = new();
+    private readonly ConcurrentDictionary<string, object> registeredOptions = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Gets or adds the tracker from the service collection.
@@ -49,10 +50,11 @@ public sealed class P2pMeshRegistrationTracker
             throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshId));
         }
 
+        meshId = CrdtStringPool.Shared.GetOrAdd(meshId);
         var options = new TOptions();
         configure?.Invoke(options);
 
-        var key = $"{meshId}_{typeof(TOptions).Name}";
+        var key = CrdtStringPool.Shared.GetOrAdd($"{meshId}_{typeof(TOptions).Name}");
 
         if (!registeredOptions.TryAdd(key, options))
         {
@@ -81,7 +83,8 @@ public sealed class P2pMeshRegistrationTracker
             throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshId));
         }
 
-        var key = $"{meshId}_Parameterless";
+        meshId = CrdtStringPool.Shared.GetOrAdd(meshId);
+        var key = CrdtStringPool.Shared.GetOrAdd($"{meshId}_Parameterless");
 
         return registeredOptions.TryAdd(key, true);
     }

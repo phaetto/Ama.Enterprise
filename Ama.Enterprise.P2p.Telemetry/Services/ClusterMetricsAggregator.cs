@@ -3,6 +3,7 @@ namespace Ama.Enterprise.P2p.Telemetry.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Ama.CRDT.Services.Pooling;
 using Ama.Enterprise.P2p.Telemetry.Models;
 
 /// <summary>
@@ -11,6 +12,7 @@ using Ama.Enterprise.P2p.Telemetry.Models;
 public sealed class ClusterMetricsAggregator : IClusterMetricsAggregator
 {
     private readonly TimeProvider timeProvider;
+    private readonly ICrdtStringPool stringPool;
     private readonly Dictionary<Guid, NodeTelemetryState> networkState = new();
     private readonly object stateLock = new();
 
@@ -18,10 +20,12 @@ public sealed class ClusterMetricsAggregator : IClusterMetricsAggregator
     /// Initializes a new instance of the <see cref="ClusterMetricsAggregator"/> class.
     /// </summary>
     /// <param name="timeProvider">The core time provider injecting native temporal resolution limits.</param>
-    public ClusterMetricsAggregator(TimeProvider timeProvider)
+    /// <param name="stringPool">Optional string pool for deduplicating repeatable metric names, types, and tags.</param>
+    public ClusterMetricsAggregator(TimeProvider timeProvider, ICrdtStringPool? stringPool = null)
     {
         ArgumentNullException.ThrowIfNull(timeProvider);
         this.timeProvider = timeProvider;
+        this.stringPool = stringPool ?? CrdtStringPool.Shared;
     }
 
     /// <inheritdoc />
@@ -50,12 +54,26 @@ public sealed class ClusterMetricsAggregator : IClusterMetricsAggregator
 
                 foreach (var metric in payload.Metrics)
                 {
-                    var tagSuffix = string.Join("|", metric.Tags.OrderBy(t => t.Key).Select(t => $"{t.Key}:{t.Value}"));
-                    var metricKey = $"{metric.Name}[{tagSuffix}]";
+                    var metricName = stringPool.GetOrAdd(metric.Name);
+                    var metricType = stringPool.GetOrAdd(metric.Type);
+                    var tagSuffix = string.Join("|", metric.Tags.OrderBy(t => t.Key, StringComparer.Ordinal).Select(t => $"{t.Key}:{t.Value}"));
+                    var metricKey = stringPool.GetOrAdd($"{metricName}[{tagSuffix}]");
 
                     if (!state.Metrics.TryGetValue(metricKey, out var stats))
                     {
-                        stats = new MetricStats(metric.Name, metric.Type, metric.Tags.ToList());
+                        var pooledTags = new List<MetricTagDto>(metric.Tags.Count);
+                        foreach (var tag in metric.Tags)
+                        {
+                            pooledTags.Add(new MetricTagDto
+                            {
+                                Key = stringPool.GetOrAdd(tag.Key),
+                                Value = stringPool.GetOrAdd(tag.Value),
+                                JsonExtensionData = tag.JsonExtensionData,
+                                BinaryExtensionData = tag.BinaryExtensionData
+                            });
+                        }
+
+                        stats = new MetricStats(metricName, metricType, pooledTags);
                         state.Metrics[metricKey] = stats;
                     }
 
@@ -84,7 +102,7 @@ public sealed class ClusterMetricsAggregator : IClusterMetricsAggregator
 
         lock (stateLock)
         {
-            var clusterMetrics = new Dictionary<string, AggregationBuilder>();
+            var clusterMetrics = new Dictionary<string, AggregationBuilder>(StringComparer.Ordinal);
             var now = timeProvider.GetUtcNow();
 
             var targetNodes = networkState.Values.Where(n => targetNodeIds.Contains(n.NodeId));
@@ -180,7 +198,7 @@ public sealed class ClusterMetricsAggregator : IClusterMetricsAggregator
 
         public Guid NodeId { get; }
         public DateTimeOffset LastSeen { get; set; }
-        public Dictionary<string, MetricStats> Metrics { get; } = new();
+        public Dictionary<string, MetricStats> Metrics { get; } = new(StringComparer.Ordinal);
     }
 
     private sealed class MetricStats

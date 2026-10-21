@@ -2,6 +2,7 @@ namespace Ama.Enterprise.P2p.Extensions;
 
 using System;
 using System.Linq;
+using Ama.CRDT.Services.Pooling;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -25,24 +26,25 @@ public static class CertificateAuthenticatorServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
+        var meshId = CrdtStringPool.Shared.GetOrAdd(builder.MeshId);
         var tracker = P2pMeshRegistrationTracker.GetOrCreate(builder.Services);
-        if (!tracker.TryRegister($"{builder.MeshId}_CertificateAuthenticator", configureOptions))
+        if (!tracker.TryRegister(CrdtStringPool.Shared.GetOrAdd($"{meshId}_CertificateAuthenticator"), configureOptions))
         {
             return builder;
         }
 
         if (configureOptions is null)
         {
-            builder.Services.Configure<CertificateAuthenticatorOptions>(builder.MeshId, _ => { });
+            builder.Services.Configure<CertificateAuthenticatorOptions>(meshId, _ => { });
         }
         else
         {
-            builder.Services.Configure(builder.MeshId, configureOptions);
+            builder.Services.Configure(meshId, configureOptions);
         }
 
         // Remove existing keyed registrations to prevent resolution collisions with defaults
         var existingDescriptors = builder.Services
-            .Where(d => d.ServiceType == typeof(IPeerAuthenticator) && object.Equals(d.ServiceKey, builder.MeshId))
+            .Where(d => d.ServiceType == typeof(IPeerAuthenticator) && object.Equals(d.ServiceKey, meshId))
             .ToList();
             
         foreach (var descriptor in existingDescriptors)
@@ -51,9 +53,9 @@ public static class CertificateAuthenticatorServiceCollectionExtensions
         }
 
         // Apply the newly configured CertificatePeerAuthenticator
-        builder.Services.AddKeyedSingleton<IPeerAuthenticator>(builder.MeshId, (sp, key) =>
+        builder.Services.AddKeyedSingleton<IPeerAuthenticator>(meshId, (sp, key) =>
             new CertificatePeerAuthenticator(
-                (string)key!,
+                CrdtStringPool.Shared.GetOrAdd((string)key!),
                 sp.GetRequiredService<IOptionsMonitor<CertificateAuthenticatorOptions>>(),
                 sp.GetRequiredService<ILogger<CertificatePeerAuthenticator>>(),
                 sp.GetService<System.Diagnostics.Metrics.IMeterFactory>()));
