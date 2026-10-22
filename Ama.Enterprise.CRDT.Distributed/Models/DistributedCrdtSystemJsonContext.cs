@@ -16,6 +16,8 @@ using Ama.CRDT.Models;
 [JsonSerializable(typeof(ClusterStateSnapshotDto))]
 [JsonSerializable(typeof(ShardVersionVectorMap))]
 [JsonSerializable(typeof(DottedVersionVector))]
+[JsonSerializable(typeof(JournaledOperation))]
+[JsonSerializable(typeof(CrdtOperation))]
 public sealed partial class DistributedCrdtSystemJsonContext : JsonSerializerContext
 {
 }

@@ -105,7 +105,6 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         
         await orchestrator.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
         await orchestrator.CreateDocumentAsync("sync-doc-2", "sync-doc-2", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var intent1 = new MapSetIntent("testKey", "Val1");
         await orchestrator.ApplyIntentAsync<SyncTestState>("sync-doc-1", intent1, "DataMap", CancellationToken.None);
@@ -204,7 +203,6 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var observers = sp.GetServices<IPeerTopologyObserver>();
         var observer = observers.OfType<CrdtTopologyObserver>().Single();
@@ -245,7 +243,6 @@ public sealed class AntiEntropyStateSyncIntegrationTests
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var hostedServices = sp.GetServices<IHostedService>().ToList();
         foreach (var svc in hostedServices)
@@ -288,7 +285,6 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
         var serializer = sp.GetRequiredService<ICrdtSerializer>();
@@ -438,7 +434,6 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         await remoteOrch.InitializeAsync(CancellationToken.None);
 
         await remoteOrch.CreateDocumentAsync("gossip-first-doc", "sync-doc-1", CancellationToken.None);
-        await remoteOrch.SyncDocumentsAsync(CancellationToken.None);
         await remoteOrch.ApplyIntentAsync<SyncTestState>("gossip-first-doc", new MapSetIntent("FastKey", "FastValue"), nameof(SyncTestState.DataMap), CancellationToken.None);
 
         var remoteOps = await remoteStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
@@ -497,7 +492,6 @@ public sealed class AntiEntropyStateSyncIntegrationTests
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Wait for the registry creation debounce timer to flush and clear captured broadcasts
         await Task.Delay(300);

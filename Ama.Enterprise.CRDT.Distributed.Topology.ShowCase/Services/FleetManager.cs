@@ -24,6 +24,13 @@ public sealed class FleetManager : IFleetManager
     /// <inheritdoc />
     public async ValueTask<IReadOnlyDictionary<string, DeviceStatus>> GetDevicesAsync(string documentId, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document Id cannot be null or empty.", nameof(documentId));
+
+        if (!await orchestrator.DocumentExistsAsync<FleetState>(documentId, cancellationToken).ConfigureAwait(false))
+        {
+            return new ReadOnlyDictionary<string, DeviceStatus>(new Dictionary<string, DeviceStatus>());
+        }
+
         var crdtDoc = await orchestrator.GetDocumentStateAsync<FleetState>(documentId, cancellationToken).ConfigureAwait(false);
         if (crdtDoc.Data != null && crdtDoc.Data.Devices != null)
         {

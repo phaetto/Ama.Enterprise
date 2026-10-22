@@ -13,11 +13,11 @@ using Ama.Enterprise.FeatureFlags.Models;
 /// <summary>
 /// Implementation of the feature flag cluster manager focused on mutations and retrievals routing via the orchestrator gateway.
 /// </summary>
-public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
+public sealed class FeatureFlagCrdtManager : IFeatureFlagCrdtManager
 {
     private readonly ICrdtDocumentOrchestrator orchestrator;
 
-    public FeatureFlagClusterManager(ICrdtDocumentOrchestrator orchestrator)
+    public FeatureFlagCrdtManager(ICrdtDocumentOrchestrator orchestrator)
     {
         this.orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
     }
@@ -25,6 +25,11 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
     /// <inheritdoc />
     public async ValueTask<IReadOnlyDictionary<string, FeatureFlag>> GetFlagsAsync(CancellationToken cancellationToken = default)
     {
+        if (!await orchestrator.DocumentExistsAsync<FeatureFlagState>(Constants.GlobalDocumentId, cancellationToken).ConfigureAwait(false))
+        {
+            return new ReadOnlyDictionary<string, FeatureFlag>(new Dictionary<string, FeatureFlag>());
+        }
+
         var crdtDoc = await orchestrator.GetDocumentStateAsync<FeatureFlagState>(Constants.GlobalDocumentId, cancellationToken).ConfigureAwait(false);
         if (crdtDoc.Data != null && crdtDoc.Data.Flags != null)
         {
@@ -49,15 +54,22 @@ public sealed class FeatureFlagClusterManager : IFeatureFlagClusterManager
             throw new ArgumentException("Flag name cannot be null or empty.", nameof(name));
         }
 
-        var crdtDoc = await orchestrator.GetDocumentStateAsync<FeatureFlagState>(Constants.GlobalDocumentId, cancellationToken).ConfigureAwait(false);
         var now = DateTimeOffset.UtcNow;
 
         var hasExisting = false;
         FeatureFlag existingFlag = default!;
 
-        if (crdtDoc.Data?.Flags != null)
+        if (await orchestrator.DocumentExistsAsync<FeatureFlagState>(Constants.GlobalDocumentId, cancellationToken).ConfigureAwait(false))
         {
-            hasExisting = crdtDoc.Data.Flags.TryGetValue(name, out existingFlag);
+            var crdtDoc = await orchestrator.GetDocumentStateAsync<FeatureFlagState>(Constants.GlobalDocumentId, cancellationToken).ConfigureAwait(false);
+            if (crdtDoc.Data?.Flags != null)
+            {
+                hasExisting = crdtDoc.Data.Flags.TryGetValue(name, out existingFlag);
+            }
+        }
+        else
+        {
+            await orchestrator.CreateDocumentAsync(Constants.GlobalDocumentId, Constants.FeatureFlagDocumentType, deliveryMode, cancellationToken).ConfigureAwait(false);
         }
 
         var createdAt = hasExisting ? existingFlag.Audit.CreatedAt : now;

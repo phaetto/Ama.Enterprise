@@ -25,7 +25,7 @@ public sealed class FeatureFlagDomainIntegrationTests
         using var provider = BuildTestProvider();
         var scopeFactory = provider.GetRequiredService<DistributedCrdtScopeManager>();
         var crdtScope = scopeFactory.GetOrCreateScope("integration-replica-1");
-        var manager = crdtScope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
+        var manager = crdtScope.ServiceProvider.GetRequiredService<IFeatureFlagCrdtManager>();
 
         // Act & Assert
         var exception = await Should.ThrowAsync<InvalidOperationException>(async () => 
@@ -41,7 +41,7 @@ public sealed class FeatureFlagDomainIntegrationTests
         using var provider = BuildTestProvider();
         var scopeFactory = provider.GetRequiredService<DistributedCrdtScopeManager>();
         var crdtScope = scopeFactory.GetOrCreateScope("integration-replica-1");
-        var manager = crdtScope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
+        var manager = crdtScope.ServiceProvider.GetRequiredService<IFeatureFlagCrdtManager>();
 
         // Act
         await StartAllHostedServicesAsync(provider);
@@ -59,7 +59,7 @@ public sealed class FeatureFlagDomainIntegrationTests
         using var provider = BuildTestProvider();
         var scopeFactory = provider.GetRequiredService<DistributedCrdtScopeManager>();
         var crdtScope = scopeFactory.GetOrCreateScope("integration-replica-1");
-        var manager = crdtScope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
+        var manager = crdtScope.ServiceProvider.GetRequiredService<IFeatureFlagCrdtManager>();
         var observer = provider.GetRequiredService<TestStateObserver>();
 
         await StartAllHostedServicesAsync(provider);
@@ -100,7 +100,7 @@ public sealed class FeatureFlagDomainIntegrationTests
         using var provider = BuildTestProvider();
         var scopeFactory = provider.GetRequiredService<DistributedCrdtScopeManager>();
         var crdtScope = scopeFactory.GetOrCreateScope("integration-replica-1");
-        var manager = crdtScope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
+        var manager = crdtScope.ServiceProvider.GetRequiredService<IFeatureFlagCrdtManager>();
         var observer = provider.GetRequiredService<TestStateObserver>();
 
         await StartAllHostedServicesAsync(provider);

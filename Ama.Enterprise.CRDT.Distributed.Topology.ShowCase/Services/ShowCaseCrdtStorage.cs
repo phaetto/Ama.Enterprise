@@ -373,6 +373,56 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         }
     }
 
+    public async Task AppendBatchAsync(IReadOnlyList<JournaledOperation> operations, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(operations);
+        if (operations.Count == 0) return;
+
+        await writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var transaction = writeConnection.BeginTransaction();
+
+            using var command = writeConnection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "INSERT OR IGNORE INTO Journal (Id, DocumentId, ShardId, OriginReplicaId, ShardClock, InsertedAt, Payload) VALUES (@Id, @DocId, @ShardId, @OriginRepId, @Clock, @InsertedAt, @Payload)";
+
+            var pId = command.CreateParameter(); pId.ParameterName = "@Id"; command.Parameters.Add(pId);
+            var pDoc = command.CreateParameter(); pDoc.ParameterName = "@DocId"; command.Parameters.Add(pDoc);
+            var pShard = command.CreateParameter(); pShard.ParameterName = "@ShardId"; command.Parameters.Add(pShard);
+            var pRep = command.CreateParameter(); pRep.ParameterName = "@OriginRepId"; command.Parameters.Add(pRep);
+            var pClock = command.CreateParameter(); pClock.ParameterName = "@Clock"; command.Parameters.Add(pClock);
+            var pInsertedAt = command.CreateParameter(); pInsertedAt.ParameterName = "@InsertedAt"; command.Parameters.Add(pInsertedAt);
+            var pPayload = command.CreateParameter(); pPayload.ParameterName = "@Payload"; command.Parameters.Add(pPayload);
+
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            foreach (var journaled in operations)
+            {
+                var op = journaled.Operation;
+                pId.Value = op.Id;
+                pDoc.Value = journaled.DocumentId?.ToString() ?? string.Empty;
+                pShard.Value = op.ShardId;
+                pRep.Value = op.ReplicaId;
+                pClock.Value = op.ShardClock;
+                pInsertedAt.Value = now;
+                pPayload.Value = serializer.SerializeToBytes(journaled);
+
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to asynchronously save operation batch to SQLite journal");
+            throw;
+        }
+        finally
+        {
+            writeLock.Release();
+        }
+    }
+
     public async IAsyncEnumerable<JournaledOperation> GetOperationsByRangeAsync(string shardId, string originReplicaId, long minShardClock, long maxShardClock, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(shardId)) throw new ArgumentException("Value cannot be null or empty.", nameof(shardId));

@@ -244,7 +244,6 @@ public sealed class WebRtcDistributedSignalingIntegrationTests(ITestOutputHelper
         
         await orchestrator.InitializeAsync(CancellationToken.None).ConfigureAwait(false);
         await orchestrator.CreateDocumentAsync(documentId, Constants.SignalingDocumentTypeAlias, CancellationToken.None).ConfigureAwait(false);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None).ConfigureAwait(false);
 
         return app;
     }

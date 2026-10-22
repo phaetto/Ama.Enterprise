@@ -99,11 +99,9 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
 
         await orchA.CreateDocumentAsync("doc-dvv-1", "dvv-doc", CancellationToken.None);
         await orchA.CreateDocumentAsync("doc-dvv-2", "dvv-doc", CancellationToken.None);
-        await orchA.SyncDocumentsAsync(CancellationToken.None);
 
         await orchB.CreateDocumentAsync("doc-dvv-1", "dvv-doc", CancellationToken.None);
         await orchB.CreateDocumentAsync("doc-dvv-2", "dvv-doc", CancellationToken.None);
-        await orchB.SyncDocumentsAsync(CancellationToken.None);
 
         // Apply distinct mutations on both nodes while relying solely on DVV anti-entropy
         await orchA.ApplyIntentAsync<DvvTestState>("doc-dvv-1", new MapSetIntent("A1", "ValA1"), "DataMap", CancellationToken.None);
@@ -190,11 +188,9 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         // Both nodes know about the two documents in the "default" shard
         await orchA.CreateDocumentAsync("doc-snap-1", "dvv-doc", CancellationToken.None);
         await orchA.CreateDocumentAsync("doc-snap-2", "dvv-doc", CancellationToken.None);
-        await orchA.SyncDocumentsAsync(CancellationToken.None);
 
         await orchB.CreateDocumentAsync("doc-snap-1", "dvv-doc", CancellationToken.None);
         await orchB.CreateDocumentAsync("doc-snap-2", "dvv-doc", CancellationToken.None);
-        await orchB.SyncDocumentsAsync(CancellationToken.None);
 
         // Node A applies mutations to both documents on shard "default"
         await orchA.ApplyIntentAsync<DvvTestState>("doc-snap-1", new MapSetIntent("K1", "SnapVal1"), "DataMap", CancellationToken.None);
@@ -268,11 +264,9 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
 
         await orchA.CreateDocumentAsync("doc-conc-1", "dvv-doc", CancellationToken.None);
         await orchA.CreateDocumentAsync("doc-conc-2", "dvv-doc", CancellationToken.None);
-        await orchA.SyncDocumentsAsync(CancellationToken.None);
 
         await orchB.CreateDocumentAsync("doc-conc-1", "dvv-doc", CancellationToken.None);
         await orchB.CreateDocumentAsync("doc-conc-2", "dvv-doc", CancellationToken.None);
-        await orchB.SyncDocumentsAsync(CancellationToken.None);
 
         var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
         using var network = WireMeshWithInspection(recordedMessages, nodeA, nodeB);
@@ -386,7 +380,6 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         {
             await orch.CreateDocumentAsync("doc-ring-1", "dvv-doc", CancellationToken.None);
             await orch.CreateDocumentAsync("doc-ring-2", "dvv-doc", CancellationToken.None);
-            await orch.SyncDocumentsAsync(CancellationToken.None);
         }
 
         // Each node applies local mutations across both documents
@@ -481,10 +474,8 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         await orchB.InitializeAsync(CancellationToken.None);
 
         await orchA.CreateDocumentAsync("doc-dots", "dvv-doc", CancellationToken.None);
-        await orchA.SyncDocumentsAsync(CancellationToken.None);
 
         await orchB.CreateDocumentAsync("doc-dots", "dvv-doc", CancellationToken.None);
-        await orchB.SyncDocumentsAsync(CancellationToken.None);
 
         // Node A generates 3 sequential operations on shard "default" (clocks 1, 2, 3)
         await orchA.ApplyIntentAsync<DvvTestState>("doc-dots", new MapSetIntent("Op1", "V1"), "DataMap", CancellationToken.None);
@@ -570,7 +561,6 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         {
             await orch.CreateDocumentAsync("alpha-1", "dvv-doc", CancellationToken.None);
             await orch.CreateDocumentAsync("alpha-2", "dvv-doc", CancellationToken.None);
-            await orch.SyncDocumentsAsync(CancellationToken.None);
         }
 
         await orchA.ApplyIntentAsync<DvvTestState>("alpha-1", new MapSetIntent("K1", "V1"), "DataMap", CancellationToken.None);
@@ -593,7 +583,6 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
 
         // Act - Delete alpha-1 on Node A while alpha-2 remains active in "shard-alpha"
         await orchA.DeleteDocumentAsync("alpha-1", CancellationToken.None);
-        await orchA.SyncDocumentsAsync(CancellationToken.None);
 
         // Mutate the remaining document alpha-2 on Node A
         await orchA.ApplyIntentAsync<DvvTestState>("alpha-2", new MapSetIntent("K2_Next", "V2_Next"), "DataMap", CancellationToken.None);
@@ -654,7 +643,8 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         // Only Node A creates the documents initially
         await orchA.CreateDocumentAsync("alpha-late", "dvv-doc", CancellationToken.None);
         await orchA.CreateDocumentAsync("beta-late", "dvv-doc", CancellationToken.None);
-        await orchA.SyncDocumentsAsync(CancellationToken.None);
+        // This is here for sync wait
+        await orchA.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
 
         await orchA.ApplyIntentAsync<DvvTestState>("alpha-late", new MapSetIntent("LateA", "ValA"), "DataMap", CancellationToken.None);
         await orchA.ApplyIntentAsync<DvvTestState>("beta-late", new MapSetIntent("LateB", "ValB"), "DataMap", CancellationToken.None);
@@ -670,6 +660,8 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         {
             await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
             await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
+            // This is here for sync wait
+            await orchB.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
             await network.DrainAsync();
         }
 
@@ -728,7 +720,6 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         foreach (var orch in new[] { orchA, orchB, orchC })
         {
             await orch.CreateDocumentAsync("doc-evict-dvv", "dvv-doc", CancellationToken.None);
-            await orch.SyncDocumentsAsync(CancellationToken.None);
         }
 
         await orchA.ApplyIntentAsync<DvvTestState>("doc-evict-dvv", new MapSetIntent("KA", "VA"), "DataMap", CancellationToken.None);

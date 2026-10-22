@@ -116,7 +116,6 @@ public sealed class ScopeTopologyProviderIntegrationTests
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("topo-doc", "topo-doc", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Act - Request snapshot for unexpected peer
         await orchestrator.ProvideSnapshotAsync("topo-doc", "RemoteReplica", new PeerId(unexpectedPeerGuid), CancellationToken.None);
@@ -248,7 +247,6 @@ public sealed class ScopeTopologyProviderIntegrationTests
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("topo-doc", "topo-doc", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Generate 5 operations locally, bumping the local DVV for Replica1 appropriately
         for (int i = 0; i < 5; i++)

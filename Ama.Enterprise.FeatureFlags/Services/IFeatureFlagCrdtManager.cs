@@ -15,7 +15,7 @@ using Ama.Enterprise.FeatureFlags.Models;
 /// var flags = await featureFlagManager.GetFlagsAsync(cancellationToken);
 /// </code>
 /// </example>
-public interface IFeatureFlagClusterManager
+public interface IFeatureFlagCrdtManager
 {
     /// <summary>
     /// Gets the current read-only map of feature flags asynchronously.

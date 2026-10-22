@@ -31,9 +31,6 @@ internal sealed class FeatureFlagBootstrapper(
 
                 // Inject the global feature flags singleton into the document orchestrator pool for this scope
                 await scope.Orchestrator.CreateDocumentAsync(Constants.GlobalDocumentId, Constants.FeatureFlagDocumentType, cancellationToken).ConfigureAwait(false);
-                
-                // Force map synchronization initializing structures before host routing begins.
-                await scope.Orchestrator.SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
             }
         }
         catch (Exception ex)

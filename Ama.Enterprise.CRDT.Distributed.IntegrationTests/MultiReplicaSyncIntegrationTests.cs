@@ -68,10 +68,6 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         
         await Task.Delay(1000); // Allow Gossip of the registry update to propagate natively
 
-        // Node B dynamically processes the registry update to instantiate the document
-        await orchA.SyncDocumentsAsync(CancellationToken.None);
-        await orchB.SyncDocumentsAsync(CancellationToken.None);
-
         // Concurrently modify both documents
         var intentA = new MapSetIntent("KeyA", "ValueA");
         var taskA = orchA.ApplyIntentAsync<SharedTestState>("doc-1", intentA, "DataMap", CancellationToken.None);
@@ -152,13 +148,11 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         await orchA.InitializeAsync(CancellationToken.None);
         await orchA.CreateDocumentAsync("doc-ae", "shared-doc", CancellationToken.None);
-        await orchA.SyncDocumentsAsync(CancellationToken.None);
 
         var scopeB = nodeB.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeB.ReplicaId);
         var orchB = scopeB.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         await orchB.InitializeAsync(CancellationToken.None);
         await orchB.CreateDocumentAsync("doc-ae", "shared-doc", CancellationToken.None);
-        await orchB.SyncDocumentsAsync(CancellationToken.None);
 
         // Modify offline
         var intentA = new MapSetIntent("OfflineKeyA", "ValueA");
@@ -236,10 +230,6 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         
         await Task.Delay(1500); // Propagation boundary explicitly allowing standard background gossip delays
 
-        await orchA.SyncDocumentsAsync(CancellationToken.None);
-        await orchB.SyncDocumentsAsync(CancellationToken.None);
-        await orchC.SyncDocumentsAsync(CancellationToken.None);
-
         // Act - Concurrently patch from all three distinct replica matrices
         var t1 = orchA.ApplyIntentAsync<SharedTestState>("doc-3", new MapSetIntent("KeyA", "ValA"), "DataMap", CancellationToken.None);
         var t2 = orchB.ApplyIntentAsync<SharedTestState>("doc-3", new MapSetIntent("KeyB", "ValB"), "DataMap", CancellationToken.None);
@@ -290,8 +280,6 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         // Node A creates the document explicitly
         await orchA.CreateDocumentAsync("doc-evict", "shared-doc", CancellationToken.None);
         await Task.Delay(1000); // Allow Gossip of the registry update to propagate natively
-
-        await orchB.SyncDocumentsAsync(CancellationToken.None);
 
         // Act - Manually trigger Anti-Entropy from B to A so A tracks B seamlessly
         var serializerB = nodeB.Sp.GetRequiredService<ICrdtSerializer>();

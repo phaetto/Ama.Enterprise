@@ -456,6 +456,61 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         }
     }
 
+    public async Task AppendBatchAsync(IReadOnlyList<JournaledOperation> operations, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(operations);
+        if (operations.Count == 0) return;
+
+        var tags = new KeyValuePair<string, object?>[] { new("type", "journal") };
+        this.operationsWriteCounter.Add(operations.Count, tags);
+
+        var groupedByShard = operations.GroupBy(jOp => jOp.Operation.ShardId);
+
+        foreach (var group in groupedByShard)
+        {
+            var partitionKey = this.GetJournalPartitionKey(group.Key);
+            var batch = new List<TableTransactionAction>();
+            var rowKeysInBatch = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var journaledOp in group)
+            {
+                var op = journaledOp.Operation;
+                var rowKey = GetJournalRowKey(op.ShardClock, op.ReplicaId);
+                var payload = this.serializer.SerializeToBytes(journaledOp);
+
+                if (payload != null)
+                {
+                    this.payloadBytesHistogram.Record(payload.Length, tags);
+                }
+
+                var entity = new TableEntity(partitionKey, rowKey);
+                CrdtTableEntity.SetPayload(entity, payload);
+
+                if (!rowKeysInBatch.Add(rowKey))
+                {
+                    await this.tableClient.SubmitTransactionAsync(batch, cancellationToken).ConfigureAwait(false);
+                    batch.Clear();
+                    rowKeysInBatch.Clear();
+                    rowKeysInBatch.Add(rowKey);
+                }
+
+                batch.Add(new TableTransactionAction(TableTransactionActionType.UpsertReplace, entity));
+
+                if (batch.Count == 100)
+                {
+                    await this.tableClient.SubmitTransactionAsync(batch, cancellationToken).ConfigureAwait(false);
+                    batch.Clear();
+                    rowKeysInBatch.Clear();
+                }
+            }
+
+            if (batch.Count > 0)
+            {
+                await this.tableClient.SubmitTransactionAsync(batch, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
     public async IAsyncEnumerable<JournaledOperation> GetOperationsByRangeAsync(string shardId, string originReplicaId, long minShardClock, long maxShardClock, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(shardId);

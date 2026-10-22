@@ -56,6 +56,12 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
                 var options = scope.ServiceProvider.GetRequiredService<IOptions<DistributedCrdtOptions>>().Value;
                 var tombstoneCooldown = TimeSpan.FromSeconds(options.PeerTombstoneCooldownSeconds);
 
+                // 0. Recover any uncommitted local disk WAL segments into the primary storage before loading checkpoints or replaying journals
+                if (globalStorage is BufferedDistributedCrdtStorageDecorator bufferedDecorator)
+                {
+                    await bufferedDecorator.WriteAheadBuffer.RecoverAsync(bufferedDecorator.InnerStorage, cancellationToken).ConfigureAwait(false);
+                }
+
                 // 1. Initialize the global Dotted Version Vector explicitly extracting persistent DVV natively
                 var savedMap = await globalStorage.LoadShardVersionVectorMapAsync(replicaContext.ReplicaId, cancellationToken).ConfigureAwait(false);
                 if (savedMap != null)
@@ -104,7 +110,7 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
                     if (registryOps.Count > 0)
                     {
                         await orchestrator.Registry.ApplyJournaledPatchAsync(new CrdtPatch(registryOps), cancellationToken).ConfigureAwait(false);
-                        await orchestrator.SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
+                        await orchestrator.ReevaluateTopologyAsync(cancellationToken).ConfigureAwait(false);
                     }
 
                     var documents = orchestrator.GetActiveDocuments();

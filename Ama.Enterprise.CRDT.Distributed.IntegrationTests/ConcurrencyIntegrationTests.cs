@@ -134,9 +134,6 @@ public sealed class ConcurrencyIntegrationTests
         ).ToArray();
 
         await Task.WhenAll(createTasks);
-        
-        // Sync explicitly to instantiate the document instances locally
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Assert - Validating thread-safe channel queueing captured all creations
         var activeDocuments = orchestrator.GetActiveDocuments();
@@ -154,19 +151,10 @@ public sealed class ConcurrencyIntegrationTests
             {
                 // Deletions executed completely asynchronously
                 await orchestrator.DeleteDocumentAsync($"doc-{i}", CancellationToken.None);
-                
-                // Intentionally interleaving background Sync calls to ensure the internal single-reader pipeline handles multiplexed states securely
-                if (i % 10 == 0)
-                {
-                    await orchestrator.SyncDocumentsAsync(CancellationToken.None);
-                }
             })
         ).ToArray();
 
         await Task.WhenAll(mixedTasks);
-
-        // Final sync evaluation catching any straggling document states resolving active deletion mapping
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Assert
         var remainingDocuments = orchestrator.GetActiveDocuments();
@@ -198,7 +186,6 @@ public sealed class ConcurrencyIntegrationTests
         
         // Map an initial target document natively
         await orchestrator.CreateDocumentAsync("doc-msg-1", "concurrent-doc", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
         
         var targetDoc = orchestrator.TryGetLocalDocument<ConcurrencyTestState>("doc-msg-1");
         targetDoc.ShouldNotBeNull();
@@ -278,7 +265,6 @@ public sealed class ConcurrencyIntegrationTests
 
         // Act - Prove the overarching long-lived channel processor loop did NOT crash
         await orchestrator.CreateDocumentAsync("success-doc", "concurrent-doc", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Assert - Subsequent command succeeds securely
         var successDoc = orchestrator.TryGetLocalDocument<ConcurrencyTestState>("success-doc");
@@ -306,7 +292,6 @@ public sealed class ConcurrencyIntegrationTests
         ).ToArray();
         
         await Task.WhenAll(setupTasks);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Assert Phase 1 completeness
         orchestrator.GetActiveDocuments().Count.ShouldBe(BatchSize + 1);
@@ -326,17 +311,8 @@ public sealed class ConcurrencyIntegrationTests
             }));
         }
 
-        // Overlay with concurrent sync routines enforcing strict mapping updates explicitly cleanly
-        for (var s = 0; s < 20; s++)
-        {
-            heavyTasks.Add(Task.Run(() => orchestrator.SyncDocumentsAsync(CancellationToken.None)));
-        }
-
         // Act
         await Task.WhenAll(heavyTasks);
-
-        // Enforce final state mapping execution
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Assert - Cleanly deleted documents securely despite aggressive parallel processing overlaps
         var finalDocs = orchestrator.GetActiveDocuments();
@@ -363,7 +339,6 @@ public sealed class ConcurrencyIntegrationTests
         {
             await orchestrator.CreateDocumentAsync($"ff-doc-{d}", "concurrent-doc", CancellationToken.None);
         }
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Act - Mix FireAndForget and Acknowledged intents concurrently across all documents sharing the "default" shard
         var tasks = new List<Task>();
@@ -427,7 +402,6 @@ public sealed class ConcurrencyIntegrationTests
         await orchestrator.InitializeAsync(CancellationToken.None);
 
         await orchestrator.CreateDocumentAsync("bounded-doc", "concurrent-doc", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         const int TotalWriters = 80;
 

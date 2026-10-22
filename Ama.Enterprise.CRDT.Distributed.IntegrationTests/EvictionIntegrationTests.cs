@@ -206,7 +206,6 @@ public class EvictionIntegrationTests
         var scope = scopeManager.GetOrCreateScope("NodeA");
         var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         await orchestrator.CreateDocumentAsync("test-doc", "test-doc", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
         
         var evictionService = scope.ServiceProvider.GetRequiredService<ICrdtEvictionService>();
         
@@ -233,7 +232,6 @@ public class EvictionIntegrationTests
         var scope = scopeManager.GetOrCreateScope("NodeA");
         var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         await orchestrator.CreateDocumentAsync("test-doc", "test-doc", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var docManager = orchestrator.TryGetLocalDocument<TestState>("test-doc")!;
         var crdtDoc = await orchestrator.GetDocumentStateAsync<TestState>("test-doc", CancellationToken.None);
@@ -350,7 +348,6 @@ public class EvictionIntegrationTests
         await orchestrator.InitializeAsync(CancellationToken.None);
 
         await orchestrator.CreateDocumentAsync("test-doc", "test-doc", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Tombstone ZombieReplica on NodeA
         scope.ClusterTracker.TombstoneReplica("ZombieReplica");

@@ -170,7 +170,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var intent = new MapSetIntent("testKey", "DirtyData");
         await orchestrator.ApplyIntentAsync<JournalTestState>("journal-doc", intent, "DataMap", CancellationToken.None);
@@ -203,7 +202,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var docManager = orchestrator.TryGetLocalDocument<JournalTestState>("journal-doc")!;
 
@@ -236,7 +234,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>("TestMesh");
         var serializer = sp.GetRequiredService<ICrdtSerializer>();
@@ -321,7 +318,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var intent = new MapSetIntent("testKey", "Updated");
         await orchestrator.ApplyIntentAsync<JournalTestState>("journal-doc", intent, "DataMap", CancellationToken.None);
@@ -356,7 +352,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var intent = new MapSetIntent("testKey", "Updated");
         await orchestrator.ApplyIntentAsync<JournalTestState>("journal-doc", intent, "DataMap", CancellationToken.None);
@@ -399,7 +394,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("journal-doc", "journal-doc", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var localIntent = new MapSetIntent("LocalKey", "LocalValue");
         await orchestrator.ApplyIntentAsync<JournalTestState>("journal-doc", localIntent, "DataMap", CancellationToken.None);
@@ -457,7 +451,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         await orchestrator1.InitializeAsync(CancellationToken.None);
         await orchestrator1.CreateDocumentAsync("test-replayed-doc", "journal-doc", CancellationToken.None);
-        await orchestrator1.SyncDocumentsAsync(CancellationToken.None);
 
         await orchestrator1.ApplyIntentAsync<JournalTestState>("test-replayed-doc", new MapSetIntent("key1", "ReplayedData1"), "DataMap", CancellationToken.None);
         await orchestrator1.ApplyIntentAsync<JournalTestState>("test-replayed-doc", new MapSetIntent("key2", "ReplayedData2"), "DataMap", CancellationToken.None);
@@ -513,7 +506,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("trim-test-doc", "journal-doc", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         for (int i = 0; i < 10; i++)
         {
@@ -564,7 +556,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("hard-trim-doc", "journal-doc", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Act - Apply 8 intents to exceed the hard threshold of 5 on shard "default"
         for (int i = 0; i < 8; i++)
@@ -621,7 +612,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         // Act
         await orchestrator.CreateDocumentAsync("orphaned-doc", "journal-doc", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Assert
         var loadedDoc = await orchestrator.GetDocumentStateAsync<JournalTestState>("orphaned-doc", CancellationToken.None);
@@ -640,7 +630,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         await orchA.CreateDocumentAsync("snap-discovered-1", "journal-doc", CancellationToken.None);
         await orchA.CreateDocumentAsync("snap-discovered-2", "journal-doc", CancellationToken.None);
-        await orchA.SyncDocumentsAsync(CancellationToken.None);
 
         var registrySnapshotDto = await orchA.Registry.GetSnapshotDataAsync(CancellationToken.None);
 
@@ -663,6 +652,9 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         // Act - Deliver the registry CrdtSnapshot to Node B
         await handlerB.HandlePayloadAsync("TestMesh", new PeerId(Guid.NewGuid()), wrapperBytes, CancellationToken.None);
 
+        // This is here for sync wait
+        await orchB.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
+
         // Assert - ProcessSnapshotAsync merged the registry and automatically triggered SyncDocumentsAsync to promote both documents
         orchB.TryGetLocalDocument<JournalTestState>("snap-discovered-1").ShouldNotBeNull();
         orchB.TryGetLocalDocument<JournalTestState>("snap-discovered-2").ShouldNotBeNull();
@@ -684,7 +676,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         await orch1.InitializeAsync(CancellationToken.None);
 
         await orch1.CreateDocumentAsync("wal-only-doc", "journal-doc", CancellationToken.None);
-        await orch1.SyncDocumentsAsync(CancellationToken.None);
         await orch1.ApplyIntentAsync<JournalTestState>("wal-only-doc", new MapSetIntent("WalKey", "WalValue"), nameof(JournalTestState.DataMap), CancellationToken.None);
 
         // Confirm no document checkpoint exists in storage before restart
@@ -709,5 +700,171 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         var state = await recoveredDoc!.GetDocumentAsync(CancellationToken.None);
         state.Data.DataMap.ShouldContainKeyAndValue("WalKey", "WalValue");
+    }
+
+    [IntegrationFact]
+    public async Task BufferedStorageDecorator_InMemoryBuffer_SupportsReadYourOwnWritesBeforeFlush_AndFlushesInBackground()
+    {
+        // Arrange
+        var innerStorage = new MemoryCrdtStorage();
+        var sp = BuildNode("ReplicaBuf", services =>
+        {
+            services.Configure<DistributedCrdtOptions>(opt =>
+            {
+                opt.JournalMode = CrdtJournalMode.InMemoryBuffer;
+                opt.WalFlushIntervalMilliseconds = 50;
+                opt.WalMaxBatchSize = 100;
+            });
+            services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(provider =>
+                new BufferedDistributedCrdtStorageDecorator(
+                    innerStorage,
+                    ActivatorUtilities.CreateInstance<InMemoryWriteAheadBuffer>(provider))));
+        });
+
+        var scope = sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaBuf");
+        var orch = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orch.InitializeAsync(CancellationToken.None);
+        await orch.CreateDocumentAsync("buf-doc", "journal-doc", CancellationToken.None);
+
+        // Act - Apply intent WITHOUT starting CrdtJournalFlushService yet
+        await orch.ApplyIntentAsync<JournalTestState>("buf-doc", new MapSetIntent("BufferedKey", "BufferedVal"), nameof(JournalTestState.DataMap), CancellationToken.None);
+
+        // Assert - Inner storage has 0 operations, but decorator exposes them via In-Flight Staging Index
+        var innerCountBeforeFlush = await innerStorage.GetJournalCountAsync("default", CancellationToken.None);
+        innerCountBeforeFlush.ShouldBe(0);
+
+        var decoratorCountBeforeFlush = await scope.Storage.GetJournalCountAsync("default", CancellationToken.None);
+        decoratorCountBeforeFlush.ShouldBeGreaterThan(0);
+
+        var rangeOps = await scope.Storage.GetOperationsByRangeAsync("default", "ReplicaBuf", 0, 100, CancellationToken.None).ToListAsync();
+        rangeOps.ShouldNotBeEmpty();
+
+        // Act - Start CrdtJournalFlushService and wait for background flush
+        var flushService = sp.GetServices<IHostedService>().OfType<CrdtJournalFlushService>().Single();
+        await flushService.StartAsync(CancellationToken.None);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (!cts.Token.IsCancellationRequested)
+        {
+            if (await innerStorage.GetJournalCountAsync("default", CancellationToken.None) > 0)
+            {
+                break;
+            }
+            await Task.Delay(25);
+        }
+
+        await flushService.StopAsync(CancellationToken.None);
+
+        // Assert - Inner storage now contains the flushed batch
+        var innerCountAfterFlush = await innerStorage.GetJournalCountAsync("default", CancellationToken.None);
+        innerCountAfterFlush.ShouldBeGreaterThan(0);
+    }
+
+    [IntegrationFact]
+    public async Task BufferedStorageDecorator_TrimBeforeFlush_DropsTrimmedOperationsFromFlushBatch()
+    {
+        // Arrange
+        var innerStorage = new MemoryCrdtStorage();
+        var sp = BuildNode("ReplicaTrimRace", services =>
+        {
+            services.Configure<DistributedCrdtOptions>(opt =>
+            {
+                opt.JournalMode = CrdtJournalMode.InMemoryBuffer;
+            });
+            services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(provider =>
+                new BufferedDistributedCrdtStorageDecorator(
+                    innerStorage,
+                    ActivatorUtilities.CreateInstance<InMemoryWriteAheadBuffer>(provider))));
+        });
+
+        var scope = sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaTrimRace");
+        var decorator = (BufferedDistributedCrdtStorageDecorator)scope.Storage;
+
+        var op1 = default(CrdtOperation) with { Id = Guid.NewGuid(), ReplicaId = "ReplicaTrimRace", ShardClock = 1, ShardId = "default" };
+        var op2 = default(CrdtOperation) with { Id = Guid.NewGuid(), ReplicaId = "ReplicaTrimRace", ShardClock = 2, ShardId = "default" };
+
+        await decorator.AppendAsync("doc-1", new[] { op1, op2 }, CancellationToken.None);
+
+        // Act - Trim up to clock 1 BEFORE flushing the buffer to innerStorage
+        await decorator.TrimAsync("default", new Dictionary<string, long> { { "ReplicaTrimRace", 1 } }, CancellationToken.None);
+        await decorator.DrainAsync(100, CancellationToken.None);
+
+        // Assert - Only op2 (clock 2) was written to innerStorage; op1 (clock 1) was dropped prior to flush
+        var persistedOps = await innerStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
+        persistedOps.Count.ShouldBe(1);
+        persistedOps[0].Operation.Id.ShouldBe(op2.Id);
+    }
+
+    [IntegrationFact]
+    public async Task DiskWriteAheadBuffer_WhenCrashOccursBeforeFlush_RecoversOperationsFromDiskWalOnStartup()
+    {
+        // Arrange
+        var walDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"ama-wal-test-{Guid.NewGuid():N}");
+        var crashedInnerStorage = new MemoryCrdtStorage();
+        var recoveredInnerStorage = new MemoryCrdtStorage();
+
+        try
+        {
+            var sp1 = BuildNode("ReplicaDiskWal", services =>
+            {
+                services.Configure<DistributedCrdtOptions>(opt =>
+                {
+                    opt.JournalMode = CrdtJournalMode.DiskWal;
+                    opt.WalDirectoryPath = walDir;
+                });
+                services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(provider =>
+                    new BufferedDistributedCrdtStorageDecorator(
+                        crashedInnerStorage,
+                        ActivatorUtilities.CreateInstance<DiskWriteAheadBuffer>(provider))));
+            });
+
+            var scope1 = sp1.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaDiskWal");
+            var orch1 = scope1.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+            await orch1.InitializeAsync(CancellationToken.None);
+            await orch1.CreateDocumentAsync("disk-wal-doc", "journal-doc", CancellationToken.None);
+            await orch1.ApplyIntentAsync<JournalTestState>("disk-wal-doc", new MapSetIntent("DiskKey", "DiskValue"), nameof(JournalTestState.DataMap), CancellationToken.None);
+
+            // Verify nothing was flushed to crashedInnerStorage (simulating crash before CrdtJournalFlushService runs)
+            (await crashedInnerStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync()).ShouldBeEmpty();
+
+            // Dispose scope1 file handles without draining to simulate abrupt termination
+            await ((IAsyncDisposable)scope1.Storage).DisposeAsync();
+
+            // Act - Boot Node 2 pointing to the same WAL directory and an empty recoveredInnerStorage
+            var sp2 = BuildNode("ReplicaDiskWal", services =>
+            {
+                services.Configure<DistributedCrdtOptions>(opt =>
+                {
+                    opt.JournalMode = CrdtJournalMode.DiskWal;
+                    opt.WalDirectoryPath = walDir;
+                });
+                services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(provider =>
+                    new BufferedDistributedCrdtStorageDecorator(
+                        recoveredInnerStorage,
+                        ActivatorUtilities.CreateInstance<DiskWriteAheadBuffer>(provider))));
+            });
+
+            var initService = sp2.GetServices<IHostedService>().OfType<CrdtInitializationService>().Single();
+            await initService.StartAsync(CancellationToken.None);
+
+            // Assert - WAL segments were recovered into recoveredInnerStorage and replayed to reconstruct document state
+            var recoveredOps = await recoveredInnerStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
+            recoveredOps.ShouldNotBeEmpty();
+
+            var scope2 = sp2.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaDiskWal");
+            var orch2 = scope2.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+            var doc2 = orch2.TryGetLocalDocument<JournalTestState>("disk-wal-doc");
+            doc2.ShouldNotBeNull();
+
+            var state2 = await doc2!.GetDocumentAsync(CancellationToken.None);
+            state2.Data.DataMap.ShouldContainKeyAndValue("DiskKey", "DiskValue");
+        }
+        finally
+        {
+            if (System.IO.Directory.Exists(walDir))
+            {
+                try { System.IO.Directory.Delete(walDir, recursive: true); } catch { }
+            }
+        }
     }
 }

@@ -33,7 +33,7 @@ public static class ServiceCollectionExtensions
         services.AddDistributedDocumentType<FeatureFlagState>(Constants.FeatureFlagDocumentType);
 
         // Register the business logic domain wrapper scoped to the CRDT hierarchy
-        services.AddDistributedCrdtService<IFeatureFlagClusterManager, FeatureFlagClusterManager>();
+        services.AddDistributedCrdtService<IFeatureFlagCrdtManager, FeatureFlagCrdtManager>();
 
         services.AddSingleton<IDocumentStateObserver<FeatureFlagState>, FeatureFlagStateObserver>();
 

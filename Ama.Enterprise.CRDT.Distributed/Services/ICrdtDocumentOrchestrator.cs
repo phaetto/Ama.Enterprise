@@ -41,6 +41,36 @@ public interface ICrdtDocumentOrchestrator
     IDistributedCrdtDocument<TState>? TryGetLocalDocument<TState>(string documentId) where TState : class, new();
 
     /// <summary>
+    /// Checks whether a document with the specified identifier exists in the cluster, even if it is assigned to a remote shard and not loaded locally.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// bool exists = await orchestrator.DocumentExistsAsync("doc-1", cancellationToken);
+    /// </code>
+    /// </example>
+    ValueTask<bool> DocumentExistsAsync(string documentId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Checks whether a document with the specified identifier and type alias exists in the cluster, even if it is assigned to a remote shard and not loaded locally.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// bool exists = await orchestrator.DocumentExistsAsync("doc-1", nameof(MyState), cancellationToken);
+    /// </code>
+    /// </example>
+    ValueTask<bool> DocumentExistsAsync(string documentId, string? typeAlias, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Checks whether a document of the specified state type and identifier exists in the cluster, even if it is assigned to a remote shard and not loaded locally.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// bool exists = await orchestrator.DocumentExistsAsync&lt;MyState&gt;("doc-1", cancellationToken);
+    /// </code>
+    /// </example>
+    ValueTask<bool> DocumentExistsAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new();
+
+    /// <summary>
     /// Resolves the shard identifier for a document ID using the registry and cached mappings.
     /// </summary>
     ValueTask<string?> TryGetShardIdAsync(string documentId, CancellationToken cancellationToken = default);
@@ -109,16 +139,6 @@ public interface ICrdtDocumentOrchestrator
     /// Issues a permanent cluster tombstone for a specific document type alias and identifier with the specified delivery mode.
     /// </summary>
     Task DeleteDocumentAsync(string documentId, string typeAlias, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Processes localized matrix modifications dynamically promoting assigned structural bounds.
-    /// </summary>
-    Task SyncDocumentsAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Processes localized matrix modifications with the specified delivery mode.
-    /// </summary>
-    Task SyncDocumentsAsync(IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Manually triggers a re-evaluation of the document topology, promoting or demoting dynamically based on the current cluster map.

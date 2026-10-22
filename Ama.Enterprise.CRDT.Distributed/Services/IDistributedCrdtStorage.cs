@@ -123,4 +123,12 @@ public interface IDistributedCrdtStorage : ICrdtOperationJournal
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>An asynchronous stream of all journaled operations.</returns>
     IAsyncEnumerable<JournaledOperation> GetAllJournaledOperationsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Persists a batch of journaled operations across one or more documents and shards in a single storage operation.
+    /// </summary>
+    /// <param name="operations">The list of journaled operations to persist.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous batch append operation.</returns>
+    Task AppendBatchAsync(IReadOnlyList<JournaledOperation> operations, CancellationToken cancellationToken = default);
 }

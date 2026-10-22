@@ -121,52 +121,6 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             ReturnCommand(cmd);
         }
     }
-
-    public Task SyncDocumentsAsync(CancellationToken cancellationToken = default)
-    {
-        return SyncDocumentsAsync(IntentDeliveryMode.Acknowledged, cancellationToken);
-    }
-
-    public async Task SyncDocumentsAsync(IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default)
-    {
-        if (deliveryMode == IntentDeliveryMode.FireAndForget)
-        {
-            if (Interlocked.Exchange(ref syncPending, 1) == 1)
-            {
-                return;
-            }
-
-            var ffCmd = GetCommand();
-            ffCmd.Type = OrchestratorCommandType.SyncDocuments;
-            ffCmd.IsFireAndForget = true;
-            ffCmd.CancellationToken = CancellationToken.None;
-
-            if (commandChannel.Writer.TryWrite(ffCmd))
-            {
-                telemetry.RecordOrchestratorCommandEnqueued();
-                return;
-            }
-
-            await commandChannel.Writer.WriteAsync(ffCmd, cancellationToken).ConfigureAwait(false);
-            telemetry.RecordOrchestratorCommandEnqueued();
-            return;
-        }
-
-        var cmd = GetCommand();
-        cmd.Type = OrchestratorCommandType.SyncDocuments;
-        cmd.CancellationToken = cancellationToken;
-
-        try
-        {
-            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
-            telemetry.RecordOrchestratorCommandEnqueued();
-            await cmd.ExecuteAsync().ConfigureAwait(false);
-        }
-        finally
-        {
-            ReturnCommand(cmd);
-        }
-    }
     
     public Task ReevaluateTopologyAsync(CancellationToken cancellationToken = default)
     {
@@ -177,6 +131,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     {
         if (deliveryMode == IntentDeliveryMode.FireAndForget)
         {
+            if (Interlocked.Exchange(ref syncPending, 1) == 1)
+            {
+                return;
+            }
+
             var ffCmd = GetCommand();
             ffCmd.Type = OrchestratorCommandType.ReevaluateTopology;
             ffCmd.IsFireAndForget = true;
@@ -253,6 +212,80 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
 
         return null;
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> DocumentExistsAsync(string documentId, CancellationToken cancellationToken = default)
+    {
+        return DocumentExistsAsync(documentId, null, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> DocumentExistsAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        if (string.IsNullOrWhiteSpace(documentId)) return new ValueTask<bool>(false);
+
+        if (typeof(TState) == typeof(CrdtRegistryState) && Registry != null && string.Equals(Registry.DocumentId, documentId, StringComparison.Ordinal))
+        {
+            return new ValueTask<bool>(true);
+        }
+
+        var typeAlias = GetTypeAlias<TState>();
+        return DocumentExistsAsync(documentId, typeAlias, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<bool> DocumentExistsAsync(string documentId, string? typeAlias, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(documentId)) return false;
+
+        documentId = stringPool.GetOrAdd(documentId);
+        if (!string.IsNullOrWhiteSpace(typeAlias))
+        {
+            typeAlias = stringPool.GetOrAdd(typeAlias);
+        }
+
+        if (Registry != null && string.Equals(Registry.DocumentId, documentId, StringComparison.Ordinal))
+        {
+            return string.IsNullOrWhiteSpace(typeAlias) ||
+                   string.Equals(typeAlias, Registry.TypeAlias, StringComparison.Ordinal) ||
+                   string.Equals(typeAlias, Constants.SystemRegistryDocumentId, StringComparison.Ordinal);
+        }
+
+        if (Registry != null)
+        {
+            var registryDoc = await Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            if (TryFindRegistryEntry(registryDoc.Data.Documents, documentId, typeAlias, out var entry) && entry != null)
+            {
+                return !entry.IsDeleted;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(typeAlias))
+        {
+            var compositeKey = CrdtRegistryEntry.GetRegistryKey(typeAlias, documentId);
+            if (activeDocuments.ContainsKey(compositeKey))
+            {
+                return true;
+            }
+        }
+        else
+        {
+            if (activeDocuments.ContainsKey(documentId))
+            {
+                return true;
+            }
+
+            foreach (var doc in activeDocuments.Values)
+            {
+                if (string.Equals(doc.DocumentId, documentId, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <inheritdoc />
@@ -589,16 +622,9 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         if (Registry != null && string.Equals(Registry.DocumentId, documentId, StringComparison.Ordinal) && Registry is IDistributedCrdtDocument<TState> registryTyped)
         {
             var applied = await registryTyped.ApplyRemoteIntentAsync(intent, targetProperty, patcher, deliveryMode, cancellationToken).ConfigureAwait(false);
-            if (applied)
+            if (applied && deliveryMode == IntentDeliveryMode.Acknowledged)
             {
-                if (deliveryMode == IntentDeliveryMode.Acknowledged)
-                {
-                    await SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
-                }
-                else
-                {
-                    await SyncDocumentsAsync(IntentDeliveryMode.FireAndForget, cancellationToken).ConfigureAwait(false);
-                }
+                await ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, cancellationToken).ConfigureAwait(false);
             }
             return applied;
         }
@@ -814,11 +840,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             await registryTyped.ApplyPatchAsync(patch, deliveryMode, cancellationToken).ConfigureAwait(false);
             if (deliveryMode == IntentDeliveryMode.Acknowledged)
             {
-                await SyncDocumentsAsync(cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                await SyncDocumentsAsync(IntentDeliveryMode.FireAndForget, cancellationToken).ConfigureAwait(false);
+                await ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, cancellationToken).ConfigureAwait(false);
             }
             return;
         }
@@ -915,10 +937,6 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 if (deliveryMode == IntentDeliveryMode.Acknowledged)
                 {
                     await PromoteSingleDocumentAsync(documentId, typeAlias, cancellationToken).ConfigureAwait(false);
-                }
-                else
-                {
-                    await SyncDocumentsAsync(IntentDeliveryMode.FireAndForget, cancellationToken).ConfigureAwait(false);
                 }
 
                 logger.LogDebug("Forwarded creation intent for document {DocumentId} ({TypeAlias}).", documentId, typeAlias);
@@ -1210,10 +1228,6 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                     {
                         case OrchestratorCommandType.Initialize:
                             await ProcessInitializeInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
-                            break;
-                        case OrchestratorCommandType.SyncDocuments:
-                            Interlocked.Exchange(ref syncPending, 0);
-                            await ProcessSyncDocumentsInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
                             break;
                         case OrchestratorCommandType.CreateDocument:
                             await ProcessPromoteDocumentInternalAsync(cmd.DocumentId!, cmd.TypeAlias!, cmd.CancellationToken).ConfigureAwait(false);

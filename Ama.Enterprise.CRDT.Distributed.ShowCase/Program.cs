@@ -100,6 +100,10 @@ public static class Program
             options.CompactionTtlSeconds = 5 * 60;
             options.ShardReplicationFactor = 2;
             options.EnableSharding = true;
+            options.JournalMode = CrdtJournalMode.InMemoryBuffer;
+            options.WalChannelCapacity = 100000;
+            options.WalMaxBatchSize = 10000;
+            options.WalDirectoryPath = AppContext.BaseDirectory;
         });
 
         services.AddDistributedCrdtReplica(replicaId);
@@ -327,7 +331,7 @@ public static class Program
                                 {
                                     if (cts.Token.IsCancellationRequested) break;
                                     var docId = $"auto-fleet-{i}";
-                                    createTasks.Add(orchestrator.CreateDocumentAsync(docId, "fleet-list", IntentDeliveryMode.FireAndForget, cts.Token));
+                                    createTasks.Add(orchestrator.CreateDocumentAsync(docId, "fleet-list", IntentDeliveryMode.Acknowledged, cts.Token));
 
                                     if (createTasks.Count >= 512)
                                     {
@@ -341,8 +345,6 @@ public static class Program
                                     await Task.WhenAll(createTasks).ConfigureAwait(false);
                                     createTasks.Clear();
                                 }
-
-                                await orchestrator.SyncDocumentsAsync(IntentDeliveryMode.Acknowledged, cts.Token).ConfigureAwait(false);
 
                                 var deviceTasks = new List<Task>(Math.Min(fleetCount * Math.Max(1, devicesPerFleet), 2048));
                                 for (int i = 1; i <= fleetCount; i++)

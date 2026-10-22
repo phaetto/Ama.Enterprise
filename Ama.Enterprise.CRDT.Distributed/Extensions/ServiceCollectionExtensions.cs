@@ -78,6 +78,12 @@ public static class ServiceCollectionExtensions
                 "RpcMaxRetries must be greater than zero.")
             .Validate(options => options.RpcRetryDelayMilliseconds >= 0,
                 "RpcRetryDelayMilliseconds cannot be negative.")
+            .Validate(options => options.WalChannelCapacity > 0,
+                "WalChannelCapacity must be greater than zero.")
+            .Validate(options => options.WalMaxBatchSize > 0,
+                "WalMaxBatchSize must be greater than zero.")
+            .Validate(options => options.WalFlushIntervalMilliseconds > 0,
+                "WalFlushIntervalMilliseconds must be greater than zero.")
             .ValidateOnStart();
 
         services.AddCrdt()
@@ -88,7 +94,8 @@ public static class ServiceCollectionExtensions
                 .AddCrdtJsonModifier(ConfigureOperationIntentPolymorphism);
 
         // Provide memory storage as the default fallback mapped as scoped per replica instance.
-        services.TryAddScoped<IDistributedCrdtStorage, MemoryCrdtStorage>();
+        services.TryAddScoped<MemoryCrdtStorage>();
+        services.TryAddScoped<IDistributedCrdtStorage>(sp => ResolveDecoratedStorage(sp, sp.GetRequiredService<MemoryCrdtStorage>()));
 
         services.AddCrdtJournaling<StorageJournalForwarder>();
 
@@ -125,13 +132,15 @@ public static class ServiceCollectionExtensions
 
         DecorateShardIdProviderResolutions(services);
         
-        // Register topology observer
+        // Register topology and registry state observers
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IClusterStateObserver, OrchestratorClusterStateObserver>());
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IDocumentStateObserver<CrdtRegistryState>, OrchestratorRegistryStateObserver>());
         
         // Register decoupled broadcast evaluations
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IDocumentPatchObserver, CrdtPatchBroadcaster>());
 
         services.AddHostedService<CrdtInitializationService>();
+        services.AddHostedService<CrdtJournalFlushService>();
         services.AddHostedService<CrdtCheckpointService>();
         services.AddHostedService<CrdtMaintenanceService>();
         services.AddHostedService<CrdtCompactionService>();
@@ -215,9 +224,32 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
 
         services.RemoveAll(typeof(IDistributedCrdtStorage));
-        services.AddScoped<IDistributedCrdtStorage, TStorage>();
+        services.TryAddScoped<TStorage>();
+        services.AddScoped<IDistributedCrdtStorage>(sp => ResolveDecoratedStorage(sp, sp.GetRequiredService<TStorage>()));
         
         return services;
+    }
+
+    private static IDistributedCrdtStorage ResolveDecoratedStorage(IServiceProvider sp, IDistributedCrdtStorage innerStorage)
+    {
+        if (innerStorage is BufferedDistributedCrdtStorageDecorator)
+        {
+            return innerStorage;
+        }
+
+        var options = sp.GetRequiredService<IOptions<DistributedCrdtOptions>>().Value;
+        return options.JournalMode switch
+        {
+            CrdtJournalMode.Direct => innerStorage,
+            CrdtJournalMode.InMemoryBuffer when innerStorage is MemoryCrdtStorage => innerStorage,
+            CrdtJournalMode.InMemoryBuffer => new BufferedDistributedCrdtStorageDecorator(
+                innerStorage,
+                ActivatorUtilities.CreateInstance<InMemoryWriteAheadBuffer>(sp)),
+            CrdtJournalMode.DiskWal => new BufferedDistributedCrdtStorageDecorator(
+                innerStorage,
+                ActivatorUtilities.CreateInstance<DiskWriteAheadBuffer>(sp)),
+            _ => innerStorage
+        };
     }
 
     private static void ConfigureOperationIntentPolymorphism(JsonTypeInfo typeInfo)

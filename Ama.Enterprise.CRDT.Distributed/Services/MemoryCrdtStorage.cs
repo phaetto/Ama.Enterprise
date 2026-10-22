@@ -77,6 +77,43 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     }
 
     /// <inheritdoc />
+    public Task AppendBatchAsync(IReadOnlyList<JournaledOperation> operations, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(operations);
+        if (operations.Count == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        lock (syncRoot)
+        {
+            foreach (var jOp in operations)
+            {
+                var shardId = jOp.Operation.ShardId ?? "";
+                if (!shardedOperations.TryGetValue(shardId, out var shardList))
+                {
+                    shardList = new List<JournaledOperation>();
+                    shardedOperations[shardId] = shardList;
+                }
+
+                if (!shardedOperationIds.TryGetValue(shardId, out var shardOpIds))
+                {
+                    shardOpIds = new HashSet<Guid>();
+                    shardedOperationIds[shardId] = shardOpIds;
+                }
+
+                if (shardOpIds.Add(jOp.Operation.Id))
+                {
+                    shardList.Add(jOp);
+                }
+            }
+        }
+
+        appendedOperationsCounter.Add(operations.Count, new KeyValuePair<string, object?>("document_id", "batch"));
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
     public async IAsyncEnumerable<JournaledOperation> GetOperationsByRangeAsync(string shardId, string originReplicaId, long minShardClock, long maxShardClock, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(shardId)) throw new ArgumentException("Shard ID cannot be null or empty.", nameof(shardId));

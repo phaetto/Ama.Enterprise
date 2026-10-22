@@ -25,6 +25,13 @@ public sealed class TaskManager : ITaskManager
     /// <inheritdoc />
     public async ValueTask<IReadOnlyDictionary<string, TaskItem>> GetTasksAsync(string documentId, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document Id cannot be null or empty.", nameof(documentId));
+
+        if (!await orchestrator.DocumentExistsAsync<TaskListState>(documentId, cancellationToken).ConfigureAwait(false))
+        {
+            return new ReadOnlyDictionary<string, TaskItem>(new Dictionary<string, TaskItem>());
+        }
+
         var crdtDoc = await orchestrator.GetDocumentStateAsync<TaskListState>(documentId, cancellationToken).ConfigureAwait(false);
         if (crdtDoc.Data != null && crdtDoc.Data.Tasks != null)
         {

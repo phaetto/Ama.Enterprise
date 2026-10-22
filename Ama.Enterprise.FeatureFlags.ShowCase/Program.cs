@@ -156,7 +156,7 @@ public static class Program
         var crdtScope = scopeFactory.GetOrCreateScope(replicaId);
         
         // Resolve the cluster manager natively via the transparent forwarder implicitly mapped to the internal state scope
-        var clusterManager = crdtScope.ServiceProvider.GetRequiredService<IFeatureFlagClusterManager>();
+        var clusterManager = crdtScope.ServiceProvider.GetRequiredService<IFeatureFlagCrdtManager>();
         
         using var cts = new CancellationTokenSource();
 

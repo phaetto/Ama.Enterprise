@@ -160,4 +160,34 @@ public sealed class DistributedCrdtOptions
     /// Defaults to 50 milliseconds. Must be non-negative.
     /// </summary>
     public int RpcRetryDelayMilliseconds { get; set; } = 50;
+
+    /// <summary>
+    /// Gets or sets the journaling strategy used when persisting CRDT operations.
+    /// Defaults to <see cref="CrdtJournalMode.Direct"/>.
+    /// </summary>
+    public CrdtJournalMode JournalMode { get; set; } = CrdtJournalMode.Direct;
+
+    /// <summary>
+    /// Gets or sets the maximum number of uncommitted operations buffered in the WAL channel before applying backpressure to writers.
+    /// Defaults to 10,000. Must be greater than 0.
+    /// </summary>
+    public int WalChannelCapacity { get; set; } = 10_000;
+
+    /// <summary>
+    /// Gets or sets the maximum number of journaled operations flushed in a single batch to the underlying storage.
+    /// Defaults to 500. Must be greater than 0.
+    /// </summary>
+    public int WalMaxBatchSize { get; set; } = 500;
+
+    /// <summary>
+    /// Gets or sets the maximum time in milliseconds to wait for a batch to fill before flushing available operations.
+    /// Defaults to 50 milliseconds. Must be greater than 0.
+    /// </summary>
+    public int WalFlushIntervalMilliseconds { get; set; } = 50;
+
+    /// <summary>
+    /// Gets or sets the local directory path used when <see cref="JournalMode"/> is set to <see cref="CrdtJournalMode.DiskWal"/>.
+    /// When null or empty, defaults to a subdirectory in the system temporary folder.
+    /// </summary>
+    public string? WalDirectoryPath { get; set; }
 }

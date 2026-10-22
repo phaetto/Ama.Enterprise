@@ -9,7 +9,6 @@ using Ama.CRDT.Models;
 internal enum OrchestratorCommandType
 {
     Initialize,
-    SyncDocuments,
     CreateDocument,
     DeleteDocument,
     ReevaluateTopology

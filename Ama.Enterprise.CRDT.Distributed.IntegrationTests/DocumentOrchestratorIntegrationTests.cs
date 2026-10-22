@@ -89,11 +89,9 @@ public sealed class DocumentOrchestratorIntegrationTests
 
         await orchestrator.CreateDocumentAsync("doc-shard-1", "dynamic-type", CancellationToken.None);
         await orchestrator.CreateDocumentAsync("doc-shard-2", "dynamic-type", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Act - Assume document Id represents its default shard isolation mapping bounds
         await orchestrator.DeleteDocumentAsync("doc-shard-1", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Assert - Validates ShardID properties route target structures properly natively 
         mockStorage.Verify(x => x.DeleteDocumentAsync(It.IsAny<string>(), "doc-shard-1", It.IsAny<CancellationToken>()), Times.Once);
@@ -117,9 +115,6 @@ public sealed class DocumentOrchestratorIntegrationTests
 
         // Act
         await orchestrator.CreateDocumentAsync("dynamic-doc-1", "dynamic-type", CancellationToken.None);
-
-        // Await manual sync execution to bypass background thread execution timing
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Assert
         var doc = orchestrator.TryGetLocalDocument<DynamicTestState>("dynamic-doc-1");
@@ -147,15 +142,11 @@ public sealed class DocumentOrchestratorIntegrationTests
         await orchestrator.InitializeAsync(CancellationToken.None);
 
         await orchestrator.CreateDocumentAsync("doc-to-delete", "dynamic-type", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
         
         orchestrator.TryGetLocalDocument<DynamicTestState>("doc-to-delete").ShouldNotBeNull();
 
         // Act
         await orchestrator.DeleteDocumentAsync("doc-to-delete", CancellationToken.None);
-        
-        // Ensure synchronization lock handles background pipeline mapping sequentially
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Assert
         var deletedDoc = orchestrator.TryGetLocalDocument<DynamicTestState>("doc-to-delete");
@@ -184,7 +175,6 @@ public sealed class DocumentOrchestratorIntegrationTests
         // Act - Create two documents with the exact same ID but different types
         await orchestrator.CreateDocumentAsync(sharedId, "dynamic-type", CancellationToken.None);
         await orchestrator.CreateDocumentAsync(sharedId, "alternate-type", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         await orchestrator.ApplyIntentAsync<DynamicTestState>(sharedId, new Ama.CRDT.Models.Intents.SetIntent(42), nameof(DynamicTestState.Value), CancellationToken.None);
         await orchestrator.ApplyIntentAsync<AlternateTestState>(sharedId, new Ama.CRDT.Models.Intents.SetIntent("hello-world"), nameof(AlternateTestState.Label), CancellationToken.None);
@@ -206,7 +196,6 @@ public sealed class DocumentOrchestratorIntegrationTests
 
         // Act 2 - Delete only the DynamicTestState document with sharedId
         await orchestrator.DeleteDocumentAsync(sharedId, "dynamic-type", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Assert 2 - DynamicTestState is deleted while AlternateTestState remains intact
         orchestrator.TryGetLocalDocument<DynamicTestState>(sharedId).ShouldBeNull();
@@ -226,7 +215,6 @@ public sealed class DocumentOrchestratorIntegrationTests
 
         // Act
         await orchestrator.CreateDocumentAsync("unknown-doc", "missing-type", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Assert
         var doc = orchestrator.GetActiveDocuments().FirstOrDefault(d => d.DocumentId == "unknown-doc");
@@ -244,10 +232,8 @@ public sealed class DocumentOrchestratorIntegrationTests
 
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("tombstoned-doc", "dynamic-type", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         await orchestrator.DeleteDocumentAsync("tombstoned-doc", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         // Act - Attempt to lazily promote a document that was already deleted in the registry
         var promoted = await orchestrator.ResolveOrPromoteLocalDocumentAsync("tombstoned-doc", "dynamic-type", CancellationToken.None);
@@ -299,7 +285,6 @@ public sealed class DocumentOrchestratorIntegrationTests
 
         await orchestrator.CreateDocumentAsync("remote-doc-1", "dynamic-type", CancellationToken.None);
         await orchestrator.CreateDocumentAsync("local-doc-1", "dynamic-type", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         orchestrator.TryGetLocalDocument<DynamicTestState>("remote-doc-1").ShouldNotBeNull();
         orchestrator.TryGetLocalDocument<DynamicTestState>("local-doc-1").ShouldNotBeNull();
@@ -355,7 +340,6 @@ public sealed class DocumentOrchestratorIntegrationTests
 
         // Act & Assert 2 - Create a document whose shard is remote (so it is in Registry, but not in activeDocuments)
         await orchestrator.CreateDocumentAsync("remote-only-doc", "dynamic-type", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         orchestrator.TryGetLocalDocument<DynamicTestState>("remote-only-doc").ShouldBeNull();
         var resolvedShardId = await orchestrator.TryGetShardIdAsync("remote-only-doc", CancellationToken.None);
@@ -363,7 +347,6 @@ public sealed class DocumentOrchestratorIntegrationTests
 
         // Act & Assert 3 - Deleting the document clears the shard ID cache and returns null for tombstoned entry
         await orchestrator.DeleteDocumentAsync("remote-only-doc", CancellationToken.None);
-        await orchestrator.SyncDocumentsAsync(CancellationToken.None);
 
         var afterDeleteShardId = await orchestrator.TryGetShardIdAsync("remote-only-doc", CancellationToken.None);
         afterDeleteShardId.ShouldBeNull();
