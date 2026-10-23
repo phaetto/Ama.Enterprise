@@ -8,6 +8,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
+using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Models;
 
 /// <summary>
@@ -25,12 +26,14 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     private readonly Dictionary<string, byte[]> serializedDocuments = new();
     private readonly object syncRoot = new();
 
+    private readonly ICrdtSerializer? serializer;
     private readonly Meter meter;
     private readonly Counter<long> appendedOperationsCounter;
     private readonly Counter<long> trimsExecutedCounter;
 
-    public MemoryCrdtStorage(IMeterFactory? meterFactory = null)
+    public MemoryCrdtStorage(IMeterFactory? meterFactory = null, ICrdtSerializer? serializer = null)
     {
+        this.serializer = serializer;
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.MemoryCrdtStorage") ?? new Meter("Ama.Enterprise.CRDT.Distributed.MemoryCrdtStorage");
         this.appendedOperationsCounter = this.meter.CreateCounter<long>("crdt.storage.memory.operations_appended", "operations", "Total operations saved natively into ephemeral memory structures");
         this.trimsExecutedCounter = this.meter.CreateCounter<long>("crdt.storage.memory.trims_executed", "trims", "Total journal trim collections evaluated");
@@ -285,14 +288,28 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     public Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new()
     {
         var key = $"{shardId}_{documentId}";
+        byte[]? rawBytes = null;
+
         lock (syncRoot)
         {
             if (documents.TryGetValue(key, out var doc) && doc is CrdtDocument<TState> typedDoc)
             {
                 return Task.FromResult<CrdtDocument<TState>?>(typedDoc);
             }
-            return Task.FromResult<CrdtDocument<TState>?>(null);
+
+            if (serializedDocuments.TryGetValue(key, out var bytes))
+            {
+                rawBytes = bytes;
+            }
         }
+
+        if (rawBytes is { Length: > 0 } && serializer is not null)
+        {
+            var deserializedDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(rawBytes);
+            return Task.FromResult<CrdtDocument<TState>?>(deserializedDoc);
+        }
+
+        return Task.FromResult<CrdtDocument<TState>?>(null);
     }
 
     /// <inheritdoc />
@@ -324,6 +341,7 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
         lock (syncRoot)
         {
             serializedDocuments[key] = serializedDocument;
+            documents.Remove(key);
         }
         return Task.CompletedTask;
     }

@@ -32,6 +32,7 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
 
     private readonly Channel<OutboundPatchItem> broadcastChannel;
     private readonly CancellationTokenSource disposeCts = new();
+    private readonly Task processingTask;
 
     private readonly Meter meter;
     private readonly Counter<long> broadcastBytesCounter;
@@ -77,7 +78,7 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
         this.patchesBroadcastedCounter = this.meter.CreateCounter<long>("crdt.broadcaster.patches_broadcasted", "patches", "Total patch payloads broadcasted");
         this.broadcastFailuresCounter = this.meter.CreateCounter<long>("crdt.broadcaster.broadcast_failures", "errors", "Total errors during patch broadcasting");
 
-        _ = Task.Run(ProcessBroadcastChannelAsync);
+        this.processingTask = Task.Run(ProcessBroadcastChannelAsync);
     }
 
     /// <inheritdoc />
@@ -92,6 +93,13 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
         }
 
         return broadcastChannel.Writer.WriteAsync(item, cancellationToken).AsTask();
+    }
+
+    /// <inheritdoc />
+    public async Task FlushAsync(CancellationToken cancellationToken = default)
+    {
+        broadcastChannel.Writer.TryComplete();
+        await processingTask.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public void Dispose()

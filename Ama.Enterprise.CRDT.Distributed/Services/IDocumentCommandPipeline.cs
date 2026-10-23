@@ -52,4 +52,11 @@ public interface IDocumentCommandPipeline
     /// <param name="cancellationToken">The token to monitor for cancellation requests while enqueuing.</param>
     /// <returns>A <see cref="ValueTask"/> that completes once the command is written to the channel.</returns>
     ValueTask EnqueueFireAndForgetAsync(PooledDocumentCommand command, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Completes the command channel writer and waits for all queued document commands to finish executing.
+    /// </summary>
+    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
+    /// <returns>A task that completes when all queued commands have been processed.</returns>
+    Task FlushAsync(CancellationToken cancellationToken = default);
 }

@@ -11,6 +11,7 @@ using Ama.CRDT.Services;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
+using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.Project.Tests.Common.Attributes;
 using Microsoft.Extensions.DependencyInjection;
@@ -731,5 +732,42 @@ public sealed class ClusterStatePersistenceIntegrationTests
         // Assert
         completedSecond.ShouldBe(tcsSecondWrite.Task, "Adding a new shard key to ShardVersionVectorMap should trigger a checkpoint save.");
         saveDvvCount.ShouldBeGreaterThanOrEqualTo(2);
+    }
+
+    [IntegrationFact]
+    public void ClusterStateTracker_InitializeState_DoesNotNotifyObservers()
+    {
+        // Arrange
+        var observerMock = new Mock<IClusterStateObserver>();
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.AddScoped<IClusterStateObserver>(_ => observerMock.Object);
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var tracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
+
+        var savedDto = new ClusterStateSnapshotDto();
+        var dvv = new DottedVersionVector();
+        dvv.Versions["ReplicaD"] = 42;
+        savedDto.PeerStates["ReplicaD"] = new ClusterPeerStateDto
+        {
+            State = new ShardVersionVectorMap { { "", dvv } },
+            LastSeen = DateTime.UtcNow
+        };
+
+        // Act - InitializeState during startup should not trigger topology observers before the system is ready
+        tracker.InitializeState(savedDto, TimeSpan.FromMinutes(5));
+
+        // Assert
+        observerMock.Verify(o => o.OnClusterTopologyChanged(), Times.Never);
+        tracker.GetClusterStates().Count.ShouldBe(1);
+
+        // Act - Subsequent runtime updates should notify observers
+        tracker.UpdatePeerState("ReplicaE", "NetworkE", new ShardVersionVectorMap { { "", dvv } });
+
+        // Assert
+        observerMock.Verify(o => o.OnClusterTopologyChanged(), Times.Once);
     }
 }

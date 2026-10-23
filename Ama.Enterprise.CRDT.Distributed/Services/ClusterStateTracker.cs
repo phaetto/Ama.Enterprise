@@ -338,7 +338,7 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
     }
 
     /// <inheritdoc />
-    public void ImportState(ClusterStateSnapshotDto state, TimeSpan cooldown)
+    public void InitializeState(ClusterStateSnapshotDto state, TimeSpan cooldown)
     {
         ArgumentNullException.ThrowIfNull(state);
 
@@ -373,8 +373,6 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
                     kvp.Value.LastSeen);
             }
         }
-        
-        NotifyObservers();
         
         // Immediately purge tombstones that expired while offline evaluating limits.
         if (cooldown > TimeSpan.Zero)

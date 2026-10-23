@@ -94,9 +94,9 @@ public interface IClusterStateTracker
     ClusterStateSnapshotDto ExportState();
 
     /// <summary>
-    /// Imports a previously exported tracker state inherently protecting the cluster topology constraints globally across initialization loops safely.
+    /// Initializes the tracker state from a previously exported snapshot during startup without notifying observers.
     /// </summary>
-    /// <param name="state">The loaded structural state to directly apply mapped topologies across.</param>
+    /// <param name="state">The loaded structural state to apply.</param>
     /// <param name="cooldown">The required elapsed timespan duration used to evaluate and purge expired tombstones immediately upon loading.</param>
-    void ImportState(ClusterStateSnapshotDto state, TimeSpan cooldown);
+    void InitializeState(ClusterStateSnapshotDto state, TimeSpan cooldown);
 }

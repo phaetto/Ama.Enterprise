@@ -84,6 +84,8 @@ public static class ServiceCollectionExtensions
                 "WalMaxBatchSize must be greater than zero.")
             .Validate(options => options.WalFlushIntervalMilliseconds > 0,
                 "WalFlushIntervalMilliseconds must be greater than zero.")
+            .Validate(options => options.ShutdownTimeoutMilliseconds > 0,
+                "ShutdownTimeoutMilliseconds must be greater than zero.")
             .ValidateOnStart();
 
         services.AddCrdt()
@@ -118,6 +120,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IDistributedCrdtTelemetry, DistributedCrdtTelemetry>();
         services.TryAddSingleton<IDistributedCrdtScopeFactory, DistributedCrdtScopeFactory>();
         services.TryAddSingleton<DistributedCrdtScopeManager>();
+        services.TryAddSingleton<ICrdtShutdownCoordinator, CrdtShutdownCoordinator>();
 
         services.TryAddScoped<IScopeTopologyProvider, DefaultScopeTopologyProvider>();
         services.TryAddScoped<IDocumentCommandPipeline, DocumentCommandPipeline>();
@@ -144,6 +147,7 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<CrdtCheckpointService>();
         services.AddHostedService<CrdtMaintenanceService>();
         services.AddHostedService<CrdtCompactionService>();
+        services.AddHostedService<CrdtShutdownService>();
 
         return services;
     }

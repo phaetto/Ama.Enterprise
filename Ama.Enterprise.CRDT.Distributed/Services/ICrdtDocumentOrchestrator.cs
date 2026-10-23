@@ -21,6 +21,19 @@ using System.Threading.Tasks;
 public interface ICrdtDocumentOrchestrator
 {
     /// <summary>
+    /// Gets the current initialization lifecycle stage of the orchestrator.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// if (orchestrator.InitializationStage == OrchestratorInitializationStage.Initialized)
+    /// {
+    ///     // Warmed up
+    /// }
+    /// </code>
+    /// </example>
+    OrchestratorInitializationStage InitializationStage { get; }
+
+    /// <summary>
     /// Exposes the global decentralized map managing P2P CRDT topology logic across the cluster.
     /// </summary>
     IDistributedCrdtDocument<CrdtRegistryState> Registry { get; }
@@ -169,4 +182,11 @@ public interface ICrdtDocumentOrchestrator
     /// Dispatches a targeted point-to-point synchronization request directly to a specific peer.
     /// </summary>
     Task DispatchAntiEntropyStateAsync(PeerId targetPeerId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Completes the orchestrator command channel and waits for all queued orchestrator commands to finish processing.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous flush operation.</returns>
+    Task FlushAsync(CancellationToken cancellationToken = default);
 }

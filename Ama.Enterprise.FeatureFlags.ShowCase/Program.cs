@@ -204,10 +204,18 @@ public static class Program
             var initialFlags = await clusterManager.GetFlagsAsync(cts.Token).ConfigureAwait(false);
             DrawFlags(initialFlags);
 
+            var shutdownCoordinator = provider.GetRequiredService<ICrdtShutdownCoordinator>();
+            using var loopCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, shutdownCoordinator.ShutdownToken);
+
             // Interactive Console Loop
-            while (!cts.Token.IsCancellationRequested)
+            while (!loopCts.Token.IsCancellationRequested)
             {
-                var input = Console.ReadLine();
+                var input = await ReadConsoleLineAsync(loopCts.Token).ConfigureAwait(false);
+                if (loopCts.Token.IsCancellationRequested)
+                {
+                    break;
+                }
+
                 if (string.IsNullOrWhiteSpace(input))
                 {
                     continue;
@@ -373,6 +381,18 @@ public static class Program
         }
 
         return port;
+    }
+
+    private static async Task<string?> ReadConsoleLineAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await Task.Run(Console.ReadLine, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

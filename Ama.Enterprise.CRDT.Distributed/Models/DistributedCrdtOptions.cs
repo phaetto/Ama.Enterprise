@@ -190,4 +190,55 @@ public sealed class DistributedCrdtOptions
     /// When null or empty, defaults to a subdirectory in the system temporary folder.
     /// </summary>
     public string? WalDirectoryPath { get; set; }
+
+    /// <summary>
+    /// Gets or sets the maximum number of retry attempts when initializing a replica scope during startup.
+    /// If all attempts fail, the initialization service throws an exception to fail application startup.
+    /// Defaults to 3. Must be greater than 0.
+    /// </summary>
+    public int InitializationMaxRetries { get; set; } = 3;
+
+    /// <summary>
+    /// Gets or sets the base delay in milliseconds between replica initialization retry attempts.
+    /// Defaults to 1000 milliseconds. Must be non-negative.
+    /// </summary>
+    public int InitializationRetryDelayMilliseconds { get; set; } = 1000;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether automatic OS and host shutdown signal interception and flushing are enabled.
+    /// Defaults to true.
+    /// </summary>
+    public bool EnableGracefulShutdown { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the maximum time in milliseconds allowed for the shutdown flush pipeline to complete before aborting.
+    /// Defaults to 25000 milliseconds (25 seconds) to fit within standard 30-second container and cloud termination windows.
+    /// Must be greater than 0.
+    /// </summary>
+    public int ShutdownTimeoutMilliseconds { get; set; } = 25_000;
+
+    /// <summary>
+    /// Gets or sets the persistence strategy executed during shutdown.
+    /// Defaults to <see cref="CrdtShutdownFlushMode.JournalAndCheckpoints"/>.
+    /// </summary>
+    public CrdtShutdownFlushMode FlushModeOnShutdown { get; set; } = CrdtShutdownFlushMode.JournalAndCheckpoints;
+
+    /// <summary>
+    /// Gets or sets the list of POSIX signals that trigger a flush and application shutdown on supported operating systems.
+    /// Supported values include "SIGTERM", "SIGINT", "SIGQUIT", "SIGHUP", "SIGUSR1", and "SIGUSR2".
+    /// Defaults to "SIGTERM", "SIGINT", and "SIGQUIT".
+    /// </summary>
+    public IList<string> ShutdownPosixSignals { get; set; } =
+    [
+        "SIGTERM",
+        "SIGINT",
+        "SIGQUIT"
+    ];
+
+    /// <summary>
+    /// Gets or sets a value indicating whether to monitor the Azure WebJobs / App Service shutdown sentinel file
+    /// specified by the <c>WEBJOBS_SHUTDOWN_FILE</c> environment variable.
+    /// Defaults to true.
+    /// </summary>
+    public bool WatchAzureWebJobsShutdownFile { get; set; } = true;
 }

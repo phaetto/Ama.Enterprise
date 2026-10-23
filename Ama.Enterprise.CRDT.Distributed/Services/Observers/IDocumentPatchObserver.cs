@@ -29,4 +29,11 @@ public interface IDocumentPatchObserver
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     Task OnPatchGeneratedAsync(string documentId, string? documentTypeAlias, CrdtPatch patch, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Flushes any queued outbound patches to the underlying transport before shutdown.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous flush operation.</returns>
+    Task FlushAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }

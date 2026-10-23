@@ -44,7 +44,12 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     private readonly Channel<PooledOrchestratorCommand> commandChannel;
     private readonly ConcurrentQueue<PooledOrchestratorCommand> commandPool = new();
     private readonly CancellationTokenSource disposeCts = new();
+    private readonly Task processingTask;
     private int syncPending;
+    private int initializationStage = (int)OrchestratorInitializationStage.NotStarted;
+
+    /// <inheritdoc />
+    public OrchestratorInitializationStage InitializationStage => (OrchestratorInitializationStage)Volatile.Read(ref initializationStage);
     
     public IDistributedCrdtDocument<CrdtRegistryState> Registry { get; private set; } = null!;
 
@@ -101,7 +106,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             () => this.commandChannel.Reader.CanCount ? this.commandChannel.Reader.Count : 0,
             () => this.commandPool.Count);
 
-        _ = Task.Run(ProcessChannelAsync);
+        this.processingTask = Task.Run(ProcessChannelAsync);
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -1171,6 +1176,13 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
     }
 
+    /// <inheritdoc />
+    public async Task FlushAsync(CancellationToken cancellationToken = default)
+    {
+        commandChannel.Writer.TryComplete();
+        await processingTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     public void Dispose()
     {
         telemetryRegistration.Dispose();
@@ -1284,16 +1296,37 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
     private async Task ProcessInitializeInternalAsync(CancellationToken cancellationToken)
     {
-        var registryState = new CrdtRegistryState();
-        Registry = ActivatorUtilities.CreateInstance<DistributedCrdtDocument<CrdtRegistryState>>(serviceProvider, registryState);
-        shardIdCache.TryAdd(Registry.DocumentId, Registry.ShardId);
-        
-        await Registry.InitializeAsync(cancellationToken).ConfigureAwait(false);
+        Volatile.Write(ref initializationStage, (int)OrchestratorInitializationStage.Initializing);
 
-        var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
-        versionVectorManager.EnsureShardRegistered(Registry.ShardId);
-        
-        await ProcessSyncDocumentsInternalAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (Registry is IDisposable existingRegistryDisposable)
+            {
+                try
+                {
+                    existingRegistryDisposable.Dispose();
+                }
+                catch (ObjectDisposedException) { }
+            }
+
+            var registryState = new CrdtRegistryState();
+            Registry = ActivatorUtilities.CreateInstance<DistributedCrdtDocument<CrdtRegistryState>>(serviceProvider, registryState);
+            shardIdCache.TryAdd(Registry.DocumentId, Registry.ShardId);
+            
+            await Registry.InitializeAsync(cancellationToken).ConfigureAwait(false);
+
+            var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
+            versionVectorManager.EnsureShardRegistered(Registry.ShardId);
+            
+            await ProcessSyncDocumentsInternalAsync(cancellationToken).ConfigureAwait(false);
+
+            Volatile.Write(ref initializationStage, (int)OrchestratorInitializationStage.Initialized);
+        }
+        catch
+        {
+            Volatile.Write(ref initializationStage, (int)OrchestratorInitializationStage.NotStarted);
+            throw;
+        }
     }
 
     private async Task ProcessPromoteDocumentInternalAsync(string documentId, string typeAlias, CancellationToken cancellationToken)

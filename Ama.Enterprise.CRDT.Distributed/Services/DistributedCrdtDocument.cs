@@ -500,6 +500,28 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     }
 
     /// <inheritdoc />
+    public async Task FlushAsync(CancellationToken cancellationToken = default)
+    {
+        List<CrdtOperation>? opsToBroadcast = null;
+
+        lock (debounceSyncRoot)
+        {
+            debounceTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+            if (debounceBuffer != null && debounceBuffer.Count > 0)
+            {
+                opsToBroadcast = new List<CrdtOperation>(debounceBuffer);
+                debounceBuffer.Clear();
+            }
+        }
+
+        if (opsToBroadcast != null && opsToBroadcast.Count > 0)
+        {
+            var batchedPatch = new CrdtPatch(opsToBroadcast);
+            await NotifyPatchGeneratedAsync(batchedPatch, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc />
     public async ValueTask<long> EstimateObjectSizeAsync(CancellationToken cancellationToken = default)
     {
         var footprint = await EstimateMemoryFootprintAsync(cancellationToken).ConfigureAwait(false);
@@ -989,7 +1011,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         CrdtDocument<TState> currentDoc = default;
         byte[]? snapshotBytes = null;
         var shouldSave = false;
-        var isMemoryStorage = storage is MemoryCrdtStorage;
+        var isMemoryStorage = storage is MemoryCrdtStorage
+            || (storage is BufferedDistributedCrdtStorageDecorator decorator && decorator.InnerStorage is MemoryCrdtStorage);
 
         try
         {

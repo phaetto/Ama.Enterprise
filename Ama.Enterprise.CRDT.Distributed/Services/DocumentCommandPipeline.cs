@@ -20,6 +20,7 @@ public sealed class DocumentCommandPipeline : IDocumentCommandPipeline, IDisposa
     private readonly ConcurrentQueue<PooledDocumentCommand> commandPool = new();
     private readonly CancellationTokenSource disposeCts = new();
     private readonly IDisposable telemetryRegistration;
+    private readonly Task processingTask;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DocumentCommandPipeline"/> class.
@@ -59,7 +60,7 @@ public sealed class DocumentCommandPipeline : IDocumentCommandPipeline, IDisposa
             () => this.commandChannel.Reader.CanCount ? this.commandChannel.Reader.Count : 0,
             () => this.commandPool.Count);
 
-        _ = Task.Run(ProcessChannelAsync);
+        this.processingTask = Task.Run(ProcessChannelAsync);
     }
 
     /// <inheritdoc />
@@ -112,6 +113,13 @@ public sealed class DocumentCommandPipeline : IDocumentCommandPipeline, IDisposa
 
         await commandChannel.Writer.WriteAsync(command, cancellationToken).ConfigureAwait(false);
         telemetry.RecordDocumentCommandEnqueued(documentId);
+    }
+
+    /// <inheritdoc />
+    public async Task FlushAsync(CancellationToken cancellationToken = default)
+    {
+        commandChannel.Writer.TryComplete();
+        await processingTask.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

@@ -140,6 +140,13 @@ public interface IDistributedCrdtDocument
     Task CompactMetadataAsync(IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Flushes any buffered debounced active-sync operations to registered patch observers immediately.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous flush operation.</returns>
+    Task FlushAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Estimates the total in-memory size in bytes of the entire document manager instance, including state, metadata, channels, pools, and telemetry.
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>

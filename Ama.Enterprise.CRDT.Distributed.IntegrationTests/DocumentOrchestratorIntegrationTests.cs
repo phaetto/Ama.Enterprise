@@ -11,9 +11,11 @@ using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.Project.Tests.Common.Attributes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Moq;
 using Shouldly;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -400,5 +402,126 @@ public sealed class DocumentOrchestratorIntegrationTests
         wrapper.DocumentTypeAlias.ShouldBe("dynamic-type");
 
         mockP2p.Verify(p => p.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [IntegrationFact]
+    public async Task Orchestrator_InitializationStage_ShouldTransitionFromNotStartedToInitializingToInitialized()
+    {
+        // Arrange
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var enteredLoadDocument = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var mockStorage = new Mock<IDistributedCrdtStorage>();
+        mockStorage.Setup(s => s.LoadDocumentAsync<CrdtRegistryState>(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                enteredLoadDocument.TrySetResult();
+                await tcs.Task;
+                return (CrdtDocument<CrdtRegistryState>?)null;
+            });
+
+        var sp = BuildNode(s =>
+        {
+            s.Replace(ServiceDescriptor.Singleton(mockStorage.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("ReplicaA");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+
+        // Assert initial stage
+        orchestrator.InitializationStage.ShouldBe(OrchestratorInitializationStage.NotStarted);
+
+        // Act
+        var initTask = orchestrator.InitializeAsync(CancellationToken.None);
+        await enteredLoadDocument.Task;
+
+        // Assert Initializing stage
+        orchestrator.InitializationStage.ShouldBe(OrchestratorInitializationStage.Initializing);
+
+        tcs.SetResult();
+        await initTask;
+
+        // Assert Initialized stage
+        orchestrator.InitializationStage.ShouldBe(OrchestratorInitializationStage.Initialized);
+    }
+
+    [IntegrationFact]
+    public async Task CrdtInitializationService_ShouldRetryOnTransientFailure_AndSucceed()
+    {
+        // Arrange
+        int attempts = 0;
+        var mockStorage = new Mock<IDistributedCrdtStorage>();
+        mockStorage.Setup(s => s.LoadShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                attempts++;
+                if (attempts < 3)
+                {
+                    throw new InvalidOperationException("Transient storage error.");
+                }
+                return Task.FromResult<ShardVersionVectorMap?>(null);
+            });
+        mockStorage.Setup(s => s.GetAllJournaledOperationsAsync(It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerable.Empty<JournaledOperation>());
+
+        var sp = BuildNode(s =>
+        {
+            s.Configure<DistributedCrdtOptions>(o =>
+            {
+                o.InitializationMaxRetries = 3;
+                o.InitializationRetryDelayMilliseconds = 10;
+            });
+            s.Replace(ServiceDescriptor.Singleton(mockStorage.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("ReplicaA");
+        var initService = sp.GetServices<IHostedService>().OfType<CrdtInitializationService>().Single();
+
+        // Act
+        await initService.StartAsync(CancellationToken.None);
+
+        // Assert
+        attempts.ShouldBe(3);
+        scope.Orchestrator.InitializationStage.ShouldBe(OrchestratorInitializationStage.Initialized);
+    }
+
+    [IntegrationFact]
+    public async Task CrdtInitializationService_ShouldThrowAndStopApplication_WhenAllRetriesFail()
+    {
+        // Arrange
+        int attempts = 0;
+        var mockStorage = new Mock<IDistributedCrdtStorage>();
+        mockStorage.Setup(s => s.LoadShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                attempts++;
+                throw new InvalidOperationException("Persistent storage failure.");
+            });
+
+        var mockLifetime = new Mock<IHostApplicationLifetime>();
+
+        var sp = BuildNode(s =>
+        {
+            s.Configure<DistributedCrdtOptions>(o =>
+            {
+                o.InitializationMaxRetries = 3;
+                o.InitializationRetryDelayMilliseconds = 5;
+            });
+            s.Replace(ServiceDescriptor.Singleton(mockStorage.Object));
+            s.AddSingleton(mockLifetime.Object);
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("ReplicaA");
+        var initService = sp.GetServices<IHostedService>().OfType<CrdtInitializationService>().Single();
+
+        // Act & Assert
+        await Should.ThrowAsync<InvalidOperationException>(() => initService.StartAsync(CancellationToken.None));
+
+        attempts.ShouldBe(3);
+        mockLifetime.Verify(l => l.StopApplication(), Times.Once);
+        scope.Orchestrator.InitializationStage.ShouldBe(OrchestratorInitializationStage.NotStarted);
     }
 }

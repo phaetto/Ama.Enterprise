@@ -887,6 +887,7 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
             opt.CheckpointIntervalSeconds = 3600;
             opt.MaintenanceIntervalSeconds = 3600;
             opt.PeerEvictionTtlSeconds = 0;
+            opt.EnableGracefulShutdown = false;
 
             configureOptions?.Invoke(opt);
         });

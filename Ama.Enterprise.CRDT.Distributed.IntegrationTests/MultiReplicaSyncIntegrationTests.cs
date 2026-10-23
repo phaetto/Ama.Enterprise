@@ -499,7 +499,8 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
             opt.AntiEntropyIntervalSeconds = 60; // Explicitly delayed to prevent test interference natively
             opt.CheckpointIntervalSeconds = 60; // Increased to ensure trims don't intercept standard testing arrays natively
             opt.PeerEvictionTtlSeconds = 0; // Disabled eviction to prevent validation errors by default
-            
+            opt.EnableGracefulShutdown = false;
+
             configureOptions?.Invoke(opt);
         });
         services.AddDistributedCrdtReplica(replicaId);
