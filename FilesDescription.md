@@ -10,22 +10,23 @@
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/AntiEntropyStateSyncIntegrationTests.cs` | Added edge-case tests for lazy sender registration and document promotion on out-of-order gossip patches, active-sync debounce batching, and adaptive startup anti-entropy intervals. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/ClusterStatePersistenceIntegrationTests.cs` | Added unit test `ClusterStateTracker_InitializeState_DoesNotNotifyObservers` verifying that `InitializeState` does not notify `IClusterStateObserver` during startup restoration. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/ConcurrencyIntegrationTests.cs` | Fixed timing race in `CrdtDocumentOrchestrator_ConcurrentMessageDispatching_EvaluatesWithoutBlocking` by waiting for `CrdtPatchBroadcaster`'s background channel to drain before asserting `IP2pAlgorithm.BroadcastAsync` invocations. |
-| `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/ConsistentHashShardDistributionManagerIntegrationTests.cs` | Added edge-case tests verifying exclusion of unmapped network peers until CRDT identity handshake and dynamic shard demotion when scaling from a single node to a multi-node cluster. |
+| `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/ConsistentHashShardDistributionManagerIntegrationTests.cs` | Updated `ConsistentHashShardDistributionManager` construction in tests to pass the scoped `ReplicaContext`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/DocumentOrchestratorIntegrationTests.cs` | Added integration tests verifying `OrchestratorInitializationStage` transitions and `CrdtInitializationService` retry and failure behavior. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/DvvExchangeAndOscillationIntegrationTests.cs` | Fixed CI timing races by conditionally registering `PrefixShardIdProvider`, tracking and draining in-flight simulated network tasks deterministically, and ensuring registry shards settle before clearing message queues. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/EvictionIntegrationTests.cs` | Added edge-case tests verifying rejection of patches and snapshots from tombstoned replicas and selective local identity reboot upon receiving `CrdtEvictionRejectionMessage`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/GracefulShutdownIntegrationTests.cs` | Verified `ICrdtShutdownCoordinator.ShutdownToken` is cancelled when shutdown flush begins. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/JournalingAndSnapshottingIntegrationTests.cs` | Added integration tests for `InMemoryBuffer` read-your-own-writes consistency, trim-before-flush filtering, and `DiskWal` crash recovery. |
+| `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/LiveMigrationIntegrationTests.cs` | Configured `IPeerRegistry` active peer mocks for `ConsistentHashShardDistributionManager` in `MediatorNode_WhenPartitionBackfillByPrimaryShardOwnerEnabled_OnlyPrimaryOwnerBackfillsEachDocument`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/MultiReplicaSyncIntegrationTests.cs` | Cleaned up debug variables in `TwoReplicas_ShardedFireAndForgetIntentForwarding_RoutesDirectWithoutWaitingForRpcAck`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/ScopeTopologyProviderIntegrationTests.cs` | Added edge-case tests verifying `CrdtTopologyObserver` behavior when unexpected peers join and when active peers disconnect. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Ama.Enterprise.CRDT.Distributed.ShowCase.csproj` | Updated reference mapping the renamed `Ama.Enterprise.CRDT.MessagePack.SourceGenerators` compilation target. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Constants.cs` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/DeviceStatus.cs` | Data structure representing the status of an IoT device. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/FleetState.cs` | Root CRDT document model representing fleet devices status, updated to inherit `IDistributedCrdtState`. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/FleetState.cs` | Root CRDT document model representing fleet devices status. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/ShowCaseCrdtAotContext.cs` | CRDT AOT reflection context mapping types used by the showcase documents. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/ShowCaseJsonContext.cs` | AOT JSON context for the showcase multi-CRDT models. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskItem.cs` | Data structure representing an individual task item. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskListState.cs` | Root CRDT document model representing a task list, updated to inherit `IDistributedCrdtState`. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskListState.cs` | Root CRDT document model representing a task list. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Linked console loop to `ICrdtShutdownCoordinator.ShutdownToken` and used `WaitAsync` on `Console.ReadLine` so a single Ctrl+C exits without blocking on standard input. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetManager.cs` | Added `DocumentExistsAsync` check and input validation to `GetDevicesAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/IFleetManager.cs` | Added overloads accepting `IntentDeliveryMode` for setting and removing devices. |
@@ -58,18 +59,21 @@
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/TaskManager.cs` | Added `DocumentExistsAsync` check and input validation to `GetTasksAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
 | `$/Ama.Enterprise.CRDT.Distributed/Constants.cs` | Global constants for the distributed CRDT module, including the reserved `SystemRegistryDocumentId` (`system-document-registry`). |
-| `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | Registered `ICrdtShutdownCoordinator`, `CrdtShutdownService`, and validation for `ShutdownTimeoutMilliseconds`. |
+| `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | Keyed `CrdtMigrationBridgeService` registrations by `MigrationId` and registered each bridge as an `IHostedService` so multiple migration bridges of the same state types can coexist in the same container. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/ClusterStateSnapshotDto.cs` | Updated to map tombstoned replicas to their eviction timestamp tracking the exact eviction moment for safe cooldown expirations. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtEvictionRejectionMessage.cs` | Message broadcasted to forcefully reject and re-bootstrap nodes that have been tombstoned by the cluster, preventing amnesia edge cases. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtIntentForwardRequestDto.cs` | Added `DocumentTypeAlias` property to support lazy document instantiation on target shards when direct RPCs outrace registry gossip. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtIntentForwardResponseDto.cs` | Data structure representing the distinct evaluated result bounds of a remote intent proxy execution mapping success statuses securely. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtJournalMode.cs` | Enum defining `Direct`, `InMemoryBuffer`, and `DiskWal` operation journaling strategies. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtMessageWrapper.cs` | Added optional `DocumentTypeAlias` parameter to carry the document type alias on P2P message envelopes. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtMigrationOptions.cs` | Configuration model for defining source/target replicas, type aliases, concurrency, shard partitioning, and tombstone propagation for live migrations. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtMigrationStage.cs` | Enum defining the lifecycle stages (`NotStarted`, `Initializing`, `Backfilling`, `StreamingLive`, `Converged`, `Drained`) of a live CRDT migration bridge. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtMigrationStatusDto.cs` | Readonly record struct reporting real-time migration metrics, queue depth, and convergence status. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtPatchMessage.cs` | Transmission model conveying replicated CRDT patches targeted asynchronously across active nodes. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtReadRequestDto.cs` | Added `DocumentTypeAlias` property to support lazy document instantiation on remote read requests. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtReadResponseDto.cs` | DTO returning the isolated serialized materialized CRDT payload natively mapped against an RPC correlation boundary. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtRegistryEntry.cs` | Pooled `DocumentId`, `TypeAlias`, and composite registry keys via `CrdtStringPool.Shared`. |
-| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtRegistryState.cs` | Added `IDistributedCrdtState` and pooled the `Id` property via `CrdtStringPool.Shared`. |
+| `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtRegistryState.cs` | Pooled the `Id` property via `CrdtStringPool.Shared`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtShutdownFlushMode.cs` | Enum defining `JournalOnly`, `JournalAndCheckpoints`, and `FullSyncAndCheckpoint` shutdown persistence strategies. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtSnapshotDataDto.cs` | DTO representing a serialized snapshot payload, avoiding tuple usage across generic bounds. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtSnapshotMessage.cs` | Message payload containing a complete materialized CRDT document snapshot, used as a fallback synchronization mechanism when log truncation gaps are detected. |
@@ -87,14 +91,16 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Models/PooledOrchestratorCommand.cs` | Removed `SyncDocuments` from `OrchestratorCommandType`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/BufferedDistributedCrdtStorageDecorator.cs` | Storage decorator maintaining an in-flight staging index and delegating writes to `ICrdtWriteAheadBuffer` while preserving read-your-own-writes consistency, trim filtering, and deletion safety. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ClusterStateTracker.cs` | Renamed `ImportState` to `InitializeState` and removed `NotifyObservers()` invocation during startup initialization. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/ConsistentHashShardDistributionManager.cs` | Replaced local registry constant with `Constants.SystemRegistryDocumentId`. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/ConsistentHashShardDistributionManager.cs` | Injected scoped `ReplicaContext` instead of singleton `DistributedCrdtReplicaRegistration` so multi-replica hosts resolve the correct local replica ID per scope. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtCheckpointService.cs` | Delegated shard version vector snapshot creation to `IShardVersionVectorManager`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtCompactionService.cs` | Background hosted service that periodically runs CRDT metadata compaction across active documents in all replica scopes. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Added `FlushAsync` to complete the orchestrator command channel and await all queued commands before shutdown. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Made `ProcessInitializeInternalAsync` idempotent so calling `InitializeAsync` on an already initialized orchestrator does not overwrite the in-memory `Registry` instance. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtEvictionService.cs` | Implemented `EvictPeersAsync` overload accepting `IntentDeliveryMode` and forwarding it to `IDistributedCrdtDocument.EvictReplicaAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtInitializationService.cs` | Added retry loop with configurable backoff during replica initialization and fatal failure handling that stops the application and rethrows if all retries fail. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtJournalFlushService.cs` | Background hosted service that drains `BufferedDistributedCrdtStorageDecorator` queues in batches and flushes remaining operations on graceful shutdown. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtMaintenanceService.cs` | Delegated version vector replica eviction and snapshot extraction to `IShardVersionVectorManager`. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtMigrationBridgeService.cs` | Updated `ScanSourceRegistryAsync` to check target document existence before deleting tombstones and cleared `propagatedTombstonesSet` when a previously deleted source document is recreated. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtMigrationManager.cs` | Default implementation of `ICrdtMigrationManager` aggregating status and drain operations across all registered migration bridges. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtShutdownCoordinator.cs` | Implemented `ShutdownToken` and `IDisposable` to signal cancellation immediately upon shutdown initiation. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtShutdownService.cs` | Updated `StartAsync` and `StopAsync` to idempotently initialize shutdown signal handlers and execute the scope flush pipeline when running in AOT slim or `IHostedService`-only contexts where `IHostedLifecycleService` methods (`StartingAsync`/`StoppingAsync`) are not invoked. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtTrimCoordinator.cs` | Coordinates trimming operations across the entire node to ensure only one aggressive or maintenance trim runs at a time, preventing IO and memory saturation. |
@@ -106,8 +112,11 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtTelemetry.cs` | Added counter and telemetry recording method `RecordDocumentMetadataCompacted`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DocumentCommandPipeline.cs` | Implemented `FlushAsync` to complete the command channel writer and await completion of all in-flight document commands. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IClusterStateTracker.cs` | Renamed `ImportState` to `InitializeState` on `IClusterStateTracker`. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/ICrdtDocumentMigrator.cs` | Developer-facing contract for translating state and deltas from a source CRDT model to a target CRDT model. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ICrdtDocumentOrchestrator.cs` | Added `FlushAsync` to `ICrdtDocumentOrchestrator`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ICrdtEvictionService.cs` | Added `IntentDeliveryMode` overload for `EvictPeersAsync`. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/ICrdtMigrationBridge.cs` | Interface for inspecting status, enqueueing live document changes, and draining a specific migration bridge. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/ICrdtMigrationManager.cs` | Coordinator interface for checking cluster-wide migration convergence and draining all active migration bridges before cutover. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ICrdtShutdownCoordinator.cs` | Added `ShutdownToken` to expose a cancellation token triggered as soon as a shutdown or scope flush begins. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ICrdtWriteAheadBuffer.cs` | Interface for staging, batching, acknowledging, and recovering journaled operations in write-behind and disk WAL modes. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtDocument.cs` | Added `FlushAsync` to `IDistributedCrdtDocument`. |
@@ -127,6 +136,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/Observers/ICrdtOrchestratorObserver.cs` | Observer interface tracking global document matrix bounding topologies dynamically tracking generic promotions and explicit structural tombstones natively isolating logic seamlessly smoothly exactly smoothly intelligently. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/Observers/IDocumentPatchObserver.cs` | Added default `FlushAsync` method to `IDocumentPatchObserver`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/Observers/IDocumentStateObserver.cs` | Generic structural evaluation observer securely signaling document modifications bypassing legacy rigid event memory leak vulnerabilities explicitly efficiently safely gracefully successfully exactly securely. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/Observers/MigrationSourceStateObserver.cs` | Resolved `ICrdtMigrationBridge` instances lazily to avoid circular DI resolution when `DistributedCrdtScopeManager` initializes replica scopes in its constructor. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/Observers/OrchestratorClusterStateObserver.cs` | Replaced `Task.Run` background task allocation with `ReevaluateTopologyAsync(IntentDeliveryMode.FireAndForget)`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/Observers/OrchestratorRegistryStateObserver.cs` | Observer implementation for `IDocumentStateObserver<CrdtRegistryState>` that triggers orchestrator topology re-evaluation when the system registry state changes. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtAntiEntropyService.cs` | Implemented adaptive polling interval evaluation during background looping utilizing `Stopwatch` boundaries to enforce faster initial startup sync phases avoiding long delays on load. |

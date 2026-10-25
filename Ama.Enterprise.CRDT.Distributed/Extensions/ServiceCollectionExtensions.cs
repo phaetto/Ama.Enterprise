@@ -229,8 +229,74 @@ public static class ServiceCollectionExtensions
 
         services.RemoveAll(typeof(IDistributedCrdtStorage));
         services.TryAddScoped<TStorage>();
+        services.AddScoped<TStorage>();
         services.AddScoped<IDistributedCrdtStorage>(sp => ResolveDecoratedStorage(sp, sp.GetRequiredService<TStorage>()));
         
+        return services;
+    }
+
+    /// <summary>
+    /// Registers a zero-downtime live CRDT migration bridge between a source replica/document type and a target replica/document type.
+    /// Automatically wires up real-time source state observers, background backfill, and graceful drain coordination.
+    /// </summary>
+    /// <typeparam name="TSourceState">The source (legacy) CRDT document state type.</typeparam>
+    /// <typeparam name="TTargetState">The target (new) CRDT document state type.</typeparam>
+    /// <typeparam name="TMigrator">The user-implemented <see cref="ICrdtDocumentMigrator{TSourceState, TTargetState}"/>.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configure">Action to configure the <see cref="CrdtMigrationOptions"/>.</param>
+    /// <returns>The updated service collection.</returns>
+    public static IServiceCollection AddDistributedCrdtMigration<TSourceState, TTargetState, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TMigrator>(
+        this IServiceCollection services,
+        Action<CrdtMigrationOptions> configure)
+        where TSourceState : class, new()
+        where TTargetState : class, new()
+        where TMigrator : class, ICrdtDocumentMigrator<TSourceState, TTargetState>
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        var migrationOptions = new CrdtMigrationOptions();
+        configure(migrationOptions);
+
+        if (string.IsNullOrWhiteSpace(migrationOptions.SourceReplicaId))
+            throw new ArgumentException("SourceReplicaId must be configured on CrdtMigrationOptions.", nameof(configure));
+        if (string.IsNullOrWhiteSpace(migrationOptions.SourceTypeAlias))
+            throw new ArgumentException("SourceTypeAlias must be configured on CrdtMigrationOptions.", nameof(configure));
+        if (string.IsNullOrWhiteSpace(migrationOptions.TargetReplicaId))
+            throw new ArgumentException("TargetReplicaId must be configured on CrdtMigrationOptions.", nameof(configure));
+        if (string.IsNullOrWhiteSpace(migrationOptions.TargetTypeAlias))
+            throw new ArgumentException("TargetTypeAlias must be configured on CrdtMigrationOptions.", nameof(configure));
+        if (migrationOptions.MaxConcurrency <= 0)
+            throw new ArgumentOutOfRangeException(nameof(configure), "MaxConcurrency must be greater than zero.");
+
+        var migrationId = CrdtStringPool.Shared.GetOrAdd(
+            string.IsNullOrWhiteSpace(migrationOptions.MigrationId)
+                ? Guid.NewGuid().ToString("N")
+                : migrationOptions.MigrationId);
+        migrationOptions.MigrationId = migrationId;
+
+        services.TryAddSingleton<ICrdtDocumentMigrator<TSourceState, TTargetState>, TMigrator>();
+        services.TryAddSingleton<ICrdtMigrationManager, CrdtMigrationManager>();
+
+        // Register scoped source state and registry observers so any mutation on the source replica immediately notifies the bridge
+        services.TryAddScoped<MigrationSourceStateObserver<TSourceState>>();
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IDocumentStateObserver<TSourceState>, MigrationSourceStateObserver<TSourceState>>(
+            sp => sp.GetRequiredService<MigrationSourceStateObserver<TSourceState>>()));
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IDocumentStateObserver<CrdtRegistryState>, MigrationSourceStateObserver<TSourceState>.RegistryStateObserverAdapter>(
+            sp => sp.GetRequiredService<MigrationSourceStateObserver<TSourceState>>().RegistryObserver));
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<ICrdtOrchestratorObserver, MigrationSourceStateObserver<TSourceState>>(
+            sp => sp.GetRequiredService<MigrationSourceStateObserver<TSourceState>>()));
+
+        services.AddKeyedSingleton<CrdtMigrationBridgeService<TSourceState, TTargetState>>(
+            migrationId,
+            (sp, _) => ActivatorUtilities.CreateInstance<CrdtMigrationBridgeService<TSourceState, TTargetState>>(sp, migrationOptions));
+
+        services.AddSingleton<ICrdtMigrationBridge>(sp =>
+            sp.GetRequiredKeyedService<CrdtMigrationBridgeService<TSourceState, TTargetState>>(migrationId));
+
+        services.AddSingleton< Microsoft.Extensions.Hosting.IHostedService>(sp =>
+            sp.GetRequiredKeyedService<CrdtMigrationBridgeService<TSourceState, TTargetState>>(migrationId));
+
         return services;
     }
 

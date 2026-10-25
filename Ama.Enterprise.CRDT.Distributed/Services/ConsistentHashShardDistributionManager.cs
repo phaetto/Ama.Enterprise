@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.CRDT.Services;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
@@ -37,15 +38,20 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
 
     public ConsistentHashShardDistributionManager(
         IClusterStateTracker clusterTracker,
-        DistributedCrdtReplicaRegistration replicaRegistration,
+        ReplicaContext replicaContext,
         IServiceProvider serviceProvider,
         IEnumerable<DistributedCrdtP2pRegistration> p2pRegistrations,
         IOptions<DistributedCrdtOptions> options)
     {
+        ArgumentNullException.ThrowIfNull(replicaContext);
         ArgumentNullException.ThrowIfNull(options);
+        if (string.IsNullOrWhiteSpace(replicaContext.ReplicaId))
+        {
+            throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaContext));
+        }
         
         this.clusterTracker = clusterTracker ?? throw new ArgumentNullException(nameof(clusterTracker));
-        this.localReplicaId = replicaRegistration?.ReplicaId ?? throw new ArgumentNullException(nameof(replicaRegistration));
+        this.localReplicaId = replicaContext.ReplicaId;
         this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         this.p2pRegistrations = p2pRegistrations ?? throw new ArgumentNullException(nameof(p2pRegistrations));
         

@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.CRDT.Services;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.P2p.Models.Core;
@@ -319,12 +320,12 @@ public sealed class ConsistentHashShardDistributionManagerIntegrationTests
         serviceCollection.AddSingleton(peerRegistryMock.Object);
         var serviceProvider = serviceCollection.BuildServiceProvider();
 
-        var replicaRegistration = new DistributedCrdtReplicaRegistration(localReplicaId);
+        var replicaContext = new ReplicaContext { ReplicaId = localReplicaId };
         var p2pRegistrations = new[] { new DistributedCrdtP2pRegistration(meshId, localReplicaId) };
 
         var manager = new ConsistentHashShardDistributionManager(
             clusterTrackerMock.Object,
-            replicaRegistration,
+            replicaContext,
             serviceProvider,
             p2pRegistrations,
             options);

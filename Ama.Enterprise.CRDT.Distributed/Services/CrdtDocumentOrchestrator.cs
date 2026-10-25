@@ -1296,6 +1296,12 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
     private async Task ProcessInitializeInternalAsync(CancellationToken cancellationToken)
     {
+        if (InitializationStage == OrchestratorInitializationStage.Initialized && Registry != null)
+        {
+            await ProcessSyncDocumentsInternalAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         Volatile.Write(ref initializationStage, (int)OrchestratorInitializationStage.Initializing);
 
         try
