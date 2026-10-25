@@ -477,6 +477,39 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         nodeB.Sender.Verify(s => s.SendDirectAsync(nodeA.PeerId, It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [IntegrationFact]
+    public async Task ShardedNode_WhenAllTargetReplicasAreUnreachableOrUnmapped_ThrowsTimeoutExceptionOnReadAndReturnsFalseOnIntent()
+    {
+        // Arrange - Node A does not own data shards and targets "OfflineReplica" which has no peer mapping
+        var nodeA = BuildNodeWithCustomSharding(
+            "ReplicaA",
+            isDataShardLocal: false,
+            targetReplicas: ["OfflineReplica"],
+            configureOptions: opt =>
+            {
+                opt.RpcTimeoutMilliseconds = 50;
+                opt.RpcMaxRetries = 2;
+                opt.RpcRetryDelayMilliseconds = 10;
+            });
+
+        var scopeA = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeA.ReplicaId);
+        var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchA.InitializeAsync(CancellationToken.None);
+
+        var intent = new MapSetIntent("UnreachableKey", "UnreachableVal");
+
+        // Act & Assert 1 - FireAndForget intent returns false when no target peer is mapped
+        var ffResult = await orchA.ApplyIntentAsync<SharedTestState>("unreachable-doc", intent, nameof(SharedTestState.DataMap), IntentDeliveryMode.FireAndForget, CancellationToken.None);
+        ffResult.ShouldBeFalse();
+
+        // Act & Assert 2 - Acknowledged intent exhausts retries and returns false
+        var ackResult = await orchA.ApplyIntentAsync<SharedTestState>("unreachable-doc", intent, nameof(SharedTestState.DataMap), IntentDeliveryMode.Acknowledged, CancellationToken.None);
+        ackResult.ShouldBeFalse();
+
+        // Act & Assert 3 - Remote read exhausts retries and throws InvalidOperationException
+        await Should.ThrowAsync<InvalidOperationException>(async () => await orchA.GetDocumentStateAsync<SharedTestState>("unreachable-doc", CancellationToken.None));
+    }
+
     private sealed record TestNode(
         IServiceProvider Sp, 
         Mock<IDirectMessageSender> Sender, 

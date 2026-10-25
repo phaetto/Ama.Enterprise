@@ -524,4 +524,33 @@ public sealed class DocumentOrchestratorIntegrationTests
         mockLifetime.Verify(l => l.StopApplication(), Times.Once);
         scope.Orchestrator.InitializationStage.ShouldBe(OrchestratorInitializationStage.NotStarted);
     }
+
+    [IntegrationFact]
+    public async Task Orchestrator_InitializeAsync_WhenCalledMultipleTimes_IsIdempotentAndPreservesActiveRegistryState()
+    {
+        // Arrange
+        var sp = BuildNode();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("ReplicaA");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        var originalRegistryInstance = orchestrator.Registry;
+
+        await orchestrator.CreateDocumentAsync("idempotent-doc", "dynamic-type", CancellationToken.None);
+        await orchestrator.ApplyIntentAsync<DynamicTestState>("idempotent-doc", new Ama.CRDT.Models.Intents.SetIntent(77), nameof(DynamicTestState.Value), CancellationToken.None);
+
+        // Act - Call InitializeAsync a second and third time on an already initialized orchestrator
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        // Assert - Registry reference and active documents are preserved without being overwritten
+        orchestrator.InitializationStage.ShouldBe(OrchestratorInitializationStage.Initialized);
+        orchestrator.Registry.ShouldBeSameAs(originalRegistryInstance);
+
+        var existingDoc = orchestrator.TryGetLocalDocument<DynamicTestState>("idempotent-doc");
+        existingDoc.ShouldNotBeNull();
+        var state = await existingDoc!.GetDocumentAsync(CancellationToken.None);
+        state.Data.Value.ShouldBe(77);
+    }
 }

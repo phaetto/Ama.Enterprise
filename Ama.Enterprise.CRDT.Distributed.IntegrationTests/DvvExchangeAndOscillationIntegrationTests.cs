@@ -807,6 +807,74 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         steadyMessages.ShouldAllBe(m => m.MessageType == "CrdtSync");
     }
 
+    [IntegrationFact]
+    public async Task TwoReplicas_DuplicateAndStalePatchDelivery_ShouldBeIdempotent_AndNeverRegressDvvOrOscillate()
+    {
+        // Arrange
+        var nodeA = BuildNode("ReplicaA", opt => opt.ActiveSyncEnabled = false);
+        var nodeB = BuildNode("ReplicaB", opt => opt.ActiveSyncEnabled = false);
+
+        var scopeA = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeA.ReplicaId);
+        var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var storageA = scopeA.ServiceProvider.GetRequiredService<IDistributedCrdtStorage>();
+        await orchA.InitializeAsync(CancellationToken.None);
+
+        var scopeB = nodeB.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeB.ReplicaId);
+        var orchB = scopeB.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var dvvManagerB = scopeB.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+        await orchB.InitializeAsync(CancellationToken.None);
+
+        await orchA.CreateDocumentAsync("doc-dup", "dvv-doc", CancellationToken.None);
+        await orchB.CreateDocumentAsync("doc-dup", "dvv-doc", CancellationToken.None);
+
+        await orchA.ApplyIntentAsync<DvvTestState>("doc-dup", new MapSetIntent("Key1", "FirstValue"), "DataMap", CancellationToken.None);
+        await orchA.ApplyIntentAsync<DvvTestState>("doc-dup", new MapSetIntent("Key1", "SecondWinningValue"), "DataMap", CancellationToken.None);
+
+        var opsA = (await storageA.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync())
+            .Where(o => o.DocumentId == "doc-dup")
+            .OrderBy(o => o.Operation.ShardClock)
+            .Select(o => o.Operation)
+            .ToArray();
+
+        opsA.Length.ShouldBe(2);
+
+        var docB = orchB.TryGetLocalDocument<DvvTestState>("doc-dup")!;
+
+        // Act - Apply full patch, then re-apply the stale first op and duplicate full patch multiple times
+        await docB.ApplyRemotePatchAsync(new CrdtPatch(opsA), CancellationToken.None);
+        await docB.ApplyRemotePatchAsync(new CrdtPatch([opsA[0]]), CancellationToken.None);
+        await docB.ApplyRemotePatchAsync(new CrdtPatch(opsA), CancellationToken.None);
+
+        // Assert - State on B retains the winning value and DVV remains at clock 2 with zero dots
+        var stateB = await orchB.GetDocumentStateAsync<DvvTestState>("doc-dup", CancellationToken.None);
+        stateB.Data.DataMap["Key1"].ShouldBe("SecondWinningValue");
+
+        var dvvB = dvvManagerB.GetShardSnapshot("default")["default"];
+        dvvB.Versions["ReplicaA"].ShouldBe(2);
+        (dvvB.Dots.TryGetValue("ReplicaA", out var dots) ? dots.Count : 0).ShouldBe(0);
+
+        var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
+        using var network = WireMeshWithInspection(recordedMessages, nodeA, nodeB);
+
+        // Sync registry first
+        await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
+        await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
+        await network.DrainAsync();
+
+        recordedMessages.Clear();
+
+        for (int round = 0; round < 4; round++)
+        {
+            await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
+            await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
+            await network.DrainAsync();
+        }
+
+        var steadyMessages = recordedMessages.ToList();
+        steadyMessages.Count.ShouldBe(8);
+        steadyMessages.ShouldAllBe(m => m.MessageType == "CrdtSync");
+    }
+
     public async ValueTask DisposeAsync()
     {
         foreach (var node in nodes)

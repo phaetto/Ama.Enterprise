@@ -398,4 +398,38 @@ public sealed class ScopeTopologyProviderIntegrationTests
         preservedStates.Count.ShouldBe(1);
         preservedStates[0]["default"].Versions["ReplicaRemote"].ShouldBe(42);
     }
+
+    [IntegrationFact]
+    public async Task CrdtTopologyObserver_WhenEventsArriveForUnregisteredMeshId_IgnoresPeerJoinAndDepart()
+    {
+        // Arrange
+        var topologyProvider = new TestTopologyProvider();
+        var peerGuid = Guid.NewGuid();
+        topologyProvider.ExpectedPeers.Add(peerGuid.ToString());
+
+        var mockSender = new Mock<IDirectMessageSender>();
+        var sp = BuildNode("Replica1", topologyProvider, services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        await scope.Orchestrator.InitializeAsync(CancellationToken.None);
+
+        var dvv = new DottedVersionVector();
+        dvv.Versions["ReplicaRemote"] = 10;
+        scope.ClusterTracker.UpdatePeerState("ReplicaRemote", peerGuid.ToString(), new ShardVersionVectorMap { { "default", dvv } });
+
+        var observer = sp.GetServices<IPeerTopologyObserver>().OfType<Services.P2p.CrdtTopologyObserver>().Single();
+        var peerNode = new PeerNode(new PeerId(peerGuid), new TcpPeerEndpoint("127.0.0.1", 5004));
+
+        // Act - Trigger join and depart on a mesh ID ("OtherUnmappedMesh") not bound to Replica1
+        await observer.OnPeerJoinedAsync("OtherUnmappedMesh", peerNode, CancellationToken.None);
+        await observer.OnPeerDepartedAsync("OtherUnmappedMesh", peerNode.Id, CancellationToken.None);
+
+        // Assert - Neither anti-entropy dispatch nor session unmapping occurred on Replica1's scope
+        mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never());
+        scope.ClusterTracker.GetReplicaIdByPeerId(peerGuid.ToString()).ShouldBe("ReplicaRemote");
+    }
 }

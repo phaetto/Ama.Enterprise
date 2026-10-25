@@ -506,6 +506,46 @@ public sealed class GracefulShutdownIntegrationTests
         coordinator.IsShuttingDown.ShouldBeTrue();
     }
 
+    [IntegrationFact]
+    public async Task CrdtShutdownCoordinator_WhenMultipleReplicaScopesExist_FlushesAllInitializedScopesAndSkipsUninitializedScopes()
+    {
+        // Arrange
+        var savedReplicaIds = new System.Collections.Concurrent.ConcurrentBag<string>();
+        var mockStorage = new Mock<IDistributedCrdtStorage>();
+        mockStorage.SetReturnsDefault(Task.CompletedTask);
+        mockStorage.Setup(s => s.SaveShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<ShardVersionVectorMap>(), It.IsAny<CancellationToken>()))
+                   .Callback<string, ShardVersionVectorMap, CancellationToken>((replicaId, _, _) => savedReplicaIds.Add(replicaId))
+                   .Returns(Task.CompletedTask);
+
+        var sp = BuildNode("ReplicaMulti1", opt =>
+        {
+            opt.FlushModeOnShutdown = CrdtShutdownFlushMode.JournalAndCheckpoints;
+        }, services =>
+        {
+            services.AddDistributedCrdtReplica("ReplicaMulti2");
+            services.AddDistributedCrdtReplica("ReplicaUninitialized");
+            services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(_ => mockStorage.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope1 = scopeManager.GetOrCreateScope("ReplicaMulti1");
+        var scope2 = scopeManager.GetOrCreateScope("ReplicaMulti2");
+        _ = scopeManager.GetOrCreateScope("ReplicaUninitialized"); // Created but NOT initialized
+
+        await scope1.Orchestrator.InitializeAsync(CancellationToken.None);
+        await scope2.Orchestrator.InitializeAsync(CancellationToken.None);
+
+        var coordinator = sp.GetRequiredService<ICrdtShutdownCoordinator>();
+
+        // Act
+        await coordinator.FlushAllScopesAsync("MultiScopeFlushTest", CancellationToken.None);
+
+        // Assert - Both initialized scopes saved their state, while the uninitialized scope was safely skipped
+        savedReplicaIds.ShouldContain("ReplicaMulti1");
+        savedReplicaIds.ShouldContain("ReplicaMulti2");
+        savedReplicaIds.ShouldNotContain("ReplicaUninitialized");
+    }
+
     private static IServiceProvider BuildNode(
         string replicaId,
         Action<DistributedCrdtOptions>? configureOptions = null,

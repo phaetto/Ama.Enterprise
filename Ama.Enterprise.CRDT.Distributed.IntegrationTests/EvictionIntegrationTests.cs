@@ -422,4 +422,39 @@ public class EvictionIntegrationTests
         replicaContext.ReplicaId.ShouldStartWith("NodeA_");
         replicaContext.ReplicaId.ShouldNotBe("NodeA");
     }
+
+    [IntegrationFact]
+    public async Task CrdtEvictionService_EvictsPeers_WithFireAndForgetMode_DrainsAndCleansVersionVectorsAcrossDocuments()
+    {
+        // Arrange
+        var sp = BuildNode("NodeA");
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("NodeA");
+
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("test-doc", "test-doc", CancellationToken.None);
+
+        var context = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+        var evictionService = scope.ServiceProvider.GetRequiredService<ICrdtEvictionService>();
+
+        var doc = await orchestrator.GetDocumentStateAsync<TestState>("test-doc", CancellationToken.None);
+        doc.Metadata.VersionVector["EvictedPeerFF"] = 42;
+        doc.Metadata.VersionVector["RetainedPeer"] = 10;
+
+        context.ShardVersionVectors["default"] = new DottedVersionVector();
+        context.ShardVersionVectors["default"].Versions["EvictedPeerFF"] = 42;
+        context.ShardVersionVectors["default"].Versions["RetainedPeer"] = 10;
+
+        // Act - Evict using FireAndForget delivery mode and then flush the pipeline to ensure completion
+        await evictionService.EvictPeersAsync(new[] { "EvictedPeerFF" }, Models.IntentDeliveryMode.FireAndForget, CancellationToken.None);
+        await orchestrator.FlushAsync(CancellationToken.None);
+
+        // Assert
+        context.ShardVersionVectors["default"].Versions.ContainsKey("EvictedPeerFF").ShouldBeFalse();
+        context.ShardVersionVectors["default"].Versions["RetainedPeer"].ShouldBe(10);
+
+        doc.Metadata.VersionVector.ContainsKey("EvictedPeerFF").ShouldBeFalse();
+        doc.Metadata.VersionVector["RetainedPeer"].ShouldBe(10);
+    }
 }

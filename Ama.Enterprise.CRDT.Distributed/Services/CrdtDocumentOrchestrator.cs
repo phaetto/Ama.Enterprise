@@ -1181,6 +1181,22 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     {
         commandChannel.Writer.TryComplete();
         await processingTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        var pipeline = serviceProvider.GetService<IDocumentCommandPipeline>();
+        if (pipeline != null)
+        {
+            await pipeline.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        if (Registry != null)
+        {
+            await Registry.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        foreach (var doc in activeDocuments.Values)
+        {
+            await doc.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
     public void Dispose()

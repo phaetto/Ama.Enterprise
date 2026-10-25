@@ -567,4 +567,102 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         completed.ShouldBe(tcsTwoCycles.Task);
         dispatchCount.ShouldBeGreaterThanOrEqualTo(2);
     }
+
+    [IntegrationFact]
+    public async Task ProcessProxyRpcPayloadsAsync_ShouldReturnNullPayloadResponse_WhenRemoteReadTargetsNonExistentAndUnregisteredDocument()
+    {
+        // Arrange
+        var mockSender = new Mock<IDirectMessageSender>();
+        var capturedDirectSends = new List<ReadOnlyMemory<byte>>();
+        mockSender.Setup(p => p.SendDirectAsync(It.IsAny<PeerId>(), Capture.In(capturedDirectSends), It.IsAny<CancellationToken>()))
+               .Returns(Task.CompletedTask);
+
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var serializer = sp.GetRequiredService<ICrdtSerializer>();
+
+        var correlationId = Guid.NewGuid();
+        var readReq = new CrdtReadRequestDto
+        {
+            CorrelationId = correlationId,
+            DocumentId = "unknown-missing-doc",
+            DocumentTypeAlias = "unregistered-type-alias"
+        };
+
+        var reqBytes = serializer.SerializeToBytes(readReq);
+        var wrapper = new CrdtMessageWrapper("unknown-missing-doc", "CrdtReadReq", reqBytes, "unregistered-type-alias");
+        var wrapperBytes = serializer.SerializeToBytes(wrapper);
+
+        // Act
+        await handler.HandlePayloadAsync(TestMeshId, new PeerId(Guid.NewGuid()), wrapperBytes, CancellationToken.None);
+
+        // Assert - Responds with CrdtReadRes containing a null SerializedDocumentPayload without throwing
+        capturedDirectSends.Count.ShouldBe(1);
+        var resWrapper = serializer.DeserializeFromBytes<CrdtMessageWrapper>(capturedDirectSends[0].ToArray());
+        resWrapper.MessageType.ShouldBe("CrdtReadRes");
+
+        var resDto = serializer.DeserializeFromBytes<CrdtReadResponseDto>(resWrapper.Payload!);
+        resDto.CorrelationId.ShouldBe(correlationId);
+        resDto.StatePayload.ShouldBeEmpty();
+    }
+
+    [IntegrationFact]
+    public async Task ProcessProxyRpcPayloadsAsync_ShouldReturnFailureResponse_WhenIntentForwardRequestHasUnknownIntentTypeAlias()
+    {
+        // Arrange
+        var mockSender = new Mock<IDirectMessageSender>();
+        var capturedDirectSends = new List<ReadOnlyMemory<byte>>();
+        mockSender.Setup(p => p.SendDirectAsync(It.IsAny<PeerId>(), Capture.In(capturedDirectSends), It.IsAny<CancellationToken>()))
+               .Returns(Task.CompletedTask);
+
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+
+        var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var serializer = sp.GetRequiredService<ICrdtSerializer>();
+
+        var correlationId = Guid.NewGuid();
+        var intentReq = new CrdtIntentForwardRequestDto
+        {
+            CorrelationId = correlationId,
+            DocumentId = "sync-doc-1",
+            SerializedIntent = [1, 2, 3],
+            IntentTypeAlias = "NonExistentIntentType",
+            TargetProperty = nameof(SyncTestState.DataMap),
+            DocumentTypeAlias = "sync-doc-1"
+        };
+
+        var reqBytes = serializer.SerializeToBytes(intentReq);
+        var wrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtIntentReq", reqBytes, "sync-doc-1");
+        var wrapperBytes = serializer.SerializeToBytes(wrapper);
+
+        // Act
+        await handler.HandlePayloadAsync(TestMeshId, new PeerId(Guid.NewGuid()), wrapperBytes, CancellationToken.None);
+
+        // Assert - Responds with IsSuccess = false instead of crashing the payload handler
+        capturedDirectSends.Count.ShouldBe(1);
+        var resWrapper = serializer.DeserializeFromBytes<CrdtMessageWrapper>(capturedDirectSends[0].ToArray());
+        resWrapper.MessageType.ShouldBe("CrdtIntentRes");
+
+        var resDto = serializer.DeserializeFromBytes<CrdtIntentForwardResponseDto>(resWrapper.Payload!);
+        resDto.CorrelationId.ShouldBe(correlationId);
+        resDto.IsSuccess.ShouldBeFalse();
+    }
 }

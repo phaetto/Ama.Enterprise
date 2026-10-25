@@ -848,6 +848,8 @@ public sealed class LiveMigrationIntegrationTests
         migrationManager.TryGetStatus("bridge-node-a", out var statusA).ShouldBeTrue();
         migrationManager.TryGetStatus("bridge-node-b", out var statusB).ShouldBeTrue();
 
+        await Task.Delay(5000);
+
         // Only one shard exists: default, so it ggoes to one node only
         (statusA.BackfilledDocuments + statusB.BackfilledDocuments).ShouldBe(totalDocs);
         statusA.BackfilledDocuments.ShouldBe(0);
@@ -909,6 +911,112 @@ public sealed class LiveMigrationIntegrationTests
                 options.TargetTypeAlias = "v2";
                 options.MaxConcurrency = 0;
             }));
+    }
+
+    [Fact]
+    public async Task MediatorNode_MultipleConcurrentMigrationsOfSameStateTypes_IsolateStatusesAndDrainIndependently()
+    {
+        // Arrange
+        var networkHandlers = new ConcurrentDictionary<(string MeshId, string ReplicaId), IApplicationPayloadHandler>();
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        services.AddDistributedCrdtCore(options =>
+        {
+            options.ActiveSyncEnabled = true;
+            options.EnableSharding = false;
+            options.AntiEntropyInitialDelaySeconds = 60;
+            options.AntiEntropyIntervalSeconds = 60;
+        });
+
+        services.AddCrdt()
+            .AddCrdtJsonTypeInfoResolver(LiveMigrationTestJsonContext.Default)
+            .AddCrdtAotContext(new LiveMigrationTestAotContext())
+            .AddCrdtSerializableType<LegacyTaskItemV1>("legacy-task-v1")
+            .AddCrdtSerializableType<ModernTaskItemV2>("modern-task-v2");
+
+        services.AddDistributedDocumentType<LegacyTaskListStateV1>("tasks-domain-a-v1");
+        services.AddDistributedDocumentType<LegacyTaskListStateV1>("tasks-domain-b-v1");
+        services.AddDistributedDocumentType<ModernTaskListStateV2>("tasks-domain-a-v2");
+        services.AddDistributedDocumentType<ModernTaskListStateV2>("tasks-domain-b-v2");
+
+        services.AddDistributedCrdtReplica("replica-v1");
+        services.AddDistributedCrdtReplica("replica-v2");
+
+        RegisterInMemoryMeshMocks(services, "mesh-v1", "replica-v1", networkHandlers);
+        RegisterInMemoryMeshMocks(services, "mesh-v2", "replica-v2", networkHandlers);
+
+        services.AddDistributedCrdtP2p("mesh-v1", "replica-v1");
+        services.AddDistributedCrdtP2p("mesh-v2", "replica-v2");
+
+        // Register two distinct migrations using the exact same C# state types (LegacyTaskListStateV1 -> ModernTaskListStateV2)
+        services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, LegacyToModernTaskMigrator>(options =>
+        {
+            options.MigrationId = "domain-a-migration";
+            options.SourceReplicaId = "replica-v1";
+            options.SourceTypeAlias = "tasks-domain-a-v1";
+            options.TargetReplicaId = "replica-v2";
+            options.TargetTypeAlias = "tasks-domain-a-v2";
+            options.BackfillBatchDelayMilliseconds = 1;
+        });
+
+        services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, LegacyToModernTaskMigrator>(options =>
+        {
+            options.MigrationId = "domain-b-migration";
+            options.SourceReplicaId = "replica-v1";
+            options.SourceTypeAlias = "tasks-domain-b-v1";
+            options.TargetReplicaId = "replica-v2";
+            options.TargetTypeAlias = "tasks-domain-b-v2";
+            options.BackfillBatchDelayMilliseconds = 1;
+        });
+
+        await using var provider = services.BuildServiceProvider();
+        var scopeManager = provider.GetRequiredService<DistributedCrdtScopeManager>();
+        var orchestratorV1 = scopeManager.GetOrCreateScope("replica-v1").ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var orchestratorV2 = scopeManager.GetOrCreateScope("replica-v2").ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+
+        await orchestratorV1.InitializeAsync();
+        await orchestratorV2.InitializeAsync();
+
+        await orchestratorV1.CreateDocumentAsync("doc-a", "tasks-domain-a-v1");
+        await orchestratorV1.ApplyIntentAsync<LegacyTaskListStateV1>(
+            "doc-a",
+            new MapSetIntent("itemA", new LegacyTaskItemV1 { Title = "Domain A Task", Completed = true }),
+            nameof(LegacyTaskListStateV1.Items));
+
+        await orchestratorV1.CreateDocumentAsync("doc-b", "tasks-domain-b-v1");
+        await orchestratorV1.ApplyIntentAsync<LegacyTaskListStateV1>(
+            "doc-b",
+            new MapSetIntent("itemB", new LegacyTaskItemV1 { Title = "Domain B Task", Completed = false }),
+            nameof(LegacyTaskListStateV1.Items));
+
+        var hostedServices = provider.GetServices<IHostedService>().ToList();
+        foreach (var hs in hostedServices)
+        {
+            await hs.StartAsync(CancellationToken.None);
+        }
+
+        var migrationManager = provider.GetRequiredService<ICrdtMigrationManager>();
+        await migrationManager.DrainAllAsync();
+
+        // Assert - Both bridges coexist, report individual statuses, and lookup for unknown migration ID returns false
+        migrationManager.GetAllStatuses().Count.ShouldBe(2);
+        migrationManager.TryGetStatus("unknown-migration-id", out _).ShouldBeFalse();
+
+        migrationManager.TryGetStatus("domain-a-migration", out var statusA).ShouldBeTrue();
+        migrationManager.TryGetStatus("domain-b-migration", out var statusB).ShouldBeTrue();
+
+        statusA.BackfilledDocuments.ShouldBe(1);
+        statusB.BackfilledDocuments.ShouldBe(1);
+
+        (await orchestratorV2.DocumentExistsAsync("doc-a", "tasks-domain-a-v2")).ShouldBeTrue();
+        (await orchestratorV2.DocumentExistsAsync("doc-b", "tasks-domain-b-v2")).ShouldBeTrue();
+        (await orchestratorV2.DocumentExistsAsync("doc-a", "tasks-domain-b-v2")).ShouldBeFalse();
+
+        foreach (var hs in hostedServices)
+        {
+            await hs.StopAsync(CancellationToken.None);
+        }
     }
 
     private static void RegisterInMemoryMeshMocks(

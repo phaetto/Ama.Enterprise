@@ -867,4 +867,72 @@ public sealed class JournalingAndSnapshottingIntegrationTests
             }
         }
     }
+
+    [IntegrationFact]
+    public async Task BufferedStorageDecorator_DeleteDocumentBeforeFlush_PurgesInFlightOperationsForDeletedDocumentOnly()
+    {
+        // Arrange
+        var innerStorage = new MemoryCrdtStorage();
+        var sp = BuildNode("ReplicaDelBuffer", services =>
+        {
+            services.Configure<DistributedCrdtOptions>(opt =>
+            {
+                opt.JournalMode = CrdtJournalMode.InMemoryBuffer;
+            });
+            services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(provider =>
+                new BufferedDistributedCrdtStorageDecorator(
+                    innerStorage,
+                    ActivatorUtilities.CreateInstance<InMemoryWriteAheadBuffer>(provider))));
+        });
+
+        var scope = sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaDelBuffer");
+        var decorator = (BufferedDistributedCrdtStorageDecorator)scope.Storage;
+
+        var deletedDocOp = default(CrdtOperation) with { Id = Guid.NewGuid(), ReplicaId = "ReplicaDelBuffer", ShardClock = 1, ShardId = "default" };
+        var survivingDocOp = default(CrdtOperation) with { Id = Guid.NewGuid(), ReplicaId = "ReplicaDelBuffer", ShardClock = 2, ShardId = "default" };
+
+        await decorator.AppendAsync("doc-to-delete", new[] { deletedDocOp }, CancellationToken.None);
+        await decorator.AppendAsync("doc-to-keep", new[] { survivingDocOp }, CancellationToken.None);
+
+        // Act - Delete "doc-to-delete" while its operation is still staged in the buffer, then drain to inner storage
+        await decorator.DeleteDocumentAsync("default", "doc-to-delete", CancellationToken.None);
+        await decorator.DrainAsync(100, CancellationToken.None);
+
+        // Assert - Only "doc-to-keep" was flushed to inner storage; "doc-to-delete" was filtered out
+        var persistedOps = await innerStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
+        persistedOps.Count.ShouldBe(1);
+        persistedOps[0].DocumentId.ShouldBe("doc-to-keep");
+        persistedOps[0].Operation.Id.ShouldBe(survivingDocOp.Id);
+    }
+
+    [IntegrationFact]
+    public async Task CrdtCompactionService_WhenSafeToCompactHoursElapsed_CompactsMetadataAcrossActiveDocuments()
+    {
+        // Arrange
+        var sp = BuildNode("ReplicaCompact", services =>
+        {
+            services.Configure<DistributedCrdtOptions>(opt =>
+            {
+                opt.CompactionIntervalSeconds = 1;
+                opt.CompactionTtlSeconds = 1; // Allow immediate compaction of metadata
+            });
+        });
+
+        var scope = sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaCompact");
+        var orch = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orch.InitializeAsync(CancellationToken.None);
+        await orch.CreateDocumentAsync("compact-doc", "journal-doc", CancellationToken.None);
+        await orch.ApplyIntentAsync<JournalTestState>("compact-doc", new MapSetIntent("Key1", "Val1"), nameof(JournalTestState.DataMap), CancellationToken.None);
+
+        var compactionService = sp.GetServices<IHostedService>().OfType<CrdtCompactionService>().Single();
+
+        // Act
+        await compactionService.StartAsync(CancellationToken.None);
+        await Task.Delay(1500);
+        await compactionService.StopAsync(CancellationToken.None);
+
+        // Assert - Document state remains intact after background metadata compaction cycle
+        var docState = await orch.GetDocumentStateAsync<JournalTestState>("compact-doc", CancellationToken.None);
+        docState.Data.DataMap.ShouldContainKeyAndValue("Key1", "Val1");
+    }
 }

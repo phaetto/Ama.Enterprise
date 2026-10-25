@@ -770,4 +770,59 @@ public sealed class ClusterStatePersistenceIntegrationTests
         // Assert
         observerMock.Verify(o => o.OnClusterTopologyChanged(), Times.Once);
     }
+
+    [IntegrationFact]
+    public void ClusterStateTracker_UpdatePeerState_WhenPeerIsAlreadyTombstoned_IgnoresUpdateAndDoesNotNotifyObservers()
+    {
+        // Arrange
+        var observerMock = new Mock<IClusterStateObserver>();
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.AddScoped<IClusterStateObserver>(_ => observerMock.Object);
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var tracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
+
+        tracker.TombstoneReplica("TombstonedPeer");
+        observerMock.Invocations.Clear();
+
+        var dvv = new DottedVersionVector();
+        dvv.Versions["TombstonedPeer"] = 99;
+        var map = new ShardVersionVectorMap { { "default", dvv } };
+
+        // Act - Attempt to update state for a replica that is currently tombstoned
+        tracker.UpdatePeerState("TombstonedPeer", "ZombieNetId", map);
+
+        // Assert - State and network session mappings are rejected and observers are not notified
+        tracker.GetClusterStates().ShouldBeEmpty();
+        tracker.GetPeerIdByReplicaId("TombstonedPeer").ShouldBeNull();
+        tracker.GetReplicaIdByPeerId("ZombieNetId").ShouldBeNull();
+        observerMock.Verify(o => o.OnClusterTopologyChanged(), Times.Never);
+    }
+
+    [IntegrationFact]
+    public void ClusterStateTracker_EvictStalePeers_WhenTtlIsZeroOrNegative_ReturnsEmptyWithoutEvicting()
+    {
+        // Arrange
+        var sp = BuildNode("Replica1");
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var tracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
+
+        var dvv = new DottedVersionVector();
+        dvv.Versions["RemotePeer"] = 1;
+        tracker.UpdatePeerState("RemotePeer", "Net1", new ShardVersionVectorMap { { "default", dvv } });
+
+        // Act
+        var evictedZero = tracker.GetAndTombstoneExpiredPeers(TimeSpan.Zero);
+        var evictedNegative = tracker.GetAndTombstoneExpiredPeers(TimeSpan.FromSeconds(-10));
+
+        // Assert
+        evictedZero.ShouldBeEmpty();
+        evictedNegative.ShouldBeEmpty();
+        tracker.IsReplicaTombstoned("RemotePeer").ShouldBeFalse();
+        tracker.GetClusterStates().Count.ShouldBe(1);
+    }
 }

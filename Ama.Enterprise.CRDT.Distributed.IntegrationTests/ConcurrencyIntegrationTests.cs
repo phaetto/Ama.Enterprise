@@ -10,6 +10,7 @@ using Ama.CRDT.Attributes;
 using Ama.CRDT.Extensions;
 using Ama.CRDT.Models;
 using Ama.CRDT.Models.Aot;
+using Ama.CRDT.Models.Intents;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.P2p.Models.Core;
@@ -476,5 +477,47 @@ public sealed class ConcurrencyIntegrationTests
 
         var dvv = await dvvManager.GetFullSnapshotAsync(CancellationToken.None);
         dvv["default"].Versions["Replica1"].ShouldBe(ConcurrentCallers);
+    }
+
+    [IntegrationFact]
+    public async Task DistributedCrdtDocument_AfterFlushAsyncCompletesChannel_SubsequentCommandsFailGracefullyWithoutHanging()
+    {
+        // Arrange
+        var serviceProvider = BuildNode("Replica1");
+        var scopeManager = serviceProvider.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var commandPipeline = scope.ServiceProvider.GetRequiredService<IDocumentCommandPipeline>();
+        var patcher = scope.ServiceProvider.GetRequiredService<Ama.CRDT.Services.IAsyncCrdtPatcher>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        await orchestrator.CreateDocumentAsync("post-flush-doc", "concurrent-doc", CancellationToken.None);
+        var doc = orchestrator.TryGetLocalDocument<ConcurrencyTestState>("post-flush-doc")!;
+
+        // Act 1 - Flush the document command pipeline (which completes the underlying command channel)
+        await commandPipeline.FlushAsync(CancellationToken.None);
+
+        // Act 2 - Enqueue a FireAndForget intent and an Acknowledged intent after the channel is closed
+        var ffException = await Record.ExceptionAsync(() =>
+            doc.ApplyRemoteIntentAsync(
+                new SetIntent("AfterFlushFF"),
+                nameof(ConcurrencyTestState.Data),
+                patcher,
+                Models.IntentDeliveryMode.FireAndForget,
+                CancellationToken.None));
+
+        var ackException = await Record.ExceptionAsync(() =>
+            doc.ApplyRemoteIntentAsync(
+                new SetIntent("AfterFlushAck"),
+                nameof(ConcurrencyTestState.Data),
+                patcher,
+                Models.IntentDeliveryMode.Acknowledged,
+                CancellationToken.None));
+
+        // Assert - Both FireAndForget and Acknowledged commands fail immediately with ChannelClosedException (InvalidOperationException) without deadlocking
+        ffException.ShouldNotBeNull();
+        ffException.ShouldBeAssignableTo<InvalidOperationException>();
+        ackException.ShouldNotBeNull();
+        ackException.ShouldBeAssignableTo<InvalidOperationException>();
     }
 }

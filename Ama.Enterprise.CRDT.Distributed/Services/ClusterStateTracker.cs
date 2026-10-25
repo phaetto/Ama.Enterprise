@@ -61,6 +61,11 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
 
         lock (syncRoot)
         {
+            if (tombstonedReplicas.ContainsKey(peerReplicaId))
+            {
+                return;
+            }
+
             // 1. Remove any old network mappings for this specific replica (enforce 1:1 relationship)
             var stalePeerIds = networkIdToReplicaId
                 .Where(x => x.Value == peerReplicaId && x.Key != peerId)
@@ -246,6 +251,11 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
     /// <inheritdoc />
     public IReadOnlyList<string> GetAndTombstoneExpiredPeers(TimeSpan ttl)
     {
+        if (ttl <= TimeSpan.Zero)
+        {
+            return Array.Empty<string>();
+        }
+
         var now = DateTime.UtcNow;
         var expiredReplicas = new List<string>();
 

@@ -281,6 +281,29 @@ public sealed class ConsistentHashShardDistributionManagerIntegrationTests
         (await context.Manager.IsShardLocalAsync("system-document-registry")).ShouldBeTrue();
     }
 
+    [Fact]
+    public async Task GetTargetNodesForShardAsync_WhenMultipleActivePeerSessionsMapToSameReplicaId_DeduplicatesReplicaOnRing()
+    {
+        // Arrange - 2 distinct replicas, but replica-1 has 3 concurrent active network PeerIds in IPeerRegistry
+        var context = SetupManager(enableSharding: true, replicationFactor: 3, nodeCount: 2);
+
+        for (int i = 0; i < 2; i++)
+        {
+            var duplicateSessionPeerId = new PeerId(Guid.NewGuid());
+            context.ActivePeers.Add(new PeerNode { Id = duplicateSessionPeerId });
+            context.PeerToReplicaMap[duplicateSessionPeerId.Value.ToString()] = "replica-1";
+        }
+
+        // Act
+        var targets = await context.Manager.GetTargetNodesForShardAsync("dedup-shard-test");
+
+        // Assert - Even though replicationFactor is 3 and there are 4 active network sessions, only 2 unique replicas exist
+        targets.Count.ShouldBe(2);
+        targets.Distinct(StringComparer.Ordinal).Count().ShouldBe(2);
+        targets.ShouldContain("replica-0");
+        targets.ShouldContain("replica-1");
+    }
+
     private static ManagerTestContext SetupManager(bool enableSharding, int replicationFactor, int nodeCount)
     {
         var localReplicaId = "replica-0";
