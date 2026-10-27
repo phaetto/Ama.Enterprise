@@ -17,6 +17,7 @@ using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 using Ama.Enterprise.CRDT.Distributed.Services.P2p;
+using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -153,7 +154,8 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Declares a distinct CRDT Replica registering bounding constraints.
+    /// Declares a distinct CRDT Replica in the global inventory.
+    /// Registration is idempotent for the same <paramref name="replicaId"/>.
     /// </summary>
     public static IServiceCollection AddDistributedCrdtReplica(this IServiceCollection services, string replicaId)
     {
@@ -161,7 +163,42 @@ public static class ServiceCollectionExtensions
         if (string.IsNullOrWhiteSpace(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
 
         replicaId = CrdtStringPool.Shared.GetOrAdd(replicaId);
-        services.AddSingleton(new DistributedCrdtReplicaRegistration(replicaId));
+
+        var alreadyRegistered = services.Any(d =>
+            d.ServiceType == typeof(DistributedCrdtReplicaRegistration) &&
+            d.ImplementationInstance is DistributedCrdtReplicaRegistration existing &&
+            string.Equals(existing.ReplicaId, replicaId, StringComparison.Ordinal));
+
+        if (!alreadyRegistered)
+        {
+            services.AddSingleton(new DistributedCrdtReplicaRegistration(replicaId));
+        }
+
+        return services;
+    }
+
+    /// <summary>
+    /// Declares a distinct CRDT Replica in the global inventory and binds it to one or more P2P meshes.
+    /// </summary>
+    public static IServiceCollection AddDistributedCrdtReplica(this IServiceCollection services, string replicaId, params string[] meshIds)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        if (string.IsNullOrWhiteSpace(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
+        ArgumentNullException.ThrowIfNull(meshIds);
+
+        services.AddDistributedCrdtReplica(replicaId);
+
+        for (int i = 0; i < meshIds.Length; i++)
+        {
+            var meshId = meshIds[i];
+            if (string.IsNullOrWhiteSpace(meshId))
+            {
+                throw new ArgumentException("Mesh ID cannot be null or empty.", nameof(meshIds));
+            }
+
+            services.AddDistributedCrdtP2p(meshId, replicaId);
+        }
+
         return services;
     }
 
@@ -195,7 +232,7 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Injects generic anti-entropy multi-mesh payloads mapped to a specific replica and mesh.
+    /// Binds a P2P mesh to a local CRDT replica and ensures the replica is registered in the global inventory.
     /// </summary>
     public static IServiceCollection AddDistributedCrdtP2p(this IServiceCollection services, string meshId, string replicaId)
     {
@@ -205,6 +242,19 @@ public static class ServiceCollectionExtensions
 
         meshId = CrdtStringPool.Shared.GetOrAdd(meshId);
         replicaId = CrdtStringPool.Shared.GetOrAdd(replicaId);
+
+        services.AddDistributedCrdtReplica(replicaId);
+
+        var alreadyBound = services.Any(d =>
+            d.ServiceType == typeof(DistributedCrdtP2pRegistration) &&
+            d.ImplementationInstance is DistributedCrdtP2pRegistration existing &&
+            string.Equals(existing.MeshId, meshId, StringComparison.Ordinal) &&
+            string.Equals(existing.ReplicaId, replicaId, StringComparison.Ordinal));
+
+        if (alreadyBound)
+        {
+            return services;
+        }
 
         services.AddSingleton(new DistributedCrdtP2pRegistration(meshId, replicaId));
 
@@ -217,6 +267,20 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<CrdtAntiEntropyService>();
 
         return services;
+    }
+
+    /// <summary>
+    /// Binds the current P2P mesh builder to a local CRDT replica and registers the replica in the global inventory.
+    /// If <paramref name="replicaId"/> is omitted or null, <see cref="IP2pMeshBuilder.MeshId"/> is used as the replica ID.
+    /// </summary>
+    public static IP2pMeshBuilder BindCrdtReplica(this IP2pMeshBuilder builder, string? replicaId = null)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        var resolvedReplicaId = string.IsNullOrWhiteSpace(replicaId) ? builder.MeshId : replicaId;
+        builder.Services.AddDistributedCrdtP2p(builder.MeshId, resolvedReplicaId);
+
+        return builder;
     }
 
     /// <summary>

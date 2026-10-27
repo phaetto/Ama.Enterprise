@@ -102,8 +102,6 @@ public static class Program
             options.JournalSoftTrimThreshold = 15000;
         });
 
-        services.AddDistributedCrdtReplica(replicaId);
-
         // Register custom topology provider tracking multi-mesh active session generic explicit partitions gracefully natively
         services.Replace(ServiceDescriptor.Scoped<IScopeTopologyProvider, RbacScopeTopologyProvider>());
 

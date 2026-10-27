@@ -1,5 +1,7 @@
 <Solution>
   <Folder Name="/Analyzers/">
+    <Project Path="Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests.csproj" Id="3f751f1e-3aaf-4492-a770-3488b9752e66" />
+    <Project Path="Ama.Enterprise.CRDT.Distributed.Analyzers/Ama.Enterprise.CRDT.Distributed.Analyzers.csproj" Id="24a69b6f-368f-4c95-9ea3-4c7083ee8078" />
     <Project Path="Ama.Enterprise.CRDT.MessagePack.SourceGenerators.UnitTests/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.UnitTests.csproj" />
     <Project Path="Ama.Enterprise.CRDT.MessagePack.SourceGenerators/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.csproj" />
     <Project Path="Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj" />

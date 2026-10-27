@@ -106,8 +106,6 @@ public static class Program
             options.WalDirectoryPath = AppContext.BaseDirectory;
         });
 
-        services.AddDistributedCrdtReplica(replicaId);
-
         // Register the showcase JSON AOT and CRDT AOT contexts directly into the generic CRDT pipeline
         services.AddCrdt()
                 .AddCrdtJsonTypeInfoResolver(ShowCaseJsonContext.Default)
@@ -177,7 +175,9 @@ public static class Program
                     string.Empty // Get ALL
                 };
             })
+#pragma warning disable DCRDT0003 // "admin" mesh is dedicated to P2P telemetry forwarding and does not host CRDT replicas
             .AddP2pMesh("admin")
+#pragma warning restore DCRDT0003
             .AddTcpTransport(options =>
             {
                 options.ListenPort = currentAdminPort;

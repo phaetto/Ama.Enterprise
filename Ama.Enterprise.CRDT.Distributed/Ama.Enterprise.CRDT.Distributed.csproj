@@ -33,10 +33,12 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\Ama.Enterprise.P2p\Ama.Enterprise.P2p.csproj" />
-		<ProjectReference Include="..\Ama.Enterprise.Project.Analyzers\Ama.Enterprise.Project.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+		<ProjectReference Include="..\Ama.Enterprise.Project.Analyzers\Ama.Enterprise.Project.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" PrivateAssets="all" />
+		<ProjectReference Include="..\Ama.Enterprise.CRDT.Distributed.Analyzers\Ama.Enterprise.CRDT.Distributed.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" PrivateAssets="all" />
 	</ItemGroup>
 
 	<ItemGroup>
+		<None Include="..\Ama.Enterprise.CRDT.Distributed.Analyzers\bin\$(Configuration)\netstandard2.0\*.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
 		<None Include="..\README.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
 

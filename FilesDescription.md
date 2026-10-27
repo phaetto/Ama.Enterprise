@@ -1,11 +1,16 @@
 | File Path | Description |
 | --- | --- |
 | `$/.editorconfig` | No description provided. |
-| `$/.github/workflows/ci.yml` | Added a step to pack `Ama.Enterprise.CRDT.MessagePack` and verify that `Ama.Enterprise.CRDT.MessagePack.SourceGenerators.dll` is included in the generated NuGet package. |
+| `$/.github/workflows/ci.yml` | Added packing and verification steps to ensure `Ama.Enterprise.CRDT.Distributed.Analyzers.dll` is bundled inside the `Ama.Enterprise.CRDT.Distributed` NuGet package alongside the MessagePack analyzer check. |
 | `$/.github/workflows/codeql.yml` | No description provided. |
-| `$/.github/workflows/publish-preview-to-nuget.yml` | Added a verification step ensuring `Ama.Enterprise.CRDT.MessagePack.SourceGenerators.dll` is present in the packed `Ama.Enterprise.CRDT.MessagePack` NuGet package before publishing. |
-| `$/.github/workflows/publish-release-to-nuget-manual.yml` | Added a verification step ensuring `Ama.Enterprise.CRDT.MessagePack.SourceGenerators.dll` is present in the packed `Ama.Enterprise.CRDT.MessagePack` NuGet package before publishing. |
+| `$/.github/workflows/publish-preview-to-nuget.yml` | Added verification step ensuring `Ama.Enterprise.CRDT.Distributed.Analyzers.dll` is included in the packed `Ama.Enterprise.CRDT.Distributed` NuGet package before publishing. |
+| `$/.github/workflows/publish-release-to-nuget-manual.yml` | Added verification step ensuring `Ama.Enterprise.CRDT.Distributed.Analyzers.dll` is included in the packed `Ama.Enterprise.CRDT.Distributed` NuGet package before publishing. |
 | `$/.gitignore` | No description provided. |
+| `$/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests.csproj` | Unit test project for `Ama.Enterprise.CRDT.Distributed.Analyzers`. |
+| `$/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests/CrdtReplicaAndMeshConfigurationAnalyzerTests.cs` | Unit tests verifying `DCRDT0001`, `DCRDT0002`, `DCRDT0003`, and `DCRDT0004` diagnostics and valid multi-mesh CRDT configurations. |
+| `$/Ama.Enterprise.CRDT.Distributed.Analyzers/Ama.Enterprise.CRDT.Distributed.Analyzers.csproj` | Roslyn analyzer project validating Distributed CRDT and P2P mesh registration rules. |
+| `$/Ama.Enterprise.CRDT.Distributed.Analyzers/CrdtReplicaAndMeshConfigurationAnalyzer.cs` | Diagnostic analyzer reporting `DCRDT0001` (missing replica), `DCRDT0002` (unbound replica), `DCRDT0003` (unbound P2P mesh), and `DCRDT0004` (unconfigured P2P mesh). |
+| `$/Ama.Enterprise.CRDT.Distributed.Analyzers/IsExternalInit.cs` | Polyfill for `System.Runtime.CompilerServices.IsExternalInit` to support primary constructor `record struct` properties on `netstandard2.0`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/Ama.Enterprise.CRDT.Distributed.IntegrationTests.csproj` | Updated reference from `Ama.Enterprise.UnitTests` to the renamed `Ama.Enterprise.Project.Tests.Common`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/AntiEntropyStateSyncIntegrationTests.cs` | Added edge-case tests for remote read requests on unregistered document types and forwarded intents with unknown intent type aliases. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/ClusterStatePersistenceIntegrationTests.cs` | Added edge-case tests verifying `UpdatePeerState` rejection for tombstoned replicas and `EvictStalePeers` handling of zero/negative TTLs. |
@@ -27,7 +32,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/ShowCaseJsonContext.cs` | AOT JSON context for the showcase multi-CRDT models. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskItem.cs` | Data structure representing an individual task item. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskListState.cs` | Root CRDT document model representing a task list. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Linked console loop to `ICrdtShutdownCoordinator.ShutdownToken` and used `WaitAsync` on `Console.ReadLine` so a single Ctrl+C exits without blocking on standard input. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Simplified replica registration via `AddDistributedCrdtP2p` and suppressed `DCRDT0003` on the telemetry-only `"admin"` mesh. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetManager.cs` | Added `DocumentExistsAsync` check and input validation to `GetDevicesAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/IFleetManager.cs` | Added overloads accepting `IntentDeliveryMode` for setting and removing devices. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ITaskManager.cs` | Added overloads accepting `IntentDeliveryMode` for setting and removing tasks. |
@@ -48,7 +53,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Models/ShowCaseNodeContext.cs` | Data structure encapsulating local session boundaries tracking active role and region. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Models/TaskItem.cs` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Models/TaskListState.cs` | No description provided. |
-| `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Program.cs` | Linked console loop to `ICrdtShutdownCoordinator.ShutdownToken` and used `WaitAsync` on `Console.ReadLine` so a single Ctrl+C exits without blocking on standard input. |
+| `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Program.cs` | Removed redundant `AddDistributedCrdtReplica` call now handled idempotently by `AddDistributedCrdtP2p`. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/FleetManager.cs` | Added `DocumentExistsAsync` check and input validation to `GetDevicesAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/IFleetManager.cs` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/ITaskManager.cs` | No description provided. |
@@ -57,9 +62,9 @@
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/ShowCaseCrdtStorage.cs` | Implemented `AppendBatchAsync` wrapping cross-document operations in a single SQLite transaction. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/ShowCaseTokenValidator.cs` | Refactored token validator evaluating structured session constraints to resolve Keyed DI construction limits. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/TaskManager.cs` | Added `DocumentExistsAsync` check and input validation to `GetTasksAsync`. |
-| `$/Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
+| `$/Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj` | Configured `Ama.Enterprise.CRDT.Distributed.Analyzers` project reference with `OutputItemType="Analyzer"` and `ReferenceOutputAssembly="false"`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Constants.cs` | Global constants for the distributed CRDT module, including the reserved `SystemRegistryDocumentId` (`system-document-registry`). |
-| `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | Keyed `CrdtMigrationBridgeService` registrations by `MigrationId` and registered each bridge as an `IHostedService` so multiple migration bridges of the same state types can coexist in the same container. |
+| `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | Made `AddDistributedCrdtReplica` and `AddDistributedCrdtP2p` idempotent, auto-registered replicas inside `AddDistributedCrdtP2p`, added `AddDistributedCrdtReplica(replicaId, params string[] meshIds)`, and added `IP2pMeshBuilder.BindCrdtReplica`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/ClusterStateSnapshotDto.cs` | Updated to map tombstoned replicas to their eviction timestamp tracking the exact eviction moment for safe cooldown expirations. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtEvictionRejectionMessage.cs` | Message broadcasted to forcefully reject and re-bootstrap nodes that have been tombstoned by the cluster, preventing amnesia edge cases. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtIntentForwardRequestDto.cs` | Added `DocumentTypeAlias` property to support lazy document instantiation on target shards when direct RPCs outrace registry gossip. |
@@ -168,7 +173,7 @@
 | `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Ama.Enterprise.FeatureFlags.IntegrationTests.csproj` | Redirected shared tests project reference pointing to renamed `Ama.Enterprise.Project.Tests.Common`. |
 | `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Services/FeatureFlagDomainIntegrationTests.cs` | Replaced legacy C# event subscription assertions with decoupled testing observers mapping to the new async `IFeatureFlagStateObserver` architecture. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj` | Appended an MSBuild target to automatically execute the local native Azurite startup batch script during the build process. Added `DisableFastUpToDateCheck` to ensure Visual Studio always evaluates the pre-build Azurite checks even when C# files haven't changed. |
-| `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Linked console loop to `ICrdtShutdownCoordinator.ShutdownToken` and used `WaitAsync` on `Console.ReadLine` so a single Ctrl+C exits without blocking on standard input. |
+| `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Removed redundant `AddDistributedCrdtReplica` call now handled by `AddDistributedCrdtP2p`. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/start-azurite.bat` | Windows batch script that automatically discovers and executes natively installed Azurite instances (via Visual Studio or NPM) bypassing Docker requirements, explicitly detached via PowerShell to prevent MSBuild hangs. |
 | `$/Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
 | `$/Ama.Enterprise.FeatureFlags/Constants.cs` | Global constants for the Feature Flags module, defining common identifiers and document types. |

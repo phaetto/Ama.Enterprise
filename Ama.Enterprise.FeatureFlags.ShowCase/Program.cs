@@ -80,9 +80,7 @@ public static class Program
             options.UseBinarySerialization = true;
         });
 
-        // 1. Explicitly register the distributed CRDT topological core bounds
-        services.AddDistributedCrdtReplica(replicaId);
-        
+        // 1. Configure the distributed CRDT core
         services.AddDistributedCrdtCore(options =>
         {
             options.ActiveSyncEnabled = true;

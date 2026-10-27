@@ -102,6 +102,11 @@ jobs:
 
       - name: Verify Analyzers
         run: |
+          for nupkg in ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/Ama.Enterprise.CRDT.Distributed.[0-9]*.nupkg; do
+            echo "Inspecting $nupkg..."
+            CONTENTS=$(unzip -l "$nupkg")
+            echo "$CONTENTS" | grep -q "analyzers/dotnet/cs/Ama.Enterprise.CRDT.Distributed.Analyzers.dll" || { echo "Error: Ama.Enterprise.CRDT.Distributed.Analyzers.dll is missing from $nupkg!"; exit 1; }
+          done
           for nupkg in ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/Ama.Enterprise.CRDT.MessagePack.*.nupkg; do
             echo "Inspecting $nupkg..."
             CONTENTS=$(unzip -l "$nupkg")
