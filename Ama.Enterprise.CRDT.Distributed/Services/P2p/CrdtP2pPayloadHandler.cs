@@ -250,6 +250,11 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
 
             if (string.Equals(syncMsg.ReplicaId, replicaContext.ReplicaId, StringComparison.Ordinal))
             {
+                if (IsLocalLoopbackSender(scope, meshId, senderId))
+                {
+                    return;
+                }
+
                 logger.LogCritical(
                     "[{ReplicaId}] Duplicate replica ID collision detected! Received CrdtSync message from remote peer '{PeerId}' claiming the same ReplicaId '{DuplicateReplicaId}'. Ignoring payload to prevent DVV corruption.",
                     replicaContext.ReplicaId,
@@ -383,6 +388,11 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             if (!string.IsNullOrEmpty(patchMsg.ReplicaId) &&
                 string.Equals(patchMsg.ReplicaId, replicaContext.ReplicaId, StringComparison.Ordinal))
             {
+                if (IsLocalLoopbackSender(scope, meshId, senderId))
+                {
+                    return;
+                }
+
                 logger.LogCritical(
                     "[{ReplicaId}] Duplicate replica ID collision detected! Received CrdtPatch message from remote peer '{PeerId}' claiming the same ReplicaId '{DuplicateReplicaId}' for document '{DocumentId}'. Dropping patch to prevent DVV corruption.",
                     replicaContext.ReplicaId,
@@ -441,6 +451,11 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
 
             if (string.Equals(resMsg.ReplicaId, replicaContext.ReplicaId, StringComparison.Ordinal))
             {
+                if (IsLocalLoopbackSender(scope, meshId, senderId))
+                {
+                    return;
+                }
+
                 logger.LogCritical(
                     "[{ReplicaId}] Duplicate replica ID collision detected! Received CrdtSnapshot message from remote peer '{PeerId}' claiming the same ReplicaId '{DuplicateReplicaId}' for document '{DocumentId}'. Dropping snapshot to prevent DVV corruption.",
                     replicaContext.ReplicaId,
@@ -496,5 +511,33 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
         {
             await p2pProtocol.BroadcastAsync(wrapperBytes, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    private static bool IsLocalLoopbackSender(IDistributedCrdtScope scope, string meshId, PeerId senderId)
+    {
+        if (senderId.Value == Guid.Empty)
+        {
+            return false;
+        }
+
+        var nodeOptionsMonitor = scope.ServiceProvider.GetService<Microsoft.Extensions.Options.IOptionsMonitor<P2pNodeOptions>>();
+        if (nodeOptionsMonitor != null)
+        {
+            try
+            {
+                var localPeerId = nodeOptionsMonitor.Get(meshId).LocalPeerId;
+                if (localPeerId != Guid.Empty && localPeerId == senderId.Value)
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                // Ignore if mesh options are not configured
+            }
+        }
+
+        var nodeOptions = scope.ServiceProvider.GetService<Microsoft.Extensions.Options.IOptions<P2pNodeOptions>>()?.Value;
+        return nodeOptions != null && nodeOptions.LocalPeerId != Guid.Empty && nodeOptions.LocalPeerId == senderId.Value;
     }
 }

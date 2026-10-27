@@ -856,12 +856,53 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 return;
             }
 
+            var replicaContext = serviceProvider.GetService<ReplicaContext>();
+            var localReplicaId = replicaContext?.ReplicaId;
+            var patchToApply = cmd.Patch.Value;
+
+            if (!string.IsNullOrEmpty(localReplicaId))
+            {
+                List<CrdtOperation>? filteredOps = null;
+                var droppedOwnOps = false;
+
+                for (int i = 0; i < incomingOps.Count; i++)
+                {
+                    var op = incomingOps[i];
+                    if (string.Equals(op.ReplicaId, localReplicaId, StringComparison.Ordinal))
+                    {
+                        if (!droppedOwnOps)
+                        {
+                            droppedOwnOps = true;
+                            filteredOps = new List<CrdtOperation>(incomingOps.Count - 1);
+                            for (int j = 0; j < i; j++)
+                            {
+                                filteredOps.Add(incomingOps[j]);
+                            }
+                        }
+                    }
+                    else if (droppedOwnOps)
+                    {
+                        filteredOps!.Add(op);
+                    }
+                }
+
+                if (droppedOwnOps)
+                {
+                    if (filteredOps == null || filteredOps.Count == 0)
+                    {
+                        return;
+                    }
+
+                    patchToApply = new CrdtPatch(filteredOps);
+                }
+            }
+
             await versionVectorManager.ExecuteShardLockedAsync(ShardId, async () =>
             {
                 CrdtDocument<TState> currentDoc;
                 lock (syncRoot) { currentDoc = currentDocument; }
 
-                var result = await applicator.ApplyPatchAsync(currentDoc, cmd.Patch!.Value).ConfigureAwait(false);
+                var result = await applicator.ApplyPatchAsync(currentDoc, patchToApply).ConfigureAwait(false);
 
                 lock (syncRoot)
                 {

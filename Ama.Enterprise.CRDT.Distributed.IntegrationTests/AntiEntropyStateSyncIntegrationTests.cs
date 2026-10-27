@@ -738,6 +738,53 @@ public sealed class AntiEntropyStateSyncIntegrationTests
     }
 
     [IntegrationFact]
+    public async Task LocalGossipLoopbackAndRelayedBounceBack_ShouldBeSilentlyIgnored_WithoutFalseCollisionCriticalLogs()
+    {
+        // Arrange - Configure local P2pNodeOptions with a concrete LocalPeerId so we can test both:
+        // 1. GossipAlgorithm.BroadcastAsync local loopback (where senderId == LocalPeerId and patchMsg.ReplicaId == "Replica1")
+        // 2. Relayed bounce-back patch (where a remote peer "Replica2" relays an operation originally created by "Replica1")
+        var localPeerGuid = Guid.NewGuid();
+        var remotePeerGuid = Guid.NewGuid();
+
+        var node1Sp = BuildNode("Replica1", services =>
+        {
+            services.Configure<P2pNodeOptions>(TestMeshId, opt => opt.LocalPeerId = localPeerGuid);
+        });
+
+        var node1Scope = node1Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica1");
+        var node1Orch = node1Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var node1Storage = node1Scope.ServiceProvider.GetRequiredService<IDistributedCrdtStorage>();
+        await node1Orch.InitializeAsync(CancellationToken.None);
+        await node1Orch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+        await node1Orch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("LocalKey", "LocalVal"), nameof(SyncTestState.DataMap), CancellationToken.None);
+
+        var node1Ops = await node1Storage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
+        var ownDocOps = node1Ops.Where(o => o.DocumentId.ToString().Contains("sync-doc-1", StringComparison.Ordinal)).Select(o => o.Operation).ToArray();
+        ownDocOps.ShouldNotBeEmpty();
+
+        var handler = node1Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var serializer = node1Sp.GetRequiredService<ICrdtSerializer>();
+
+        // Act 1: GossipAlgorithm local loopback (BroadcastAsync dispatches to local state.Dispatcher with localPeerGuid)
+        var loopbackPatchMsg = new CrdtPatchMessage("Replica1", new CrdtPatch(ownDocOps));
+        var loopbackWrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtPatch", serializer.SerializeToBytes(loopbackPatchMsg), "sync-doc-1");
+        await handler.HandlePayloadAsync(TestMeshId, new PeerId(localPeerGuid), serializer.SerializeToBytes(loopbackWrapper), CancellationToken.None);
+
+        // Act 2: Remote peer ("Replica2") relays back a patch containing an operation authored by "Replica1"
+        // (e.g. during anti-entropy or multi-hop forwarding)
+        var bouncedPatchMsg = new CrdtPatchMessage("Replica2", new CrdtPatch(ownDocOps));
+        var bouncedWrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtPatch", serializer.SerializeToBytes(bouncedPatchMsg), "sync-doc-1");
+        await handler.HandlePayloadAsync(TestMeshId, new PeerId(remotePeerGuid), serializer.SerializeToBytes(bouncedWrapper), CancellationToken.None);
+
+        // Assert - Local DVV remains at version 1 with no out-of-order dots or corruption, and "Replica1" is never registered as a remote peer
+        node1Scope.ClusterTracker.GetPeerIdByReplicaId("Replica1").ShouldBeNull();
+        var node1Doc = node1Orch.TryGetLocalDocument<SyncTestState>("sync-doc-1")!;
+        var dvv = node1Doc.GetLocalState()[node1Doc.ShardId];
+        dvv.Versions["Replica1"].ShouldBe(1);
+        dvv.Dots.ContainsKey("Replica1").ShouldBeFalse();
+    }
+
+    [IntegrationFact]
     public async Task AmnesiaRecovery_WhenNodeRestartsAndReceivesSnapshot_ShouldRestoreOwnDvvAndStopInfiniteSnapshotLoop()
     {
         // Arrange: Node 2 has a snapshot where Node 1 ("Replica1") was at version 9000 and Node 2 ("Replica2") was at version 10000.

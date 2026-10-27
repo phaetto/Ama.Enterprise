@@ -147,7 +147,6 @@ public static class Program
             {
                 options.ListenPort = currentPort;
                 options.ListenHost = "127.0.0.1";
-                //options.MaxMessageSize = int.MaxValue;
             })
             .AddUdpPeerDiscovery(options =>
             {
