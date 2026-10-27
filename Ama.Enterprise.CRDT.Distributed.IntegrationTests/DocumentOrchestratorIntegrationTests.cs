@@ -15,7 +15,6 @@ using Microsoft.Extensions.Hosting;
 using Moq;
 using Shouldly;
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json.Serialization;
 using System.Threading;

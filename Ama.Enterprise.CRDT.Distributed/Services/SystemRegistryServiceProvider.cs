@@ -6,7 +6,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
 /// Internal service provider wrapper that ensures any resolved <see cref="IShardIdProvider"/>
-/// is decorated with <see cref="SystemRegistryShardIdProviderDecorator"/> regardless of service registration order.
+/// or <see cref="IDocumentIdProvider"/> is decorated with the system registry decorators
+/// regardless of service registration order.
 /// </summary>
 internal sealed class SystemRegistryServiceProvider : IServiceProvider, ISupportRequiredService, IKeyedServiceProvider
 {
@@ -33,6 +34,18 @@ internal sealed class SystemRegistryServiceProvider : IServiceProvider, ISupport
                 ?? new SystemRegistryShardIdProviderDecorator(provider);
         }
 
+        if (serviceType == typeof(IDocumentIdProvider))
+        {
+            var provider = inner.GetService(typeof(IDocumentIdProvider)) as IDocumentIdProvider;
+            if (provider is null)
+            {
+                return null;
+            }
+
+            return provider as SystemRegistryDocumentIdProviderDecorator
+                ?? new SystemRegistryDocumentIdProviderDecorator(provider);
+        }
+
         if (serviceType == typeof(IServiceProvider))
         {
             return this;
@@ -50,6 +63,13 @@ internal sealed class SystemRegistryServiceProvider : IServiceProvider, ISupport
             var provider = inner.GetRequiredService<IShardIdProvider>();
             return provider as SystemRegistryShardIdProviderDecorator
                 ?? new SystemRegistryShardIdProviderDecorator(provider);
+        }
+
+        if (serviceType == typeof(IDocumentIdProvider))
+        {
+            var provider = inner.GetRequiredService<IDocumentIdProvider>();
+            return provider as SystemRegistryDocumentIdProviderDecorator
+                ?? new SystemRegistryDocumentIdProviderDecorator(provider);
         }
 
         if (serviceType == typeof(IServiceProvider))

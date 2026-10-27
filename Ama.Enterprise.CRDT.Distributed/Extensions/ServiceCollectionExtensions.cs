@@ -134,7 +134,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IClusterStateTracker, ClusterStateTracker>();
         services.AddScoped<ICrdtEvictionService, CrdtEvictionService>();
 
-        DecorateShardIdProviderResolutions(services);
+        DecorateSystemRegistryProviders(services);
         
         // Register topology and registry state observers
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IClusterStateObserver, OrchestratorClusterStateObserver>());
@@ -428,7 +428,7 @@ public static class ServiceCollectionExtensions
     }
 
     [UnconditionalSuppressMessage("Trimming", "IL2067", Justification = "Target types are already registered in the DI container with preserved constructors.")]
-    private static void DecorateShardIdProviderResolutions(IServiceCollection services)
+    private static void DecorateSystemRegistryProviders(IServiceCollection services)
     {
         var shardProviderDescriptor = services.LastOrDefault(d => d.ServiceType == typeof(IShardIdProvider));
         if (shardProviderDescriptor != null)
@@ -448,11 +448,30 @@ public static class ServiceCollectionExtensions
                 shardProviderDescriptor.Lifetime));
         }
 
+        var docIdProviderDescriptor = services.LastOrDefault(d => d.ServiceType == typeof(IDocumentIdProvider));
+        if (docIdProviderDescriptor != null)
+        {
+            services.Remove(docIdProviderDescriptor);
+            services.Add(ServiceDescriptor.Describe(
+                typeof(IDocumentIdProvider),
+                sp =>
+                {
+                    var inner = docIdProviderDescriptor.ImplementationInstance as IDocumentIdProvider
+                        ?? (docIdProviderDescriptor.ImplementationFactory != null
+                            ? (IDocumentIdProvider)docIdProviderDescriptor.ImplementationFactory(sp)
+                            : (IDocumentIdProvider)ActivatorUtilities.CreateInstance(sp, docIdProviderDescriptor.ImplementationType!));
+                    return inner as SystemRegistryDocumentIdProviderDecorator
+                        ?? new SystemRegistryDocumentIdProviderDecorator(inner);
+                },
+                docIdProviderDescriptor.Lifetime));
+        }
+
         for (int i = 0; i < services.Count; i++)
         {
             var descriptor = services[i];
             if (descriptor.IsKeyedService ||
                 descriptor.ServiceType == typeof(IShardIdProvider) ||
+                descriptor.ServiceType == typeof(IDocumentIdProvider) ||
                 descriptor.ServiceType.IsGenericTypeDefinition ||
                 descriptor.ImplementationInstance != null ||
                 descriptor.ServiceType.Namespace == null ||

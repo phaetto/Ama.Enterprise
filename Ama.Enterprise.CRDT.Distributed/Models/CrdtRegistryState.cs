@@ -5,7 +5,6 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Ama.CRDT.Models;
 using Ama.CRDT.Services.Pooling;
 using Ama.Enterprise.P2p.Models.Core;
 
