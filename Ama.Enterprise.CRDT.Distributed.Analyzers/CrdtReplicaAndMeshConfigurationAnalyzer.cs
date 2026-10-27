@@ -30,8 +30,7 @@ public sealed class CrdtReplicaAndMeshConfigurationAnalyzer : DiagnosticAnalyzer
         Category,
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "When configuring Distributed CRDT core services, at least one local CRDT replica must be registered so documents can be initialized and synchronized.",
-        customTags: [WellKnownDiagnosticTags.CompilationEnd]);
+        description: "When configuring Distributed CRDT core services, at least one local CRDT replica must be registered so documents can be initialized and synchronized.");
 
     private static readonly DiagnosticDescriptor UnboundReplicaRule = new(
         UnboundReplicaDiagnosticId,
@@ -40,8 +39,7 @@ public sealed class CrdtReplicaAndMeshConfigurationAnalyzer : DiagnosticAnalyzer
         Category,
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "A CRDT replica registered via 'AddDistributedCrdtReplica' without mesh bindings operates only locally. Suppress this warning if the replica is intentionally offline or local-only.",
-        customTags: [WellKnownDiagnosticTags.CompilationEnd]);
+        description: "A CRDT replica registered via 'AddDistributedCrdtReplica' without mesh bindings operates only locally. Suppress this warning if the replica is intentionally offline or local-only.");
 
     private static readonly DiagnosticDescriptor UnboundMeshRule = new(
         UnboundMeshDiagnosticId,
@@ -50,8 +48,7 @@ public sealed class CrdtReplicaAndMeshConfigurationAnalyzer : DiagnosticAnalyzer
         Category,
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "When Distributed CRDTs are active, P2P meshes are typically bound to a CRDT replica. Suppress this warning if the mesh is intentionally dedicated to non-CRDT traffic such as telemetry or monitoring.",
-        customTags: [WellKnownDiagnosticTags.CompilationEnd]);
+        description: "When Distributed CRDTs are active, P2P meshes are typically bound to a CRDT replica. Suppress this warning if the mesh is intentionally dedicated to non-CRDT traffic such as telemetry or monitoring.");
 
     private static readonly DiagnosticDescriptor UnconfiguredMeshRule = new(
         UnconfiguredMeshDiagnosticId,
@@ -60,8 +57,7 @@ public sealed class CrdtReplicaAndMeshConfigurationAnalyzer : DiagnosticAnalyzer
         Category,
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "Binding a CRDT replica to a P2P mesh ID requires a corresponding 'AddP2pMesh' registration with the same mesh ID.",
-        customTags: [WellKnownDiagnosticTags.CompilationEnd]);
+        description: "Binding a CRDT replica to a P2P mesh ID requires a corresponding 'AddP2pMesh' registration with the same mesh ID.");
 
     private readonly record struct ResolvedIdentifier(string Key, string DisplayName);
 
@@ -70,6 +66,14 @@ public sealed class CrdtReplicaAndMeshConfigurationAnalyzer : DiagnosticAnalyzer
     private readonly record struct P2pBindingInvocationInfo(Location Location, ResolvedIdentifier MeshId, ResolvedIdentifier ReplicaId, Location? OriginatingAddP2pMeshLocation);
 
     private readonly record struct MeshInvocationInfo(Location Location, ResolvedIdentifier MeshId);
+
+    private sealed class ConfigurationState
+    {
+        public List<Location> CoreLocations { get; } = [];
+        public List<ReplicaInvocationInfo> ReplicaRegistrations { get; } = [];
+        public List<P2pBindingInvocationInfo> P2pBindings { get; } = [];
+        public List<MeshInvocationInfo> MeshRegistrations { get; } = [];
+    }
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
     [
@@ -93,43 +97,52 @@ public sealed class CrdtReplicaAndMeshConfigurationAnalyzer : DiagnosticAnalyzer
         {
             var assemblyName = compilationContext.Compilation.AssemblyName ?? string.Empty;
 
-            if (assemblyName.IndexOf(".Test", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            if (string.Equals(assemblyName, "Ama.Enterprise.CRDT.Distributed", StringComparison.OrdinalIgnoreCase) ||
+                assemblyName.IndexOf(".Test", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 assemblyName.IndexOf(".UnitTests", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 assemblyName.IndexOf(".IntegrationTests", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 return;
             }
 
-            var coreLocations = new ConcurrentBag<Location>();
-            var replicaRegistrations = new ConcurrentBag<ReplicaInvocationInfo>();
-            var p2pBindings = new ConcurrentBag<P2pBindingInvocationInfo>();
-            var meshRegistrations = new ConcurrentBag<MeshInvocationInfo>();
+            compilationContext.RegisterOperationBlockStartAction(blockStartContext =>
+            {
+                if (IsExtensionMethodDefinition(blockStartContext.OwningSymbol))
+                {
+                    return;
+                }
 
-            compilationContext.RegisterOperationAction(
-                opContext => AnalyzeInvocation(
-                    opContext,
-                    coreLocations,
-                    replicaRegistrations,
-                    p2pBindings,
-                    meshRegistrations),
-                OperationKind.Invocation);
+                var state = new ConfigurationState();
 
-            compilationContext.RegisterCompilationEndAction(
-                endContext => ReportDiagnostics(
-                    endContext,
-                    coreLocations,
-                    replicaRegistrations,
-                    p2pBindings,
-                    meshRegistrations));
+                blockStartContext.RegisterOperationAction(
+                    opContext => AnalyzeInvocation(opContext, state),
+                    OperationKind.Invocation);
+
+                blockStartContext.RegisterOperationBlockEndAction(
+                    endContext => ReportDiagnostics(endContext, state));
+            });
         });
+    }
+
+    private static bool IsExtensionMethodDefinition(ISymbol owningSymbol)
+    {
+        if (owningSymbol is not IMethodSymbol methodSymbol)
+        {
+            return false;
+        }
+
+        if (methodSymbol.IsExtensionMethod &&
+            string.Equals(methodSymbol.ContainingType?.Name, "ServiceCollectionExtensions", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static void AnalyzeInvocation(
         OperationAnalysisContext context,
-        ConcurrentBag<Location> coreLocations,
-        ConcurrentBag<ReplicaInvocationInfo> replicaRegistrations,
-        ConcurrentBag<P2pBindingInvocationInfo> p2pBindings,
-        ConcurrentBag<MeshInvocationInfo> meshRegistrations)
+        ConfigurationState state)
     {
         if (context.Operation is not IInvocationOperation invocation)
         {
@@ -140,7 +153,7 @@ public sealed class CrdtReplicaAndMeshConfigurationAnalyzer : DiagnosticAnalyzer
 
         if (string.Equals(methodName, "AddDistributedCrdtCore", StringComparison.Ordinal))
         {
-            coreLocations.Add(GetInvocationIdentifierLocation(invocation));
+            state.CoreLocations.Add(GetInvocationIdentifierLocation(invocation));
             return;
         }
 
@@ -157,11 +170,11 @@ public sealed class CrdtReplicaAndMeshConfigurationAnalyzer : DiagnosticAnalyzer
             var meshIds = ExtractMeshIdsFromParamsArgument(meshIdsArg);
 
             var location = GetInvocationIdentifierLocation(invocation);
-            replicaRegistrations.Add(new ReplicaInvocationInfo(location, replicaId, meshIds.Count > 0));
+            state.ReplicaRegistrations.Add(new ReplicaInvocationInfo(location, replicaId, meshIds.Count > 0));
 
             for (int i = 0; i < meshIds.Count; i++)
             {
-                p2pBindings.Add(new P2pBindingInvocationInfo(location, meshIds[i], replicaId, null));
+                state.P2pBindings.Add(new P2pBindingInvocationInfo(location, meshIds[i], replicaId, null));
             }
 
             return;
@@ -180,7 +193,7 @@ public sealed class CrdtReplicaAndMeshConfigurationAnalyzer : DiagnosticAnalyzer
             var replicaId = ExtractIdentifier(replicaArg.Value);
             var location = GetInvocationIdentifierLocation(invocation);
 
-            p2pBindings.Add(new P2pBindingInvocationInfo(location, meshId, replicaId, null));
+            state.P2pBindings.Add(new P2pBindingInvocationInfo(location, meshId, replicaId, null));
             return;
         }
 
@@ -215,7 +228,7 @@ public sealed class CrdtReplicaAndMeshConfigurationAnalyzer : DiagnosticAnalyzer
             }
 
             var location = GetInvocationIdentifierLocation(invocation);
-            p2pBindings.Add(new P2pBindingInvocationInfo(location, meshId, replicaId, originatingMeshLocation));
+            state.P2pBindings.Add(new P2pBindingInvocationInfo(location, meshId, replicaId, originatingMeshLocation));
             return;
         }
 
@@ -229,20 +242,17 @@ public sealed class CrdtReplicaAndMeshConfigurationAnalyzer : DiagnosticAnalyzer
 
             var meshId = ExtractIdentifier(meshArg.Value);
             var location = GetInvocationIdentifierLocation(invocation);
-            meshRegistrations.Add(new MeshInvocationInfo(location, meshId));
+            state.MeshRegistrations.Add(new MeshInvocationInfo(location, meshId));
         }
     }
 
     private static void ReportDiagnostics(
-        CompilationAnalysisContext context,
-        ConcurrentBag<Location> coreLocations,
-        ConcurrentBag<ReplicaInvocationInfo> replicaRegistrations,
-        ConcurrentBag<P2pBindingInvocationInfo> p2pBindings,
-        ConcurrentBag<MeshInvocationInfo> meshRegistrations)
+        OperationBlockAnalysisContext context,
+        ConfigurationState state)
     {
-        var hasCore = !coreLocations.IsEmpty;
-        var hasReplicas = !replicaRegistrations.IsEmpty;
-        var hasBindings = !p2pBindings.IsEmpty;
+        var hasCore = state.CoreLocations.Count > 0;
+        var hasReplicas = state.ReplicaRegistrations.Count > 0;
+        var hasBindings = state.P2pBindings.Count > 0;
         var isCrdtUsed = hasCore || hasReplicas || hasBindings;
 
         if (!isCrdtUsed)
@@ -253,18 +263,18 @@ public sealed class CrdtReplicaAndMeshConfigurationAnalyzer : DiagnosticAnalyzer
         // DCRDT0001: AddDistributedCrdtCore called without any replica or P2P binding
         if (hasCore && !hasReplicas && !hasBindings)
         {
-            foreach (var location in coreLocations.OrderBy(l => l.SourceSpan.Start))
+            foreach (var location in state.CoreLocations.OrderBy(l => l.SourceSpan.Start))
             {
                 context.ReportDiagnostic(Diagnostic.Create(MissingReplicaRule, location));
             }
         }
 
         var boundReplicaKeys = new HashSet<string>(
-            p2pBindings.Select(b => b.ReplicaId.Key),
+            state.P2pBindings.Select(b => b.ReplicaId.Key),
             StringComparer.Ordinal);
 
         // DCRDT0002: AddDistributedCrdtReplica called without any P2P mesh binding
-        foreach (var replicaReg in replicaRegistrations.OrderBy(r => r.Location.SourceSpan.Start))
+        foreach (var replicaReg in state.ReplicaRegistrations.OrderBy(r => r.Location.SourceSpan.Start))
         {
             if (!replicaReg.HasInlineMeshes && !boundReplicaKeys.Contains(replicaReg.ReplicaId.Key))
             {
@@ -276,14 +286,14 @@ public sealed class CrdtReplicaAndMeshConfigurationAnalyzer : DiagnosticAnalyzer
         }
 
         var boundMeshKeys = new HashSet<string>(
-            p2pBindings.Select(b => b.MeshId.Key),
+            state.P2pBindings.Select(b => b.MeshId.Key),
             StringComparer.Ordinal);
 
         var directlyBoundMeshLocations = new HashSet<Location>(
-            p2pBindings.Where(b => b.OriginatingAddP2pMeshLocation is not null).Select(b => b.OriginatingAddP2pMeshLocation!));
+            state.P2pBindings.Where(b => b.OriginatingAddP2pMeshLocation is not null).Select(b => b.OriginatingAddP2pMeshLocation!));
 
         // DCRDT0003: AddP2pMesh called without any CRDT replica bound to it
-        foreach (var meshReg in meshRegistrations.OrderBy(m => m.Location.SourceSpan.Start))
+        foreach (var meshReg in state.MeshRegistrations.OrderBy(m => m.Location.SourceSpan.Start))
         {
             if (!boundMeshKeys.Contains(meshReg.MeshId.Key) && !directlyBoundMeshLocations.Contains(meshReg.Location))
             {
@@ -295,11 +305,11 @@ public sealed class CrdtReplicaAndMeshConfigurationAnalyzer : DiagnosticAnalyzer
         }
 
         var configuredMeshKeys = new HashSet<string>(
-            meshRegistrations.Select(m => m.MeshId.Key),
+            state.MeshRegistrations.Select(m => m.MeshId.Key),
             StringComparer.Ordinal);
 
         // DCRDT0004: AddDistributedCrdtP2p or AddDistributedCrdtReplica(replicaId, meshIds) references a meshId not configured via AddP2pMesh
-        foreach (var binding in p2pBindings.OrderBy(b => b.Location.SourceSpan.Start))
+        foreach (var binding in state.P2pBindings.OrderBy(b => b.Location.SourceSpan.Start))
         {
             if (binding.OriginatingAddP2pMeshLocation is null &&
                 !string.Equals(binding.MeshId.Key, "unknown-mesh", StringComparison.Ordinal) &&

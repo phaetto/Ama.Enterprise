@@ -7,9 +7,9 @@
 | `$/.github/workflows/publish-release-to-nuget-manual.yml` | Added verification step ensuring `Ama.Enterprise.CRDT.Distributed.Analyzers.dll` is included in the packed `Ama.Enterprise.CRDT.Distributed` NuGet package before publishing. |
 | `$/.gitignore` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests.csproj` | Unit test project for `Ama.Enterprise.CRDT.Distributed.Analyzers`. |
-| `$/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests/CrdtReplicaAndMeshConfigurationAnalyzerTests.cs` | Unit tests verifying `DCRDT0001`, `DCRDT0002`, `DCRDT0003`, and `DCRDT0004` diagnostics and valid multi-mesh CRDT configurations. |
+| `$/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests/CrdtReplicaAndMeshConfigurationAnalyzerTests.cs` | Updated extension method stubs to include realistic internal delegation calls (`AddDistributedCrdtP2p` calling `AddDistributedCrdtReplica`) to verify no diagnostics are reported inside `ServiceCollectionExtensions`. |
 | `$/Ama.Enterprise.CRDT.Distributed.Analyzers/Ama.Enterprise.CRDT.Distributed.Analyzers.csproj` | Roslyn analyzer project validating Distributed CRDT and P2P mesh registration rules. |
-| `$/Ama.Enterprise.CRDT.Distributed.Analyzers/CrdtReplicaAndMeshConfigurationAnalyzer.cs` | Diagnostic analyzer reporting `DCRDT0001` (missing replica), `DCRDT0002` (unbound replica), `DCRDT0003` (unbound P2P mesh), and `DCRDT0004` (unconfigured P2P mesh). |
+| `$/Ama.Enterprise.CRDT.Distributed.Analyzers/CrdtReplicaAndMeshConfigurationAnalyzer.cs` | Excluded `Ama.Enterprise.CRDT.Distributed` and `ServiceCollectionExtensions` extension method definitions from analysis so diagnostics only target consumer/client startup code. |
 | `$/Ama.Enterprise.CRDT.Distributed.Analyzers/IsExternalInit.cs` | Polyfill for `System.Runtime.CompilerServices.IsExternalInit` to support primary constructor `record struct` properties on `netstandard2.0`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/Ama.Enterprise.CRDT.Distributed.IntegrationTests.csproj` | Updated reference from `Ama.Enterprise.UnitTests` to the renamed `Ama.Enterprise.Project.Tests.Common`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/AntiEntropyStateSyncIntegrationTests.cs` | Added integration test verifying duplicate replica ID collision protection across syncs, patches, relayed patches, and snapshots. |
@@ -62,7 +62,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/ShowCaseCrdtStorage.cs` | Implemented `AppendBatchAsync` wrapping cross-document operations in a single SQLite transaction. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/ShowCaseTokenValidator.cs` | Refactored token validator evaluating structured session constraints to resolve Keyed DI construction limits. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/TaskManager.cs` | Added `DocumentExistsAsync` check and input validation to `GetTasksAsync`. |
-| `$/Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj` | Configured `Ama.Enterprise.CRDT.Distributed.Analyzers` project reference with `OutputItemType="Analyzer"` and `ReferenceOutputAssembly="false"`. |
+| `$/Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj` | Removed `PrivateAssets="all"` from the `Ama.Enterprise.CRDT.Distributed.Analyzers` `ProjectReference` so the analyzer flows transitively to client projects in the solution. |
 | `$/Ama.Enterprise.CRDT.Distributed/Constants.cs` | Global constants for the distributed CRDT module, including the reserved `SystemRegistryDocumentId` (`system-document-registry`). |
 | `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | Decorated `IDocumentIdProvider` resolutions with `SystemRegistryDocumentIdProviderDecorator` alongside `IShardIdProvider`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/ClusterStateSnapshotDto.cs` | Updated to map tombstoned replicas to their eviction timestamp tracking the exact eviction moment for safe cooldown expirations. |

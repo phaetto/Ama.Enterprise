@@ -43,9 +43,25 @@ namespace Ama.Enterprise.CRDT.Distributed.Extensions
     {
         public static IServiceCollection AddDistributedCrdtCore(this IServiceCollection services, Action<object>? configure = null) => services;
         public static IServiceCollection AddDistributedCrdtReplica(this IServiceCollection services, string replicaId) => services;
-        public static IServiceCollection AddDistributedCrdtReplica(this IServiceCollection services, string replicaId, params string[] meshIds) => services;
-        public static IServiceCollection AddDistributedCrdtP2p(this IServiceCollection services, string meshId, string replicaId) => services;
-        public static IP2pMeshBuilder BindCrdtReplica(this IP2pMeshBuilder builder, string? replicaId = null) => builder;
+        public static IServiceCollection AddDistributedCrdtReplica(this IServiceCollection services, string replicaId, params string[] meshIds)
+        {
+            services.AddDistributedCrdtReplica(replicaId);
+            for (int i = 0; i < meshIds.Length; i++)
+            {
+                services.AddDistributedCrdtP2p(meshIds[i], replicaId);
+            }
+            return services;
+        }
+        public static IServiceCollection AddDistributedCrdtP2p(this IServiceCollection services, string meshId, string replicaId)
+        {
+            services.AddDistributedCrdtReplica(replicaId);
+            return services;
+        }
+        public static IP2pMeshBuilder BindCrdtReplica(this IP2pMeshBuilder builder, string? replicaId = null)
+        {
+            builder.Services.AddDistributedCrdtP2p(builder.MeshId, replicaId ?? builder.MeshId);
+            return builder;
+        }
     }
 }
 ";
