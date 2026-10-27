@@ -243,8 +243,18 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             var journalManager = scope.ServiceProvider.GetRequiredService<IJournalManager>();
             var distributionManager = scope.ServiceProvider.GetRequiredService<IShardDistributionManager>();
 
-            if (string.IsNullOrEmpty(syncMsg.ReplicaId) || syncMsg.ReplicaId == replicaContext.ReplicaId || syncMsg.State == null)
+            if (string.IsNullOrEmpty(syncMsg.ReplicaId) || syncMsg.State == null)
             {
+                return;
+            }
+
+            if (string.Equals(syncMsg.ReplicaId, replicaContext.ReplicaId, StringComparison.Ordinal))
+            {
+                logger.LogCritical(
+                    "[{ReplicaId}] Duplicate replica ID collision detected! Received CrdtSync message from remote peer '{PeerId}' claiming the same ReplicaId '{DuplicateReplicaId}'. Ignoring payload to prevent DVV corruption.",
+                    replicaContext.ReplicaId,
+                    senderId.Value,
+                    syncMsg.ReplicaId);
                 return;
             }
 
@@ -368,6 +378,19 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
         try
         {
             var patchMsg = serializer.DeserializeFromBytes<CrdtPatchMessage>(wrapper.Payload!);
+            var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+
+            if (!string.IsNullOrEmpty(patchMsg.ReplicaId) &&
+                string.Equals(patchMsg.ReplicaId, replicaContext.ReplicaId, StringComparison.Ordinal))
+            {
+                logger.LogCritical(
+                    "[{ReplicaId}] Duplicate replica ID collision detected! Received CrdtPatch message from remote peer '{PeerId}' claiming the same ReplicaId '{DuplicateReplicaId}' for document '{DocumentId}'. Dropping patch to prevent DVV corruption.",
+                    replicaContext.ReplicaId,
+                    senderId.Value,
+                    patchMsg.ReplicaId,
+                    targetDoc.DocumentId);
+                return;
+            }
             
             if (patchMsg.ReplicaId != null && scope.ClusterTracker.IsReplicaTombstoned(patchMsg.ReplicaId))
             {
@@ -416,8 +439,14 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
 
             var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
 
-            if (resMsg.ReplicaId == replicaContext.ReplicaId)
+            if (string.Equals(resMsg.ReplicaId, replicaContext.ReplicaId, StringComparison.Ordinal))
             {
+                logger.LogCritical(
+                    "[{ReplicaId}] Duplicate replica ID collision detected! Received CrdtSnapshot message from remote peer '{PeerId}' claiming the same ReplicaId '{DuplicateReplicaId}' for document '{DocumentId}'. Dropping snapshot to prevent DVV corruption.",
+                    replicaContext.ReplicaId,
+                    senderId.Value,
+                    resMsg.ReplicaId,
+                    targetDoc.DocumentId);
                 return;
             }
             

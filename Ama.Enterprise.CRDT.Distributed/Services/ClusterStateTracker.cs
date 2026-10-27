@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Diagnostics.Metrics;
 using System.Linq;
 using Ama.CRDT.Models;
+using Ama.CRDT.Services;
 using Ama.CRDT.Services.Pooling;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services.Observers;
@@ -18,6 +19,7 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
     private readonly IEnumerable<IClusterStateObserver> observers;
     private readonly ILogger<ClusterStateTracker> logger;
     private readonly ICrdtStringPool stringPool;
+    private readonly ReplicaContext? replicaContext;
     
     private readonly Dictionary<string, PeerStateEntry> peerStates = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> networkIdToReplicaId = new(StringComparer.Ordinal);
@@ -34,11 +36,13 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
         IEnumerable<IClusterStateObserver> observers,
         ILogger<ClusterStateTracker> logger,
         IMeterFactory? meterFactory = null,
-        ICrdtStringPool? stringPool = null)
+        ICrdtStringPool? stringPool = null,
+        ReplicaContext? replicaContext = null)
     {
         this.observers = observers ?? throw new ArgumentNullException(nameof(observers));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
         this.stringPool = stringPool ?? CrdtStringPool.Shared;
+        this.replicaContext = replicaContext;
         
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.ClusterStateTracker") ?? new Meter("Ama.Enterprise.CRDT.Distributed.ClusterStateTracker");
         this.stateUpdatesCounter = this.meter.CreateCounter<long>("crdt.cluster.state_updates", "updates", "Number of cluster state updates");
@@ -56,6 +60,16 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
 
         peerReplicaId = stringPool.GetOrAdd(peerReplicaId);
         peerId = stringPool.GetOrAdd(peerId);
+
+        if (replicaContext != null && !string.IsNullOrWhiteSpace(replicaContext.ReplicaId) &&
+            string.Equals(peerReplicaId, replicaContext.ReplicaId, StringComparison.Ordinal))
+        {
+            logger.LogCritical(
+                "[{ReplicaId}] Duplicate replica ID collision detected! Rejecting peer state update from network peer '{PeerId}' claiming the local replica ID.",
+                replicaContext.ReplicaId,
+                peerId);
+            return;
+        }
 
         bool topologyChanged = false;
 
@@ -367,6 +381,12 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
             peerStates.Clear();
             foreach (var kvp in state.PeerStates)
             {
+                if (replicaContext != null && !string.IsNullOrWhiteSpace(replicaContext.ReplicaId) &&
+                    string.Equals(kvp.Key, replicaContext.ReplicaId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
                 var safeMap = new ShardVersionVectorMap();
                 
                 foreach (var shardKvp in kvp.Value.State)

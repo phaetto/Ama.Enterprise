@@ -665,4 +665,156 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         resDto.CorrelationId.ShouldBe(correlationId);
         resDto.IsSuccess.ShouldBeFalse();
     }
+
+    [IntegrationFact]
+    public async Task DuplicateReplicaIdProtection_ShouldRejectCollidingSyncPatchesAndSnapshots_AndProtectLocalDvv()
+    {
+        // Arrange - Two distinct nodes accidentally configured with the exact same ReplicaId ("Replica1")
+        var node1Sp = BuildNode("Replica1");
+        var node1Scope = node1Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica1");
+        var node1Orch = node1Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await node1Orch.InitializeAsync(CancellationToken.None);
+        await node1Orch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+        await node1Orch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("Key1", "Node1Val"), nameof(SyncTestState.DataMap), CancellationToken.None);
+
+        var node2Sp = BuildNode("Replica1");
+        var node2Scope = node2Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica1");
+        var node2Orch = node2Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var node2Storage = node2Scope.ServiceProvider.GetRequiredService<IDistributedCrdtStorage>();
+        await node2Orch.InitializeAsync(CancellationToken.None);
+        await node2Orch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+
+        // Advance Node 2's clock for "Replica1" far ahead of Node 1 (e.g., 3 mutations -> clock 3 on sync-doc-1)
+        await node2Orch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("CollisionKey1", "Bad1"), nameof(SyncTestState.DataMap), CancellationToken.None);
+        await node2Orch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("CollisionKey2", "Bad2"), nameof(SyncTestState.DataMap), CancellationToken.None);
+        await node2Orch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("CollisionKey3", "Bad3"), nameof(SyncTestState.DataMap), CancellationToken.None);
+
+        var node1Doc = node1Orch.TryGetLocalDocument<SyncTestState>("sync-doc-1")!;
+        var initialLocalDvv = node1Doc.GetLocalState()[node1Doc.ShardId];
+        var initialLocalVersion = initialLocalDvv.Versions["Replica1"];
+        initialLocalVersion.ShouldBe(1);
+
+        var handler = node1Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var serializer = node1Sp.GetRequiredService<ICrdtSerializer>();
+        var collidingPeerId = new PeerId(Guid.NewGuid());
+
+        // 1. Colliding CrdtSync message from Node 2 claiming ReplicaId = "Replica1"
+        var node2GlobalState = await node2Scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>().GetFullSnapshotAsync(CancellationToken.None);
+        var syncMsg = new CrdtStateSyncMessage("Replica1", node2GlobalState);
+        var syncWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg));
+        await handler.HandlePayloadAsync(TestMeshId, collidingPeerId, serializer.SerializeToBytes(syncWrapper), CancellationToken.None);
+
+        // 2. Colliding CrdtPatch message from Node 2 claiming ReplicaId = "Replica1"
+        var node2Ops = await node2Storage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
+        var collidingOps = node2Ops.Where(o => o.DocumentId.ToString().Contains("sync-doc-1", StringComparison.Ordinal)).Select(o => o.Operation).ToArray();
+        collidingOps.ShouldNotBeEmpty();
+
+        var patchMsg = new CrdtPatchMessage("Replica1", new CrdtPatch(collidingOps));
+        var patchWrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtPatch", serializer.SerializeToBytes(patchMsg), "sync-doc-1");
+        await handler.HandlePayloadAsync(TestMeshId, collidingPeerId, serializer.SerializeToBytes(patchWrapper), CancellationToken.None);
+
+        // 3. Colliding CrdtSnapshot message from Node 2 claiming ReplicaId = "Replica1"
+        var node2Doc = node2Orch.TryGetLocalDocument<SyncTestState>("sync-doc-1")!;
+        var node2Snapshot = await node2Doc.GetSnapshotDataAsync(CancellationToken.None);
+        var snapshotMsg = new CrdtSnapshotMessage("Replica1", node2Snapshot.SnapshotData, node2Snapshot.GlobalState);
+        var snapshotWrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtSnapshot", serializer.SerializeToBytes(snapshotMsg), "sync-doc-1");
+        await handler.HandlePayloadAsync(TestMeshId, collidingPeerId, serializer.SerializeToBytes(snapshotWrapper), CancellationToken.None);
+
+        // Assert - Node 1's ClusterTracker rejected "Replica1" as a remote peer, and Node 1's own DVV for "Replica1" was never corrupted
+        node1Scope.ClusterTracker.GetPeerIdByReplicaId("Replica1").ShouldBeNull();
+        var afterLocalDvv = node1Doc.GetLocalState()[node1Doc.ShardId];
+        afterLocalDvv.Versions["Replica1"].ShouldBe(initialLocalVersion);
+        afterLocalDvv.Dots.ContainsKey("Replica1").ShouldBeFalse();
+
+        // Verify Node 1 can still generate and apply its own next sequential operation (Clock 2) without failing
+        var applied = await node1Orch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("Key2", "Node1Val2"), nameof(SyncTestState.DataMap), CancellationToken.None);
+        applied.ShouldBeTrue();
+
+        var finalDoc = await node1Doc.GetDocumentAsync(CancellationToken.None);
+        finalDoc.Data.DataMap.ShouldContainKeyAndValue("Key1", "Node1Val");
+        finalDoc.Data.DataMap.ShouldContainKeyAndValue("Key2", "Node1Val2");
+        finalDoc.Data.DataMap.ShouldNotContainKey("CollisionKey1");
+        node1Doc.GetLocalState()[node1Doc.ShardId].Versions["Replica1"].ShouldBe(2);
+    }
+
+    [IntegrationFact]
+    public async Task AmnesiaRecovery_WhenNodeRestartsAndReceivesSnapshot_ShouldRestoreOwnDvvAndStopInfiniteSnapshotLoop()
+    {
+        // Arrange: Node 2 has a snapshot where Node 1 ("Replica1") was at version 9000 and Node 2 ("Replica2") was at version 10000.
+        // Node 1 restarts with amnesia (or loads from an older state where Replica1 is 0) and receives the snapshot from Node 2.
+        var capturedDirectSends = new List<ReadOnlyMemory<byte>>();
+        var mockSender = new Mock<IDirectMessageSender>();
+        mockSender.Setup(p => p.SendDirectAsync(It.IsAny<PeerId>(), Capture.In(capturedDirectSends), It.IsAny<CancellationToken>()))
+               .Returns(Task.CompletedTask);
+
+        var node1Sp = BuildNode("Replica1", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+        });
+        var node1Scope = node1Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica1");
+        var node1Orch = node1Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await node1Orch.InitializeAsync(CancellationToken.None);
+        await node1Orch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+
+        var node2Sp = BuildNode("Replica2", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+        });
+        var node2Scope = node2Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica2");
+        var node2Orch = node2Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await node2Orch.InitializeAsync(CancellationToken.None);
+        await node2Orch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+        await node2Orch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("RecoveredKey", "RecoveredVal"), nameof(SyncTestState.DataMap), CancellationToken.None);
+
+        var serializer = node2Sp.GetRequiredService<ICrdtSerializer>();
+        var node2Doc = node2Orch.TryGetLocalDocument<SyncTestState>("sync-doc-1")!;
+        var node2Snapshot = await node2Doc.GetSnapshotDataAsync(CancellationToken.None);
+
+        // Simulate that before restart, Replica1 had reached version 9000 and Replica2 had reached version 10000
+        var snapshotDoc = serializer.DeserializeFromBytes<CrdtDocument<SyncTestState>>(node2Snapshot.SnapshotData);
+        snapshotDoc.Metadata!.VersionVector["Replica1"] = 9000;
+        snapshotDoc.Metadata.VersionVector["Replica2"] = 10000;
+
+        var shardId = node2Doc.ShardId;
+        var globalState = new ShardVersionVectorMap(node2Snapshot.GlobalState);
+        globalState[shardId].Versions["Replica1"] = 9000;
+        globalState[shardId].Versions["Replica2"] = 10000;
+
+        // Also update Node 2's local shard DVV to match (Replica1: 9000, Replica2: 10000)
+        var node2Vvm = node2Scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+        node2Vvm.MergeShardState(shardId, globalState);
+
+        var snapshotMsg = new CrdtSnapshotMessage("Replica2", serializer.SerializeToBytes(snapshotDoc), globalState);
+        var snapshotWrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtSnapshot", serializer.SerializeToBytes(snapshotMsg), "sync-doc-1");
+
+        var node1Handler = node1Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var node2Handler = node2Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+
+        // Act 1: Node 1 receives the snapshot from Node 2
+        await node1Handler.HandlePayloadAsync(TestMeshId, new PeerId(Guid.NewGuid()), serializer.SerializeToBytes(snapshotWrapper), CancellationToken.None);
+
+        // Assert 1: Node 1's local DVV and document metadata must have restored "Replica1" to 9000 (NOT stripped it to 0!)
+        var node1Doc = node1Orch.TryGetLocalDocument<SyncTestState>("sync-doc-1")!;
+        var node1LocalDvv = node1Doc.GetLocalState()[shardId];
+        node1LocalDvv.Versions.ShouldContainKeyAndValue("Replica1", 9000);
+        node1LocalDvv.Versions.ShouldContainKeyAndValue("Replica2", 10000);
+
+        var node1Materialized = await node1Doc.GetDocumentAsync(CancellationToken.None);
+        node1Materialized.Metadata!.VersionVector.ShouldContainKeyAndValue("Replica1", 9000);
+        node1Materialized.Metadata.VersionVector.ShouldContainKeyAndValue("Replica2", 10000);
+
+        // Act 2: Node 1 now sends a CrdtSync message to Node 2 with its current state
+        capturedDirectSends.Clear();
+        var node1FullState = await node1Scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>().GetFullSnapshotAsync(CancellationToken.None);
+        // Ensure registry shard is also aligned so we only test the document shard
+        var node2FullState = await node2Vvm.GetFullSnapshotAsync(CancellationToken.None);
+        node1FullState[node2Orch.Registry.DocumentId] = node2FullState[node2Orch.Registry.DocumentId];
+
+        var syncFromNode1 = new CrdtStateSyncMessage("Replica1", node1FullState);
+        var syncWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncFromNode1));
+        await node2Handler.HandlePayloadAsync(TestMeshId, new PeerId(Guid.NewGuid()), serializer.SerializeToBytes(syncWrapper), CancellationToken.None);
+
+        // Assert 2: Node 2 sees that Node 1 is at (Replica1: 9000, Replica2: 10000) and does NOT resend any snapshot or patch!
+        capturedDirectSends.ShouldBeEmpty();
+    }
 }

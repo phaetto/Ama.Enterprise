@@ -850,6 +850,12 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     {
         try
         {
+            var incomingOps = cmd.Patch!.Value.Operations;
+            if (incomingOps == null || incomingOps.Count == 0)
+            {
+                return;
+            }
+
             await versionVectorManager.ExecuteShardLockedAsync(ShardId, async () =>
             {
                 CrdtDocument<TState> currentDoc;
@@ -946,12 +952,12 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                     isDirty = true;
                 }
 
-            if ( cmd.GlobalState != null )
-            {
-                var activeShardDocIds = GetActiveDocumentIdsForShard();
-                var compositeDocId = GetStorageDocumentKey();
-                versionVectorManager.RecordDocumentSnapshotMerge(ShardId, compositeDocId, cmd.GlobalState, activeShardDocIds);
-            }
+                if (cmd.GlobalState != null)
+                {
+                    var activeShardDocIds = GetActiveDocumentIdsForShard();
+                    var compositeDocId = GetStorageDocumentKey();
+                    versionVectorManager.RecordDocumentSnapshotMerge(ShardId, compositeDocId, cmd.GlobalState, activeShardDocIds);
+                }
             }, cmd.CancellationToken).ConfigureAwait(false);
 
             telemetry.RecordDocumentSnapshotMerged(DocumentId);

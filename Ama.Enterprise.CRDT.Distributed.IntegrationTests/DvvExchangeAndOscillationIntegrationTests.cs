@@ -875,6 +875,105 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         steadyMessages.ShouldAllBe(m => m.MessageType == "CrdtSync");
     }
 
+    [IntegrationFact]
+    public async Task TwoReplicas_AmnesiaRestartWithTrimmedRemoteJournal_ShouldRestoreOwnDvvFromSnapshot_AndNeverOscillateSnapshots()
+    {
+        // Arrange - Node A and Node B exchange operations so Node B records ReplicaA's version in its DVV,
+        // then Node B trims its journal and Node A suffers amnesia (wipes local state and restarts with same ReplicaA ID).
+        var nodeA = BuildNode("ReplicaA", opt => opt.ActiveSyncEnabled = false);
+        var nodeB = BuildNode("ReplicaB", opt => opt.ActiveSyncEnabled = false);
+
+        var scopeA = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeA.ReplicaId);
+        var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var dvvManagerA = scopeA.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+        var storageA = scopeA.ServiceProvider.GetRequiredService<IDistributedCrdtStorage>();
+        await orchA.InitializeAsync(CancellationToken.None);
+
+        var scopeB = nodeB.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeB.ReplicaId);
+        var orchB = scopeB.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var dvvManagerB = scopeB.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+        var storageB = scopeB.ServiceProvider.GetRequiredService<IDistributedCrdtStorage>();
+        await orchB.InitializeAsync(CancellationToken.None);
+
+        await orchA.CreateDocumentAsync("doc-amnesia-snap", "dvv-doc", CancellationToken.None);
+        await orchB.CreateDocumentAsync("doc-amnesia-snap", "dvv-doc", CancellationToken.None);
+
+        // Node A generates 3 mutations (ReplicaA clock = 3) and Node B generates 2 mutations (ReplicaB clock = 2)
+        await orchA.ApplyIntentAsync<DvvTestState>("doc-amnesia-snap", new MapSetIntent("KA1", "VA1"), "DataMap", CancellationToken.None);
+        await orchA.ApplyIntentAsync<DvvTestState>("doc-amnesia-snap", new MapSetIntent("KA2", "VA2"), "DataMap", CancellationToken.None);
+        await orchA.ApplyIntentAsync<DvvTestState>("doc-amnesia-snap", new MapSetIntent("KA3", "VA3"), "DataMap", CancellationToken.None);
+
+        await orchB.ApplyIntentAsync<DvvTestState>("doc-amnesia-snap", new MapSetIntent("KB1", "VB1"), "DataMap", CancellationToken.None);
+        await orchB.ApplyIntentAsync<DvvTestState>("doc-amnesia-snap", new MapSetIntent("KB2", "VB2"), "DataMap", CancellationToken.None);
+
+        var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
+        using var network = WireMeshWithInspection(recordedMessages, nodeA, nodeB);
+
+        // Converge both nodes initially so Node B's DVV has { ReplicaA: 3, ReplicaB: 2 }
+        for (int round = 0; round < 2; round++)
+        {
+            await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
+            await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
+            await network.DrainAsync();
+        }
+
+        await WaitForConvergenceAsync(async () =>
+        {
+            var docB = await orchB.GetDocumentStateAsync<DvvTestState>("doc-amnesia-snap", CancellationToken.None);
+            return docB.Data.DataMap.Count == 5;
+        }, TimeSpan.FromSeconds(5));
+
+        var preCrashSnapB = await dvvManagerB.GetFullSnapshotAsync(CancellationToken.None);
+        preCrashSnapB["default"].Versions["ReplicaA"].ShouldBe(3);
+        preCrashSnapB["default"].Versions["ReplicaB"].ShouldBe(2);
+
+        // Trim Node B's journal so any missing operations for "default" require a full CrdtSnapshot
+        await storageB.TrimAsync("default", new Dictionary<string, long> { { "ReplicaA", 10 }, { "ReplicaB", 10 } }, CancellationToken.None);
+
+        // Simulate Node A restarting with amnesia (its local DVV for "default" resets to empty/0 while keeping ReplicaA identity)
+        var docA = orchA.TryGetLocalDocument<DvvTestState>("doc-amnesia-snap")!;
+        await docA.ResetLocalStateAsync("ReplicaA", CancellationToken.None);
+        dvvManagerA.RemoveShard("default");
+        dvvManagerA.EnsureShardRegistered("default");
+        await storageA.TrimAsync("default", new Dictionary<string, long> { { "ReplicaA", 10 }, { "ReplicaB", 10 } }, CancellationToken.None);
+
+        dvvManagerA.GetShardSnapshot("default")["default"].Versions.ContainsKey("ReplicaA").ShouldBeFalse();
+
+        // Act - Node A dispatches its empty DVV to Node B -> Node B sends CrdtSnapshot -> Node A merges snapshot and restores its own ReplicaA: 3 clock
+        recordedMessages.Clear();
+        await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
+        await network.DrainAsync();
+
+        await WaitForConvergenceAsync(async () =>
+        {
+            var stateA = await orchA.GetDocumentStateAsync<DvvTestState>("doc-amnesia-snap", CancellationToken.None);
+            return stateA.Data.DataMap.Count == 5;
+        }, TimeSpan.FromSeconds(5));
+
+        // Verify Node A restored its own ReplicaA version (3) as well as ReplicaB (2) in its DVV
+        var recoveredSnapA = await dvvManagerA.GetFullSnapshotAsync(CancellationToken.None);
+        recoveredSnapA["default"].Versions.ShouldContainKeyAndValue("ReplicaA", 3);
+        recoveredSnapA["default"].Versions.ShouldContainKeyAndValue("ReplicaB", 2);
+
+        // Ensure Node A saw exactly 1 CrdtSnapshot during recovery
+        recordedMessages.Count(m => m.MessageType == "CrdtSnapshot" && m.DocumentId == "doc-amnesia-snap").ShouldBe(1);
+
+        // Clear recorded messages and run 5 subsequent bidirectional DVV exchange rounds
+        recordedMessages.Clear();
+
+        for (int round = 0; round < 5; round++)
+        {
+            await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
+            await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
+            await network.DrainAsync();
+        }
+
+        // Assert - Zero additional CrdtSnapshot or CrdtPatch messages are sent because Node A knows its own DVV is at 3
+        var steadyMessages = recordedMessages.ToList();
+        steadyMessages.Count.ShouldBe(10);
+        steadyMessages.ShouldAllBe(m => m.MessageType == "CrdtSync");
+    }
+
     public async ValueTask DisposeAsync()
     {
         foreach (var node in nodes)
