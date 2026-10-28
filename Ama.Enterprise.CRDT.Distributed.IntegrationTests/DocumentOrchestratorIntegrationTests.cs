@@ -359,8 +359,8 @@ public sealed class DocumentOrchestratorIntegrationTests
         // Arrange
         var remotePeerGuid = Guid.NewGuid();
         var mockSender = new Mock<IDirectMessageSender>();
-        var capturedDirectSends = new System.Collections.Generic.List<ReadOnlyMemory<byte>>();
-        mockSender.Setup(s => s.SendDirectAsync(It.Is<Ama.Enterprise.P2p.Models.Core.PeerId>(p => p.Value == remotePeerGuid), Capture.In(capturedDirectSends), It.IsAny<CancellationToken>()))
+        var capturedDirectSends = new List<ReadOnlyMemory<byte>>();
+        mockSender.Setup(s => s.SendDirectAsync(It.Is<P2p.Models.Core.PeerId>(p => p.Value == remotePeerGuid), Capture.In(capturedDirectSends), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var mockP2p = new Mock<IP2pAlgorithm>();
@@ -395,7 +395,7 @@ public sealed class DocumentOrchestratorIntegrationTests
         // Assert - Sent directly to ReplicaB's PeerId and broadcasted to the mesh
         capturedDirectSends.Count.ShouldBe(1);
         var serializer = sp.GetRequiredService<Ama.CRDT.Services.Serialization.ICrdtSerializer>();
-        var wrapper = serializer.DeserializeFromBytes<Models.CrdtMessageWrapper>(capturedDirectSends[0].ToArray());
+        var wrapper = serializer.DeserializeFromBytes<CrdtMessageWrapper>(capturedDirectSends[0].ToArray());
         wrapper.DocumentId.ShouldBe("remote-patch-doc");
         wrapper.MessageType.ShouldBe("CrdtPatch");
         wrapper.DocumentTypeAlias.ShouldBe("dynamic-type");
@@ -551,5 +551,77 @@ public sealed class DocumentOrchestratorIntegrationTests
         existingDoc.ShouldNotBeNull();
         var state = await existingDoc!.GetDocumentAsync(CancellationToken.None);
         state.Data.Value.ShouldBe(77);
+    }
+
+    [IntegrationFact]
+    public async Task DistributedCrdtDocument_EstimateMemoryFootprintAsync_BreaksDownDataMetadataAndShardDvvBytes()
+    {
+        // Arrange
+        var sp = BuildNode();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("ReplicaA");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("footprint-doc", "AlternateTestState" == nameof(AlternateTestState) ? "alternate-type" : "dynamic-type", CancellationToken.None);
+
+        var doc = orchestrator.TryGetLocalDocument<AlternateTestState>("footprint-doc")!;
+        var baselineFootprint = await doc.EstimateMemoryFootprintAsync(CancellationToken.None);
+
+        // Act - Apply a large string payload to increase both DataBytes and MetadataBytes/ShardVersionVectorBytes
+        var largeString = new string('X', 4096);
+        await orchestrator.ApplyIntentAsync<AlternateTestState>("footprint-doc", new Ama.CRDT.Models.Intents.SetIntent(largeString), nameof(AlternateTestState.Label), CancellationToken.None);
+
+        var updatedFootprint = await doc.EstimateMemoryFootprintAsync(CancellationToken.None);
+        var estimatedObjectSize = await doc.EstimateObjectSizeAsync(CancellationToken.None);
+
+        // Assert
+        updatedFootprint.DataBytes.ShouldBeGreaterThan(baselineFootprint.DataBytes + 8000);
+        updatedFootprint.MetadataBytes.ShouldBeGreaterThan(0);
+        updatedFootprint.DataAndMetadataBytes.ShouldBe(32L + updatedFootprint.DataBytes + updatedFootprint.MetadataBytes);
+        updatedFootprint.WholeDocumentBytes.ShouldBeGreaterThan(updatedFootprint.DataAndMetadataBytes);
+        updatedFootprint.ShardVersionVectorBytes.ShouldBeGreaterThan(0);
+        estimatedObjectSize.ShouldBe(updatedFootprint.WholeDocumentBytes);
+    }
+
+    [IntegrationFact]
+    public async Task Orchestrator_DeleteThenRecreateSameDocumentId_RestoresActiveDocumentWithCleanInitialState()
+    {
+        // Arrange
+        var sp = BuildNode();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("ReplicaA");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        const string docId = "reincarnated-doc";
+        await orchestrator.CreateDocumentAsync(docId, "dynamic-type", CancellationToken.None);
+        await orchestrator.ApplyIntentAsync<DynamicTestState>(docId, new Ama.CRDT.Models.Intents.SetIntent(999), nameof(DynamicTestState.Value), CancellationToken.None);
+
+        var initialDoc = await orchestrator.GetDocumentStateAsync<DynamicTestState>(docId, CancellationToken.None);
+        initialDoc.Data.Value.ShouldBe(999);
+
+        // Checkpoint so the old state is persisted to storage before deletion
+        await orchestrator.TryGetLocalDocument<DynamicTestState>(docId)!.CheckpointAsync(CancellationToken.None);
+
+        // Act 1 - Delete the document (tombstones registry entry and purges storage)
+        await orchestrator.DeleteDocumentAsync(docId, "dynamic-type", CancellationToken.None);
+        (await orchestrator.DocumentExistsAsync<DynamicTestState>(docId, CancellationToken.None)).ShouldBeFalse();
+        orchestrator.TryGetLocalDocument<DynamicTestState>(docId).ShouldBeNull();
+
+        // Act 2 - Recreate the exact same document ID and type alias
+        await orchestrator.CreateDocumentAsync(docId, "dynamic-type", CancellationToken.None);
+
+        // Assert - Document is promoted again, is no longer marked deleted, and starts with a fresh state (not the deleted 999 checkpoint)
+        (await orchestrator.DocumentExistsAsync<DynamicTestState>(docId, CancellationToken.None)).ShouldBeTrue();
+        var recreatedLocalDoc = orchestrator.TryGetLocalDocument<DynamicTestState>(docId);
+        recreatedLocalDoc.ShouldNotBeNull();
+
+        var recreatedState = await orchestrator.GetDocumentStateAsync<DynamicTestState>(docId, CancellationToken.None);
+        recreatedState.Data.Value.ShouldBe(0);
+
+        await orchestrator.ApplyIntentAsync<DynamicTestState>(docId, new Ama.CRDT.Models.Intents.SetIntent(123), nameof(DynamicTestState.Value), CancellationToken.None);
+        (await orchestrator.GetDocumentStateAsync<DynamicTestState>(docId, CancellationToken.None)).Data.Value.ShouldBe(123);
     }
 }

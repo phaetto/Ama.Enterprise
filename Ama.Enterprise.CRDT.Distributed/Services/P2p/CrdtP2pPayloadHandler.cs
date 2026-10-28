@@ -84,9 +84,27 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             return;
         }
 
-        messagesProcessedCounter.Add(1, new KeyValuePair<string, object?>("message_type", wrapper.MessageType));
-
         var scope = scopeManager.GetOrCreateScope(replicaId);
+
+        if (senderId.Value != Guid.Empty)
+        {
+            var topologyProvider = scope.ServiceProvider.GetService<IScopeTopologyProvider>();
+            if (topologyProvider != null)
+            {
+                var isExpected = await topologyProvider.IsPeerExpectedAsync(senderId.Value.ToString(), cancellationToken).ConfigureAwait(false);
+                if (!isExpected)
+                {
+                    logger.LogWarning(
+                        "[{ReplicaId}] Dropped inbound {MessageType} payload from unexpected peer '{PeerId}'.",
+                        scope.ReplicaId,
+                        wrapper.MessageType,
+                        senderId.Value);
+                    return;
+                }
+            }
+        }
+
+        messagesProcessedCounter.Add(1, new KeyValuePair<string, object?>("message_type", wrapper.MessageType));
 
         if (wrapper.MessageType == "CrdtReadReq" || wrapper.MessageType == "CrdtReadRes" || 
             wrapper.MessageType == "CrdtIntentReq" || wrapper.MessageType == "CrdtIntentRes")

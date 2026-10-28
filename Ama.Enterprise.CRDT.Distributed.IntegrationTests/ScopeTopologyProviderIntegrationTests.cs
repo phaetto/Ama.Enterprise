@@ -432,4 +432,77 @@ public sealed class ScopeTopologyProviderIntegrationTests
         mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never());
         scope.ClusterTracker.GetReplicaIdByPeerId(peerGuid.ToString()).ShouldBe("ReplicaRemote");
     }
+
+    [IntegrationFact]
+    public async Task CrdtP2pPayloadHandler_WhenUnexpectedPeerSendsSyncPatchOrSnapshot_DropsPayloadsBeforeMutatingClusterOrDocuments()
+    {
+        // Arrange
+        var topologyProvider = new TestTopologyProvider();
+        var unexpectedPeerGuid = Guid.NewGuid();
+        var expectedPeerGuid = Guid.NewGuid();
+        topologyProvider.ExpectedPeers.Add(expectedPeerGuid.ToString());
+
+        var mockSender = new Mock<IDirectMessageSender>();
+        var sp = BuildNode("Replica1", topologyProvider, services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("topo-doc", "topo-doc", CancellationToken.None);
+
+        // Build valid payloads on a separate remote node
+        var remoteSp = BuildNode("UnauthorizedReplica", new TestTopologyProvider());
+        var remoteScope = remoteSp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("UnauthorizedReplica");
+        await remoteScope.Orchestrator.InitializeAsync(CancellationToken.None);
+        await remoteScope.Orchestrator.CreateDocumentAsync("topo-doc", "topo-doc", CancellationToken.None);
+        await remoteScope.Orchestrator.ApplyIntentAsync<TopologyTestState>("topo-doc", new MapSetIntent("InjectedKey", "InjectedVal"), nameof(TopologyTestState.DataMap), CancellationToken.None);
+
+        var serializer = sp.GetRequiredService<Ama.CRDT.Services.Serialization.ICrdtSerializer>();
+        var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var unexpectedPeerId = new PeerId(unexpectedPeerGuid);
+
+        // 1. CrdtSync from unexpected peer
+        var remoteGlobalState = await remoteScope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>().GetFullSnapshotAsync(CancellationToken.None);
+        var syncMsg = new Models.CrdtStateSyncMessage("UnauthorizedReplica", remoteGlobalState);
+        var syncWrapper = new Models.CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg));
+
+        // 2. CrdtPatch from unexpected peer
+        var remoteOps = (await remoteScope.Storage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync())
+            .Where(o => o.DocumentId.ToString().Contains("topo-doc", StringComparison.Ordinal))
+            .Select(o => o.Operation)
+            .ToArray();
+        var patchMsg = new Models.CrdtPatchMessage("UnauthorizedReplica", new CrdtPatch(remoteOps));
+        var patchWrapper = new Models.CrdtMessageWrapper("topo-doc", "CrdtPatch", serializer.SerializeToBytes(patchMsg), "topo-doc");
+
+        // 3. CrdtSnapshot from unexpected peer
+        var remoteDoc = remoteScope.Orchestrator.TryGetLocalDocument<TopologyTestState>("topo-doc")!;
+        var snapDto = await remoteDoc.GetSnapshotDataAsync(CancellationToken.None);
+        var snapMsg = new Models.CrdtSnapshotMessage("UnauthorizedReplica", snapDto.SnapshotData, snapDto.GlobalState);
+        var snapWrapper = new Models.CrdtMessageWrapper("topo-doc", "CrdtSnapshot", serializer.SerializeToBytes(snapMsg), "topo-doc");
+
+        // Act
+        await handler.HandlePayloadAsync(TestMeshId, unexpectedPeerId, serializer.SerializeToBytes(syncWrapper), CancellationToken.None);
+        await handler.HandlePayloadAsync(TestMeshId, unexpectedPeerId, serializer.SerializeToBytes(patchWrapper), CancellationToken.None);
+        await handler.HandlePayloadAsync(TestMeshId, unexpectedPeerId, serializer.SerializeToBytes(snapWrapper), CancellationToken.None);
+
+        // Assert - Unexpected peer was never registered in ClusterTracker, no sync response was sent, and document state remained untouched
+        scope.ClusterTracker.GetClusterStates().ShouldBeEmpty();
+        scope.ClusterTracker.GetPeerIdByReplicaId("UnauthorizedReplica").ShouldBeNull();
+        mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never());
+
+        var localState = await orchestrator.GetDocumentStateAsync<TopologyTestState>("topo-doc", CancellationToken.None);
+        localState.Data.DataMap.ShouldBeEmpty();
+
+        // Act 2 - Expected peer sends the same patch
+        var expectedPeerId = new PeerId(expectedPeerGuid);
+        await handler.HandlePayloadAsync(TestMeshId, expectedPeerId, serializer.SerializeToBytes(patchWrapper), CancellationToken.None);
+
+        // Assert 2 - Expected peer payload is processed and applied
+        var updatedState = await orchestrator.GetDocumentStateAsync<TopologyTestState>("topo-doc", CancellationToken.None);
+        updatedState.Data.DataMap.ShouldContainKeyAndValue("InjectedKey", "InjectedVal");
+    }
 }

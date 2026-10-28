@@ -59,7 +59,7 @@ public static class WireEncoderServiceCollectionExtensions
         }
 
         var existingDescriptors = builder.Services
-            .Where(d => d.ServiceType == typeof(IMeshWireEncoder) && object.Equals(d.ServiceKey, meshId))
+            .Where(d => d.ServiceType == typeof(IMeshWireEncoder) && Equals(d.ServiceKey, meshId))
             .ToList();
             
         foreach (var descriptor in existingDescriptors)

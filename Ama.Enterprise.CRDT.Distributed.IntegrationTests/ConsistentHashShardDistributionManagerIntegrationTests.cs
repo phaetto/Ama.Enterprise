@@ -304,6 +304,77 @@ public sealed class ConsistentHashShardDistributionManagerIntegrationTests
         targets.ShouldContain("replica-1");
     }
 
+    [Fact]
+    public async Task GetTargetNodesForShardAsync_WhenSingleReplicaboundToMultipleMeshes_AggregatesAndDeduplicatesPeersAcrossAllBoundMeshes()
+    {
+        // Arrange - Local replica "replica-0" is bound to both "mesh-internal" and "mesh-external", while "mesh-unrelated" is bound to another replica.
+        // Peer "replica-shared" is connected on BOTH bound meshes, "replica-internal-only" is on "mesh-internal",
+        // "replica-external-only" is on "mesh-external", and "replica-unrelated" is on "mesh-unrelated".
+        var peerShared1 = new PeerId(Guid.NewGuid());
+        var peerShared2 = new PeerId(Guid.NewGuid());
+        var peerInternal = new PeerId(Guid.NewGuid());
+        var peerExternal = new PeerId(Guid.NewGuid());
+        var peerUnrelated = new PeerId(Guid.NewGuid());
+
+        var peerToReplica = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [peerShared1.Value.ToString()] = "replica-shared",
+            [peerShared2.Value.ToString()] = "replica-shared",
+            [peerInternal.Value.ToString()] = "replica-internal-only",
+            [peerExternal.Value.ToString()] = "replica-external-only",
+            [peerUnrelated.Value.ToString()] = "replica-unrelated"
+        };
+
+        var clusterTrackerMock = new Mock<IClusterStateTracker>();
+        clusterTrackerMock.Setup(x => x.GetReplicaIdByPeerId(It.IsAny<string>()))
+            .Returns((string id) => peerToReplica.TryGetValue(id, out var rId) ? rId : null);
+
+        var peerRegistryMock = new Mock<IPeerRegistry>();
+        peerRegistryMock.Setup(x => x.GetPeersByStatusAsync("mesh-internal", PeerStatus.Active, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<PeerNode> { new() { Id = peerShared1 }, new() { Id = peerInternal } });
+        peerRegistryMock.Setup(x => x.GetPeersByStatusAsync("mesh-external", PeerStatus.Active, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<PeerNode> { new() { Id = peerShared2 }, new() { Id = peerExternal } });
+        peerRegistryMock.Setup(x => x.GetPeersByStatusAsync("mesh-unrelated", PeerStatus.Active, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<PeerNode> { new() { Id = peerUnrelated } });
+
+        var services = new ServiceCollection();
+        services.AddSingleton(peerRegistryMock.Object);
+        var sp = services.BuildServiceProvider();
+
+        var p2pRegistrations = new[]
+        {
+            new DistributedCrdtP2pRegistration("mesh-internal", "replica-0"),
+            new DistributedCrdtP2pRegistration("mesh-external", "replica-0"),
+            new DistributedCrdtP2pRegistration("mesh-unrelated", "other-local-replica")
+        };
+
+        var options = Options.Create(new DistributedCrdtOptions
+        {
+            EnableSharding = true,
+            ShardReplicationFactor = 10,
+            VirtualNodesPerReplica = 50
+        });
+
+        var manager = new ConsistentHashShardDistributionManager(
+            clusterTrackerMock.Object,
+            new ReplicaContext { ReplicaId = "replica-0" },
+            sp,
+            p2pRegistrations,
+            options);
+
+        // Act
+        var targets = await manager.GetTargetNodesForShardAsync("multi-mesh-shard");
+
+        // Assert - Includes local replica + internal + external + deduplicated shared, and excludes "replica-unrelated"
+        targets.Count.ShouldBe(4);
+        targets.Distinct(StringComparer.Ordinal).Count().ShouldBe(4);
+        targets.ShouldContain("replica-0");
+        targets.ShouldContain("replica-shared");
+        targets.ShouldContain("replica-internal-only");
+        targets.ShouldContain("replica-external-only");
+        targets.ShouldNotContain("replica-unrelated");
+    }
+
     private static ManagerTestContext SetupManager(bool enableSharding, int replicationFactor, int nodeCount)
     {
         var localReplicaId = "replica-0";

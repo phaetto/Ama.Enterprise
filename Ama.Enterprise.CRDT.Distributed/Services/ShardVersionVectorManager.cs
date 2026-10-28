@@ -425,7 +425,24 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
 
             lock (dvv)
             {
-                dvv.Merge(incomingDvv);
+                var localReplicaId = replicaContext.ReplicaId;
+                var hasLocalProgress = !string.IsNullOrEmpty(localReplicaId) &&
+                    ((dvv.Versions.TryGetValue(localReplicaId, out var localVer) && localVer > 0) ||
+                     (dvv.Dots != null && dvv.Dots.TryGetValue(localReplicaId, out var localDots) && localDots.Count > 0));
+
+                if (hasLocalProgress &&
+                    ((incomingDvv.Versions != null && incomingDvv.Versions.ContainsKey(localReplicaId!)) ||
+                     (incomingDvv.Dots != null && incomingDvv.Dots.ContainsKey(localReplicaId!))))
+                {
+                    var sanitized = CloneDvv(incomingDvv, stringPool);
+                    sanitized.Versions.Remove(localReplicaId!);
+                    sanitized.Dots?.Remove(localReplicaId!);
+                    dvv.Merge(sanitized);
+                }
+                else
+                {
+                    dvv.Merge(incomingDvv);
+                }
             }
         }
     }

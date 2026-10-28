@@ -741,7 +741,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
         var observerMock = new Mock<IClusterStateObserver>();
         var sp = BuildNode("Replica1", services =>
         {
-            services.AddScoped<IClusterStateObserver>(_ => observerMock.Object);
+            services.AddScoped(_ => observerMock.Object);
         });
 
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
@@ -778,7 +778,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
         var observerMock = new Mock<IClusterStateObserver>();
         var sp = BuildNode("Replica1", services =>
         {
-            services.AddScoped<IClusterStateObserver>(_ => observerMock.Object);
+            services.AddScoped(_ => observerMock.Object);
         });
 
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();

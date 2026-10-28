@@ -864,4 +864,121 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         // Assert 2: Node 2 sees that Node 1 is at (Replica1: 9000, Replica2: 10000) and does NOT resend any snapshot or patch!
         capturedDirectSends.ShouldBeEmpty();
     }
+
+    [IntegrationFact]
+    public async Task ProcessPatchAsync_WhenCompoundPatchContainsMixedLocalAndRemoteOperations_FiltersOnlyLocalOperationsAndAppliesRemoteOnes()
+    {
+        // Arrange
+        var node1Sp = BuildNode("Replica1");
+        var node1Scope = node1Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica1");
+        var node1Orch = node1Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var node1Storage = node1Scope.ServiceProvider.GetRequiredService<IDistributedCrdtStorage>();
+        await node1Orch.InitializeAsync(CancellationToken.None);
+        await node1Orch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+        await node1Orch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("OwnKey", "OwnVal"), nameof(SyncTestState.DataMap), CancellationToken.None);
+
+        var node2Sp = BuildNode("Replica2");
+        var node2Scope = node2Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica2");
+        var node2Orch = node2Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var node2Storage = node2Scope.ServiceProvider.GetRequiredService<IDistributedCrdtStorage>();
+        await node2Orch.InitializeAsync(CancellationToken.None);
+        await node2Orch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+        await node2Orch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("RemoteKey1", "RemoteVal1"), nameof(SyncTestState.DataMap), CancellationToken.None);
+        await node2Orch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("RemoteKey2", "RemoteVal2"), nameof(SyncTestState.DataMap), CancellationToken.None);
+
+        var ownOp = (await node1Storage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync())
+            .First(o => o.DocumentId.ToString().Contains("sync-doc-1", StringComparison.Ordinal)).Operation;
+
+        var remoteOps = (await node2Storage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync())
+            .Where(o => o.DocumentId.ToString().Contains("sync-doc-1", StringComparison.Ordinal))
+            .OrderBy(o => o.Operation.ShardClock)
+            .Select(o => o.Operation)
+            .ToArray();
+
+        // Build a mixed patch where a bounced-back Replica1 op is interleaved between two valid Replica2 ops
+        var mixedPatch = new CrdtPatch([remoteOps[0], ownOp with { Id = Guid.NewGuid(), ShardClock = 999 }, remoteOps[1]]);
+
+        var serializer = node1Sp.GetRequiredService<ICrdtSerializer>();
+        var patchMsg = new CrdtPatchMessage("Replica2", mixedPatch);
+        var wrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtPatch", serializer.SerializeToBytes(patchMsg), "sync-doc-1");
+        var handler = node1Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+
+        // Act
+        await handler.HandlePayloadAsync(TestMeshId, new PeerId(Guid.NewGuid()), serializer.SerializeToBytes(wrapper), CancellationToken.None);
+
+        // Assert - Both Replica2 operations were applied, while the bounced Replica1 operation was stripped without corrupting Replica1's DVV
+        var node1Doc = node1Orch.TryGetLocalDocument<SyncTestState>("sync-doc-1")!;
+        var state = await node1Doc.GetDocumentAsync(CancellationToken.None);
+        state.Data.DataMap.ShouldContainKeyAndValue("OwnKey", "OwnVal");
+        state.Data.DataMap.ShouldContainKeyAndValue("RemoteKey1", "RemoteVal1");
+        state.Data.DataMap.ShouldContainKeyAndValue("RemoteKey2", "RemoteVal2");
+
+        var dvv = node1Doc.GetLocalState()[node1Doc.ShardId];
+        dvv.Versions["Replica1"].ShouldBe(1);
+        dvv.Dots.ContainsKey("Replica1").ShouldBeFalse();
+        dvv.Versions["Replica2"].ShouldBe(2);
+    }
+
+    [IntegrationFact]
+    public async Task ProcessProxyRpcPayloadsAsync_WhenReadRequestTargetsLocalShardWithUncreatedDocument_LazilyPromotesAndReturnsMaterializedState()
+    {
+        // Arrange
+        var mockSender = new Mock<IDirectMessageSender>();
+        var capturedDirectSends = new List<ReadOnlyMemory<byte>>();
+        mockSender.Setup(p => p.SendDirectAsync(It.IsAny<PeerId>(), Capture.In(capturedDirectSends), It.IsAny<CancellationToken>()))
+               .Returns(Task.CompletedTask);
+
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        // Pre-populate storage with a document checkpoint before any registry entry or in-memory instance exists
+        var metadataManager = scope.ServiceProvider.GetRequiredService<Ama.CRDT.Services.ICrdtMetadataManager>();
+        var preStoredState = new SyncTestState { Id = "lazy-read-doc" };
+        preStoredState.DataMap["PreStoredKey"] = "PreStoredVal";
+        var preStoredDoc = new CrdtDocument<SyncTestState>(preStoredState, metadataManager.Initialize(preStoredState));
+        await scope.Storage.SaveDocumentAsync(
+            "default",
+            CrdtRegistryEntry.GetRegistryKey("sync-doc-1", "lazy-read-doc"),
+            preStoredDoc,
+            CancellationToken.None);
+
+        orchestrator.TryGetLocalDocument<SyncTestState>("lazy-read-doc").ShouldBeNull();
+
+        var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var serializer = sp.GetRequiredService<ICrdtSerializer>();
+
+        var correlationId = Guid.NewGuid();
+        var readReq = new CrdtReadRequestDto
+        {
+            CorrelationId = correlationId,
+            DocumentId = "lazy-read-doc",
+            DocumentTypeAlias = "sync-doc-1"
+        };
+
+        var wrapper = new CrdtMessageWrapper("lazy-read-doc", "CrdtReadReq", serializer.SerializeToBytes(readReq), "sync-doc-1");
+
+        // Act - Remote node sends a CrdtReadReq for a document that is registered by type alias and owned by a local shard, but not yet promoted
+        await handler.HandlePayloadAsync(TestMeshId, new PeerId(Guid.NewGuid()), serializer.SerializeToBytes(wrapper), CancellationToken.None);
+
+        // Assert - Document was lazily promoted, loaded from storage, and returned in CrdtReadRes
+        orchestrator.TryGetLocalDocument<SyncTestState>("lazy-read-doc").ShouldNotBeNull();
+
+        capturedDirectSends.Count.ShouldBe(1);
+        var resWrapper = serializer.DeserializeFromBytes<CrdtMessageWrapper>(capturedDirectSends[0].ToArray());
+        resWrapper.MessageType.ShouldBe("CrdtReadRes");
+
+        var resDto = serializer.DeserializeFromBytes<CrdtReadResponseDto>(resWrapper.Payload!);
+        resDto.CorrelationId.ShouldBe(correlationId);
+        resDto.StatePayload.ShouldNotBeEmpty();
+
+        var returnedDoc = serializer.DeserializeFromBytes<CrdtDocument<SyncTestState>>(resDto.StatePayload!);
+        returnedDoc.Data.DataMap.ShouldContainKeyAndValue("PreStoredKey", "PreStoredVal");
+    }
 }

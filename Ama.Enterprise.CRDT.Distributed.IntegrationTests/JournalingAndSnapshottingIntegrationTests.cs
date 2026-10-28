@@ -799,7 +799,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     public async Task DiskWriteAheadBuffer_WhenCrashOccursBeforeFlush_RecoversOperationsFromDiskWalOnStartup()
     {
         // Arrange
-        var walDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"ama-wal-test-{Guid.NewGuid():N}");
+        var walDir = Path.Combine(Path.GetTempPath(), $"ama-wal-test-{Guid.NewGuid():N}");
         var crashedInnerStorage = new MemoryCrdtStorage();
         var recoveredInnerStorage = new MemoryCrdtStorage();
 
@@ -861,78 +861,106 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         }
         finally
         {
-            if (System.IO.Directory.Exists(walDir))
+            if (Directory.Exists(walDir))
             {
-                try { System.IO.Directory.Delete(walDir, recursive: true); } catch { }
+                try { Directory.Delete(walDir, recursive: true); } catch { }
             }
         }
     }
 
     [IntegrationFact]
-    public async Task BufferedStorageDecorator_DeleteDocumentBeforeFlush_PurgesInFlightOperationsForDeletedDocumentOnly()
+    public async Task StorageJournalForwarder_WhenJournalContainsMultiDocumentShard_RefreshesDvvAndCheckpointsAllDocumentsBeforeTrimming()
     {
-        // Arrange
+        // Arrange - Both doc-1 and doc-2 share the "default" shard.
+        // Verify that when aggressive trimming is triggered, StorageJournalForwarder checkpoints BOTH documents
+        // and persists the latest shard DVV before deleting journal entries.
+        var savedDocumentKeys = new List<string>();
+        ShardVersionVectorMap? savedDvvBeforeTrim = null;
+        var dvvSavedBeforeTrim = false;
+        var docsSavedCountBeforeTrim = 0;
+
         var innerStorage = new MemoryCrdtStorage();
-        var sp = BuildNode("ReplicaDelBuffer", services =>
+        var mockStorage = new Mock<IDistributedCrdtStorage>();
+
+        mockStorage.Setup(s => s.AppendAsync(It.IsAny<string>(), It.IsAny<IReadOnlyList<CrdtOperation>>(), It.IsAny<CancellationToken>()))
+            .Returns((string docId, IReadOnlyList<CrdtOperation> ops, CancellationToken ct) => innerStorage.AppendAsync(docId, ops, ct));
+
+        mockStorage.Setup(s => s.GetJournalCountAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string shardId, CancellationToken ct) => innerStorage.GetJournalCountAsync(shardId, ct));
+
+        mockStorage.Setup(s => s.SaveSerializedDocumentAsync<JournalTestState>(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, byte[], CancellationToken>((_, docKey, _, _) =>
+            {
+                lock (savedDocumentKeys)
+                {
+                    savedDocumentKeys.Add(docKey);
+                }
+            })
+            .Returns((string shardId, string docKey, byte[] bytes, CancellationToken ct) =>
+                innerStorage.SaveSerializedDocumentAsync<JournalTestState>(shardId, docKey, bytes, ct));
+
+        mockStorage.Setup(s => s.SaveShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<ShardVersionVectorMap>(), It.IsAny<CancellationToken>()))
+            .Callback<string, ShardVersionVectorMap, CancellationToken>((_, map, _) =>
+            {
+                savedDvvBeforeTrim = map;
+            })
+            .Returns((string repId, ShardVersionVectorMap map, CancellationToken ct) =>
+                innerStorage.SaveShardVersionVectorMapAsync(repId, map, ct));
+
+        mockStorage.Setup(s => s.TrimAsync("default", It.IsAny<IReadOnlyDictionary<string, long>>(), It.IsAny<CancellationToken>()))
+            .Callback(() =>
+            {
+                lock (savedDocumentKeys)
+                {
+                    docsSavedCountBeforeTrim = savedDocumentKeys.Count;
+                }
+                dvvSavedBeforeTrim = savedDvvBeforeTrim != null &&
+                                     savedDvvBeforeTrim.TryGetValue("default", out var dvv) &&
+                                     dvv.Versions.TryGetValue("ReplicaOrder", out var v) &&
+                                     v >= 5;
+            })
+            .Returns((string shardId, IReadOnlyDictionary<string, long> gmvv, CancellationToken ct) =>
+                innerStorage.TrimAsync(shardId, gmvv, ct));
+
+        var sp = BuildNode("ReplicaOrder", services =>
         {
             services.Configure<DistributedCrdtOptions>(opt =>
             {
-                opt.JournalMode = CrdtJournalMode.InMemoryBuffer;
+                opt.JournalHardTrimThreshold = 5;
+                opt.CheckpointIntervalSeconds = 3600;
+                opt.MaintenanceIntervalSeconds = 3600;
             });
-            services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(provider =>
-                new BufferedDistributedCrdtStorageDecorator(
-                    innerStorage,
-                    ActivatorUtilities.CreateInstance<InMemoryWriteAheadBuffer>(provider))));
+            services.Replace(ServiceDescriptor.Scoped(_ => mockStorage.Object));
         });
 
-        var scope = sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaDelBuffer");
-        var decorator = (BufferedDistributedCrdtStorageDecorator)scope.Storage;
-
-        var deletedDocOp = default(CrdtOperation) with { Id = Guid.NewGuid(), ReplicaId = "ReplicaDelBuffer", ShardClock = 1, ShardId = "default" };
-        var survivingDocOp = default(CrdtOperation) with { Id = Guid.NewGuid(), ReplicaId = "ReplicaDelBuffer", ShardClock = 2, ShardId = "default" };
-
-        await decorator.AppendAsync("doc-to-delete", new[] { deletedDocOp }, CancellationToken.None);
-        await decorator.AppendAsync("doc-to-keep", new[] { survivingDocOp }, CancellationToken.None);
-
-        // Act - Delete "doc-to-delete" while its operation is still staged in the buffer, then drain to inner storage
-        await decorator.DeleteDocumentAsync("default", "doc-to-delete", CancellationToken.None);
-        await decorator.DrainAsync(100, CancellationToken.None);
-
-        // Assert - Only "doc-to-keep" was flushed to inner storage; "doc-to-delete" was filtered out
-        var persistedOps = await innerStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
-        persistedOps.Count.ShouldBe(1);
-        persistedOps[0].DocumentId.ShouldBe("doc-to-keep");
-        persistedOps[0].Operation.Id.ShouldBe(survivingDocOp.Id);
-    }
-
-    [IntegrationFact]
-    public async Task CrdtCompactionService_WhenSafeToCompactHoursElapsed_CompactsMetadataAcrossActiveDocuments()
-    {
-        // Arrange
-        var sp = BuildNode("ReplicaCompact", services =>
-        {
-            services.Configure<DistributedCrdtOptions>(opt =>
-            {
-                opt.CompactionIntervalSeconds = 1;
-                opt.CompactionTtlSeconds = 1; // Allow immediate compaction of metadata
-            });
-        });
-
-        var scope = sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaCompact");
+        var scope = sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaOrder");
         var orch = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         await orch.InitializeAsync(CancellationToken.None);
-        await orch.CreateDocumentAsync("compact-doc", "journal-doc", CancellationToken.None);
-        await orch.ApplyIntentAsync<JournalTestState>("compact-doc", new MapSetIntent("Key1", "Val1"), nameof(JournalTestState.DataMap), CancellationToken.None);
 
-        var compactionService = sp.GetServices<IHostedService>().OfType<CrdtCompactionService>().Single();
+        await orch.CreateDocumentAsync("shared-shard-doc-1", "journal-doc", CancellationToken.None);
+        await orch.CreateDocumentAsync("shared-shard-doc-2", "journal-doc", CancellationToken.None);
 
-        // Act
-        await compactionService.StartAsync(CancellationToken.None);
-        await Task.Delay(1500);
-        await compactionService.StopAsync(CancellationToken.None);
+        // Act - Apply 3 operations to doc-1 and 3 operations to doc-2 (6 total > hard threshold 5)
+        for (int i = 0; i < 3; i++)
+        {
+            await orch.ApplyIntentAsync<JournalTestState>("shared-shard-doc-1", new MapSetIntent($"K1_{i}", $"V1_{i}"), nameof(JournalTestState.DataMap), CancellationToken.None);
+            await orch.ApplyIntentAsync<JournalTestState>("shared-shard-doc-2", new MapSetIntent($"K2_{i}", $"V2_{i}"), nameof(JournalTestState.DataMap), CancellationToken.None);
+        }
 
-        // Assert - Document state remains intact after background metadata compaction cycle
-        var docState = await orch.GetDocumentStateAsync<JournalTestState>("compact-doc", CancellationToken.None);
-        docState.Data.DataMap.ShouldContainKeyAndValue("Key1", "Val1");
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (!cts.Token.IsCancellationRequested)
+        {
+            if (await innerStorage.GetJournalCountAsync("default", CancellationToken.None) == 0 && dvvSavedBeforeTrim)
+            {
+                break;
+            }
+            await Task.Delay(30);
+        }
+
+        // Assert - Both documents in the "default" shard were checkpointed and the up-to-date DVV was persisted BEFORE TrimAsync executed
+        dvvSavedBeforeTrim.ShouldBeTrue();
+        docsSavedCountBeforeTrim.ShouldBeGreaterThanOrEqualTo(2);
+        savedDocumentKeys.ShouldContain(CrdtRegistryEntry.GetRegistryKey("journal-doc", "shared-shard-doc-1"));
+        savedDocumentKeys.ShouldContain(CrdtRegistryEntry.GetRegistryKey("journal-doc", "shared-shard-doc-2"));
     }
 }

@@ -974,6 +974,55 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         steadyMessages.ShouldAllBe(m => m.MessageType == "CrdtSync");
     }
 
+    [IntegrationFact]
+    public async Task TwoReplicas_WhenRemotePeerHasHigherContiguousVersionForLocalReplicaOnLiveNode_SanitizesLocalReplicaEntryDuringSnapshotMerge()
+    {
+        // Arrange - Node A is live (NOT at version 0; it is at version 1 for ReplicaA).
+        // A misconfigured or stale snapshot arrives claiming ReplicaA is at version 500 and ReplicaB is at version 2.
+        var nodeA = BuildNode("ReplicaA", opt => opt.ActiveSyncEnabled = false);
+        var nodeB = BuildNode("ReplicaB", opt => opt.ActiveSyncEnabled = false);
+
+        var scopeA = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeA.ReplicaId);
+        var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var dvvManagerA = scopeA.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+        await orchA.InitializeAsync(CancellationToken.None);
+
+        var scopeB = nodeB.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeB.ReplicaId);
+        var orchB = scopeB.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchB.InitializeAsync(CancellationToken.None);
+
+        await orchA.CreateDocumentAsync("doc-sanitize", "dvv-doc", CancellationToken.None);
+        await orchB.CreateDocumentAsync("doc-sanitize", "dvv-doc", CancellationToken.None);
+
+        // Node A has already generated 1 local operation (so ReplicaA is at 1, NOT 0/amnesia)
+        await orchA.ApplyIntentAsync<DvvTestState>("doc-sanitize", new MapSetIntent("LocalK1", "LocalV1"), "DataMap", CancellationToken.None);
+        await orchB.ApplyIntentAsync<DvvTestState>("doc-sanitize", new MapSetIntent("RemoteK1", "RemoteV1"), "DataMap", CancellationToken.None);
+        await orchB.ApplyIntentAsync<DvvTestState>("doc-sanitize", new MapSetIntent("RemoteK2", "RemoteV2"), "DataMap", CancellationToken.None);
+
+        var docB = orchB.TryGetLocalDocument<DvvTestState>("doc-sanitize")!;
+        var snapB = await docB.GetSnapshotDataAsync(CancellationToken.None);
+
+        // Inject a bogus inflated version (500) and dot (505) for "ReplicaA" into the incoming snapshot's GlobalState
+        var forgedGlobalState = new ShardVersionVectorMap(snapB.GlobalState);
+        forgedGlobalState["default"].Versions["ReplicaA"] = 500;
+        forgedGlobalState["default"].Add("ReplicaA", 505);
+
+        var docA = orchA.TryGetLocalDocument<DvvTestState>("doc-sanitize")!;
+
+        // Act - Merge the snapshot onto live Node A (where localVersion for ReplicaA is 1 > 0)
+        await docA.MergeSnapshotAsync(snapB.SnapshotData, forgedGlobalState, CancellationToken.None);
+
+        // Assert - ReplicaB's version (2) was merged, but ReplicaA's own causal clock remained at 1 (not jumped to 500)
+        var dvvAfterMerge = dvvManagerA.GetShardSnapshot("default")["default"];
+        dvvAfterMerge.Versions["ReplicaA"].ShouldBe(1);
+        dvvAfterMerge.Dots.ContainsKey("ReplicaA").ShouldBeFalse();
+        dvvAfterMerge.Versions["ReplicaB"].ShouldBe(2);
+
+        // Node A's next local mutation increments cleanly to clock 2
+        await orchA.ApplyIntentAsync<DvvTestState>("doc-sanitize", new MapSetIntent("LocalK2", "LocalV2"), "DataMap", CancellationToken.None);
+        dvvManagerA.GetShardSnapshot("default")["default"].Versions["ReplicaA"].ShouldBe(2);
+    }
+
     public async ValueTask DisposeAsync()
     {
         foreach (var node in nodes)

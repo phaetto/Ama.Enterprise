@@ -510,6 +510,78 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         await Should.ThrowAsync<InvalidOperationException>(async () => await orchA.GetDocumentStateAsync<SharedTestState>("unreachable-doc", CancellationToken.None));
     }
 
+    [IntegrationFact]
+    public async Task ShardedNode_WhenRemoteReplicaExplicitlyRejectsIntent_FailsOverToSecondaryReplicaAndSucceeds()
+    {
+        // Arrange - Shard targets ["RejectingReplica", "ReplicaB"].
+        // "RejectingReplica" is reachable and immediately replies with CrdtIntentForwardResponseDto { IsSuccess = false }.
+        // Node A must not abort on the negative ACK; it must fail over to "ReplicaB" in the same attempt.
+        var nodeA = BuildNodeWithCustomSharding(
+            "ReplicaA",
+            isDataShardLocal: false,
+            targetReplicas: ["RejectingReplica", "ReplicaB"],
+            configureOptions: opt =>
+            {
+                opt.RpcTimeoutMilliseconds = 1000;
+                opt.RpcMaxRetries = 1;
+            });
+        var nodeB = BuildNodeWithCustomSharding("ReplicaB", isDataShardLocal: true, targetReplicas: ["RejectingReplica", "ReplicaB"]);
+
+        WireMesh(nodeA, nodeB);
+
+        var rejectingPeerId = new PeerId(Guid.NewGuid());
+        var serializerA = nodeA.Sp.GetRequiredService<ICrdtSerializer>();
+        var handlerA = nodeA.Sp.GetRequiredKeyedService<IApplicationPayloadHandler>("TestMesh");
+
+        // Intercept sends to rejectingPeerId and immediately return an explicit failure CrdtIntentRes
+        nodeA.Sender
+            .Setup(s => s.SendDirectAsync(It.Is<PeerId>(p => p == rejectingPeerId), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()))
+            .Returns((PeerId _, ReadOnlyMemory<byte> payload, CancellationToken _) =>
+            {
+                var reqWrapper = serializerA.DeserializeFromBytes<CrdtMessageWrapper>(payload.ToArray());
+                var reqDto = serializerA.DeserializeFromBytes<CrdtIntentForwardRequestDto>(reqWrapper.Payload!);
+
+                _ = Task.Run(async () =>
+                {
+                    var failRes = new CrdtIntentForwardResponseDto
+                    {
+                        CorrelationId = reqDto.CorrelationId,
+                        IsSuccess = false,
+                        ErrorMessage = "Simulated remote application rejection."
+                    };
+                    var resWrapper = new CrdtMessageWrapper(reqWrapper.DocumentId, "CrdtIntentRes", serializerA.SerializeToBytes(failRes));
+                    await handlerA.HandlePayloadAsync("TestMesh", rejectingPeerId, serializerA.SerializeToBytes(resWrapper), CancellationToken.None);
+                });
+
+                return Task.CompletedTask;
+            });
+
+        var scopeA = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeA.ReplicaId);
+        var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchA.InitializeAsync(CancellationToken.None);
+
+        var scopeB = nodeB.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeB.ReplicaId);
+        var orchB = scopeB.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchB.InitializeAsync(CancellationToken.None);
+
+        scopeA.ClusterTracker.UpdatePeerState("RejectingReplica", rejectingPeerId.Value.ToString(), new ShardVersionVectorMap());
+        scopeA.ClusterTracker.UpdatePeerState("ReplicaB", nodeB.PeerId.Value.ToString(), new ShardVersionVectorMap());
+        scopeB.ClusterTracker.UpdatePeerState("ReplicaA", nodeA.PeerId.Value.ToString(), new ShardVersionVectorMap());
+
+        // Act
+        var applied = await orchA.ApplyIntentAsync<SharedTestState>(
+            "rejected-then-failover-doc",
+            new MapSetIntent("FailoverKey", "RecoveredOnReplicaB"),
+            nameof(SharedTestState.DataMap),
+            IntentDeliveryMode.Acknowledged,
+            CancellationToken.None);
+
+        // Assert - Failed over past RejectingReplica's negative response and applied on ReplicaB
+        applied.ShouldBeTrue();
+        var stateOnB = await orchB.GetDocumentStateAsync<SharedTestState>("rejected-then-failover-doc", CancellationToken.None);
+        stateOnB.Data.DataMap.ShouldContainKeyAndValue("FailoverKey", "RecoveredOnReplicaB");
+    }
+
     private sealed record TestNode(
         IServiceProvider Sp, 
         Mock<IDirectMessageSender> Sender, 
@@ -606,7 +678,7 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         services.AddSingleton(senderMock.Object);
         services.AddSingleton(gossipMock.Object);
         services.AddSingleton<IP2pRpcCorrelator, P2pRpcCorrelator>();
-        services.AddScoped<IShardDistributionManager>(_ => mockDist.Object);
+        services.AddScoped(_ => mockDist.Object);
 
         var sp = services.BuildServiceProvider();
 

@@ -370,8 +370,8 @@ public class EvictionIntegrationTests
         var snapWrapper = new Models.CrdtMessageWrapper("test-doc", "CrdtSnapshot", serializer.SerializeToBytes(snapMsg), "test-doc");
 
         // Act
-        await handler.HandlePayloadAsync("TestMesh", new Ama.Enterprise.P2p.Models.Core.PeerId(Guid.NewGuid()), serializer.SerializeToBytes(patchWrapper), CancellationToken.None);
-        await handler.HandlePayloadAsync("TestMesh", new Ama.Enterprise.P2p.Models.Core.PeerId(Guid.NewGuid()), serializer.SerializeToBytes(snapWrapper), CancellationToken.None);
+        await handler.HandlePayloadAsync("TestMesh", new P2p.Models.Core.PeerId(Guid.NewGuid()), serializer.SerializeToBytes(patchWrapper), CancellationToken.None);
+        await handler.HandlePayloadAsync("TestMesh", new P2p.Models.Core.PeerId(Guid.NewGuid()), serializer.SerializeToBytes(snapWrapper), CancellationToken.None);
 
         // Assert - Neither payload was applied, and two CrdtEviction rejection messages were broadcast
         var docAfter = await orchestrator.GetDocumentStateAsync<TestState>("test-doc", CancellationToken.None);
@@ -408,7 +408,7 @@ public class EvictionIntegrationTests
         // Act 1 - Receive CrdtEviction targeting a different replica ("NodeB")
         var otherEviction = new Models.CrdtEvictionRejectionMessage("NodeB");
         var otherWrapper = new Models.CrdtMessageWrapper("test-doc", "CrdtEviction", serializer.SerializeToBytes(otherEviction));
-        await handler.HandlePayloadAsync("TestMesh", new Ama.Enterprise.P2p.Models.Core.PeerId(Guid.NewGuid()), serializer.SerializeToBytes(otherWrapper), CancellationToken.None);
+        await handler.HandlePayloadAsync("TestMesh", new P2p.Models.Core.PeerId(Guid.NewGuid()), serializer.SerializeToBytes(otherWrapper), CancellationToken.None);
 
         // Assert 1 - Local identity is untouched
         replicaContext.ReplicaId.ShouldBe("NodeA");
@@ -416,7 +416,7 @@ public class EvictionIntegrationTests
         // Act 2 - Receive CrdtEviction targeting local replica ("NodeA")
         var selfEviction = new Models.CrdtEvictionRejectionMessage("NodeA");
         var selfWrapper = new Models.CrdtMessageWrapper("test-doc", "CrdtEviction", serializer.SerializeToBytes(selfEviction));
-        await handler.HandlePayloadAsync("TestMesh", new Ama.Enterprise.P2p.Models.Core.PeerId(Guid.NewGuid()), serializer.SerializeToBytes(selfWrapper), CancellationToken.None);
+        await handler.HandlePayloadAsync("TestMesh", new P2p.Models.Core.PeerId(Guid.NewGuid()), serializer.SerializeToBytes(selfWrapper), CancellationToken.None);
 
         // Assert 2 - Local identity was rebooted with a new GUID suffix
         replicaContext.ReplicaId.ShouldStartWith("NodeA_");

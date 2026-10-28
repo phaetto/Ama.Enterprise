@@ -355,7 +355,7 @@ public sealed class ConcurrencyIntegrationTests
                         ? Models.IntentDeliveryMode.FireAndForget
                         : Models.IntentDeliveryMode.Acknowledged;
 
-                    var intent = new Ama.CRDT.Models.Intents.SetIntent($"Val_{currentOp}");
+                    var intent = new SetIntent($"Val_{currentOp}");
                     await orchestrator.ApplyIntentAsync<ConcurrencyTestState>(docId, intent, nameof(ConcurrencyTestState.Data), mode, CancellationToken.None);
                 }));
             }
@@ -366,7 +366,7 @@ public sealed class ConcurrencyIntegrationTests
         // Flush each document queue with a final Acknowledged intent so all preceding FireAndForget commands have drained
         for (int d = 0; d < DocCount; d++)
         {
-            var finalIntent = new Ama.CRDT.Models.Intents.SetIntent($"Final_{d}");
+            var finalIntent = new SetIntent($"Final_{d}");
             await orchestrator.ApplyIntentAsync<ConcurrencyTestState>(
                 $"ff-doc-{d}",
                 finalIntent,
@@ -413,7 +413,7 @@ public sealed class ConcurrencyIntegrationTests
                 ? Models.IntentDeliveryMode.FireAndForget
                 : Models.IntentDeliveryMode.Acknowledged;
 
-            var intent = new Ama.CRDT.Models.Intents.SetIntent($"Backpressure_{i}");
+            var intent = new SetIntent($"Backpressure_{i}");
             await orchestrator.ApplyIntentAsync<ConcurrencyTestState>("bounded-doc", intent, nameof(ConcurrencyTestState.Data), mode, CancellationToken.None);
 
             if (i % 10 == 0)
@@ -429,7 +429,7 @@ public sealed class ConcurrencyIntegrationTests
         // Drain any remaining FireAndForget commands with one final Acknowledged intent
         await orchestrator.ApplyIntentAsync<ConcurrencyTestState>(
             "bounded-doc",
-            new Ama.CRDT.Models.Intents.SetIntent("FinalDrain"),
+            new SetIntent("FinalDrain"),
             nameof(ConcurrencyTestState.Data),
             Models.IntentDeliveryMode.Acknowledged,
             CancellationToken.None);
@@ -458,7 +458,7 @@ public sealed class ConcurrencyIntegrationTests
         // Act - 50 concurrent threads simultaneously trigger lazy promotion and intent application on the same uncreated document
         var tasks = Enumerable.Range(0, ConcurrentCallers).Select(i => Task.Run(async () =>
         {
-            var intent = new Ama.CRDT.Models.Intents.SetIntent($"RaceVal_{i}");
+            var intent = new SetIntent($"RaceVal_{i}");
             return await orchestrator.ApplyIntentAsync<ConcurrencyTestState>(
                 "race-promote-doc",
                 intent,
@@ -519,5 +519,51 @@ public sealed class ConcurrencyIntegrationTests
         ffException.ShouldBeAssignableTo<InvalidOperationException>();
         ackException.ShouldNotBeNull();
         ackException.ShouldBeAssignableTo<InvalidOperationException>();
+    }
+
+    [IntegrationFact]
+    public async Task CrdtDocumentOrchestrator_RapidFireAndForgetReevaluateTopologyCalls_CoalescesRedundantPendingSyncsAndAppliesFinalState()
+    {
+        // Arrange
+        var serviceProvider = BuildNode("Replica1");
+        var scopeManager = serviceProvider.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        const int BurstCount = 50;
+
+        // Act - Concurrently create documents via FireAndForget while flooding ReevaluateTopologyAsync(FireAndForget)
+        var tasks = new List<Task>(BurstCount * 2);
+        for (int i = 0; i < BurstCount; i++)
+        {
+            var docId = $"coalesce-doc-{i}";
+            tasks.Add(Task.Run(async () =>
+            {
+                await orchestrator.CreateDocumentAsync(docId, "concurrent-doc", Models.IntentDeliveryMode.FireAndForget, CancellationToken.None);
+                await orchestrator.ReevaluateTopologyAsync(Models.IntentDeliveryMode.FireAndForget, CancellationToken.None);
+            }));
+        }
+
+        await Task.WhenAll(tasks);
+
+        // Drain the document command pipeline (so all FireAndForget registry MapSetIntents have applied)
+        // and then run a single Acknowledged topology reevaluation to settle any coalesced syncs.
+        var commandPipeline = scope.ServiceProvider.GetRequiredService<IDocumentCommandPipeline>();
+        await orchestrator.ApplyIntentAsync<Models.CrdtRegistryState>(
+            orchestrator.Registry.DocumentId,
+            new MapSetIntent(
+                Models.CrdtRegistryEntry.GetRegistryKey("concurrent-doc", "coalesce-doc-final"),
+                new Models.CrdtRegistryEntry("coalesce-doc-final", "concurrent-doc", false)),
+            nameof(Models.CrdtRegistryState.Documents),
+            Models.IntentDeliveryMode.Acknowledged,
+            CancellationToken.None);
+
+        // Assert - All 50 + 1 documents were promoted without deadlocking or losing registry entries
+        for (int i = 0; i < BurstCount; i++)
+        {
+            orchestrator.TryGetLocalDocument<ConcurrencyTestState>($"coalesce-doc-{i}").ShouldNotBeNull();
+        }
+        orchestrator.TryGetLocalDocument<ConcurrencyTestState>("coalesce-doc-final").ShouldNotBeNull();
     }
 }

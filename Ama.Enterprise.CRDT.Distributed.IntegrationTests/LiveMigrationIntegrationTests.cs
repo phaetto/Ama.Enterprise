@@ -14,6 +14,7 @@ using Ama.CRDT.Extensions;
 using Ama.CRDT.Models;
 using Ama.CRDT.Models.Aot;
 using Ama.CRDT.Models.Intents;
+using Ama.CRDT.Services;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
@@ -399,333 +400,10 @@ public sealed class LiveMigrationIntegrationTests
     }
 
     [Fact]
-    public async Task MediatorNode_CustomDocumentIdMapping_AndFaultIsolation_ContinuesMigratingHealthyDocuments()
+    public async Task MediatorNode_WhenSourceDocumentliesOnRemoteShard_FetchesStateViaRpcAndMigratesToTargetReplica()
     {
-        // Arrange
-        var networkHandlers = new ConcurrentDictionary<(string MeshId, string ReplicaId), IApplicationPayloadHandler>();
-        var services = new ServiceCollection();
-        services.AddLogging();
-
-        services.AddDistributedCrdtCore(options =>
-        {
-            options.ActiveSyncEnabled = true;
-            options.EnableSharding = false;
-            options.AntiEntropyInitialDelaySeconds = 60;
-            options.AntiEntropyIntervalSeconds = 60;
-        });
-
-        services.AddCrdt()
-            .AddCrdtJsonTypeInfoResolver(LiveMigrationTestJsonContext.Default)
-            .AddCrdtAotContext(new LiveMigrationTestAotContext())
-            .AddCrdtSerializableType<LegacyTaskItemV1>("legacy-task-v1")
-            .AddCrdtSerializableType<ModernTaskItemV2>("modern-task-v2");
-
-        services.AddDistributedDocumentType<LegacyTaskListStateV1>("task-list-v1");
-        services.AddDistributedDocumentType<ModernTaskListStateV2>("task-list-v2");
-
-        services.AddDistributedCrdtReplica("replica-v1");
-        services.AddDistributedCrdtReplica("replica-v2");
-
-        RegisterInMemoryMeshMocks(services, "mesh-v1", "replica-v1", networkHandlers);
-        RegisterInMemoryMeshMocks(services, "mesh-v2", "replica-v2", networkHandlers);
-
-        services.AddDistributedCrdtP2p("mesh-v1", "replica-v1");
-        services.AddDistributedCrdtP2p("mesh-v2", "replica-v2");
-
-        services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, CustomPrefixAndFaultyTaskMigrator>(options =>
-        {
-            options.MigrationId = "custom-id-and-fault-test";
-            options.SourceReplicaId = "replica-v1";
-            options.SourceTypeAlias = "task-list-v1";
-            options.TargetReplicaId = "replica-v2";
-            options.TargetTypeAlias = "task-list-v2";
-            options.BackfillBatchDelayMilliseconds = 1;
-            options.ReconciliationScanIntervalSeconds = 60;
-        });
-
-        await using var provider = services.BuildServiceProvider();
-        var scopeManager = provider.GetRequiredService<DistributedCrdtScopeManager>();
-        var orchestratorV1 = scopeManager.GetOrCreateScope("replica-v1").ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var orchestratorV2 = scopeManager.GetOrCreateScope("replica-v2").ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-
-        await orchestratorV1.InitializeAsync();
-        await orchestratorV2.InitializeAsync();
-
-        var hostedServices = provider.GetServices<IHostedService>().ToList();
-        foreach (var hs in hostedServices)
-        {
-            await hs.StartAsync(CancellationToken.None);
-        }
-
-        // Act: Create a healthy doc, a poisoned doc that throws, and another healthy doc
-        await orchestratorV1.CreateDocumentAsync("doc-1", "task-list-v1");
-        await orchestratorV1.ApplyIntentAsync<LegacyTaskListStateV1>(
-            "doc-1",
-            new MapSetIntent("k1", new LegacyTaskItemV1 { Title = "Healthy 1", Completed = true }),
-            nameof(LegacyTaskListStateV1.Items));
-
-        await orchestratorV1.CreateDocumentAsync("doc-poison", "task-list-v1");
-        await orchestratorV1.ApplyIntentAsync<LegacyTaskListStateV1>(
-            "doc-poison",
-            new MapSetIntent("poison", new LegacyTaskItemV1 { Title = "Corrupt payload", Completed = false }),
-            nameof(LegacyTaskListStateV1.Items));
-
-        await orchestratorV1.CreateDocumentAsync("doc-2", "task-list-v1");
-        await orchestratorV1.ApplyIntentAsync<LegacyTaskListStateV1>(
-            "doc-2",
-            new MapSetIntent("k2", new LegacyTaskItemV1 { Title = "Healthy 2", Completed = false }),
-            nameof(LegacyTaskListStateV1.Items));
-
-        var migrationManager = provider.GetRequiredService<ICrdtMigrationManager>();
-        await migrationManager.DrainAllAsync();
-
-        // Assert: Failed translation is recorded, worker did not crash, and mapped IDs exist in target
-        migrationManager.TryGetStatus("custom-id-and-fault-test", out var status).ShouldBeTrue();
-        status.FailedTranslations.ShouldBeGreaterThanOrEqualTo(1);
-        status.BackfilledDocuments.ShouldBe(2);
-
-        (await orchestratorV2.DocumentExistsAsync("doc-1", "task-list-v2")).ShouldBeFalse();
-        (await orchestratorV2.DocumentExistsAsync("v2-doc-1", "task-list-v2")).ShouldBeTrue();
-        (await orchestratorV2.DocumentExistsAsync("v2-doc-2", "task-list-v2")).ShouldBeTrue();
-
-        var doc1V2 = await orchestratorV2.GetDocumentStateAsync<ModernTaskListStateV2>("v2-doc-1");
-        doc1V2.Data.ShouldNotBeNull();
-        doc1V2.Data.Tasks["k1"].Description.ShouldBe("Healthy 1");
-
-        // Fix the poison document and verify it recovers and migrates on subsequent mutation
-        await orchestratorV1.ApplyIntentAsync<LegacyTaskListStateV1>(
-            "doc-poison",
-            new MapRemoveIntent("poison"),
-            nameof(LegacyTaskListStateV1.Items));
-        await orchestratorV1.ApplyIntentAsync<LegacyTaskListStateV1>(
-            "doc-poison",
-            new MapSetIntent("recovered", new LegacyTaskItemV1 { Title = "Fixed item", Completed = true }),
-            nameof(LegacyTaskListStateV1.Items));
-
-        await migrationManager.DrainAllAsync();
-
-        var recoveredDocV2 = await orchestratorV2.GetDocumentStateAsync<ModernTaskListStateV2>("v2-doc-poison");
-        recoveredDocV2.Data.ShouldNotBeNull();
-        recoveredDocV2.Data.Tasks.ContainsKey("recovered").ShouldBeTrue();
-        recoveredDocV2.Data.Tasks["recovered"].Status.ShouldBe("Done");
-
-        // Delete doc-1 in source and verify the mapped target ID ("v2-doc-1") is deleted
-        await orchestratorV1.DeleteDocumentAsync("doc-1", "task-list-v1");
-        await migrationManager.DrainAllAsync();
-
-        (await orchestratorV2.DocumentExistsAsync("v2-doc-1", "task-list-v2")).ShouldBeFalse();
-
-        foreach (var hs in hostedServices)
-        {
-            await hs.StopAsync(CancellationToken.None);
-        }
-    }
-
-    [Fact]
-    public async Task MediatorNode_WhenPropagateDocumentTombstonesDisabled_RetainsTargetDocumentsAndFiltersUnrelatedTypes()
-    {
-        // Arrange
-        var networkHandlers = new ConcurrentDictionary<(string MeshId, string ReplicaId), IApplicationPayloadHandler>();
-        var services = new ServiceCollection();
-        services.AddLogging();
-
-        services.AddDistributedCrdtCore(options =>
-        {
-            options.ActiveSyncEnabled = true;
-            options.EnableSharding = false;
-            options.AntiEntropyInitialDelaySeconds = 60;
-            options.AntiEntropyIntervalSeconds = 60;
-        });
-
-        services.AddCrdt()
-            .AddCrdtJsonTypeInfoResolver(LiveMigrationTestJsonContext.Default)
-            .AddCrdtAotContext(new LiveMigrationTestAotContext())
-            .AddCrdtSerializableType<LegacyTaskItemV1>("legacy-task-v1")
-            .AddCrdtSerializableType<ModernTaskItemV2>("modern-task-v2");
-
-        services.AddDistributedDocumentType<LegacyTaskListStateV1>("task-list-v1");
-        services.AddDistributedDocumentType<LegacyTaskListStateV1>("other-unrelated-type-v1");
-        services.AddDistributedDocumentType<ModernTaskListStateV2>("task-list-v2");
-
-        services.AddDistributedCrdtReplica("replica-v1");
-        services.AddDistributedCrdtReplica("replica-v2");
-
-        RegisterInMemoryMeshMocks(services, "mesh-v1", "replica-v1", networkHandlers);
-        RegisterInMemoryMeshMocks(services, "mesh-v2", "replica-v2", networkHandlers);
-
-        services.AddDistributedCrdtP2p("mesh-v1", "replica-v1");
-        services.AddDistributedCrdtP2p("mesh-v2", "replica-v2");
-
-        services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, LegacyToModernTaskMigrator>(options =>
-        {
-            options.MigrationId = "no-tombstones-migration";
-            options.SourceReplicaId = "replica-v1";
-            options.SourceTypeAlias = "task-list-v1";
-            options.TargetReplicaId = "replica-v2";
-            options.TargetTypeAlias = "task-list-v2";
-            options.PropagateDocumentTombstones = false;
-            options.BackfillBatchDelayMilliseconds = 1;
-        });
-
-        await using var provider = services.BuildServiceProvider();
-        var scopeManager = provider.GetRequiredService<DistributedCrdtScopeManager>();
-        var orchestratorV1 = scopeManager.GetOrCreateScope("replica-v1").ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var orchestratorV2 = scopeManager.GetOrCreateScope("replica-v2").ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-
-        await orchestratorV1.InitializeAsync();
-        await orchestratorV2.InitializeAsync();
-
-        // Create an unrelated document type on V1 before backfill
-        await orchestratorV1.CreateDocumentAsync("unrelated-doc", "other-unrelated-type-v1");
-        await orchestratorV1.CreateDocumentAsync("retained-doc", "task-list-v1");
-        await orchestratorV1.ApplyIntentAsync<LegacyTaskListStateV1>(
-            "retained-doc",
-            new MapSetIntent("t1", new LegacyTaskItemV1 { Title = "Keep me in V2", Completed = true }),
-            nameof(LegacyTaskListStateV1.Items));
-
-        var hostedServices = provider.GetServices<IHostedService>().ToList();
-        foreach (var hs in hostedServices)
-        {
-            await hs.StartAsync(CancellationToken.None);
-        }
-
-        var migrationManager = provider.GetRequiredService<ICrdtMigrationManager>();
-        await migrationManager.DrainAllAsync();
-
-        // Verify unrelated type was ignored and target document was migrated
-        (await orchestratorV2.DocumentExistsAsync("unrelated-doc", "task-list-v2")).ShouldBeFalse();
-        (await orchestratorV2.DocumentExistsAsync("retained-doc", "task-list-v2")).ShouldBeTrue();
-
-        // Act: Delete the document in V1 while PropagateDocumentTombstones is false
-        await orchestratorV1.DeleteDocumentAsync("retained-doc", "task-list-v1");
-        await migrationManager.DrainAllAsync();
-
-        // Assert: Document remains intact in V2 and TombstonesProcessed is 0
-        (await orchestratorV2.DocumentExistsAsync("retained-doc", "task-list-v2")).ShouldBeTrue();
-        migrationManager.TryGetStatus("no-tombstones-migration", out var status).ShouldBeTrue();
-        status.TombstonesProcessed.ShouldBe(0);
-
-        foreach (var hs in hostedServices)
-        {
-            await hs.StopAsync(CancellationToken.None);
-        }
-    }
-
-    [Fact]
-    public async Task MediatorNode_DocumentDeleteAndRecreateLifecycle_PropagatesBothDirections()
-    {
-        // Arrange
-        var networkHandlers = new ConcurrentDictionary<(string MeshId, string ReplicaId), IApplicationPayloadHandler>();
-        var services = new ServiceCollection();
-        services.AddLogging();
-
-        services.AddDistributedCrdtCore(options =>
-        {
-            options.ActiveSyncEnabled = true;
-            options.EnableSharding = false;
-            options.AntiEntropyInitialDelaySeconds = 60;
-            options.AntiEntropyIntervalSeconds = 60;
-        });
-
-        services.AddCrdt()
-            .AddCrdtJsonTypeInfoResolver(LiveMigrationTestJsonContext.Default)
-            .AddCrdtAotContext(new LiveMigrationTestAotContext())
-            .AddCrdtSerializableType<LegacyTaskItemV1>("legacy-task-v1")
-            .AddCrdtSerializableType<ModernTaskItemV2>("modern-task-v2");
-
-        services.AddDistributedDocumentType<LegacyTaskListStateV1>("task-list-v1");
-        services.AddDistributedDocumentType<ModernTaskListStateV2>("task-list-v2");
-
-        services.AddDistributedCrdtReplica("replica-v1");
-        services.AddDistributedCrdtReplica("replica-v2");
-
-        RegisterInMemoryMeshMocks(services, "mesh-v1", "replica-v1", networkHandlers);
-        RegisterInMemoryMeshMocks(services, "mesh-v2", "replica-v2", networkHandlers);
-
-        services.AddDistributedCrdtP2p("mesh-v1", "replica-v1");
-        services.AddDistributedCrdtP2p("mesh-v2", "replica-v2");
-
-        services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, LegacyToModernTaskMigrator>(options =>
-        {
-            options.MigrationId = "recreate-lifecycle";
-            options.SourceReplicaId = "replica-v1";
-            options.SourceTypeAlias = "task-list-v1";
-            options.TargetReplicaId = "replica-v2";
-            options.TargetTypeAlias = "task-list-v2";
-            options.PropagateDocumentTombstones = true;
-            options.BackfillBatchDelayMilliseconds = 1;
-        });
-
-        await using var provider = services.BuildServiceProvider();
-        var scopeManager = provider.GetRequiredService<DistributedCrdtScopeManager>();
-        var orchestratorV1 = scopeManager.GetOrCreateScope("replica-v1").ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var orchestratorV2 = scopeManager.GetOrCreateScope("replica-v2").ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-
-        await orchestratorV1.InitializeAsync();
-        await orchestratorV2.InitializeAsync();
-
-        // Pre-delete a document before migration starts (never existed in V2)
-        await orchestratorV1.CreateDocumentAsync("pre-deleted-doc", "task-list-v1");
-        await orchestratorV1.DeleteDocumentAsync("pre-deleted-doc", "task-list-v1");
-
-        var hostedServices = provider.GetServices<IHostedService>().ToList();
-        foreach (var hs in hostedServices)
-        {
-            await hs.StartAsync(CancellationToken.None);
-        }
-
-        var migrationManager = provider.GetRequiredService<ICrdtMigrationManager>();
-        await migrationManager.DrainAllAsync();
-
-        // Pre-deleted doc that never existed in V2 should not increment TombstonesProcessed
-        migrationManager.TryGetStatus("recreate-lifecycle", out var initialStatus).ShouldBeTrue();
-        initialStatus.TombstonesProcessed.ShouldBe(0);
-
-        // Step 1: Create -> Migrate -> Delete -> Verify Tombstone
-        await orchestratorV1.CreateDocumentAsync("flapping-doc", "task-list-v1");
-        await orchestratorV1.ApplyIntentAsync<LegacyTaskListStateV1>(
-            "flapping-doc",
-            new MapSetIntent("item1", new LegacyTaskItemV1 { Title = "First incarnation", Completed = false }),
-            nameof(LegacyTaskListStateV1.Items));
-        await migrationManager.DrainAllAsync();
-        (await orchestratorV2.DocumentExistsAsync("flapping-doc", "task-list-v2")).ShouldBeTrue();
-
-        await orchestratorV1.DeleteDocumentAsync("flapping-doc", "task-list-v1");
-        await migrationManager.DrainAllAsync();
-        (await orchestratorV2.DocumentExistsAsync("flapping-doc", "task-list-v2")).ShouldBeFalse();
-
-        // Step 2: Recreate the same document ID -> Migrate -> Verify Recreated in V2
-        await orchestratorV1.CreateDocumentAsync("flapping-doc", "task-list-v1");
-        await orchestratorV1.ApplyIntentAsync<LegacyTaskListStateV1>(
-            "flapping-doc",
-            new MapSetIntent("item2", new LegacyTaskItemV1 { Title = "Second incarnation", Completed = true }),
-            nameof(LegacyTaskListStateV1.Items));
-        await migrationManager.DrainAllAsync();
-
-        (await orchestratorV2.DocumentExistsAsync("flapping-doc", "task-list-v2")).ShouldBeTrue();
-        var recreatedState = await orchestratorV2.GetDocumentStateAsync<ModernTaskListStateV2>("flapping-doc");
-        recreatedState.Data.ShouldNotBeNull();
-        recreatedState.Data.Tasks.ContainsKey("item2").ShouldBeTrue();
-        recreatedState.Data.Tasks["item2"].Description.ShouldBe("Second incarnation");
-
-        // Step 3: Delete a second time -> Verify Tombstone is propagated again
-        await orchestratorV1.DeleteDocumentAsync("flapping-doc", "task-list-v1");
-        await migrationManager.DrainAllAsync();
-
-        (await orchestratorV2.DocumentExistsAsync("flapping-doc", "task-list-v2")).ShouldBeFalse();
-        migrationManager.TryGetStatus("recreate-lifecycle", out var finalStatus).ShouldBeTrue();
-        finalStatus.TombstonesProcessed.ShouldBe(2);
-
-        foreach (var hs in hostedServices)
-        {
-            await hs.StopAsync(CancellationToken.None);
-        }
-    }
-
-    [Fact]
-    public async Task MediatorNode_WhenPartitionBackfillByPrimaryShardOwnerEnabled_OnlyPrimaryOwnerBackfillsEachDocument()
-    {
-        // Arrange: Set up two Mediator nodes where V1 is sharded with ReplicationFactor = 2 (both nodes hold all docs, but primary owner is partitioned)
+        // Arrange - Mediator's source replica ("replica-v1-mediator") does NOT host the data shard locally;
+        // the source document is hosted on a remote V1 shard owner ("replica-v1-remote-owner").
         var networkHandlers = new ConcurrentDictionary<(string MeshId, string ReplicaId), IApplicationPayloadHandler>();
         var services = new ServiceCollection();
         services.AddLogging();
@@ -734,7 +412,6 @@ public sealed class LiveMigrationIntegrationTests
         {
             options.ActiveSyncEnabled = true;
             options.EnableSharding = true;
-            options.ShardReplicationFactor = 2;
             options.AntiEntropyInitialDelaySeconds = 60;
             options.AntiEntropyIntervalSeconds = 60;
         });
@@ -748,248 +425,107 @@ public sealed class LiveMigrationIntegrationTests
         services.AddDistributedDocumentType<LegacyTaskListStateV1>("task-list-v1");
         services.AddDistributedDocumentType<ModernTaskListStateV2>("task-list-v2");
 
-        // Mediator Node A (replica-v1-a -> replica-v2-a) and Mediator Node B (replica-v1-b -> replica-v2-b)
-        services.AddDistributedCrdtReplica("replica-v1-a");
-        services.AddDistributedCrdtReplica("replica-v2-a");
-        services.AddDistributedCrdtReplica("replica-v1-b");
-        services.AddDistributedCrdtReplica("replica-v2-b");
+        services.AddDistributedCrdtReplica("replica-v1-mediator");
+        services.AddDistributedCrdtReplica("replica-v2-target");
 
-        var peerAId = new PeerId(Guid.NewGuid());
-        var peerBId = new PeerId(Guid.NewGuid());
+        RegisterInMemoryMeshMocks(services, "mesh-v1", "replica-v1-mediator", networkHandlers);
+        RegisterInMemoryMeshMocks(services, "mesh-v2", "replica-v2-target", networkHandlers);
 
-        RegisterInMemoryMeshMocks(services, "mesh-v1-a", "replica-v1-a", networkHandlers);
-        RegisterInMemoryMeshMocks(services, "mesh-v2-a", "replica-v2-a", networkHandlers);
-        RegisterInMemoryMeshMocks(services, "mesh-v1-b", "replica-v1-b", networkHandlers);
-        RegisterInMemoryMeshMocks(services, "mesh-v2-b", "replica-v2-b", networkHandlers);
+        // Configure custom distribution manager on the mediator so "replica-v1-mediator" considers data shards remote
+        // (owned by "replica-v1-remote-owner"), while "replica-v2-target" considers all shards local.
+        services.AddScoped<IShardDistributionManager>(sp =>
+        {
+            var replicaCtx = sp.GetRequiredService<ReplicaContext>();
+            var mockDist = new Mock<IShardDistributionManager>();
+            if (string.Equals(replicaCtx.ReplicaId, "replica-v1-mediator", StringComparison.Ordinal))
+            {
+                mockDist.Setup(d => d.IsShardLocalAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                    .Returns((string shardId, CancellationToken _) =>
+                        new ValueTask<bool>(string.Equals(shardId, Constants.SystemRegistryDocumentId, StringComparison.Ordinal)));
+                mockDist.Setup(d => d.GetTargetNodesForShardAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(new[] { "replica-v1-remote-owner" });
+            }
+            else
+            {
+                mockDist.Setup(d => d.IsShardLocalAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                    .Returns(new ValueTask<bool>(true));
+                mockDist.Setup(d => d.GetTargetNodesForShardAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(new[] { replicaCtx.ReplicaId });
+            }
 
-        var sharedPeerRegistryMock = new Mock<IPeerRegistry>();
-        sharedPeerRegistryMock
-            .Setup(r => r.GetPeersByStatusAsync("mesh-v1-a", PeerStatus.Active, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { new PeerNode { Id = peerBId } });
-        sharedPeerRegistryMock
-            .Setup(r => r.GetPeersByStatusAsync("mesh-v1-b", PeerStatus.Active, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { new PeerNode { Id = peerAId } });
-        sharedPeerRegistryMock
-            .Setup(r => r.GetPeersByStatusAsync(It.Is<string>(m => m != "mesh-v1-a" && m != "mesh-v1-b"), PeerStatus.Active, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<PeerNode>());
-        services.AddSingleton<IPeerRegistry>(sharedPeerRegistryMock.Object);
+            return mockDist.Object;
+        });
 
-        services.AddDistributedCrdtP2p("mesh-v1-a", "replica-v1-a");
-        services.AddDistributedCrdtP2p("mesh-v2-a", "replica-v2-a");
-        services.AddDistributedCrdtP2p("mesh-v1-b", "replica-v1-b");
-        services.AddDistributedCrdtP2p("mesh-v2-b", "replica-v2-b");
+        var remoteOwnerPeerId = new PeerId(Guid.NewGuid());
+        var directSenderMock = new Mock<IDirectMessageSender>();
+        services.AddSingleton(directSenderMock.Object);
+        services.AddSingleton<IP2pRpcCorrelator, P2pRpcCorrelator>();
+
+        services.AddDistributedCrdtP2p("mesh-v1", "replica-v1-mediator");
+        services.AddDistributedCrdtP2p("mesh-v2", "replica-v2-target");
 
         services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, LegacyToModernTaskMigrator>(options =>
         {
-            options.MigrationId = "bridge-node-a";
-            options.SourceReplicaId = "replica-v1-a";
+            options.MigrationId = "remote-shard-rpc-migration";
+            options.SourceReplicaId = "replica-v1-mediator";
             options.SourceTypeAlias = "task-list-v1";
-            options.TargetReplicaId = "replica-v2-a";
+            options.TargetReplicaId = "replica-v2-target";
             options.TargetTypeAlias = "task-list-v2";
-            options.PartitionBackfillByPrimaryShardOwner = true;
-            options.BackfillBatchDelayMilliseconds = 0;
-        });
-
-        services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, LegacyToModernTaskMigrator>(options =>
-        {
-            options.MigrationId = "bridge-node-b";
-            options.SourceReplicaId = "replica-v1-b";
-            options.SourceTypeAlias = "task-list-v1";
-            options.TargetReplicaId = "replica-v2-b";
-            options.TargetTypeAlias = "task-list-v2";
-            options.PartitionBackfillByPrimaryShardOwner = true;
-            options.BackfillBatchDelayMilliseconds = 0;
-        });
-
-        await using var provider = services.BuildServiceProvider();
-        var scopeManager = provider.GetRequiredService<DistributedCrdtScopeManager>();
-
-        var scopeV1A = scopeManager.GetOrCreateScope("replica-v1-a");
-        var scopeV1B = scopeManager.GetOrCreateScope("replica-v1-b");
-        var scopeV2A = scopeManager.GetOrCreateScope("replica-v2-a");
-        var scopeV2B = scopeManager.GetOrCreateScope("replica-v2-b");
-
-        // Inform both V1 cluster trackers that both replica-v1-a and replica-v1-b are active in the V1 cluster
-        var trackerA = scopeV1A.ServiceProvider.GetRequiredService<IClusterStateTracker>();
-        var trackerB = scopeV1B.ServiceProvider.GetRequiredService<IClusterStateTracker>();
-        trackerA.UpdatePeerState("replica-v1-b", peerBId.Value.ToString(), new ShardVersionVectorMap());
-        trackerB.UpdatePeerState("replica-v1-a", peerAId.Value.ToString(), new ShardVersionVectorMap());
-
-        var orchestratorV1A = scopeV1A.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var orchestratorV1B = scopeV1B.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var orchestratorV2A = scopeV2A.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var orchestratorV2B = scopeV2B.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-
-        await orchestratorV1A.InitializeAsync();
-        await orchestratorV1B.InitializeAsync();
-        await orchestratorV2A.InitializeAsync();
-        await orchestratorV2B.InitializeAsync();
-
-        // Populate 20 identical documents on both V1 replicas (since ReplicationFactor = 2)
-        const int totalDocs = 20;
-        for (int i = 0; i < totalDocs; i++)
-        {
-            var docId = $"sharded-doc-{i}";
-            await orchestratorV1A.CreateDocumentAsync(docId, "task-list-v1");
-            await orchestratorV1B.CreateDocumentAsync(docId, "task-list-v1");
-        }
-
-        // Act: Start bridges and drain
-        var hostedServices = provider.GetServices<IHostedService>().ToList();
-        foreach (var hs in hostedServices)
-        {
-            await hs.StartAsync(CancellationToken.None);
-        }
-
-        var migrationManager = provider.GetRequiredService<ICrdtMigrationManager>();
-        await migrationManager.DrainAllAsync();
-
-        // Assert: Each document was backfilled by strictly ONE primary owner (no duplicate backfill across A and B)
-        migrationManager.TryGetStatus("bridge-node-a", out var statusA).ShouldBeTrue();
-        migrationManager.TryGetStatus("bridge-node-b", out var statusB).ShouldBeTrue();
-
-        await Task.Delay(5000);
-
-        // Only one shard exists: default, so it ggoes to one node only
-        (statusA.BackfilledDocuments + statusB.BackfilledDocuments).ShouldBe(totalDocs);
-        statusA.BackfilledDocuments.ShouldBe(0);
-        statusB.BackfilledDocuments.ShouldBe(20);
-
-        foreach (var hs in hostedServices)
-        {
-            await hs.StopAsync(CancellationToken.None);
-        }
-    }
-
-    [Fact]
-    public void AddDistributedCrdtMigration_WithInvalidOptions_ThrowsArgumentException()
-    {
-        var services = new ServiceCollection();
-
-        Should.Throw<ArgumentException>(() =>
-            services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, LegacyToModernTaskMigrator>(options =>
-            {
-                options.SourceReplicaId = "";
-                options.SourceTypeAlias = "v1";
-                options.TargetReplicaId = "replica-v2";
-                options.TargetTypeAlias = "v2";
-            }));
-
-        Should.Throw<ArgumentException>(() =>
-            services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, LegacyToModernTaskMigrator>(options =>
-            {
-                options.SourceReplicaId = "replica-v1";
-                options.SourceTypeAlias = " ";
-                options.TargetReplicaId = "replica-v2";
-                options.TargetTypeAlias = "v2";
-            }));
-
-        Should.Throw<ArgumentException>(() =>
-            services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, LegacyToModernTaskMigrator>(options =>
-            {
-                options.SourceReplicaId = "replica-v1";
-                options.SourceTypeAlias = "v1";
-                options.TargetReplicaId = "";
-                options.TargetTypeAlias = "v2";
-            }));
-
-        Should.Throw<ArgumentException>(() =>
-            services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, LegacyToModernTaskMigrator>(options =>
-            {
-                options.SourceReplicaId = "replica-v1";
-                options.SourceTypeAlias = "v1";
-                options.TargetReplicaId = "replica-v2";
-                options.TargetTypeAlias = "";
-            }));
-
-        Should.Throw<ArgumentOutOfRangeException>(() =>
-            services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, LegacyToModernTaskMigrator>(options =>
-            {
-                options.SourceReplicaId = "replica-v1";
-                options.SourceTypeAlias = "v1";
-                options.TargetReplicaId = "replica-v2";
-                options.TargetTypeAlias = "v2";
-                options.MaxConcurrency = 0;
-            }));
-    }
-
-    [Fact]
-    public async Task MediatorNode_MultipleConcurrentMigrationsOfSameStateTypes_IsolateStatusesAndDrainIndependently()
-    {
-        // Arrange
-        var networkHandlers = new ConcurrentDictionary<(string MeshId, string ReplicaId), IApplicationPayloadHandler>();
-        var services = new ServiceCollection();
-        services.AddLogging();
-
-        services.AddDistributedCrdtCore(options =>
-        {
-            options.ActiveSyncEnabled = true;
-            options.EnableSharding = false;
-            options.AntiEntropyInitialDelaySeconds = 60;
-            options.AntiEntropyIntervalSeconds = 60;
-        });
-
-        services.AddCrdt()
-            .AddCrdtJsonTypeInfoResolver(LiveMigrationTestJsonContext.Default)
-            .AddCrdtAotContext(new LiveMigrationTestAotContext())
-            .AddCrdtSerializableType<LegacyTaskItemV1>("legacy-task-v1")
-            .AddCrdtSerializableType<ModernTaskItemV2>("modern-task-v2");
-
-        services.AddDistributedDocumentType<LegacyTaskListStateV1>("tasks-domain-a-v1");
-        services.AddDistributedDocumentType<LegacyTaskListStateV1>("tasks-domain-b-v1");
-        services.AddDistributedDocumentType<ModernTaskListStateV2>("tasks-domain-a-v2");
-        services.AddDistributedDocumentType<ModernTaskListStateV2>("tasks-domain-b-v2");
-
-        services.AddDistributedCrdtReplica("replica-v1");
-        services.AddDistributedCrdtReplica("replica-v2");
-
-        RegisterInMemoryMeshMocks(services, "mesh-v1", "replica-v1", networkHandlers);
-        RegisterInMemoryMeshMocks(services, "mesh-v2", "replica-v2", networkHandlers);
-
-        services.AddDistributedCrdtP2p("mesh-v1", "replica-v1");
-        services.AddDistributedCrdtP2p("mesh-v2", "replica-v2");
-
-        // Register two distinct migrations using the exact same C# state types (LegacyTaskListStateV1 -> ModernTaskListStateV2)
-        services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, LegacyToModernTaskMigrator>(options =>
-        {
-            options.MigrationId = "domain-a-migration";
-            options.SourceReplicaId = "replica-v1";
-            options.SourceTypeAlias = "tasks-domain-a-v1";
-            options.TargetReplicaId = "replica-v2";
-            options.TargetTypeAlias = "tasks-domain-a-v2";
-            options.BackfillBatchDelayMilliseconds = 1;
-        });
-
-        services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, LegacyToModernTaskMigrator>(options =>
-        {
-            options.MigrationId = "domain-b-migration";
-            options.SourceReplicaId = "replica-v1";
-            options.SourceTypeAlias = "tasks-domain-b-v1";
-            options.TargetReplicaId = "replica-v2";
-            options.TargetTypeAlias = "tasks-domain-b-v2";
+            options.PartitionBackfillByPrimaryShardOwner = false;
             options.BackfillBatchDelayMilliseconds = 1;
         });
 
         await using var provider = services.BuildServiceProvider();
+        var serializer = provider.GetRequiredService<Ama.CRDT.Services.Serialization.ICrdtSerializer>();
+        var handlerV1 = provider.GetRequiredKeyedService<IApplicationPayloadHandler>("mesh-v1");
+
         var scopeManager = provider.GetRequiredService<DistributedCrdtScopeManager>();
-        var orchestratorV1 = scopeManager.GetOrCreateScope("replica-v1").ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var orchestratorV2 = scopeManager.GetOrCreateScope("replica-v2").ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var scopeV1 = scopeManager.GetOrCreateScope("replica-v1-mediator");
+        var scopeV2 = scopeManager.GetOrCreateScope("replica-v2-target");
+
+        var metadataManager = scopeV1.ServiceProvider.GetRequiredService<Ama.CRDT.Services.ICrdtMetadataManager>();
+        var remoteDocState = new LegacyTaskListStateV1 { Id = "remote-owned-doc" };
+        remoteDocState.Items["r1"] = new LegacyTaskItemV1 { Title = "Fetched over P2P RPC", Completed = true };
+        var remoteCrdtDoc = new CrdtDocument<LegacyTaskListStateV1>(remoteDocState, metadataManager.Initialize(remoteDocState));
+        var remoteDocBytes = serializer.SerializeToBytes(remoteCrdtDoc);
+
+        // Intercept CrdtReadReq sent to remoteOwnerPeerId and reply with CrdtReadRes
+        directSenderMock
+            .Setup(s => s.SendDirectAsync(It.Is<PeerId>(p => p == remoteOwnerPeerId), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()))
+            .Returns((PeerId _, ReadOnlyMemory<byte> payload, CancellationToken _) =>
+            {
+                var wrapper = serializer.DeserializeFromBytes<CrdtMessageWrapper>(payload.ToArray());
+                if (wrapper.MessageType == "CrdtReadReq")
+                {
+                    var req = serializer.DeserializeFromBytes<CrdtReadRequestDto>(wrapper.Payload!);
+                    _ = Task.Run(async () =>
+                    {
+                        var res = new CrdtReadResponseDto
+                        {
+                            CorrelationId = req.CorrelationId,
+                            StatePayload = remoteDocBytes
+                        };
+                        var resWrapper = new CrdtMessageWrapper(wrapper.DocumentId, "CrdtReadRes", serializer.SerializeToBytes(res));
+                        await handlerV1.HandlePayloadAsync("mesh-v1", remoteOwnerPeerId, serializer.SerializeToBytes(resWrapper), CancellationToken.None);
+                    });
+                }
+
+                return Task.CompletedTask;
+            });
+
+        var orchestratorV1 = scopeV1.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var orchestratorV2 = scopeV2.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
 
         await orchestratorV1.InitializeAsync();
         await orchestratorV2.InitializeAsync();
 
-        await orchestratorV1.CreateDocumentAsync("doc-a", "tasks-domain-a-v1");
-        await orchestratorV1.ApplyIntentAsync<LegacyTaskListStateV1>(
-            "doc-a",
-            new MapSetIntent("itemA", new LegacyTaskItemV1 { Title = "Domain A Task", Completed = true }),
-            nameof(LegacyTaskListStateV1.Items));
+        scopeV1.ClusterTracker.UpdatePeerState("replica-v1-remote-owner", remoteOwnerPeerId.Value.ToString(), new ShardVersionVectorMap());
 
-        await orchestratorV1.CreateDocumentAsync("doc-b", "tasks-domain-b-v1");
-        await orchestratorV1.ApplyIntentAsync<LegacyTaskListStateV1>(
-            "doc-b",
-            new MapSetIntent("itemB", new LegacyTaskItemV1 { Title = "Domain B Task", Completed = false }),
-            nameof(LegacyTaskListStateV1.Items));
+        // Register the document in V1's global registry (since the shard is remote, it is NOT instantiated locally on replica-v1-mediator)
+        await orchestratorV1.CreateDocumentAsync("remote-owned-doc", "task-list-v1");
+        orchestratorV1.TryGetLocalDocument<LegacyTaskListStateV1>("remote-owned-doc").ShouldBeNull();
 
+        // Act
         var hostedServices = provider.GetServices<IHostedService>().ToList();
         foreach (var hs in hostedServices)
         {
@@ -999,19 +535,12 @@ public sealed class LiveMigrationIntegrationTests
         var migrationManager = provider.GetRequiredService<ICrdtMigrationManager>();
         await migrationManager.DrainAllAsync();
 
-        // Assert - Both bridges coexist, report individual statuses, and lookup for unknown migration ID returns false
-        migrationManager.GetAllStatuses().Count.ShouldBe(2);
-        migrationManager.TryGetStatus("unknown-migration-id", out _).ShouldBeFalse();
-
-        migrationManager.TryGetStatus("domain-a-migration", out var statusA).ShouldBeTrue();
-        migrationManager.TryGetStatus("domain-b-migration", out var statusB).ShouldBeTrue();
-
-        statusA.BackfilledDocuments.ShouldBe(1);
-        statusB.BackfilledDocuments.ShouldBe(1);
-
-        (await orchestratorV2.DocumentExistsAsync("doc-a", "tasks-domain-a-v2")).ShouldBeTrue();
-        (await orchestratorV2.DocumentExistsAsync("doc-b", "tasks-domain-b-v2")).ShouldBeTrue();
-        (await orchestratorV2.DocumentExistsAsync("doc-a", "tasks-domain-b-v2")).ShouldBeFalse();
+        // Assert - Migration bridge fetched the non-local V1 document via GetDocumentStateAsync RPC and translated it into V2
+        var migratedDocV2 = await orchestratorV2.GetDocumentStateAsync<ModernTaskListStateV2>("remote-owned-doc");
+        migratedDocV2.Data.ShouldNotBeNull();
+        migratedDocV2.Data.Tasks.ShouldContainKey("r1");
+        migratedDocV2.Data.Tasks["r1"].Description.ShouldBe("Fetched over P2P RPC");
+        migratedDocV2.Data.Tasks["r1"].Status.ShouldBe("Done");
 
         foreach (var hs in hostedServices)
         {

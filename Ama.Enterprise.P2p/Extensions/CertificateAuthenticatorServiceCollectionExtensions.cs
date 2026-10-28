@@ -44,7 +44,7 @@ public static class CertificateAuthenticatorServiceCollectionExtensions
 
         // Remove existing keyed registrations to prevent resolution collisions with defaults
         var existingDescriptors = builder.Services
-            .Where(d => d.ServiceType == typeof(IPeerAuthenticator) && object.Equals(d.ServiceKey, meshId))
+            .Where(d => d.ServiceType == typeof(IPeerAuthenticator) && Equals(d.ServiceKey, meshId))
             .ToList();
             
         foreach (var descriptor in existingDescriptors)

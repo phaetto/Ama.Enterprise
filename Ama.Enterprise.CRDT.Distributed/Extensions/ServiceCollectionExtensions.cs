@@ -98,7 +98,7 @@ public static class ServiceCollectionExtensions
 
         // Provide memory storage as the default fallback mapped as scoped per replica instance.
         services.TryAddScoped<MemoryCrdtStorage>();
-        services.TryAddScoped<IDistributedCrdtStorage>(sp => ResolveDecoratedStorage(sp, sp.GetRequiredService<MemoryCrdtStorage>()));
+        services.TryAddScoped(sp => ResolveDecoratedStorage(sp, sp.GetRequiredService<MemoryCrdtStorage>()));
 
         services.AddCrdtJournaling<StorageJournalForwarder>();
 
@@ -294,7 +294,7 @@ public static class ServiceCollectionExtensions
         services.RemoveAll(typeof(IDistributedCrdtStorage));
         services.TryAddScoped<TStorage>();
         services.AddScoped<TStorage>();
-        services.AddScoped<IDistributedCrdtStorage>(sp => ResolveDecoratedStorage(sp, sp.GetRequiredService<TStorage>()));
+        services.AddScoped(sp => ResolveDecoratedStorage(sp, sp.GetRequiredService<TStorage>()));
         
         return services;
     }
@@ -351,7 +351,7 @@ public static class ServiceCollectionExtensions
         services.TryAddEnumerable(ServiceDescriptor.Scoped<ICrdtOrchestratorObserver, MigrationSourceStateObserver<TSourceState>>(
             sp => sp.GetRequiredService<MigrationSourceStateObserver<TSourceState>>()));
 
-        services.AddKeyedSingleton<CrdtMigrationBridgeService<TSourceState, TTargetState>>(
+        services.AddKeyedSingleton(
             migrationId,
             (sp, _) => ActivatorUtilities.CreateInstance<CrdtMigrationBridgeService<TSourceState, TTargetState>>(sp, migrationOptions));
 

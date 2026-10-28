@@ -272,7 +272,7 @@ public sealed class GracefulShutdownIntegrationTests
             opt.FlushModeOnShutdown = CrdtShutdownFlushMode.JournalAndCheckpoints;
         }, services =>
         {
-            services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(_ => mockStorage.Object));
+            services.Replace(ServiceDescriptor.Scoped(_ => mockStorage.Object));
             services.AddSingleton(mockLifetime.Object);
         });
 
@@ -313,7 +313,7 @@ public sealed class GracefulShutdownIntegrationTests
             opt.ShutdownPosixSignals = [];
         }, services =>
         {
-            services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(_ => mockStorage.Object));
+            services.Replace(ServiceDescriptor.Scoped(_ => mockStorage.Object));
         });
 
         var scope = sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaLifecycle");
@@ -351,7 +351,7 @@ public sealed class GracefulShutdownIntegrationTests
             opt.EnableGracefulShutdown = false;
         }, services =>
         {
-            services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(_ => mockStorage.Object));
+            services.Replace(ServiceDescriptor.Scoped(_ => mockStorage.Object));
         });
 
         var scope = sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaDisabled");
@@ -393,7 +393,7 @@ public sealed class GracefulShutdownIntegrationTests
             opt.ShutdownPosixSignals = [];
         }, services =>
         {
-            services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(_ => mockStorage.Object));
+            services.Replace(ServiceDescriptor.Scoped(_ => mockStorage.Object));
             services.AddSingleton(mockLifetime.Object);
         });
 
@@ -488,7 +488,7 @@ public sealed class GracefulShutdownIntegrationTests
             opt.FlushModeOnShutdown = CrdtShutdownFlushMode.JournalAndCheckpoints;
         }, services =>
         {
-            services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(_ => mockStorage.Object));
+            services.Replace(ServiceDescriptor.Scoped(_ => mockStorage.Object));
         });
 
         var scope = sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaTimeout");
@@ -524,7 +524,7 @@ public sealed class GracefulShutdownIntegrationTests
         {
             services.AddDistributedCrdtReplica("ReplicaMulti2");
             services.AddDistributedCrdtReplica("ReplicaUninitialized");
-            services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(_ => mockStorage.Object));
+            services.Replace(ServiceDescriptor.Scoped(_ => mockStorage.Object));
         });
 
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
@@ -544,6 +544,51 @@ public sealed class GracefulShutdownIntegrationTests
         savedReplicaIds.ShouldContain("ReplicaMulti1");
         savedReplicaIds.ShouldContain("ReplicaMulti2");
         savedReplicaIds.ShouldNotContain("ReplicaUninitialized");
+    }
+
+    [IntegrationFact]
+    public async Task CrdtShutdownCoordinator_WhenOneScopeThrowsDuringCheckpoint_ContinuesFlushingRemainingHealthyScopes()
+    {
+        // Arrange
+        var savedDvvReplicas = new System.Collections.Concurrent.ConcurrentBag<string>();
+        var mockStorage = new Mock<IDistributedCrdtStorage>();
+        mockStorage.SetReturnsDefault(Task.CompletedTask);
+
+        mockStorage.Setup(s => s.SaveShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<ShardVersionVectorMap>(), It.IsAny<CancellationToken>()))
+                   .Returns<string, ShardVersionVectorMap, CancellationToken>((replicaId, _, _) =>
+                   {
+                       if (string.Equals(replicaId, "ReplicaFaulty", StringComparison.Ordinal))
+                       {
+                           throw new InvalidOperationException("Simulated storage failure on ReplicaFaulty during shutdown.");
+                       }
+
+                       savedDvvReplicas.Add(replicaId);
+                       return Task.CompletedTask;
+                   });
+
+        var sp = BuildNode("ReplicaFaulty", opt =>
+        {
+            opt.FlushModeOnShutdown = CrdtShutdownFlushMode.JournalAndCheckpoints;
+        }, services =>
+        {
+            services.AddDistributedCrdtReplica("ReplicaHealthy");
+            services.Replace(ServiceDescriptor.Scoped(_ => mockStorage.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var faultyScope = scopeManager.GetOrCreateScope("ReplicaFaulty");
+        var healthyScope = scopeManager.GetOrCreateScope("ReplicaHealthy");
+
+        await faultyScope.Orchestrator.InitializeAsync(CancellationToken.None);
+        await healthyScope.Orchestrator.InitializeAsync(CancellationToken.None);
+
+        var coordinator = sp.GetRequiredService<ICrdtShutdownCoordinator>();
+
+        // Act - Should not throw despite ReplicaFaulty failing its checkpoint
+        await coordinator.FlushAllScopesAsync("FaultIsolationShutdownTest", CancellationToken.None);
+
+        // Assert - ReplicaHealthy still completed its shutdown checkpoint
+        savedDvvReplicas.ShouldContain("ReplicaHealthy");
     }
 
     private static IServiceProvider BuildNode(

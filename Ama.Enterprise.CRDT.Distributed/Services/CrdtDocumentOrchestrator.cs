@@ -668,7 +668,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
 
         var intentTypeAlias = CrdtTypeRegistry.GetDiscriminator(intent.GetType());
-        var serializedIntent = serializer.SerializeToBytes<IOperationIntent>(intent);
+        var serializedIntent = serializer.SerializeToBytes(intent);
 
         if (deliveryMode == IntentDeliveryMode.FireAndForget)
         {
