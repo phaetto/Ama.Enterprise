@@ -40,7 +40,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseCrdtStorage.cs` | Implemented `AppendBatchAsync` wrapping cross-document operations in a single SQLite transaction. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseShardIdProvider.cs` | Custom shard ID provider decoupling overarching multi-document structures into isolated causal tracking domains. Implemented lightweight `GetShardId` overloads avoiding document allocations. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/TaskManager.cs` | Added `DocumentExistsAsync` check and input validation to `GetTasksAsync`. |
-| `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Ama.Enterprise.CRDT.Distributed.TableStorage.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
+| `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Ama.Enterprise.CRDT.Distributed.TableStorage.csproj` | Added target framework conditions to reference `10.0.0` `Microsoft.Extensions.*` packages on `net10.0` and `11.0.0` on `net11.0`. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Extensions/ServiceCollectionExtensions.cs` | Simplified Table Storage DI extensions to strictly register a single unified scoped storage using `TryAddSingleton` to register default AOT JSON fallbacks safely bridging implementations. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Models/CrdtTableEntity.cs` | Refactored into a static helper directly mapping chunks onto the dictionary-backed `TableEntity` avoiding reflection-heavy SDK deserialization limits ensuring AOT compatibility. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Models/TableStorageCrdtOptions.cs` | Configuration structure holding Azure Table Storage endpoints and table bindings. Added `UseBinarySerialization` option to pivot between human-readable JSON rows and cost-optimized high-performance binary structures without tight coupling to a specific format. |
@@ -195,7 +195,7 @@
 | `$/Ama.Enterprise.Licensing.UnitTests/Ama.Enterprise.Licensing.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.Licensing.UnitTests/Services/CertificateLoaderTests.cs` | Unit tests verifying certificate loading capabilities from multiple inputs evaluating null constraints and cryptographic formats. |
 | `$/Ama.Enterprise.Licensing.UnitTests/Services/HonorLicenseManagerTests.cs` | Evaluates generic honor checks mapping cryptography bounds. Updated constructor payloads mapping new structural bounds matching the expanded payload fields evaluating assertions. |
-| `$/Ama.Enterprise.Licensing/Ama.Enterprise.Licensing.csproj` | Removed `.pfx` embedded resource to only support strict public `.cer` inclusion for licensing. |
+| `$/Ama.Enterprise.Licensing/Ama.Enterprise.Licensing.csproj` | Added target framework conditions to reference `10.0.0` `Microsoft.Extensions.Hosting.Abstractions` on `net10.0` and `11.0.0` on `net11.0`. |
 | `$/Ama.Enterprise.Licensing/Extensions/ServiceCollectionExtensions.cs` | Redesigned configuration pipeline splitting Open Source and Enterprise declarations into distinct APIs. Applied `[UnsupportedOSPlatform("browser")]` to the Enterprise configuration to enforce compile-time compiler warnings/errors on Blazor WebAssembly. |
 | `$/Ama.Enterprise.Licensing/Models/DeclaredLicenseType.cs` | Enum defining user choices for license declaration (OpenSource, Enterprise, Unknown). |
 | `$/Ama.Enterprise.Licensing/Models/LicenseOptions.cs` | Configuration structure holding license strings and extended options. Adjusted `DeclaredLicenseType` to utilize an internal set preventing external bypasses to the DI assignment bounds. |
@@ -207,7 +207,7 @@
 | `$/Ama.Enterprise.Licensing/Services/ILicenseManager.cs` | Interface separating generic honor-based logic capabilities avoiding tightly coupled bounds. Added explicit getters matching the expanded structured bounds. |
 | `$/Ama.Enterprise.Licensing/Services/LicenseStartupService.cs` | Starts up evaluations executing internal generic licensing checks. |
 | `$/Ama.Enterprise.Licensing/ama-license.cer` | No description provided. |
-| `$/Ama.Enterprise.Monitoring.Cli/Ama.Enterprise.Monitoring.Cli.csproj` | No description provided. |
+| `$/Ama.Enterprise.Monitoring.Cli/Ama.Enterprise.Monitoring.Cli.csproj` | Added target framework conditions for `Microsoft.Extensions.Configuration` and `Microsoft.Extensions.Configuration.CommandLine` across `net10.0` and `net11.0`. |
 | `$/Ama.Enterprise.Monitoring.Cli/Program.cs` | Refactored internal architecture mapping UI generation explicitly bounded to modular distinct generic boundaries decoupled from program setups traversing dependencies explicitly. |
 | `$/Ama.Enterprise.Monitoring.Cli/Services/IUserInterfaceOrchestrator.cs` | Contract decoupling terminal GUI orchestrations avoiding inline Program allocations and generic boundaries. |
 | `$/Ama.Enterprise.Monitoring.Cli/Services/UserInterfaceOrchestrator.cs` | Implements CLI user interface initializations managing standard generic window layouts. |
@@ -348,7 +348,7 @@
 | `$/Ama.Enterprise.P2p.WebRTC/Services/WebRtcFailureDetector.cs` | A dedicated implementation of `IFailureDetector` for WebRTC bypassing standard protocol heartbeats and evaluating exact local connection data channel presence. |
 | `$/Ama.Enterprise.P2p.WebRTC/Services/WebRtcTransport.cs` | Delegated polymorphic bounding directly to internal encoder mapping for handling data. |
 | `$/Ama.Enterprise.P2p.WebRTC/Services/WebRtcTransportListener.cs` | Transformed evaluation pipeline mapping directly generic structural decryption. |
-| `$/Ama.Enterprise.P2p/Ama.Enterprise.P2p.csproj` | Updated the NuGet description representing the core generic peer-to-peer mechanisms while extending metadata tag values to include 'networking'. |
+| `$/Ama.Enterprise.P2p/Ama.Enterprise.P2p.csproj` | Added target framework conditions to reference `10.0.0` `Microsoft.Extensions.Http` on `net10.0` and `11.0.0` on `net11.0`. |
 | `$/Ama.Enterprise.P2p/Constants.cs` | Global constants for the P2P module, including protocol versions and payload size limits. |
 | `$/Ama.Enterprise.P2p/Extensions/CertificateAuthenticatorServiceCollectionExtensions.cs` | Pooled `meshId` and registration keys via `CrdtStringPool.Shared`. |
 | `$/Ama.Enterprise.P2p/Extensions/DnsDiscoveryServiceCollectionExtensions.cs` | Pooled `meshId` and keyed service identifiers via `CrdtStringPool.Shared`. |
