@@ -3,8 +3,8 @@
 | `$/.editorconfig` | No description provided. |
 | `$/.github/workflows/ci.yml` | Added packing and verification steps to ensure `Ama.Enterprise.CRDT.Distributed.Analyzers.dll` is bundled inside the `Ama.Enterprise.CRDT.Distributed` NuGet package alongside the MessagePack analyzer check. |
 | `$/.github/workflows/codeql.yml` | No description provided. |
-| `$/.github/workflows/publish-preview-to-nuget.yml` | Added verification step ensuring `Ama.Enterprise.CRDT.Distributed.Analyzers.dll` is included in the packed `Ama.Enterprise.CRDT.Distributed` NuGet package before publishing. |
-| `$/.github/workflows/publish-release-to-nuget-manual.yml` | Added verification step ensuring `Ama.Enterprise.CRDT.Distributed.Analyzers.dll` is included in the packed `Ama.Enterprise.CRDT.Distributed` NuGet package before publishing. |
+| `$/.github/workflows/publish-preview-to-nuget.yml` | Updated prerelease unlisting step to query the NuGet V3 Registration API for listed-only packages (excluding the newly published preview version) and capped unlisting to the last 10 versions. |
+| `$/.github/workflows/publish-release-to-nuget-manual.yml` | Updated prerelease unlisting step to query the NuGet V3 Registration API for listed-only packages and capped unlisting to the last 10 versions. |
 | `$/.gitignore` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests.csproj` | Unit test project for `Ama.Enterprise.CRDT.Distributed.Analyzers`. |
 | `$/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests/CrdtReplicaAndMeshConfigurationAnalyzerTests.cs` | Updated extension method stubs to include realistic internal delegation calls (`AddDistributedCrdtP2p` calling `AddDistributedCrdtReplica`) to verify no diagnostics are reported inside `ServiceCollectionExtensions`. |

@@ -145,23 +145,41 @@ jobs:
             "Ama.Enterprise.P2p.WebRTC.DistributedSignaling"
           )
           for pkg in "${packages[@]}"; do
-            echo "Fetching versions for $pkg..."
-            # The NuGet V3 API requires lowercase package IDs
+            echo "Fetching registration metadata for $pkg..."
+            # The NuGet V3 Registration API requires lowercase package IDs and includes the 'listed' property
             pkg_lower=$(echo "$pkg" | tr '[:upper:]' '[:lower:]')
             
-            HTTP_STATUS=$(curl -s -o versions.json -w "%{http_code}" "https://api.nuget.org/v3-flatcontainer/$pkg_lower/index.json")
+            HTTP_STATUS=$(curl -s --compressed -o registration.json -w "%{http_code}" "https://api.nuget.org/v3/registration5-gz-semver2/$pkg_lower/index.json")
             
             if [ "$HTTP_STATUS" -ne 200 ]; then
-              echo "Failed to fetch versions for $pkg (HTTP $HTTP_STATUS). It might be a new package or a network issue. Skipping..."
+              echo "Failed to fetch registration for $pkg (HTTP $HTTP_STATUS). It might be a new package or a network issue. Skipping..."
               continue
             fi
             
-            # Extract versions that contain a hyphen (SemVer indicator for prerelease)
-            # If you want to ONLY delete CI generated previews, change 'contains("-")' to 'contains("-ci")'
-            prereleases=$(jq -r '.versions[] | select(contains("-"))' versions.json)
+            prereleases=""
+            # Extract inline items where 'listed' is true and version is a prerelease, excluding the version just pushed
+            inline_prereleases=$(jq -r --arg current_ver "${{ env.PACKAGE_VERSION }}" '.items[] | select(.items != null) | .items[].catalogEntry | select(.listed == true) | .version | select(contains("-") and . != $current_ver)' registration.json)
+            if [ -n "$inline_prereleases" ]; then
+              prereleases="$inline_prereleases"
+            fi
+            
+            # If the registration index has paged items (for packages with many versions), fetch those pages
+            page_urls=$(jq -r '.items[] | select(.items == null) | .["@id"]' registration.json)
+            for page_url in $page_urls; do
+              PAGE_STATUS=$(curl -s --compressed -o page.json -w "%{http_code}" "$page_url")
+              if [ "$PAGE_STATUS" -eq 200 ]; then
+                page_prereleases=$(jq -r --arg current_ver "${{ env.PACKAGE_VERSION }}" '.items[].catalogEntry | select(.listed == true) | .version | select(contains("-") and . != $current_ver)' page.json)
+                if [ -n "$page_prereleases" ]; then
+                  prereleases=$(printf "%s\n%s" "$prereleases" "$page_prereleases")
+                fi
+              fi
+            done
+            
+            # Clean up empty lines and limit to the last 10 listed prerelease versions
+            prereleases=$(echo "$prereleases" | sed '/^$/d' | tail -n 10)
             
             if [ -z "$prereleases" ]; then
-              echo "No prerelease versions found for $pkg."
+              echo "No listed prerelease versions found for $pkg."
               continue
             fi
             
