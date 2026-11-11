@@ -6,12 +6,13 @@ using System.Threading.Tasks;
 using System.Threading.Tasks.Sources;
 using Ama.CRDT.Models;
 
-internal enum OrchestratorCommandType
+public enum OrchestratorCommandType
 {
     Initialize,
     CreateDocument,
     DeleteDocument,
-    ReevaluateTopology
+    ReevaluateTopology,
+    FlushBarrier
 }
 
 /// <summary>

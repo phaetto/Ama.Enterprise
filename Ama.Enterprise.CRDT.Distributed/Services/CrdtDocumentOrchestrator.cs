@@ -1179,8 +1179,29 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     /// <inheritdoc />
     public async Task FlushAsync(CancellationToken cancellationToken = default)
     {
-        commandChannel.Writer.TryComplete();
-        await processingTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (!disposeCts.IsCancellationRequested)
+        {
+            var cmd = GetCommand();
+            cmd.Type = OrchestratorCommandType.FlushBarrier;
+            cmd.CancellationToken = cancellationToken;
+
+            try
+            {
+                if (!commandChannel.Writer.TryWrite(cmd))
+                {
+                    await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+                }
+
+                await cmd.ExecuteAsync().ConfigureAwait(false);
+            }
+            catch (ChannelClosedException)
+            {
+            }
+            finally
+            {
+                ReturnCommand(cmd);
+            }
+        }
 
         var pipeline = serviceProvider.GetService<IDocumentCommandPipeline>();
         if (pipeline != null)
@@ -1263,6 +1284,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                         case OrchestratorCommandType.ReevaluateTopology:
                             Interlocked.Exchange(ref syncPending, 0);
                             await ProcessSyncDocumentsInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
+                            break;
+                        case OrchestratorCommandType.FlushBarrier:
                             break;
                     }
 

@@ -480,7 +480,7 @@ public sealed class ConcurrencyIntegrationTests
     }
 
     [IntegrationFact]
-    public async Task DistributedCrdtDocument_AfterFlushAsyncCompletesChannel_SubsequentCommandsFailGracefullyWithoutHanging()
+    public async Task DistributedCrdtDocument_AfterFlushAsync_DrainsPendingCommandsAndContinuesAcceptingSubsequentCommands()
     {
         // Arrange
         var serviceProvider = BuildNode("Replica1");
@@ -494,31 +494,38 @@ public sealed class ConcurrencyIntegrationTests
         await orchestrator.CreateDocumentAsync("post-flush-doc", "concurrent-doc", CancellationToken.None);
         var doc = orchestrator.TryGetLocalDocument<ConcurrencyTestState>("post-flush-doc")!;
 
-        // Act 1 - Flush the document command pipeline (which completes the underlying command channel)
+        // Act 1 - Enqueue a FireAndForget intent and flush the pipeline using the non-destructive FlushBarrier
+        await doc.ApplyRemoteIntentAsync(
+            new SetIntent("BeforeFlushFF"),
+            nameof(ConcurrencyTestState.Data),
+            patcher,
+            Models.IntentDeliveryMode.FireAndForget,
+            CancellationToken.None);
+
         await commandPipeline.FlushAsync(CancellationToken.None);
 
-        // Act 2 - Enqueue a FireAndForget intent and an Acknowledged intent after the channel is closed
-        var ffException = await Record.ExceptionAsync(() =>
-            doc.ApplyRemoteIntentAsync(
-                new SetIntent("AfterFlushFF"),
-                nameof(ConcurrencyTestState.Data),
-                patcher,
-                Models.IntentDeliveryMode.FireAndForget,
-                CancellationToken.None));
+        var stateAfterFlush = await doc.GetDocumentAsync(CancellationToken.None);
+        stateAfterFlush.Data.Data.ShouldBe("BeforeFlushFF");
 
-        var ackException = await Record.ExceptionAsync(() =>
-            doc.ApplyRemoteIntentAsync(
-                new SetIntent("AfterFlushAck"),
-                nameof(ConcurrencyTestState.Data),
-                patcher,
-                Models.IntentDeliveryMode.Acknowledged,
-                CancellationToken.None));
+        // Act 2 - Enqueue subsequent FireAndForget and Acknowledged intents after the flush barrier
+        await doc.ApplyRemoteIntentAsync(
+            new SetIntent("AfterFlushFF"),
+            nameof(ConcurrencyTestState.Data),
+            patcher,
+            Models.IntentDeliveryMode.FireAndForget,
+            CancellationToken.None);
 
-        // Assert - Both FireAndForget and Acknowledged commands fail immediately with ChannelClosedException (InvalidOperationException) without deadlocking
-        ffException.ShouldNotBeNull();
-        ffException.ShouldBeAssignableTo<InvalidOperationException>();
-        ackException.ShouldNotBeNull();
-        ackException.ShouldBeAssignableTo<InvalidOperationException>();
+        var ackApplied = await doc.ApplyRemoteIntentAsync(
+            new SetIntent("AfterFlushAck"),
+            nameof(ConcurrencyTestState.Data),
+            patcher,
+            Models.IntentDeliveryMode.Acknowledged,
+            CancellationToken.None);
+
+        // Assert - Pipeline remains open and processes subsequent commands
+        ackApplied.ShouldBeTrue();
+        var finalState = await doc.GetDocumentAsync(CancellationToken.None);
+        finalState.Data.Data.ShouldBe("AfterFlushAck");
     }
 
     [IntegrationFact]

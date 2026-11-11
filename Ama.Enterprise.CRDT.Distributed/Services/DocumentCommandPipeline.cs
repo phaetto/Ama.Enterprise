@@ -118,8 +118,31 @@ public sealed class DocumentCommandPipeline : IDocumentCommandPipeline, IDisposa
     /// <inheritdoc />
     public async Task FlushAsync(CancellationToken cancellationToken = default)
     {
-        commandChannel.Writer.TryComplete();
-        await processingTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (disposeCts.IsCancellationRequested)
+        {
+            return;
+        }
+
+        var cmd = RentCommand();
+        cmd.Type = DocumentCommandType.FlushBarrier;
+        cmd.CancellationToken = cancellationToken;
+
+        try
+        {
+            if (!commandChannel.Writer.TryWrite(cmd))
+            {
+                await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+            }
+
+            await cmd.ExecuteAsync().ConfigureAwait(false);
+        }
+        catch (ChannelClosedException)
+        {
+        }
+        finally
+        {
+            ReturnCommand(cmd);
+        }
     }
 
     /// <inheritdoc />

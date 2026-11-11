@@ -67,7 +67,12 @@ public enum DocumentCommandType
     /// <summary>
     /// Compacts CRDT metadata using the configured compaction policy.
     /// </summary>
-    CompactMetadata
+    CompactMetadata,
+
+    /// <summary>
+    /// No-op barrier command used to wait until all previously queued commands in the pipeline have completed.
+    /// </summary>
+    FlushBarrier
 }
 
 /// <summary>

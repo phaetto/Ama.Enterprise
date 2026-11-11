@@ -22,7 +22,7 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
 {
-    private readonly record struct OutboundPatchItem(string DocumentId, string? DocumentTypeAlias, CrdtPatch Patch);
+    private readonly record struct OutboundPatchItem(string DocumentId, string? DocumentTypeAlias, CrdtPatch Patch, TaskCompletionSource? FlushBarrier = null);
 
     private readonly IServiceProvider serviceProvider;
     private readonly IP2pAlgorithm p2pAlgorithm;
@@ -98,8 +98,26 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
     /// <inheritdoc />
     public async Task FlushAsync(CancellationToken cancellationToken = default)
     {
-        broadcastChannel.Writer.TryComplete();
-        await processingTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (disposeCts.IsCancellationRequested)
+        {
+            return;
+        }
+
+        var barrierTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var barrierItem = new OutboundPatchItem(string.Empty, null, default, barrierTcs);
+
+        try
+        {
+            if (!broadcastChannel.Writer.TryWrite(barrierItem))
+            {
+                await broadcastChannel.Writer.WriteAsync(barrierItem, cancellationToken).ConfigureAwait(false);
+            }
+
+            await barrierTcs.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (ChannelClosedException)
+        {
+        }
     }
 
     public void Dispose()
@@ -116,6 +134,12 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
         {
             await foreach (var item in broadcastChannel.Reader.ReadAllAsync(disposeCts.Token).ConfigureAwait(false))
             {
+                if (item.FlushBarrier is not null)
+                {
+                    item.FlushBarrier.TrySetResult();
+                    continue;
+                }
+
                 try
                 {
                     var documentTypeAlias = item.DocumentTypeAlias;
