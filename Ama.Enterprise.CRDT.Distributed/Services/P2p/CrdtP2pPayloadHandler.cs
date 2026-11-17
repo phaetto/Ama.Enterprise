@@ -302,6 +302,11 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                 localActiveShards.Add(doc.ShardId);
             }
 
+            foreach (var knownLocalShard in safeLocalState.Keys)
+            {
+                localActiveShards.Add(knownLocalShard);
+            }
+
             allShardsToEvaluate.IntersectWith(localActiveShards);
 
             var requirements = new List<ReplicaSyncRequirement>();
@@ -359,6 +364,8 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                     .GroupBy(x => (Key: x.DocumentId?.ToString() ?? string.Empty, ShardId: x.Operation.ShardId ?? string.Empty))
                     .ToDictionary(g => g.Key, g => g.Select(x => x.Operation).ToArray());
 
+                var sentBucketKeys = new HashSet<(string Key, string ShardId)>();
+
                 foreach (var targetDoc in documents)
                 {
                     if (shardsRequiringSnapshot.Contains(targetDoc.ShardId))
@@ -367,11 +374,22 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                     }
 
                     var compositeKey = CrdtRegistryEntry.GetRegistryKey(targetDoc.TypeAlias, targetDoc.DocumentId);
-                    if (!opsByDoc.TryGetValue((compositeKey, targetDoc.ShardId), out var docOps) &&
-                        !opsByDoc.TryGetValue((targetDoc.DocumentId, targetDoc.ShardId), out docOps) &&
-                        !opsByDoc.TryGetValue((compositeKey, string.Empty), out docOps))
+                    CrdtOperation[]? docOps = null;
+                    if (opsByDoc.TryGetValue((compositeKey, targetDoc.ShardId), out docOps))
                     {
-                        opsByDoc.TryGetValue((targetDoc.DocumentId, string.Empty), out docOps);
+                        sentBucketKeys.Add((compositeKey, targetDoc.ShardId));
+                    }
+                    else if (opsByDoc.TryGetValue((targetDoc.DocumentId, targetDoc.ShardId), out docOps))
+                    {
+                        sentBucketKeys.Add((targetDoc.DocumentId, targetDoc.ShardId));
+                    }
+                    else if (opsByDoc.TryGetValue((compositeKey, string.Empty), out docOps))
+                    {
+                        sentBucketKeys.Add((compositeKey, string.Empty));
+                    }
+                    else if (opsByDoc.TryGetValue((targetDoc.DocumentId, string.Empty), out docOps))
+                    {
+                        sentBucketKeys.Add((targetDoc.DocumentId, string.Empty));
                     }
 
                     if (docOps != null && docOps.Length > 0)
@@ -387,6 +405,43 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
 
                         await directSender.SendDirectAsync(senderId, replyBytes, cancellationToken).ConfigureAwait(false);
                     }
+                }
+
+                // Also forward journaled operations for shards that were recently demoted locally
+                // (so the document is no longer in `documents`, but its causal operations are still in our local journal/DVV).
+                foreach (var kvp in opsByDoc)
+                {
+                    if (sentBucketKeys.Contains(kvp.Key))
+                    {
+                        continue;
+                    }
+
+                    if (!string.IsNullOrEmpty(kvp.Key.ShardId) && shardsRequiringSnapshot.Contains(kvp.Key.ShardId))
+                    {
+                        continue;
+                    }
+
+                    var docOps = kvp.Value;
+                    if (docOps == null || docOps.Length == 0 || string.IsNullOrWhiteSpace(kvp.Key.Key))
+                    {
+                        continue;
+                    }
+
+                    string rawDocId = kvp.Key.Key;
+                    string? docTypeAlias = null;
+                    var colonIdx = rawDocId.IndexOf(':', StringComparison.Ordinal);
+                    if (colonIdx > 0 && colonIdx < rawDocId.Length - 1)
+                    {
+                        docTypeAlias = rawDocId[..colonIdx];
+                        rawDocId = rawDocId[(colonIdx + 1)..];
+                    }
+
+                    var patchMsg = new CrdtPatchMessage(replicaContext.ReplicaId, new CrdtPatch(docOps));
+                    var patchPayload = serializer.SerializeToBytes(patchMsg);
+                    var replyWrapper = new CrdtMessageWrapper(rawDocId, "CrdtPatch", patchPayload, docTypeAlias);
+                    var replyBytes = serializer.SerializeToBytes(replyWrapper);
+
+                    await directSender.SendDirectAsync(senderId, replyBytes, cancellationToken).ConfigureAwait(false);
                 }
             }
         }

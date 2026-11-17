@@ -1542,30 +1542,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                         {
                             if (activeDocuments.TryRemove(compositeKey, out _))
                             {
-                                var demotedShardId = activeDoc.ShardId;
-                                try
-                                {
-                                    if (activeDoc is IDisposable d) d.Dispose();
-                                }
-                                catch (ObjectDisposedException) { }
-                                
-                                bool shardStillInUse = string.Equals(registry.ShardId, demotedShardId, StringComparison.Ordinal);
-                                if (!shardStillInUse)
-                                {
-                                    foreach (var remainingDoc in activeDocuments.Values)
-                                    {
-                                        if (string.Equals(remainingDoc.ShardId, demotedShardId, StringComparison.Ordinal))
-                                        {
-                                            shardStillInUse = true;
-                                            break;
-                                        }
-                                    }
-                                }
-
-                                if (!shardStillInUse)
-                                {
-                                    versionVectorManager.RemoveShard(demotedShardId);
-                                }
+                                await DemoteActiveDocumentSafelyAsync(activeDoc, cancellationToken).ConfigureAwait(false);
 
                                 changed = true;
                                 logger.LogDebug("Removed CRDT document footprint: {DocumentId} ({TypeAlias})", entry.DocumentId, entry.TypeAlias);
@@ -1597,30 +1574,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             {
                 if (activeDocuments.TryRemove(compositeKey, out var doc))
                 {
-                    var demotedShardId = doc.ShardId;
-                    try
-                    {
-                        if (doc is IDisposable d) d.Dispose();
-                    }
-                    catch (ObjectDisposedException) { }
-
-                    bool shardStillInUse = string.Equals(registry.ShardId, demotedShardId, StringComparison.Ordinal);
-                    if (!shardStillInUse)
-                    {
-                        foreach (var remainingDoc in activeDocuments.Values)
-                        {
-                            if (string.Equals(remainingDoc.ShardId, demotedShardId, StringComparison.Ordinal))
-                            {
-                                shardStillInUse = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (!shardStillInUse)
-                    {
-                        versionVectorManager.RemoveShard(demotedShardId);
-                    }
+                    await DemoteActiveDocumentSafelyAsync(doc, cancellationToken).ConfigureAwait(false);
 
                     changed = true;
                     logger.LogDebug("Removed CRDT document footprint: {DocumentId} ({TypeAlias})", doc.DocumentId, doc.TypeAlias);
@@ -1840,5 +1794,37 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
 
         return stateTypeAliases.TryGetValue(typeof(TState), out var alias) ? alias : null;
+    }
+
+    private async Task DemoteActiveDocumentSafelyAsync(IDistributedCrdtDocument doc, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await doc.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to flush document {DocumentId} ({TypeAlias}) prior to shard demotion.", doc.DocumentId, doc.TypeAlias);
+        }
+
+        try
+        {
+            await doc.CheckpointAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to checkpoint document {DocumentId} ({TypeAlias}) prior to shard demotion.", doc.DocumentId, doc.TypeAlias);
+        }
+
+        try
+        {
+            if (doc is IDisposable d)
+            {
+                d.Dispose();
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+        }
     }
 }

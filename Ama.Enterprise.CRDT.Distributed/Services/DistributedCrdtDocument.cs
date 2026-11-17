@@ -711,9 +711,46 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
             if (storedDoc != null)
             {
+                var hasUnpersistedLocalMutations = false;
                 lock (syncRoot)
                 {
-                    currentDocument = storedDoc.Value;
+                    if (!isDirty)
+                    {
+                        currentDocument = storedDoc.Value;
+                    }
+                    else
+                    {
+                        hasUnpersistedLocalMutations = true;
+                    }
+                }
+
+                if (!hasUnpersistedLocalMutations)
+                {
+                    await versionVectorManager.ExecuteShardLockedAsync(ShardId, () =>
+                    {
+                        MergeDocumentMetadataIntoShardVersionVector(storedDoc.Value);
+                        return Task.CompletedTask;
+                    }, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await versionVectorManager.ExecuteShardLockedAsync(ShardId, async () =>
+                    {
+                        CrdtDocument<TState> currentDoc;
+                        lock (syncRoot)
+                        {
+                            currentDoc = currentDocument;
+                        }
+
+                        await merger.MergeStateAsync(currentDoc, storedDoc.Value, cancellationToken).ConfigureAwait(false);
+                        MergeDocumentMetadataIntoShardVersionVector(currentDoc);
+
+                        lock (syncRoot)
+                        {
+                            currentDocument = currentDoc;
+                            isDirty = true;
+                        }
+                    }, cancellationToken).ConfigureAwait(false);
                 }
 
                 await NotifyStateChangedAsync(cancellationToken).ConfigureAwait(false);
@@ -725,6 +762,42 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             logger.LogError(ex, "Failed to load initial state for document {DocumentId} ({TypeAlias}) from storage.", DocumentId, TypeAlias);
             throw;
         }
+    }
+
+    private void MergeDocumentMetadataIntoShardVersionVector(CrdtDocument<TState> doc)
+    {
+        var metadata = doc.Metadata;
+        if (metadata?.VersionVector == null || metadata.VersionVector.Count == 0)
+        {
+            return;
+        }
+
+        var versions = new Dictionary<string, long>(metadata.VersionVector, StringComparer.Ordinal);
+        var dots = new Dictionary<string, ISet<long>>(StringComparer.Ordinal);
+
+        if (metadata.SeenExceptions != null)
+        {
+            foreach (var op in metadata.SeenExceptions)
+            {
+                if (!string.IsNullOrEmpty(op.ReplicaId) && op.Clock > 0)
+                {
+                    if (!dots.TryGetValue(op.ReplicaId, out var dotSet))
+                    {
+                        dotSet = new HashSet<long>();
+                        dots[op.ReplicaId] = dotSet;
+                    }
+
+                    dotSet.Add(op.Clock);
+                }
+            }
+        }
+
+        var map = new ShardVersionVectorMap
+        {
+            [ShardId] = new DottedVersionVector(versions, dots)
+        };
+
+        versionVectorManager.MergeShardState(ShardId, map);
     }
 
     private async Task ProcessApplyRemoteIntentInternalAsync(PooledDocumentCommand cmd)

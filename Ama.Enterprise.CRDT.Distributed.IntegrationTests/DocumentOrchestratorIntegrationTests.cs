@@ -294,12 +294,13 @@ public sealed class DocumentOrchestratorIntegrationTests
         shardRemoteIsLocal = false;
         await orchestrator.ReevaluateTopologyAsync(CancellationToken.None);
 
-        // Assert - "remote-doc-1" is demoted and its shard DVV removed, while "local-doc-1" and "local-shard" remain active
+        // Assert - "remote-doc-1" is demoted from active memory while preserving causal shard DVV history
+        // so that if "remote-shard" is re-promoted later, its local sequence clock never resets to 1.
         orchestrator.TryGetLocalDocument<DynamicTestState>("remote-doc-1").ShouldBeNull();
         orchestrator.TryGetLocalDocument<DynamicTestState>("local-doc-1").ShouldNotBeNull();
 
         var dvvSnap = await dvvManager.GetFullSnapshotAsync(CancellationToken.None);
-        dvvSnap.ContainsKey("remote-shard").ShouldBeFalse();
+        dvvSnap.ContainsKey("remote-shard").ShouldBeTrue();
         dvvSnap.ContainsKey("local-shard").ShouldBeTrue();
     }
 
