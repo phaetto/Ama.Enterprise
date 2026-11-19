@@ -136,7 +136,7 @@ public static class Program
         if (currentMode == "server")
         {
             // Server-to-Server Mesh (TCP/UDP)
-            services.AddDistributedCrdtP2p("server", replicaId);
+            services.AddDistributedCrdtReplica(replicaId, "server");
 
             services.AddP2pMesh("server")
                 .AddSessionAuthentication<ShowCaseTokenValidator>(options =>
@@ -175,7 +175,7 @@ public static class Program
         // Both Server and User expose WebRTC out-of-band HTTP signaling.
         // Server awaits Users. User awaits other downstream Users or acts as edge node.
         
-        services.AddDistributedCrdtP2p("user", replicaId);
+        services.AddDistributedCrdtReplica(replicaId, "user");
 
         services.AddP2pMesh("user")
             .AddSessionAuthentication<ShowCaseTokenValidator>(options =>

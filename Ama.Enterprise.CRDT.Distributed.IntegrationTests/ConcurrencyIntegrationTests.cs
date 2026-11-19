@@ -70,7 +70,7 @@ public sealed class ConcurrencyIntegrationTests
                 .AddCrdtJsonTypeInfoResolver(ConcurrencyTestJsonContext.Default);
 
         services.AddDistributedDocumentType<ConcurrencyTestState>("concurrent-doc");
-        services.AddDistributedCrdtP2p("TestMesh", replicaId);
+        services.AddDistributedCrdtReplica(replicaId, "TestMesh");
         
         services.AddSingleton(Mock.Of<IP2pAlgorithm>());
         services.AddSingleton(Mock.Of<IDirectMessageSender>());

@@ -61,15 +61,13 @@ public sealed class AntiEntropyStateSyncIntegrationTests
             opt.ActiveSyncEnabled = activeSync;
         });
 
-        services.AddDistributedCrdtReplica(replicaId);
-
         services.AddCrdt()
                 .AddCrdtAotContext(new AntiEntropyStateSyncTestAotContext())
                 .AddCrdtJsonTypeInfoResolver(AntiEntropyStateSyncTestJsonContext.Default);
 
         services.AddDistributedDocumentType<SyncTestState>("sync-doc-1");
         services.AddDistributedDocumentType<SyncTestState>("sync-doc-2");
-        services.AddDistributedCrdtP2p(TestMeshId, replicaId);
+        services.AddDistributedCrdtReplica(replicaId, TestMeshId);
 
         services.AddSingleton(Mock.Of<IP2pAlgorithm>());
         services.AddSingleton(Mock.Of<IDirectMessageSender>());

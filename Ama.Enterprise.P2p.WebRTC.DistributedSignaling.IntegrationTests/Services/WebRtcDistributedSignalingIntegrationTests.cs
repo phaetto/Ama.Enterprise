@@ -213,13 +213,11 @@ public sealed class WebRtcDistributedSignalingIntegrationTests(ITestOutputHelper
             opt.AntiEntropyInitialDelaySeconds = 0;
             opt.ActiveSyncEnabled = false;
         });
-
-        builder.Services.AddDistributedCrdtReplica(replicaId);
         
         builder.Services.AddCrdt();
 
         // Inject specific DCRDT P2P boundaries alongside dummy Mocks tracking network payloads naturally isolating limits
-        builder.Services.AddDistributedCrdtP2p(meshId, replicaId);
+        builder.Services.AddDistributedCrdtReplica(replicaId, meshId);
         builder.Services.AddSingleton(Mock.Of<IP2pAlgorithm>());
         builder.Services.AddSingleton(Mock.Of<IDirectMessageSender>());
 

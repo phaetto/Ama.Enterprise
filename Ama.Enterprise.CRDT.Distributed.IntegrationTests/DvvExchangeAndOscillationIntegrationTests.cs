@@ -1119,7 +1119,7 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         }
 
         services.AddDistributedDocumentType<DvvTestState>("dvv-doc");
-        services.AddDistributedCrdtP2p("TestMesh", replicaId);
+        services.AddDistributedCrdtReplica(replicaId, "TestMesh");
 
         services.AddSingleton(senderMock.Object);
         services.AddSingleton(gossipMock.Object);

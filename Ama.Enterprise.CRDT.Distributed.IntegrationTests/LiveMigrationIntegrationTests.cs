@@ -283,14 +283,11 @@ public sealed class LiveMigrationIntegrationTests
         services.AddDistributedDocumentType<ModernTaskListStateV2>("task-list-v2");
 
         // Register Legacy Replica (V1) and Modern Replica (V2) on the Mediator host
-        services.AddDistributedCrdtReplica("replica-v1");
-        services.AddDistributedCrdtReplica("replica-v2");
-
         RegisterInMemoryMeshMocks(services, "mesh-v1", "replica-v1", networkHandlers);
         RegisterInMemoryMeshMocks(services, "mesh-v2", "replica-v2", networkHandlers);
 
-        services.AddDistributedCrdtP2p("mesh-v1", "replica-v1");
-        services.AddDistributedCrdtP2p("mesh-v2", "replica-v2");
+        services.AddDistributedCrdtReplica("replica-v1", "mesh-v1");
+        services.AddDistributedCrdtReplica("replica-v2", "mesh-v2");
 
         // Register the Live Migration Bridge from replica-v1 (task-list-v1) -> replica-v2 (task-list-v2)
         services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, LegacyToModernTaskMigrator>(options =>
@@ -439,9 +436,6 @@ public sealed class LiveMigrationIntegrationTests
         services.AddDistributedDocumentType<LegacyTaskListStateV1>("task-list-v1");
         services.AddDistributedDocumentType<ModernTaskListStateV2>("task-list-v2");
 
-        services.AddDistributedCrdtReplica("replica-v1-mediator");
-        services.AddDistributedCrdtReplica("replica-v2-target");
-
         RegisterInMemoryMeshMocks(services, "mesh-v1", "replica-v1-mediator", networkHandlers);
         RegisterInMemoryMeshMocks(services, "mesh-v2", "replica-v2-target", networkHandlers);
 
@@ -475,8 +469,8 @@ public sealed class LiveMigrationIntegrationTests
         services.AddSingleton(directSenderMock.Object);
         services.AddSingleton<IP2pRpcCorrelator, P2pRpcCorrelator>();
 
-        services.AddDistributedCrdtP2p("mesh-v1", "replica-v1-mediator");
-        services.AddDistributedCrdtP2p("mesh-v2", "replica-v2-target");
+        services.AddDistributedCrdtReplica("replica-v1-mediator", "mesh-v1");
+        services.AddDistributedCrdtReplica("replica-v2-target", "mesh-v2");
 
         services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, LegacyToModernTaskMigrator>(options =>
         {
@@ -588,14 +582,11 @@ public sealed class LiveMigrationIntegrationTests
         services.AddDistributedDocumentType<LegacyTaskListStateV1>("task-list-v1");
         services.AddDistributedDocumentType<ModernTaskListStateV2>("task-list-v2");
 
-        services.AddDistributedCrdtReplica("replica-v1");
-        services.AddDistributedCrdtReplica("replica-v2");
-
         RegisterInMemoryMeshMocks(services, "mesh-v1", "replica-v1", networkHandlers);
         RegisterInMemoryMeshMocks(services, "mesh-v2", "replica-v2", networkHandlers);
 
-        services.AddDistributedCrdtP2p("mesh-v1", "replica-v1");
-        services.AddDistributedCrdtP2p("mesh-v2", "replica-v2");
+        services.AddDistributedCrdtReplica("replica-v1", "mesh-v1");
+        services.AddDistributedCrdtReplica("replica-v2", "mesh-v2");
 
         services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, LegacyToModernTaskMigrator>(options =>
         {
@@ -740,14 +731,11 @@ public sealed class LiveMigrationIntegrationTests
 
         services.AddDistributedDocumentType<ModernTaskListStateV2>("task-list-same-type");
 
-        services.AddDistributedCrdtReplica("replica-legacy-cluster");
-        services.AddDistributedCrdtReplica("replica-modern-cluster");
-
         RegisterInMemoryMeshMocks(services, "mesh-legacy", "replica-legacy-cluster", networkHandlers);
         RegisterInMemoryMeshMocks(services, "mesh-modern", "replica-modern-cluster", networkHandlers);
 
-        services.AddDistributedCrdtP2p("mesh-legacy", "replica-legacy-cluster");
-        services.AddDistributedCrdtP2p("mesh-modern", "replica-modern-cluster");
+        services.AddDistributedCrdtReplica("replica-legacy-cluster", "mesh-legacy");
+        services.AddDistributedCrdtReplica("replica-modern-cluster", "mesh-modern");
 
         services.AddDistributedCrdtMigration<ModernTaskListStateV2, ModernTaskListStateV2, SameTypePassthroughTaskMigrator>(options =>
         {
@@ -839,21 +827,18 @@ public sealed class LiveMigrationIntegrationTests
             meshBus,
             configureReplicasAndMeshes: services =>
             {
-                services.AddDistributedCrdtReplica("node-v1-pure");
                 meshBus.RegisterNode(services, "mesh-v1", "node-v1-pure", peerIdNodeV1);
-                services.AddDistributedCrdtP2p("mesh-v1", "node-v1-pure");
+                services.AddDistributedCrdtReplica("node-v1-pure", "mesh-v1");
             });
 
         await using var hostMediator = await CreateClusterNodeHostAsync(
             meshBus,
             configureReplicasAndMeshes: services =>
             {
-                services.AddDistributedCrdtReplica("mediator-v1");
-                services.AddDistributedCrdtReplica("mediator-v2");
                 meshBus.RegisterNode(services, "mesh-v1", "mediator-v1", peerIdMediatorV1);
                 meshBus.RegisterNode(services, "mesh-v2", "mediator-v2", peerIdMediatorV2);
-                services.AddDistributedCrdtP2p("mesh-v1", "mediator-v1");
-                services.AddDistributedCrdtP2p("mesh-v2", "mediator-v2");
+                services.AddDistributedCrdtReplica("mediator-v1", "mesh-v1");
+                services.AddDistributedCrdtReplica("mediator-v2", "mesh-v2");
 
                 services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, LegacyToModernTaskMigrator>(options =>
                 {
@@ -870,9 +855,8 @@ public sealed class LiveMigrationIntegrationTests
             meshBus,
             configureReplicasAndMeshes: services =>
             {
-                services.AddDistributedCrdtReplica("node-v2-pure");
                 meshBus.RegisterNode(services, "mesh-v2", "node-v2-pure", peerIdNodeV2);
-                services.AddDistributedCrdtP2p("mesh-v2", "node-v2-pure");
+                services.AddDistributedCrdtReplica("node-v2-pure", "mesh-v2");
             });
 
         meshBus.BindComplete();
@@ -1010,14 +994,11 @@ public sealed class LiveMigrationIntegrationTests
         services.AddDistributedDocumentType<LegacyTaskListStateV1>("task-list-v1");
         services.AddDistributedDocumentType<ModernTaskListStateV2>("task-list-v2");
 
-        services.AddDistributedCrdtReplica("replica-v1");
-        services.AddDistributedCrdtReplica("replica-v2");
-
         RegisterInMemoryMeshMocks(services, "mesh-v1", "replica-v1", networkHandlers);
         RegisterInMemoryMeshMocks(services, "mesh-v2", "replica-v2", networkHandlers);
 
-        services.AddDistributedCrdtP2p("mesh-v1", "replica-v1");
-        services.AddDistributedCrdtP2p("mesh-v2", "replica-v2");
+        services.AddDistributedCrdtReplica("replica-v1", "mesh-v1");
+        services.AddDistributedCrdtReplica("replica-v2", "mesh-v2");
 
         services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, CustomPrefixAndFaultyTaskMigrator>(options =>
         {
@@ -1135,14 +1116,11 @@ public sealed class LiveMigrationIntegrationTests
         services.AddDistributedDocumentType<LegacyTaskListStateV1>("task-list-v1");
         services.AddDistributedDocumentType<ModernTaskListStateV2>("task-list-v2");
 
-        services.AddDistributedCrdtReplica("replica-v1");
-        services.AddDistributedCrdtReplica("replica-v2");
-
         RegisterInMemoryMeshMocks(services, "mesh-v1", "replica-v1", networkHandlers);
         RegisterInMemoryMeshMocks(services, "mesh-v2", "replica-v2", networkHandlers);
 
-        services.AddDistributedCrdtP2p("mesh-v1", "replica-v1");
-        services.AddDistributedCrdtP2p("mesh-v2", "replica-v2");
+        services.AddDistributedCrdtReplica("replica-v1", "mesh-v1");
+        services.AddDistributedCrdtReplica("replica-v2", "mesh-v2");
 
         services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, LegacyToModernTaskMigrator>(options =>
         {
@@ -1229,15 +1207,11 @@ public sealed class LiveMigrationIntegrationTests
 
         services.AddDistributedDocumentType<LegacyTaskListStateV1>("task-list-v1");
         services.AddDistributedDocumentType<ModernTaskListStateV2>("task-list-v2");
-
-        services.AddDistributedCrdtReplica("replica-v1");
-        services.AddDistributedCrdtReplica("replica-v2");
-
         RegisterInMemoryMeshMocks(services, "mesh-v1", "replica-v1", networkHandlers);
         RegisterInMemoryMeshMocks(services, "mesh-v2", "replica-v2", networkHandlers);
 
-        services.AddDistributedCrdtP2p("mesh-v1", "replica-v1");
-        services.AddDistributedCrdtP2p("mesh-v2", "replica-v2");
+        services.AddDistributedCrdtReplica("replica-v1", "mesh-v1");
+        services.AddDistributedCrdtReplica("replica-v2", "mesh-v2");
 
         services.AddDistributedCrdtMigration<LegacyTaskListStateV1, ModernTaskListStateV2, LegacyToModernTaskMigrator>(options =>
         {

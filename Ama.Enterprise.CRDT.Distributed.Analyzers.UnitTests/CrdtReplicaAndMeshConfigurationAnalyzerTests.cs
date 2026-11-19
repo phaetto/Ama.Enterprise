@@ -42,24 +42,10 @@ namespace Ama.Enterprise.CRDT.Distributed.Extensions
     public static class ServiceCollectionExtensions
     {
         public static IServiceCollection AddDistributedCrdtCore(this IServiceCollection services, Action<object>? configure = null) => services;
-        public static IServiceCollection AddDistributedCrdtReplica(this IServiceCollection services, string replicaId) => services;
-        public static IServiceCollection AddDistributedCrdtReplica(this IServiceCollection services, string replicaId, params string[] meshIds)
-        {
-            services.AddDistributedCrdtReplica(replicaId);
-            for (int i = 0; i < meshIds.Length; i++)
-            {
-                services.AddDistributedCrdtP2p(meshIds[i], replicaId);
-            }
-            return services;
-        }
-        public static IServiceCollection AddDistributedCrdtP2p(this IServiceCollection services, string meshId, string replicaId)
-        {
-            services.AddDistributedCrdtReplica(replicaId);
-            return services;
-        }
+        public static IServiceCollection AddDistributedCrdtReplica(this IServiceCollection services, string replicaId, params string[] meshIds) => services;
         public static IP2pMeshBuilder BindCrdtReplica(this IP2pMeshBuilder builder, string? replicaId = null)
         {
-            builder.Services.AddDistributedCrdtP2p(builder.MeshId, replicaId ?? builder.MeshId);
+            builder.Services.AddDistributedCrdtReplica(replicaId ?? builder.MeshId, builder.MeshId);
             return builder;
         }
     }
@@ -134,7 +120,7 @@ namespace TestApp
         {
             var replicaId = ""node-1"";
             services.AddDistributedCrdtCore();
-            services.AddDistributedCrdtP2p(""internal"", replicaId);
+            services.AddDistributedCrdtReplica(replicaId, ""internal"");
             services.AddP2pMesh(""internal"");
             services.{|#0:AddP2pMesh|}(""admin-telemetry"");
         }
@@ -165,7 +151,7 @@ namespace TestApp
         {
             var replicaId = ""node-1"";
             services.AddDistributedCrdtCore();
-            services.AddDistributedCrdtP2p(""internal"", replicaId);
+            services.AddDistributedCrdtReplica(replicaId, ""internal"");
             services.AddP2pMesh(""internal"");
 #pragma warning disable DCRDT0003
             services.AddP2pMesh(""admin-telemetry"");
@@ -193,7 +179,7 @@ namespace TestApp
         public void Configure(IServiceCollection services)
         {
             services.AddDistributedCrdtCore();
-            services.{|#0:AddDistributedCrdtP2p|}(""interal-typo"", ""node-1"");
+            services.{|#0:AddDistributedCrdtReplica|}(""node-1"", ""interal-typo"");
             services.{|#1:AddP2pMesh|}(""internal"");
         }
     }

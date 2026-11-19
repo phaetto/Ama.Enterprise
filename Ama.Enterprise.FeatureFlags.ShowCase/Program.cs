@@ -93,7 +93,7 @@ public static class Program
         });
 
         // 2. Delegate routing orchestrations and background services completely to the distributed core explicitly bounded
-        services.AddDistributedCrdtP2p("feature-flags-internal-mesh", replicaId);
+        services.AddDistributedCrdtReplica(replicaId, "feature-flags-internal-mesh");
 
         // 3. Add Feature Flags Product domain abstractions natively tracking internal explicit scopes mapped dynamically 
         services.AddFeatureFlags();

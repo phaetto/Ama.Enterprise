@@ -70,14 +70,12 @@ public sealed class ScopeTopologyProviderIntegrationTests
             opt.ActiveSyncEnabled = true;
         });
 
-        services.AddDistributedCrdtReplica(replicaId);
-
         services.AddCrdt()
                 .AddCrdtAotContext(new TopologyTestAotContext())
                 .AddCrdtJsonTypeInfoResolver(TopologyTestJsonContext.Default);
 
         services.AddDistributedDocumentType<TopologyTestState>("topo-doc");
-        services.AddDistributedCrdtP2p(TestMeshId, replicaId);
+        services.AddDistributedCrdtReplica(replicaId, TestMeshId);
         
         services.Replace(ServiceDescriptor.Scoped<IScopeTopologyProvider>(sp => topologyProvider));
 

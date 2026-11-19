@@ -551,15 +551,13 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
             opt.EnableGracefulShutdown = false;
         });
 
-        services.AddDistributedCrdtReplica(replicaId);
-
         services.AddCrdt()
                 .AddCrdtAotContext(new DynamicShardingTestAotContext())
                 .AddCrdtJsonTypeInfoResolver(DynamicShardingTestJsonContext.Default)
                 .AddCrdtShardIdProvider<DocumentIdShardProvider>();
 
         services.AddDistributedDocumentType<ShardedDocState>(DocTypeAlias);
-        services.AddDistributedCrdtP2p(MeshId, replicaId);
+        services.AddDistributedCrdtReplica(replicaId, MeshId);
 
         services.AddSingleton(senderMock.Object);
         services.AddSingleton(gossipMock.Object);

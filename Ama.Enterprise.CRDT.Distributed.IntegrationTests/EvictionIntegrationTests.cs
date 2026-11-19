@@ -338,7 +338,7 @@ public class EvictionIntegrationTests
 
         var sp = BuildNode("NodeA", services =>
         {
-            services.AddDistributedCrdtP2p("TestMesh", "NodeA");
+            services.AddDistributedCrdtReplica("NodeA", "TestMesh");
             services.AddSingleton(mockP2p.Object);
         });
 
@@ -393,7 +393,7 @@ public class EvictionIntegrationTests
         // Arrange
         var sp = BuildNode("NodeA", services =>
         {
-            services.AddDistributedCrdtP2p("TestMesh", "NodeA");
+            services.AddDistributedCrdtReplica("NodeA", "TestMesh");
         });
 
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();

@@ -131,7 +131,7 @@ public static class Program
         services.AddDistributedCrdtStorage<ShowCaseCrdtStorage>();
 
         // Register the background multi-document orchestration and route inbound intents from the network
-        services.AddDistributedCrdtP2p("internal", replicaId);
+        services.AddDistributedCrdtReplica(replicaId, "internal");
 
         // Network Layer bindings
         services

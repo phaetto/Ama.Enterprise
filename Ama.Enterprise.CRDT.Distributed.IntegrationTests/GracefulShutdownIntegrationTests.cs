@@ -618,7 +618,7 @@ public sealed class GracefulShutdownIntegrationTests
                 .AddCrdtJsonTypeInfoResolver(GracefulShutdownTestJsonContext.Default);
 
         services.AddDistributedDocumentType<ShutdownTestState>("shutdown-doc");
-        services.AddDistributedCrdtP2p(TestMeshId, replicaId);
+        services.AddDistributedCrdtReplica(replicaId, TestMeshId);
 
         services.AddSingleton(Mock.Of<IP2pAlgorithm>());
         services.AddSingleton(Mock.Of<IDirectMessageSender>());

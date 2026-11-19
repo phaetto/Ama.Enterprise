@@ -175,11 +175,10 @@ public sealed class FeatureFlagDomainIntegrationTests
         services.AddSingleton<IDistributedCrdtStorage, MemoryCrdtStorage>();
 
         // Explicitly register the distributed CRDT topological core bounds
-        services.AddDistributedCrdtReplica("integration-replica-1");
         services.AddDistributedCrdtCore(x => {
             x.ActiveSyncEnabled = true;
         });
-        services.AddDistributedCrdtP2p("integration-mesh", "integration-replica-1");
+        services.AddDistributedCrdtReplica("integration-replica-1", "integration-mesh");
 
         // Bootstrap the feature flags exactly as a real application would natively
         services.AddFeatureFlags();

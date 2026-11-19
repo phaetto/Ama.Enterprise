@@ -70,7 +70,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
                 .AddCrdtJsonTypeInfoResolver(JournalTestJsonContext.Default);
 
         services.AddDistributedDocumentType<JournalTestState>("journal-doc");
-        services.AddDistributedCrdtP2p("TestMesh", replicaId);
+        services.AddDistributedCrdtReplica(replicaId, "TestMesh");
         services.AddSingleton(Mock.Of<IP2pAlgorithm>());
 
         configureExtra?.Invoke(services);

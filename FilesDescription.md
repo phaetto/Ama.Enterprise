@@ -7,25 +7,25 @@
 | `$/.github/workflows/publish-release-to-nuget-manual.yml` | Updated release versioning to use user-entered `major_version` and `minor_version` with an automatically generated `YYMMDD` patch number and valid `< 65536` `AssemblyVersion` build/revision numbers. |
 | `$/.gitignore` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests.csproj` | Unit test project for `Ama.Enterprise.CRDT.Distributed.Analyzers`. |
-| `$/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests/CrdtReplicaAndMeshConfigurationAnalyzerTests.cs` | Updated extension method stubs to include realistic internal delegation calls (`AddDistributedCrdtP2p` calling `AddDistributedCrdtReplica`) to verify no diagnostics are reported inside `ServiceCollectionExtensions`. |
+| `$/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests/CrdtReplicaAndMeshConfigurationAnalyzerTests.cs` | Updated analyzer unit tests to use `AddDistributedCrdtReplica(replicaId, params meshIds)` and `BindCrdtReplica` after removing `AddDistributedCrdtP2p`. |
 | `$/Ama.Enterprise.CRDT.Distributed.Analyzers/Ama.Enterprise.CRDT.Distributed.Analyzers.csproj` | Roslyn analyzer project validating Distributed CRDT and P2P mesh registration rules. |
-| `$/Ama.Enterprise.CRDT.Distributed.Analyzers/CrdtReplicaAndMeshConfigurationAnalyzer.cs` | Excluded `Ama.Enterprise.CRDT.Distributed` and `ServiceCollectionExtensions` extension method definitions from analysis so diagnostics only target consumer/client startup code. |
+| `$/Ama.Enterprise.CRDT.Distributed.Analyzers/CrdtReplicaAndMeshConfigurationAnalyzer.cs` | Updated analyzer rules and invocation analysis to support the unified `AddDistributedCrdtReplica(replicaId, params meshIds)` and `BindCrdtReplica` APIs. |
 | `$/Ama.Enterprise.CRDT.Distributed.Analyzers/IsExternalInit.cs` | Polyfill for `System.Runtime.CompilerServices.IsExternalInit` to support primary constructor `record struct` properties on `netstandard2.0`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/Ama.Enterprise.CRDT.Distributed.IntegrationTests.csproj` | Updated reference from `Ama.Enterprise.UnitTests` to the renamed `Ama.Enterprise.Project.Tests.Common`. |
-| `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/AntiEntropyStateSyncIntegrationTests.cs` | Added edge-case test verifying `CrdtReadReq` lazily promotes and loads a stored document when the read arrives before registry gossip. |
+| `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/AntiEntropyStateSyncIntegrationTests.cs` | Replaced `AddDistributedCrdtP2p` with `AddDistributedCrdtReplica(replicaId, TestMeshId)`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/ClusterStatePersistenceIntegrationTests.cs` | Added edge-case tests verifying `UpdatePeerState` rejection for tombstoned replicas and `EvictStalePeers` handling of zero/negative TTLs. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/ConcurrencyIntegrationTests.cs` | Replaced obsolete post-flush channel closure test with `DistributedCrdtDocument_AfterFlushAsync_DrainsPendingCommandsAndContinuesAcceptingSubsequentCommands` to verify non-destructive `FlushBarrier` behavior. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/ConsistentHashShardDistributionManagerIntegrationTests.cs` | Added edge-case test verifying multi-mesh replica bindings aggregate and deduplicate active peers across bound meshes while ignoring unrelated meshes. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/DocumentOrchestratorIntegrationTests.cs` | Updated `Orchestrator_ReevaluateTopologyAsync_ShouldDemoteNonLocalDocuments_WhilePreservingSharedLocalShardDvv` to assert that shard DVV history is preserved upon shard demotion. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/DvvExchangeAndOscillationIntegrationTests.cs` | Added edge-case test verifying live nodes sanitize incoming snapshot DVVs that carry inflated versions or dots for the local replica ID. |
-| `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/DynamicShardingTopologyIntegrationTests.cs` | Integration tests validating zero-downtime sharding across live cluster scale-out, sudden node crash with RPC failover, and rolling shard demotion/re-promotion under continuous read/write load. |
+| `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/DynamicShardingTopologyIntegrationTests.cs` | Replaced `AddDistributedCrdtP2p` with `AddDistributedCrdtReplica(replicaId, MeshId)`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/EvictionIntegrationTests.cs` | Added edge-case test verifying `EvictPeersAsync` with `IntentDeliveryMode.FireAndForget`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/GracefulShutdownIntegrationTests.cs` | Added edge-case test verifying fault isolation across multiple replica scopes when one scope throws during shutdown checkpointing. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/JournalingAndSnapshottingIntegrationTests.cs` | Added edge-case test verifying `StorageJournalForwarder` checkpoints all documents in a shared shard and persists the refreshed shard DVV before trimming the journal. |
-| `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/LiveMigrationIntegrationTests.cs` | Added integration tests verifying strict unidirectional V1-to-V2 data flow, same-type multi-replica observer isolation, end-to-end 3-node multi-mesh P2P gossip forwarding, delete-and-recreate lifecycles, disabled tombstone propagation, and high-concurrency burst writes. |
-| `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/MultiReplicaSyncIntegrationTests.cs` | Added edge-case test verifying RPC intent forwarding fails over to a secondary shard replica when the primary replica returns an explicit `IsSuccess = false` response. |
+| `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/LiveMigrationIntegrationTests.cs` | Replaced separate `AddDistributedCrdtReplica` and `AddDistributedCrdtP2p` calls with `AddDistributedCrdtReplica(replicaId, meshId)`. |
+| `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/MultiReplicaSyncIntegrationTests.cs` | Replaced `AddDistributedCrdtP2p` with `AddDistributedCrdtReplica(replicaId, "TestMesh")`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/ObserversIntegrationTests.cs` | Integration tests verifying that `IDocumentStateObserver<TState>`, `IDocumentPatchObserver`, `ICrdtOrchestratorObserver`, and `IClusterStateObserver` are invoked across all execution paths and isolate exceptions thrown by faulty observers. |
-| `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/ScopeTopologyProviderIntegrationTests.cs` | Verified `CrdtP2pPayloadHandler` drops payloads from unexpected peers and processes payloads from expected peers. |
+| `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/ScopeTopologyProviderIntegrationTests.cs` | Replaced `AddDistributedCrdtP2p` with `AddDistributedCrdtReplica(replicaId, TestMeshId)`. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Ama.Enterprise.CRDT.Distributed.ShowCase.csproj` | Updated reference mapping the renamed `Ama.Enterprise.CRDT.MessagePack.SourceGenerators` compilation target. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Constants.cs` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/DeviceStatus.cs` | Data structure representing the status of an IoT device. |
@@ -34,7 +34,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/ShowCaseJsonContext.cs` | AOT JSON context for the showcase multi-CRDT models. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskItem.cs` | Data structure representing an individual task item. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskListState.cs` | Root CRDT document model representing a task list. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Simplified replica registration via `AddDistributedCrdtP2p` and suppressed `DCRDT0003` on the telemetry-only `"admin"` mesh. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Updated replica registration to `AddDistributedCrdtReplica(replicaId, "internal")`. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetManager.cs` | Added `DocumentExistsAsync` check and input validation to `GetDevicesAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/IFleetManager.cs` | Added overloads accepting `IntentDeliveryMode` for setting and removing devices. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ITaskManager.cs` | Added overloads accepting `IntentDeliveryMode` for setting and removing tasks. |
@@ -55,7 +55,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Models/ShowCaseNodeContext.cs` | Data structure encapsulating local session boundaries tracking active role and region. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Models/TaskItem.cs` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Models/TaskListState.cs` | No description provided. |
-| `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Program.cs` | Removed redundant `AddDistributedCrdtReplica` call now handled idempotently by `AddDistributedCrdtP2p`. |
+| `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Program.cs` | Updated replica registrations to `AddDistributedCrdtReplica(replicaId, "server")` and `AddDistributedCrdtReplica(replicaId, "user")`. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/FleetManager.cs` | Added `DocumentExistsAsync` check and input validation to `GetDevicesAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/IFleetManager.cs` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/ITaskManager.cs` | No description provided. |
@@ -66,7 +66,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/TaskManager.cs` | Added `DocumentExistsAsync` check and input validation to `GetTasksAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj` | Removed `PrivateAssets="all"` from the `Ama.Enterprise.CRDT.Distributed.Analyzers` `ProjectReference` so the analyzer flows transitively to client projects in the solution. |
 | `$/Ama.Enterprise.CRDT.Distributed/Constants.cs` | Global constants for the distributed CRDT module, including the reserved `SystemRegistryDocumentId` (`system-document-registry`). |
-| `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | Decorated `IDocumentIdProvider` resolutions with `SystemRegistryDocumentIdProviderDecorator` alongside `IShardIdProvider`. |
+| `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | Consolidated `AddDistributedCrdtReplica` and `AddDistributedCrdtP2p` into a single `AddDistributedCrdtReplica(this IServiceCollection services, string replicaId, params string[] meshIds)` method alongside `IP2pMeshBuilder.BindCrdtReplica`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/ClusterStateSnapshotDto.cs` | Updated to map tombstoned replicas to their eviction timestamp tracking the exact eviction moment for safe cooldown expirations. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtEvictionRejectionMessage.cs` | Message broadcasted to forcefully reject and re-bootstrap nodes that have been tombstoned by the cluster, preventing amnesia edge cases. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/CrdtIntentForwardRequestDto.cs` | Added `DocumentTypeAlias` property to support lazy document instantiation on target shards when direct RPCs outrace registry gossip. |
@@ -174,9 +174,9 @@
 | `$/Ama.Enterprise.CRDT.MessagePack/Formatters/CrdtPolymorphicMessagePackRegistry.cs` | Centralized registry caching typed AOT polymorphic serialization delegates for MessagePack. |
 | `$/Ama.Enterprise.CRDT.MessagePack/MessagePackCrdtSerializer.cs` | Replaced `bytes.ToArray()` allocations in `DeserializeFromBytes` with `ArrayPool<byte>.Shared` buffers. |
 | `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Ama.Enterprise.FeatureFlags.IntegrationTests.csproj` | Redirected shared tests project reference pointing to renamed `Ama.Enterprise.Project.Tests.Common`. |
-| `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Services/FeatureFlagDomainIntegrationTests.cs` | Replaced legacy C# event subscription assertions with decoupled testing observers mapping to the new async `IFeatureFlagStateObserver` architecture. |
+| `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Services/FeatureFlagDomainIntegrationTests.cs` | Replaced `AddDistributedCrdtP2p` with `AddDistributedCrdtReplica("integration-replica-1", "integration-mesh")`. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj` | Appended an MSBuild target to automatically execute the local native Azurite startup batch script during the build process. Added `DisableFastUpToDateCheck` to ensure Visual Studio always evaluates the pre-build Azurite checks even when C# files haven't changed. |
-| `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Removed redundant `AddDistributedCrdtReplica` call now handled by `AddDistributedCrdtP2p`. |
+| `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Updated replica registration to `AddDistributedCrdtReplica(replicaId, "feature-flags-internal-mesh")`. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/start-azurite.bat` | Windows batch script that automatically discovers and executes natively installed Azurite instances (via Visual Studio or NPM) bypassing Docker requirements, explicitly detached via PowerShell to prevent MSBuild hangs. |
 | `$/Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
 | `$/Ama.Enterprise.FeatureFlags/Constants.cs` | Global constants for the Feature Flags module, defining common identifiers and document types. |
@@ -319,7 +319,7 @@
 | `$/Ama.Enterprise.P2p.WebRTC.AspNetCore/Services/WebRtcSignalingServer.cs` | Bound zero-trust evaluations mapping incoming `AuthRequest`, tracking client `PeerId` and dropping disconnected `ConnectionId` references. |
 | `$/Ama.Enterprise.P2p.WebRTC.AspNetCore/Services/WebRtcSignalingWsHelper.cs` | Internal helper wrapping WebSockets bounds isolating generic out-of-band envelope negotiations. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling.IntegrationTests/Ama.Enterprise.P2p.WebRTC.DistributedSignaling.IntegrationTests.csproj` | No description provided. |
-| `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling.IntegrationTests/Services/WebRtcDistributedSignalingIntegrationTests.cs` | Refactored integration tests routing `replicaId` tracking explicit parameters instead of obsolete `meshId` mapping arrays. |
+| `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling.IntegrationTests/Services/WebRtcDistributedSignalingIntegrationTests.cs` | Replaced `AddDistributedCrdtP2p` with `AddDistributedCrdtReplica(replicaId, meshId)`. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Ama.Enterprise.P2p.WebRTC.DistributedSignaling.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Constants.cs` | Defines global constants such as document type aliases and default IDs for the WebRTC CRDT distributed signaling components. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Extensions/EndpointRouteBuilderExtensions.cs` | Refactored routes to require `replicaId` mapping distinct localized `ICrdtSignalingManager` from `DistributedCrdtScopeManager`, bypassing global mesh boundaries. |

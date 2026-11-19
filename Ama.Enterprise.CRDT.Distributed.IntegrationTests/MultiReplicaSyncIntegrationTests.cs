@@ -608,14 +608,13 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
 
             configureOptions?.Invoke(opt);
         });
-        services.AddDistributedCrdtReplica(replicaId);
         
         services.AddCrdt()
                 .AddCrdtAotContext(new MultiReplicaTestAotContext())
                 .AddCrdtJsonTypeInfoResolver(MultiReplicaTestJsonContext.Default);
                 
         services.AddDistributedDocumentType<SharedTestState>("shared-doc");
-        services.AddDistributedCrdtP2p("TestMesh", replicaId);
+        services.AddDistributedCrdtReplica(replicaId, "TestMesh");
         
         services.AddSingleton(senderMock.Object);
         services.AddSingleton(gossipMock.Object);
@@ -666,14 +665,13 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
 
             configureOptions?.Invoke(opt);
         });
-        services.AddDistributedCrdtReplica(replicaId);
 
         services.AddCrdt()
                 .AddCrdtAotContext(new MultiReplicaTestAotContext())
                 .AddCrdtJsonTypeInfoResolver(MultiReplicaTestJsonContext.Default);
 
         services.AddDistributedDocumentType<SharedTestState>("shared-doc");
-        services.AddDistributedCrdtP2p("TestMesh", replicaId);
+        services.AddDistributedCrdtReplica(replicaId, "TestMesh");
 
         services.AddSingleton(senderMock.Object);
         services.AddSingleton(gossipMock.Object);

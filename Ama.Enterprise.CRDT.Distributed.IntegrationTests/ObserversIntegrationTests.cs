@@ -676,7 +676,7 @@ public sealed class ObserversIntegrationTests
                 .AddCrdtJsonTypeInfoResolver(ObserversIntegrationTestJsonContext.Default);
 
         services.AddDistributedDocumentType<ObserverTestState>("obs-doc");
-        services.AddDistributedCrdtP2p("ObserverMesh", replicaId);
+        services.AddDistributedCrdtReplica(replicaId, "ObserverMesh");
 
         services.AddSingleton(Mock.Of<IP2pAlgorithm>());
         services.AddSingleton(Mock.Of<IDirectMessageSender>());

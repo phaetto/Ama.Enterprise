@@ -26,7 +26,7 @@ public sealed class CrdtReplicaAndMeshConfigurationAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor MissingReplicaRule = new(
         MissingReplicaDiagnosticId,
         "Distributed CRDT core requires at least one replica registration",
-        "'AddDistributedCrdtCore' is called without registering any CRDT replica via 'AddDistributedCrdtP2p', 'AddDistributedCrdtReplica', or 'BindCrdtReplica'",
+        "'AddDistributedCrdtCore' is called without registering any CRDT replica via 'AddDistributedCrdtReplica' or 'BindCrdtReplica'",
         Category,
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -35,7 +35,7 @@ public sealed class CrdtReplicaAndMeshConfigurationAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor UnboundReplicaRule = new(
         UnboundReplicaDiagnosticId,
         "CRDT replica is not bound to any P2P mesh",
-        "CRDT replica '{0}' is registered without being bound to any P2P mesh via 'AddDistributedCrdtP2p', 'BindCrdtReplica', or mesh ID parameters",
+        "CRDT replica '{0}' is registered without being bound to any P2P mesh via 'AddDistributedCrdtReplica(replicaId, meshIds)' or 'BindCrdtReplica'",
         Category,
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
@@ -180,23 +180,6 @@ public sealed class CrdtReplicaAndMeshConfigurationAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        if (string.Equals(methodName, "AddDistributedCrdtP2p", StringComparison.Ordinal))
-        {
-            var meshArg = GetArgument(invocation, "meshId", 0);
-            var replicaArg = GetArgument(invocation, "replicaId", 1);
-            if (meshArg is null || replicaArg is null)
-            {
-                return;
-            }
-
-            var meshId = ExtractIdentifier(meshArg.Value);
-            var replicaId = ExtractIdentifier(replicaArg.Value);
-            var location = GetInvocationIdentifierLocation(invocation);
-
-            state.P2pBindings.Add(new P2pBindingInvocationInfo(location, meshId, replicaId, null));
-            return;
-        }
-
         if (string.Equals(methodName, "BindCrdtReplica", StringComparison.Ordinal))
         {
             var addP2pMeshInvocation = FindOriginatingAddP2pMeshInvocation(invocation);
@@ -308,7 +291,7 @@ public sealed class CrdtReplicaAndMeshConfigurationAnalyzer : DiagnosticAnalyzer
             state.MeshRegistrations.Select(m => m.MeshId.Key),
             StringComparer.Ordinal);
 
-        // DCRDT0004: AddDistributedCrdtP2p or AddDistributedCrdtReplica(replicaId, meshIds) references a meshId not configured via AddP2pMesh
+        // DCRDT0004: AddDistributedCrdtReplica(replicaId, meshIds) references a meshId not configured via AddP2pMesh
         foreach (var binding in state.P2pBindings.OrderBy(b => b.Location.SourceSpan.Start))
         {
             if (binding.OriginatingAddP2pMeshLocation is null &&
