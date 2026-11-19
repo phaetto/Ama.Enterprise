@@ -175,6 +175,10 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                     var snapshot = await targetDoc.GetSnapshotDataAsync(cancellationToken).ConfigureAwait(false);
                     statePayload = snapshot.SnapshotData;
                 }
+                else if (!string.IsNullOrWhiteSpace(req.DocumentId))
+                {
+                    statePayload = await scope.Orchestrator.TryLoadStoredDocumentSnapshotBytesAsync(req.DocumentId, typeAlias, cancellationToken).ConfigureAwait(false);
+                }
 
                 var res = new CrdtReadResponseDto { CorrelationId = req.CorrelationId, StatePayload = statePayload };
                 var resPayload = serializer.SerializeToBytes(res);
@@ -349,11 +353,36 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             if (shardsRequiringSnapshot.Count > 0)
             {
                 logger.LogWarning("[{ReplicaId}] Journal missing or trimmed for {ShardCount} shard(s). Sending full snapshots for affected shards.", replicaContext.ReplicaId, shardsRequiringSnapshot.Count);
+                var sentSnapshots = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var targetDoc in documents)
                 {
                     if (shardsRequiringSnapshot.Contains(targetDoc.ShardId))
                     {
+                        var compositeKey = CrdtRegistryEntry.GetRegistryKey(targetDoc.TypeAlias, targetDoc.DocumentId);
+                        sentSnapshots.Add(compositeKey);
                         await scope.Orchestrator.ProvideSnapshotAsync(targetDoc.DocumentId, targetDoc.TypeAlias, syncMsg.ReplicaId, senderId, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+
+                var registryDoc = await scope.Orchestrator.Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+                foreach (var entry in registryDoc.Data.Documents.Values)
+                {
+                    if (entry.IsDeleted)
+                    {
+                        continue;
+                    }
+
+                    var compositeKey = CrdtRegistryEntry.GetRegistryKey(entry.TypeAlias, entry.DocumentId);
+                    if (sentSnapshots.Contains(compositeKey))
+                    {
+                        continue;
+                    }
+
+                    var entryShardId = await scope.Orchestrator.TryGetShardIdAsync(entry.DocumentId, entry.TypeAlias, cancellationToken).ConfigureAwait(false);
+                    if (!string.IsNullOrWhiteSpace(entryShardId) && shardsRequiringSnapshot.Contains(entryShardId))
+                    {
+                        sentSnapshots.Add(compositeKey);
+                        await scope.Orchestrator.ProvideSnapshotAsync(entry.DocumentId, entry.TypeAlias, syncMsg.ReplicaId, senderId, cancellationToken).ConfigureAwait(false);
                     }
                 }
             }

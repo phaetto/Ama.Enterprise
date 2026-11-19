@@ -504,6 +504,105 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
         }
     }
 
+    [IntegrationFact]
+    public async Task ShardHandover_WhenNewNodeJoinsAndReturningNodeRePromotes_HydratesLatestVersionImmediatelyWithoutAntiEntropy()
+    {
+        // Arrange - ReplicationFactor = 1 so shard ownership moves completely between nodes.
+        // Verify that when a new node joins or an old node re-promotes a shard that was mutated elsewhere,
+        // round-robin reads hitting any node immediately return the latest version BEFORE any background anti-entropy runs.
+        using var fabric = new DynamicMeshFabric();
+        var node1 = await CreateAndStartNodeAsync("Replica-1", replicationFactor: 1);
+        var node2 = await CreateAndStartNodeAsync("Replica-2", replicationFactor: 1);
+
+        await fabric.JoinNodeAsync(node1);
+
+        var docIds = Enumerable.Range(1, 10).Select(i => $"immediate-hydrate-doc-{i}").ToArray();
+        foreach (var docId in docIds)
+        {
+            await node1.Orchestrator.CreateDocumentAsync(docId, DocTypeAlias, CancellationToken.None);
+            await node1.Orchestrator.ApplyIntentAsync<ShardedDocState>(
+                docId,
+                new MapSetIntent("v1", $"value1-{docId}"),
+                nameof(ShardedDocState.DataMap),
+                IntentDeliveryMode.Acknowledged,
+                CancellationToken.None);
+        }
+
+        // Act 1: Node 2 joins. Sync ONLY the registry so Node 2 knows the documents exist,
+        // then trigger topology re-evaluation on Node 2 WITHOUT running anti-entropy on the document shards.
+        await fabric.JoinNodeAsync(node2);
+        await node1.Orchestrator.ProvideSnapshotAsync(
+            node1.Orchestrator.Registry.DocumentId,
+            node1.Orchestrator.Registry.TypeAlias,
+            node2.ReplicaId,
+            node2.PeerId,
+            CancellationToken.None);
+        await fabric.DrainNetworkAsync();
+
+        await node2.Orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
+        await node1.Orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
+        await fabric.DrainNetworkAsync();
+
+        var movedDocIds = new List<string>();
+        foreach (var docId in docIds)
+        {
+            var shardId = $"shard-{docId}";
+            if (await node2.DistributionManager.IsShardLocalAsync(shardId, CancellationToken.None))
+            {
+                movedDocIds.Add(docId);
+            }
+        }
+
+        movedDocIds.ShouldNotBeEmpty();
+
+        // Assert 1: Immediately reading from Node 2 or Node 1 returns v1 (no V0 blank state bounce!)
+        foreach (var movedDocId in movedDocIds)
+        {
+            var readFromNode2 = await node2.Orchestrator.GetDocumentStateAsync<ShardedDocState>(movedDocId, CancellationToken.None);
+            readFromNode2.Data.DataMap.ShouldContainKeyAndValue("v1", $"value1-{movedDocId}");
+
+            var readFromNode1 = await node1.Orchestrator.GetDocumentStateAsync<ShardedDocState>(movedDocId, CancellationToken.None);
+            readFromNode1.Data.DataMap.ShouldContainKeyAndValue("v1", $"value1-{movedDocId}");
+
+            // Advance the document to v2 on Node 2 while Node 1 does not own the shard
+            var appliedV2 = await node2.Orchestrator.ApplyIntentAsync<ShardedDocState>(
+                movedDocId,
+                new MapSetIntent("v2", $"value2-{movedDocId}"),
+                nameof(ShardedDocState.DataMap),
+                IntentDeliveryMode.Acknowledged,
+                CancellationToken.None);
+            appliedV2.ShouldBeTrue();
+        }
+
+        // Act 2: Node 1 re-promotes the shard while Node 1's local storage still has stale checkpoint v1.
+        // Before Node 2's network is disconnected, Node 1 re-evaluates or promotes and hydrates v2 from Node 2 (or Node 2 pushes on demotion).
+        var node3 = await CreateAndStartNodeAsync("Replica-3", replicationFactor: 1);
+        await fabric.JoinNodeAsync(node3);
+        await node1.Orchestrator.ProvideSnapshotAsync(
+            node1.Orchestrator.Registry.DocumentId,
+            node1.Orchestrator.Registry.TypeAlias,
+            node3.ReplicaId,
+            node3.PeerId,
+            CancellationToken.None);
+        await fabric.DrainNetworkAsync();
+
+        await node1.Orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
+        await node2.Orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
+        await node3.Orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
+        await fabric.DrainNetworkAsync();
+
+        // Assert 2: Every active node in the 3-node cluster immediately returns both v1 and v2 on round-robin reads
+        foreach (var movedDocId in movedDocIds)
+        {
+            foreach (var activeNode in fabric.GetActiveNodes())
+            {
+                var docState = await activeNode.Orchestrator.GetDocumentStateAsync<ShardedDocState>(movedDocId, CancellationToken.None);
+                docState.Data.DataMap.ShouldContainKeyAndValue("v1", $"value1-{movedDocId}");
+                docState.Data.DataMap.ShouldContainKeyAndValue("v2", $"value2-{movedDocId}");
+            }
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         foreach (var node in nodes)

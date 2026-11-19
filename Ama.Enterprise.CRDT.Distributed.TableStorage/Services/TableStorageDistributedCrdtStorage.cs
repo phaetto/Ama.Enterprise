@@ -36,6 +36,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
     private readonly TableServiceClient tableServiceClient;
     private readonly TableClient tableClient;
     private readonly ICrdtSerializer serializer;
+    private readonly IAsyncCrdtMerger? merger;
     private readonly bool useBinarySerialization;
     private readonly ILogger<TableStorageDistributedCrdtStorage> logger;
 
@@ -82,6 +83,7 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
             this.serializer = textJsonSerializer ?? throw new ArgumentNullException(nameof(textJsonSerializer));
         }
 
+        this.merger = this.serviceProvider.GetService<IAsyncCrdtMerger>();
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         this.tableServiceClient = new TableServiceClient(storageOptions.ConnectionString);
@@ -270,39 +272,105 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
 
         try
         {
-            // Query for any RowKey matching the documentId across all partitions
-            var filter = TableClient.CreateQueryFilter($"RowKey eq {documentId}");
-            var query = this.tableClient.QueryAsync<TableEntity>(filter, cancellationToken: cancellationToken);
-            
-            TableEntity? latestOrphan = null;
-            
-            await foreach (var entity in query.WithCancellation(cancellationToken).ConfigureAwait(false))
+            var localReplicaId = this.GetLocalReplicaId();
+            var localPartitionKey = this.GetDocumentStatePartitionKey(shardId);
+            var matchedEntities = new List<TableEntity>();
+
+            var clusterStateTracker = this.serviceProvider.GetService<IClusterStateTracker>();
+            if (clusterStateTracker != null)
             {
-                if (entity.PartitionKey != null && entity.PartitionKey.Contains(DocumentStatePartitionKey, StringComparison.OrdinalIgnoreCase))
+                var candidateReplicas = new HashSet<string>(clusterStateTracker.GetActiveReplicaIds(), StringComparer.Ordinal);
+                var snapshot = clusterStateTracker.ExportState();
+                foreach (var knownReplica in snapshot.PeerStates.Keys)
                 {
-                    if (latestOrphan == null || entity.Timestamp > latestOrphan.Timestamp)
+                    candidateReplicas.Add(knownReplica);
+                }
+
+                if (!string.IsNullOrWhiteSpace(localReplicaId))
+                {
+                    candidateReplicas.Remove(localReplicaId);
+                }
+
+                foreach (var peerReplicaId in candidateReplicas)
+                {
+                    var peerPartitionKey = $"{peerReplicaId}_{DocumentStatePartitionKey}_{shardId}";
+                    try
                     {
-                        latestOrphan = entity;
+                        var response = await this.tableClient.GetEntityAsync<TableEntity>(peerPartitionKey, documentId, cancellationToken: cancellationToken).ConfigureAwait(false);
+                        if (response?.Value != null)
+                        {
+                            matchedEntities.Add(response.Value);
+                        }
+                    }
+                    catch (RequestFailedException ex) when (ex.Status == 404 && ex.ErrorCode != "TableNotFound")
+                    {
+                        // Peer partition does not have a checkpoint for this document
                     }
                 }
             }
-            
-            if (latestOrphan != null)
+
+            if (matchedEntities.Count == 0)
             {
-                var tags = new KeyValuePair<string, object?>[] { new("type", "document_bootstrap") };
-                this.operationsReadCounter.Add(1, tags);
-                
-                var payload = CrdtTableEntity.GetPayload(latestOrphan);
-                if (payload != null)
+                // Fallback for cold boot before cluster state tracker has discovered peer replica IDs
+                var expectedSuffix = $"_{DocumentStatePartitionKey}_{shardId}";
+                var exactUnprefixedPartition = $"{DocumentStatePartitionKey}_{shardId}";
+                var filter = TableClient.CreateQueryFilter($"RowKey eq {documentId}");
+                var query = this.tableClient.QueryAsync<TableEntity>(filter, cancellationToken: cancellationToken);
+
+                await foreach (var entity in query.WithCancellation(cancellationToken).ConfigureAwait(false))
                 {
-                    this.payloadBytesHistogram.Record(payload.Length, tags);
+                    if (entity.PartitionKey == null || string.Equals(entity.PartitionKey, localPartitionKey, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    if (entity.PartitionKey.EndsWith(expectedSuffix, StringComparison.Ordinal) ||
+                        string.Equals(entity.PartitionKey, exactUnprefixedPartition, StringComparison.Ordinal) ||
+                        entity.PartitionKey.Contains(DocumentStatePartitionKey, StringComparison.OrdinalIgnoreCase))
+                    {
+                        matchedEntities.Add(entity);
+                    }
                 }
-                
-                var document = this.serializer.DeserializeFromBytes<CrdtDocument<TState>>(payload);
-                if (document != null)
+            }
+
+            if (matchedEntities.Count > 0)
+            {
+                matchedEntities.Sort((a, b) => Nullable.Compare(b.Timestamp, a.Timestamp));
+
+                var tags = new KeyValuePair<string, object?>[] { new("type", "document_bootstrap") };
+                CrdtDocument<TState>? mergedDocument = null;
+
+                foreach (var entity in matchedEntities)
                 {
-                    this.logger.LogInformation("Successfully bootstrapped orphaned document '{DocumentId}' from partition '{PartitionKey}'.", documentId, latestOrphan.PartitionKey);
-                    return document;
+                    this.operationsReadCounter.Add(1, tags);
+
+                    var payload = CrdtTableEntity.GetPayload(entity);
+                    if (payload == null || payload.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    this.payloadBytesHistogram.Record(payload.Length, tags);
+                    var doc = this.serializer.DeserializeFromBytes<CrdtDocument<TState>>(payload);
+                    if (doc.Data == null)
+                    {
+                        continue;
+                    }
+
+                    if (mergedDocument == null)
+                    {
+                        mergedDocument = doc;
+                    }
+                    else if (this.merger != null)
+                    {
+                        await this.merger.MergeStateAsync(mergedDocument.Value, doc, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+
+                if (mergedDocument != null)
+                {
+                    this.logger.LogInformation("Bootstrapped and merged orphaned document '{DocumentId}' across {PartitionCount} peer partition(s).", documentId, matchedEntities.Count);
+                    return mergedDocument;
                 }
             }
         }

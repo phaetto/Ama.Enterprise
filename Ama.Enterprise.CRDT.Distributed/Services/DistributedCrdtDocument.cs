@@ -689,24 +689,34 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             }
 
             var storageDocKey = GetStorageDocumentKey();
-            var storedDoc = await storage.LoadDocumentAsync<TState>(ShardId, storageDocKey, cancellationToken).ConfigureAwait(false);
-            if (storedDoc == null && !string.Equals(storageDocKey, DocumentId, StringComparison.Ordinal))
+            var localStoredDoc = await storage.LoadDocumentAsync<TState>(ShardId, storageDocKey, cancellationToken).ConfigureAwait(false);
+            if (localStoredDoc == null && !string.Equals(storageDocKey, DocumentId, StringComparison.Ordinal))
             {
-                storedDoc = await storage.LoadDocumentAsync<TState>(ShardId, DocumentId, cancellationToken).ConfigureAwait(false);
+                localStoredDoc = await storage.LoadDocumentAsync<TState>(ShardId, DocumentId, cancellationToken).ConfigureAwait(false);
             }
-            
-            if (storedDoc == null)
-            {
-                storedDoc = await storage.LoadOrphanedDocumentAsync<TState>(ShardId, storageDocKey, cancellationToken).ConfigureAwait(false);
-                if (storedDoc == null && !string.Equals(storageDocKey, DocumentId, StringComparison.Ordinal))
-                {
-                    storedDoc = await storage.LoadOrphanedDocumentAsync<TState>(ShardId, DocumentId, cancellationToken).ConfigureAwait(false);
-                }
 
-                if (storedDoc != null)
-                {
-                    logger.LogInformation("Loaded orphaned state for document {DocumentId} ({TypeAlias}) from storage.", DocumentId, TypeAlias);
-                }
+            var orphanedDoc = await storage.LoadOrphanedDocumentAsync<TState>(ShardId, storageDocKey, cancellationToken).ConfigureAwait(false);
+            if (orphanedDoc == null && !string.Equals(storageDocKey, DocumentId, StringComparison.Ordinal))
+            {
+                orphanedDoc = await storage.LoadOrphanedDocumentAsync<TState>(ShardId, DocumentId, cancellationToken).ConfigureAwait(false);
+            }
+
+            CrdtDocument<TState>? storedDoc = null;
+            if (localStoredDoc != null && orphanedDoc != null)
+            {
+                var mergedStoredDoc = localStoredDoc.Value;
+                await merger.MergeStateAsync(mergedStoredDoc, orphanedDoc.Value, cancellationToken).ConfigureAwait(false);
+                storedDoc = mergedStoredDoc;
+                logger.LogInformation("Merged local and orphaned state for document {DocumentId} ({TypeAlias}) from storage.", DocumentId, TypeAlias);
+            }
+            else if (localStoredDoc != null)
+            {
+                storedDoc = localStoredDoc;
+            }
+            else if (orphanedDoc != null)
+            {
+                storedDoc = orphanedDoc;
+                logger.LogInformation("Loaded orphaned state for document {DocumentId} ({TypeAlias}) from storage.", DocumentId, TypeAlias);
             }
 
             if (storedDoc != null)
@@ -717,6 +727,10 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                     if (!isDirty)
                     {
                         currentDocument = storedDoc.Value;
+                        if (localStoredDoc != null && orphanedDoc != null)
+                        {
+                            isDirty = true;
+                        }
                     }
                     else
                     {
@@ -1066,11 +1080,15 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                     isDirty = true;
                 }
 
-                if (cmd.GlobalState != null)
+                if (cmd.GlobalState != null && cmd.GlobalState.Count > 0)
                 {
                     var activeShardDocIds = GetActiveDocumentIdsForShard();
                     var compositeDocId = GetStorageDocumentKey();
                     versionVectorManager.RecordDocumentSnapshotMerge(ShardId, compositeDocId, cmd.GlobalState, activeShardDocIds);
+                }
+                else
+                {
+                    MergeDocumentMetadataIntoShardVersionVector(currentDoc);
                 }
             }, cmd.CancellationToken).ConfigureAwait(false);
 

@@ -477,6 +477,66 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         return promotedDoc;
     }
 
+    /// <inheritdoc />
+    public async ValueTask<byte[]> TryLoadStoredDocumentSnapshotBytesAsync(string documentId, string? typeAlias = null, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(documentId))
+        {
+            return Array.Empty<byte>();
+        }
+
+        documentId = stringPool.GetOrAdd(documentId);
+        if (!string.IsNullOrWhiteSpace(typeAlias))
+        {
+            typeAlias = stringPool.GetOrAdd(typeAlias);
+        }
+
+        if (Registry != null && string.Equals(Registry.DocumentId, documentId, StringComparison.Ordinal))
+        {
+            var registrySnapshot = await Registry.GetSnapshotDataAsync(cancellationToken).ConfigureAwait(false);
+            return registrySnapshot.SnapshotData;
+        }
+
+        var resolvedAlias = typeAlias;
+        if (Registry != null)
+        {
+            var registryDoc = await Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            if (TryFindRegistryEntry(registryDoc.Data.Documents, documentId, resolvedAlias, out var entry) && entry != null)
+            {
+                if (entry.IsDeleted)
+                {
+                    return Array.Empty<byte>();
+                }
+
+                if (string.IsNullOrWhiteSpace(resolvedAlias))
+                {
+                    resolvedAlias = entry.TypeAlias;
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(resolvedAlias))
+        {
+            return Array.Empty<byte>();
+        }
+
+        resolvedAlias = stringPool.GetOrAdd(resolvedAlias);
+        var factory = serviceProvider.GetKeyedService<IDocumentFactory>(resolvedAlias);
+        if (factory == null)
+        {
+            return Array.Empty<byte>();
+        }
+
+        var compositeKey = CrdtRegistryEntry.GetRegistryKey(resolvedAlias, documentId);
+        if (!shardIdCache.TryGetValue(compositeKey, out var shardId))
+        {
+            shardId = stringPool.GetOrAdd(factory.GetShardId(serviceProvider, documentId));
+            shardIdCache.TryAdd(compositeKey, shardId);
+        }
+
+        return await factory.TryLoadSerializedDocumentFromStorageAsync(serviceProvider, shardId, documentId, cancellationToken).ConfigureAwait(false);
+    }
+
     public async ValueTask<CrdtDocument<TState>> GetDocumentStateAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
     {
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
@@ -508,8 +568,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         var rpcCorrelator = serviceProvider.GetRequiredService<IP2pRpcCorrelator>();
         var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
 
-        var activeNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
-        if (activeNodes == null || activeNodes.Count == 0)
+        var candidateReplicas = await GetCandidateRemoteReplicasForShardAsync(shardId, replicaContext.ReplicaId, clusterStateTracker, cancellationToken).ConfigureAwait(false);
+        if (candidateReplicas.Count == 0)
         {
             var noNodesEx = new InvalidOperationException($"Cannot read state: no active nodes found for shard {shardId}.");
             logger.LogError(noNodesEx, "Cannot read state for document {DocumentId}: no active nodes found for shard {ShardId}.", documentId, shardId);
@@ -525,8 +585,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         {
             if (attempt > 0)
             {
-                activeNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
-                if (activeNodes == null || activeNodes.Count == 0)
+                candidateReplicas = await GetCandidateRemoteReplicasForShardAsync(shardId, replicaContext.ReplicaId, clusterStateTracker, cancellationToken).ConfigureAwait(false);
+                if (candidateReplicas.Count == 0)
                 {
                     break;
                 }
@@ -534,9 +594,9 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
             bool triedAnyPeer = false;
 
-            for (int i = 0; i < activeNodes.Count; i++)
+            for (int i = 0; i < candidateReplicas.Count; i++)
             {
-                var candidateReplica = activeNodes[(i + attempt) % activeNodes.Count];
+                var candidateReplica = candidateReplicas[(i + attempt) % candidateReplicas.Count];
                 if (string.Equals(candidateReplica, replicaContext.ReplicaId, StringComparison.Ordinal))
                 {
                     continue;
@@ -1034,24 +1094,45 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             }
         }
 
-        if (targetDoc == null)
-        {
-            logger.LogWarning("Requested snapshot for unknown document {DocumentId} ({TypeAlias}).", documentId, typeAlias);
-            return;
-        }
-
         try
         {
-            var snapshotResult = await targetDoc.GetSnapshotDataAsync(cancellationToken).ConfigureAwait(false);
-            
+            byte[] snapshotData;
+            ShardVersionVectorMap globalState;
+            string? documentTypeAlias = typeAlias;
+
+            if (targetDoc != null)
+            {
+                var snapshotResult = await targetDoc.GetSnapshotDataAsync(cancellationToken).ConfigureAwait(false);
+                snapshotData = snapshotResult.SnapshotData;
+                globalState = snapshotResult.GlobalState;
+                if (string.IsNullOrWhiteSpace(documentTypeAlias))
+                {
+                    documentTypeAlias = targetDoc.TypeAlias;
+                }
+            }
+            else
+            {
+                snapshotData = await TryLoadStoredDocumentSnapshotBytesAsync(documentId, typeAlias, cancellationToken).ConfigureAwait(false);
+                if (snapshotData.Length == 0)
+                {
+                    logger.LogWarning("Requested snapshot for unknown document {DocumentId} ({TypeAlias}).", documentId, typeAlias);
+                    return;
+                }
+
+                var shardId = await TryGetShardIdAsync(documentId, typeAlias, cancellationToken).ConfigureAwait(false);
+                var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
+                globalState = !string.IsNullOrWhiteSpace(shardId)
+                    ? versionVectorManager.GetShardSnapshot(shardId)
+                    : new ShardVersionVectorMap();
+            }
+
             var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
             var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
             var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
 
-            var resMsg = new CrdtSnapshotMessage(replicaContext.ReplicaId, snapshotResult.SnapshotData, snapshotResult.GlobalState);
+            var resMsg = new CrdtSnapshotMessage(replicaContext.ReplicaId, snapshotData, globalState);
             var payload = serializer.SerializeToBytes(resMsg);
 
-            string? documentTypeAlias = !string.IsNullOrWhiteSpace(typeAlias) ? typeAlias : targetDoc.TypeAlias;
             if (string.IsNullOrWhiteSpace(documentTypeAlias) && Registry != null && !string.Equals(documentId, Registry.DocumentId, StringComparison.Ordinal))
             {
                 var registryDoc = await Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
@@ -1412,6 +1493,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         var doc = factory.CreateDocument(serviceProvider, documentId);
         await doc.InitializeAsync(cancellationToken).ConfigureAwait(false);
+        await HydratePromotedDocumentFromPeersAsync(doc, CancellationToken.None).ConfigureAwait(false);
 
         if (activeDocuments.TryAdd(compositeKey, doc))
         {
@@ -1512,6 +1594,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                             {
                                 var doc = factory.CreateDocument(serviceProvider, entry.DocumentId);
                                 await doc.InitializeAsync(cancellationToken).ConfigureAwait(false);
+                                await HydratePromotedDocumentFromPeersAsync(doc, CancellationToken.None).ConfigureAwait(false);
                                 
                                 if (activeDocuments.TryAdd(compositeKey, doc))
                                 {
@@ -1816,6 +1899,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             logger.LogWarning(ex, "Failed to checkpoint document {DocumentId} ({TypeAlias}) prior to shard demotion.", doc.DocumentId, doc.TypeAlias);
         }
 
+        await PushDemotedDocumentSnapshotToTargetPeersAsync(doc, CancellationToken.None).ConfigureAwait(false);
+
         try
         {
             if (doc is IDisposable d)
@@ -1825,6 +1910,171 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
         catch (ObjectDisposedException)
         {
+        }
+    }
+
+    private async Task<List<string>> GetCandidateRemoteReplicasForShardAsync(
+        string shardId,
+        string localReplicaId,
+        IClusterStateTracker clusterStateTracker,
+        CancellationToken cancellationToken)
+    {
+        var candidates = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        var targetNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
+        if (targetNodes != null)
+        {
+            for (int i = 0; i < targetNodes.Count; i++)
+            {
+                var replicaId = targetNodes[i];
+                if (!string.Equals(replicaId, localReplicaId, StringComparison.Ordinal) && seen.Add(replicaId))
+                {
+                    candidates.Add(replicaId);
+                }
+            }
+        }
+
+        var activeReplicas = clusterStateTracker.GetActiveReplicaIds();
+        for (int i = 0; i < activeReplicas.Count; i++)
+        {
+            var replicaId = activeReplicas[i];
+            if (!string.Equals(replicaId, localReplicaId, StringComparison.Ordinal) && seen.Add(replicaId))
+            {
+                candidates.Add(replicaId);
+            }
+        }
+
+        return candidates;
+    }
+
+    private async Task HydratePromotedDocumentFromPeersAsync(IDistributedCrdtDocument doc, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var clusterStateTracker = serviceProvider.GetService<IClusterStateTracker>();
+            var directSender = serviceProvider.GetService<IDirectMessageSender>();
+            var rpcCorrelator = serviceProvider.GetService<IP2pRpcCorrelator>();
+            var serializer = serviceProvider.GetService<ICrdtSerializer>();
+            var replicaContext = serviceProvider.GetService<ReplicaContext>();
+
+            if (clusterStateTracker == null || directSender == null || rpcCorrelator == null || serializer == null || replicaContext == null)
+            {
+                return;
+            }
+
+            var candidateReplicas = await GetCandidateRemoteReplicasForShardAsync(doc.ShardId, replicaContext.ReplicaId, clusterStateTracker, cancellationToken).ConfigureAwait(false);
+            if (candidateReplicas.Count == 0)
+            {
+                return;
+            }
+
+            var rpcTimeout = TimeSpan.FromMilliseconds(Math.Max(1, options.RpcTimeoutMilliseconds));
+
+            for (int i = 0; i < candidateReplicas.Count; i++)
+            {
+                var candidateReplica = candidateReplicas[i];
+                var candidatePeer = clusterStateTracker.GetPeerIdByReplicaId(candidateReplica);
+                if (string.IsNullOrWhiteSpace(candidatePeer) || !Guid.TryParse(candidatePeer, out var peerGuid))
+                {
+                    continue;
+                }
+
+                var correlationId = Guid.NewGuid();
+                var req = new CrdtReadRequestDto
+                {
+                    CorrelationId = correlationId,
+                    DocumentId = doc.DocumentId,
+                    DocumentTypeAlias = doc.TypeAlias
+                };
+
+                var reqPayload = serializer.SerializeToBytes(req);
+                var wrapper = new CrdtMessageWrapper(doc.DocumentId, "CrdtReadReq", reqPayload, doc.TypeAlias);
+                var wrapperBytes = serializer.SerializeToBytes(wrapper);
+
+                try
+                {
+                    var waitTask = rpcCorrelator.RegisterRequestAsync<CrdtReadResponseDto>(correlationId, rpcTimeout, cancellationToken);
+                    await directSender.SendDirectAsync(new PeerId(peerGuid), wrapperBytes, cancellationToken).ConfigureAwait(false);
+                    var response = await waitTask.ConfigureAwait(false);
+
+                    if (response.StatePayload != null && response.StatePayload.Length > 0)
+                    {
+                        await doc.MergeSnapshotAsync(response.StatePayload, new ShardVersionVectorMap(), IntentDeliveryMode.Acknowledged, cancellationToken).ConfigureAwait(false);
+                        logger.LogDebug(
+                            "Hydrated promoted document {DocumentId} ({TypeAlias}) on shard {ShardId} from peer replica {PeerReplica}.",
+                            doc.DocumentId,
+                            doc.TypeAlias,
+                            doc.ShardId,
+                            candidateReplica);
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogTrace(ex, "Peer hydration query to replica {TargetReplica} for document {DocumentId} did not return state.", candidateReplica, doc.DocumentId);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to hydrate promoted document {DocumentId} ({TypeAlias}) from peers.", doc.DocumentId, doc.TypeAlias);
+        }
+    }
+
+    private async Task PushDemotedDocumentSnapshotToTargetPeersAsync(IDistributedCrdtDocument doc, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var clusterStateTracker = serviceProvider.GetService<IClusterStateTracker>();
+            var directSender = serviceProvider.GetService<IDirectMessageSender>();
+            var serializer = serviceProvider.GetService<ICrdtSerializer>();
+            var replicaContext = serviceProvider.GetService<ReplicaContext>();
+
+            if (clusterStateTracker == null || directSender == null || serializer == null || replicaContext == null)
+            {
+                return;
+            }
+
+            var targetNodes = await distributionManager.GetTargetNodesForShardAsync(doc.ShardId, cancellationToken).ConfigureAwait(false);
+            if (targetNodes == null || targetNodes.Count == 0)
+            {
+                return;
+            }
+
+            CrdtSnapshotDataDto? snapshotResult = null;
+
+            for (int i = 0; i < targetNodes.Count; i++)
+            {
+                var targetReplica = targetNodes[i];
+                if (string.Equals(targetReplica, replicaContext.ReplicaId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var targetPeerStr = clusterStateTracker.GetPeerIdByReplicaId(targetReplica);
+                if (string.IsNullOrWhiteSpace(targetPeerStr) || !Guid.TryParse(targetPeerStr, out var peerGuid))
+                {
+                    continue;
+                }
+
+                snapshotResult ??= await doc.GetSnapshotDataAsync(cancellationToken).ConfigureAwait(false);
+                var snapshot = snapshotResult.Value;
+
+                var resMsg = new CrdtSnapshotMessage(replicaContext.ReplicaId, snapshot.SnapshotData, snapshot.GlobalState);
+                var payload = serializer.SerializeToBytes(resMsg);
+                var wrapper = new CrdtMessageWrapper(doc.DocumentId, "CrdtSnapshot", payload, doc.TypeAlias);
+                var finalBytes = serializer.SerializeToBytes(wrapper);
+
+                await directSender.SendDirectAsync(new PeerId(peerGuid), finalBytes, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to push final snapshot for demoted document {DocumentId} ({TypeAlias}).", doc.DocumentId, doc.TypeAlias);
         }
     }
 }

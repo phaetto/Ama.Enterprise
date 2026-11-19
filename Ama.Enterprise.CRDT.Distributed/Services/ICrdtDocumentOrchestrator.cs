@@ -99,6 +99,16 @@ public interface ICrdtDocumentOrchestrator
     ValueTask<IDistributedCrdtDocument?> ResolveOrPromoteLocalDocumentAsync(string documentId, string? typeAlias = null, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Attempts to load a serialized document snapshot directly from local or shared storage without promoting the document into active memory.
+    /// Used as a fallback when serving remote read or snapshot requests for recently demoted shards.
+    /// </summary>
+    /// <param name="documentId">The document identifier.</param>
+    /// <param name="typeAlias">The optional document type alias.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The serialized document state bytes, or an empty byte array if not found in storage.</returns>
+    ValueTask<byte[]> TryLoadStoredDocumentSnapshotBytesAsync(string documentId, string? typeAlias = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Retrieves the materialized document state routing across local memory channels or out-of-bound RPC network fetches.
     /// </summary>
     ValueTask<CrdtDocument<TState>> GetDocumentStateAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new();
