@@ -6,74 +6,81 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
-using Ama.CRDT.Services.Pooling;
+using Ama.CRDT.Models;
+using Ama.CRDT.Services.Providers;
+using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Background hosted mediator service that executes a zero-downtime live migration from a source CRDT replica/model to a target CRDT replica/model.
-/// Subscribes to live change events first, runs a throttled background backfill of existing documents, and drains all pending work before shutdown.
+/// Background hosted service that bridges a source CRDT replica and document type to a target CRDT replica and document type,
+/// handling live mutation streaming, background registry backfill, tombstone propagation, and zero-data-loss draining.
 /// </summary>
-/// <typeparam name="TSourceState">The source document state type.</typeparam>
-/// <typeparam name="TTargetState">The target document state type.</typeparam>
+/// <typeparam name="TSourceState">The source CRDT document state type.</typeparam>
+/// <typeparam name="TTargetState">The target CRDT document state type.</typeparam>
 public sealed class CrdtMigrationBridgeService<TSourceState, TTargetState> : BackgroundService, ICrdtMigrationBridge
     where TSourceState : class, new()
     where TTargetState : class, new()
 {
     private readonly CrdtMigrationOptions options;
+    private readonly DistributedCrdtScopeManager scopeManager;
     private readonly IServiceProvider rootServiceProvider;
-    private readonly ICrdtShutdownCoordinator shutdownCoordinator;
+    private readonly ICrdtSerializer serializer;
     private readonly ILogger<CrdtMigrationBridgeService<TSourceState, TTargetState>> logger;
 
     private readonly Channel<string> dirtyDocumentChannel;
     private readonly ConcurrentDictionary<string, byte> queuedDocuments = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> documentLocks = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, byte> backfilledDocumentsSet = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, byte> propagatedTombstonesSet = new(StringComparer.Ordinal);
-    private readonly SemaphoreSlim drainGate = new(1, 1);
+    private readonly ConcurrentDictionary<string, CrdtDocument<TSourceState>> previousSourceSnapshots = new(StringComparer.Ordinal);
+    private readonly SemaphoreSlim drainLock = new(1, 1);
 
     private int stage = (int)CrdtMigrationStage.NotStarted;
-    private int registryScanRequested = 1;
     private int inFlightTranslations;
+    private int registryScanRequested;
+    private long totalSourceDocumentsDiscovered;
     private long backfilledDocumentsCount;
     private long liveEventsProcessedCount;
     private long tombstonesProcessedCount;
     private long failedTranslationsCount;
-    private volatile bool initialBackfillCompleted;
+    private bool initialBackfillCompleted;
+
+    public CrdtMigrationOptions Options => options;
 
     public CrdtMigrationBridgeService(
         CrdtMigrationOptions options,
+        DistributedCrdtScopeManager scopeManager,
         IServiceProvider rootServiceProvider,
-        ICrdtShutdownCoordinator shutdownCoordinator,
+        ICrdtSerializer serializer,
         ILogger<CrdtMigrationBridgeService<TSourceState, TTargetState>> logger)
     {
-        this.options = options ?? throw new ArgumentNullException(nameof(options));
-        this.rootServiceProvider = rootServiceProvider ?? throw new ArgumentNullException(nameof(rootServiceProvider));
-        this.shutdownCoordinator = shutdownCoordinator ?? throw new ArgumentNullException(nameof(shutdownCoordinator));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(scopeManager);
+        ArgumentNullException.ThrowIfNull(rootServiceProvider);
+        ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentNullException.ThrowIfNull(logger);
 
-        if (string.IsNullOrWhiteSpace(options.SourceReplicaId))
-            throw new ArgumentException("SourceReplicaId must be specified.", nameof(options));
-        if (string.IsNullOrWhiteSpace(options.SourceTypeAlias))
-            throw new ArgumentException("SourceTypeAlias must be specified.", nameof(options));
-        if (string.IsNullOrWhiteSpace(options.TargetReplicaId))
-            throw new ArgumentException("TargetReplicaId must be specified.", nameof(options));
-        if (string.IsNullOrWhiteSpace(options.TargetTypeAlias))
-            throw new ArgumentException("TargetTypeAlias must be specified.", nameof(options));
-        if (options.MaxConcurrency <= 0)
-            throw new ArgumentOutOfRangeException(nameof(options), "MaxConcurrency must be greater than zero.");
+        ArgumentException.ThrowIfNullOrWhiteSpace(options.MigrationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(options.SourceReplicaId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(options.SourceTypeAlias);
+        ArgumentException.ThrowIfNullOrWhiteSpace(options.TargetReplicaId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(options.TargetTypeAlias);
+
+        this.options = options;
+        this.scopeManager = scopeManager;
+        this.rootServiceProvider = rootServiceProvider;
+        this.serializer = serializer;
+        this.logger = logger;
 
         dirtyDocumentChannel = Channel.CreateUnbounded<string>(new UnboundedChannelOptions
         {
             SingleReader = false,
-            SingleWriter = false,
-            AllowSynchronousContinuations = false
+            SingleWriter = false
         });
     }
-
-    /// <inheritdoc />
-    public CrdtMigrationOptions Options => options;
 
     /// <inheritdoc />
     public CrdtMigrationStatusDto GetStatus()
@@ -82,26 +89,19 @@ public sealed class CrdtMigrationBridgeService<TSourceState, TTargetState> : Bac
         var pending = queuedDocuments.Count;
         var inFlight = Volatile.Read(ref inFlightTranslations);
 
-        if (initialBackfillCompleted && currentStage != CrdtMigrationStage.Drained)
-        {
-            currentStage = (pending == 0 && inFlight == 0)
-                ? CrdtMigrationStage.Converged
-                : CrdtMigrationStage.StreamingLive;
-        }
-
         return new CrdtMigrationStatusDto(
-            options.MigrationId,
-            options.SourceReplicaId,
-            options.SourceTypeAlias,
-            options.TargetReplicaId,
-            options.TargetTypeAlias,
-            currentStage,
-            Interlocked.Read(ref backfilledDocumentsCount),
-            Interlocked.Read(ref liveEventsProcessedCount),
-            Interlocked.Read(ref tombstonesProcessedCount),
-            pending,
-            inFlight,
-            Interlocked.Read(ref failedTranslationsCount));
+            MigrationId: options.MigrationId,
+            SourceReplicaId: options.SourceReplicaId,
+            SourceTypeAlias: options.SourceTypeAlias,
+            TargetReplicaId: options.TargetReplicaId,
+            TargetTypeAlias: options.TargetTypeAlias,
+            Stage: currentStage,
+            BackfilledDocuments: Interlocked.Read(ref backfilledDocumentsCount),
+            LiveEventsProcessed: Interlocked.Read(ref liveEventsProcessedCount),
+            TombstonesProcessed: Interlocked.Read(ref tombstonesProcessedCount),
+            PendingDocumentsInQueue: pending,
+            InFlightTranslations: inFlight,
+            FailedTranslations: Interlocked.Read(ref failedTranslationsCount));
     }
 
     /// <inheritdoc />
@@ -114,15 +114,11 @@ public sealed class CrdtMigrationBridgeService<TSourceState, TTargetState> : Bac
 
         if (string.Equals(sourceDocumentId, Constants.SystemRegistryDocumentId, StringComparison.Ordinal))
         {
-            NotifyTopologyOrRegistryChanged();
             return;
         }
 
-        sourceDocumentId = CrdtStringPool.Shared.GetOrAdd(sourceDocumentId);
-        if (queuedDocuments.TryAdd(sourceDocumentId, 0))
-        {
-            dirtyDocumentChannel.Writer.TryWrite(sourceDocumentId);
-        }
+        Interlocked.Increment(ref liveEventsProcessedCount);
+        EnqueueDirtyDocument(sourceDocumentId);
     }
 
     /// <inheritdoc />
@@ -134,378 +130,370 @@ public sealed class CrdtMigrationBridgeService<TSourceState, TTargetState> : Bac
     /// <inheritdoc />
     public async Task DrainAndFlushAsync(CancellationToken cancellationToken = default)
     {
-        await drainGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await drainLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var scopeManager = rootServiceProvider.GetRequiredService<DistributedCrdtScopeManager>();
             var sourceScope = scopeManager.GetOrCreateScope(options.SourceReplicaId);
             var targetScope = scopeManager.GetOrCreateScope(options.TargetReplicaId);
 
-            var sourceOrchestrator = sourceScope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-            var targetOrchestrator = targetScope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-            var sourceShardManager = sourceScope.ServiceProvider.GetRequiredService<IShardDistributionManager>();
-            var migrator = targetScope.ServiceProvider.GetService<ICrdtDocumentMigrator<TSourceState, TTargetState>>()
-                ?? rootServiceProvider.GetRequiredService<ICrdtDocumentMigrator<TSourceState, TTargetState>>();
+            // 1. Flush the source orchestrator so all in-flight source commands/observers have fired
+            await sourceScope.Orchestrator.FlushAsync(cancellationToken).ConfigureAwait(false);
 
-            // 1. Scan registry one more time to ensure all existing or tombstoned documents are queued
-            await ScanSourceRegistryAsync(
-                sourceOrchestrator,
-                targetOrchestrator,
-                sourceShardManager,
-                migrator,
-                cancellationToken).ConfigureAwait(false);
+            // 2. Run a full reconciliation scan of the source registry to catch anything not yet enqueued
+            await ScanSourceRegistryAsync(sourceScope, isInitialBackfill: false, cancellationToken).ConfigureAwait(false);
 
-            // 2. Drain all queued documents synchronously
-            while (dirtyDocumentChannel.Reader.TryRead(out var docId))
-            {
-                await ProcessSingleDocumentSafeAsync(
-                    docId,
-                    isBackfill: false,
-                    sourceOrchestrator,
-                    targetOrchestrator,
-                    migrator,
-                    cancellationToken).ConfigureAwait(false);
-            }
+            // 3. Process all queued items until the queue and in-flight workers are completely empty
+            using var migratorScope = rootServiceProvider.CreateScope();
+            var migrator = ResolveMigrator(migratorScope.ServiceProvider);
 
-            // 3. Wait for any concurrent background workers to finish in-flight items
-            var pollDelay = TimeSpan.FromMilliseconds(Math.Max(1, options.BackfillBatchDelayMilliseconds));
-            while (!queuedDocuments.IsEmpty || Volatile.Read(ref inFlightTranslations) > 0)
+            while (true)
             {
                 while (dirtyDocumentChannel.Reader.TryRead(out var docId))
                 {
-                    await ProcessSingleDocumentSafeAsync(
-                        docId,
-                        isBackfill: false,
-                        sourceOrchestrator,
-                        targetOrchestrator,
-                        migrator,
-                        cancellationToken).ConfigureAwait(false);
+                    await ProcessSingleDocumentSafeAsync(docId, sourceScope, targetScope, migrator, cancellationToken).ConfigureAwait(false);
                 }
 
-                if (!queuedDocuments.IsEmpty || Volatile.Read(ref inFlightTranslations) > 0)
+                if (queuedDocuments.IsEmpty && Volatile.Read(ref inFlightTranslations) == 0)
                 {
-                    await Task.Delay(pollDelay, cancellationToken).ConfigureAwait(false);
+                    // Flush source one more time in case new commands arrived during processing
+                    await sourceScope.Orchestrator.FlushAsync(cancellationToken).ConfigureAwait(false);
+                    if (queuedDocuments.IsEmpty && Volatile.Read(ref inFlightTranslations) == 0 && !dirtyDocumentChannel.Reader.TryPeek(out _))
+                    {
+                        break;
+                    }
                 }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(Math.Max(1, options.BackfillBatchDelayMilliseconds)), cancellationToken).ConfigureAwait(false);
             }
 
-            // 4. Flush active target documents so active-sync broadcasters and journals are up-to-date
-            var activeTargetDocs = targetOrchestrator.GetActiveDocuments();
-            for (int i = 0; i < activeTargetDocs.Count; i++)
-            {
-                await activeTargetDocs[i].FlushAsync(cancellationToken).ConfigureAwait(false);
-            }
+            // 4. Flush the target orchestrator so all translated intents and patch broadcasts are durable/sent
+            await targetScope.Orchestrator.FlushAsync(cancellationToken).ConfigureAwait(false);
+
+            Volatile.Write(ref initialBackfillCompleted, true);
+            Volatile.Write(ref stage, (int)CrdtMigrationStage.Drained);
         }
         finally
         {
-            drainGate.Release();
+            drainLock.Release();
         }
-    }
-
-    /// <inheritdoc />
-    public override async Task StopAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            await DrainAndFlushAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            // Ignore cancellation on stop
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Error while draining CRDT migration bridge '{MigrationId}' during shutdown.", options.MigrationId);
-        }
-
-        dirtyDocumentChannel.Writer.TryComplete();
-        Interlocked.Exchange(ref stage, (int)CrdtMigrationStage.Drained);
-
-        await base.StopAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, shutdownCoordinator.ShutdownToken);
-        var token = linkedCts.Token;
+        Volatile.Write(ref stage, (int)CrdtMigrationStage.Initializing);
 
-        Interlocked.Exchange(ref stage, (int)CrdtMigrationStage.Initializing);
-
-        var scopeManager = rootServiceProvider.GetRequiredService<DistributedCrdtScopeManager>();
-        var sourceScope = scopeManager.GetOrCreateScope(options.SourceReplicaId);
-        var targetScope = scopeManager.GetOrCreateScope(options.TargetReplicaId);
-
-        var sourceOrchestrator = sourceScope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var targetOrchestrator = targetScope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-        var sourceShardManager = sourceScope.ServiceProvider.GetRequiredService<IShardDistributionManager>();
-        var migrator = targetScope.ServiceProvider.GetService<ICrdtDocumentMigrator<TSourceState, TTargetState>>()
-            ?? rootServiceProvider.GetRequiredService<ICrdtDocumentMigrator<TSourceState, TTargetState>>();
-
-        await WaitForOrchestratorInitializedAsync(sourceOrchestrator, token).ConfigureAwait(false);
-        await WaitForOrchestratorInitializedAsync(targetOrchestrator, token).ConfigureAwait(false);
-
-        Interlocked.Exchange(ref stage, (int)CrdtMigrationStage.Backfilling);
-        logger.LogInformation(
-            "Starting live CRDT migration bridge '{MigrationId}' from {SourceReplica}/{SourceType} to {TargetReplica}/{TargetType}.",
-            options.MigrationId,
-            options.SourceReplicaId,
-            options.SourceTypeAlias,
-            options.TargetReplicaId,
-            options.TargetTypeAlias);
-
-        // Start live consumer workers immediately so live changes are processed concurrently with backfill
-        var workerCount = Math.Max(1, options.MaxConcurrency);
-        var workers = new List<Task>(workerCount);
-        for (int i = 0; i < workerCount; i++)
-        {
-            workers.Add(RunLiveQueueConsumerAsync(sourceOrchestrator, targetOrchestrator, migrator, token));
-        }
-
-        // Run initial background backfill and periodic reconciliation loop
-        var reconciliationTask = RunBackfillAndReconciliationLoopAsync(
-            sourceOrchestrator,
-            targetOrchestrator,
-            sourceShardManager,
-            migrator,
-            token);
+        IDistributedCrdtScope sourceScope;
+        IDistributedCrdtScope targetScope;
 
         try
         {
-            await Task.WhenAll(workers.Append(reconciliationTask)).ConfigureAwait(false);
+            sourceScope = scopeManager.GetOrCreateScope(options.SourceReplicaId);
+            targetScope = scopeManager.GetOrCreateScope(options.TargetReplicaId);
+
+            await WaitForOrchestratorInitializedAsync(sourceScope.Orchestrator, stoppingToken).ConfigureAwait(false);
+            await WaitForOrchestratorInitializedAsync(targetScope.Orchestrator, stoppingToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to initialize CrdtMigrationBridgeService '{MigrationId}'.", options.MigrationId);
+            return;
+        }
+
+        // Start concurrent translation worker loops
+        var concurrency = Math.Max(1, options.MaxConcurrency);
+        var workerTasks = new Task[concurrency];
+        for (int i = 0; i < concurrency; i++)
+        {
+            workerTasks[i] = RunWorkerLoopAsync(sourceScope, targetScope, stoppingToken);
+        }
+
+        // Perform initial backfill scan
+        Volatile.Write(ref stage, (int)CrdtMigrationStage.Backfilling);
+        try
+        {
+            await ScanSourceRegistryAsync(sourceScope, isInitialBackfill: true, stoppingToken).ConfigureAwait(false);
+            Volatile.Write(ref initialBackfillCompleted, true);
+            UpdateDynamicStage();
+
+            // Run periodic reconciliation scans until stopped
+            var scanIntervalSeconds = Math.Max(1, options.ReconciliationScanIntervalSeconds);
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(scanIntervalSeconds));
+
+            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+            {
+                Interlocked.Exchange(ref registryScanRequested, 0);
+                await ScanSourceRegistryAsync(sourceScope, isInitialBackfill: false, stoppingToken).ConfigureAwait(false);
+                UpdateDynamicStage();
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
             // Normal shutdown
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error in reconciliation loop for CrdtMigrationBridgeService '{MigrationId}'.", options.MigrationId);
+        }
+
+        try
+        {
+            await Task.WhenAll(workerTasks).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    private void EnqueueDirtyDocument(string sourceDocumentId)
+    {
+        if (queuedDocuments.TryAdd(sourceDocumentId, 0))
+        {
+            if (Volatile.Read(ref initialBackfillCompleted))
+            {
+                var current = (CrdtMigrationStage)Volatile.Read(ref stage);
+                if (current is CrdtMigrationStage.Converged or CrdtMigrationStage.Drained)
+                {
+                    Volatile.Write(ref stage, (int)CrdtMigrationStage.StreamingLive);
+                }
+            }
+
+            dirtyDocumentChannel.Writer.TryWrite(sourceDocumentId);
+        }
+    }
+
+    private void UpdateDynamicStage()
+    {
+        if (!Volatile.Read(ref initialBackfillCompleted))
+        {
+            return;
+        }
+
+        var current = (CrdtMigrationStage)Volatile.Read(ref stage);
+        if (current == CrdtMigrationStage.Drained && queuedDocuments.IsEmpty && Volatile.Read(ref inFlightTranslations) == 0)
+        {
+            return;
+        }
+
+        if (queuedDocuments.IsEmpty && Volatile.Read(ref inFlightTranslations) == 0)
+        {
+            Volatile.Write(ref stage, (int)CrdtMigrationStage.Converged);
+        }
+        else
+        {
+            Volatile.Write(ref stage, (int)CrdtMigrationStage.StreamingLive);
         }
     }
 
     private async Task WaitForOrchestratorInitializedAsync(ICrdtDocumentOrchestrator orchestrator, CancellationToken cancellationToken)
     {
-        var delay = TimeSpan.FromMilliseconds(Math.Max(5, options.BackfillBatchDelayMilliseconds));
         while (orchestrator.InitializationStage != OrchestratorInitializationStage.Initialized)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+            await Task.Delay(TimeSpan.FromMilliseconds(Math.Max(1, options.BackfillBatchDelayMilliseconds)), cancellationToken).ConfigureAwait(false);
         }
     }
 
-    private async Task RunLiveQueueConsumerAsync(
-        ICrdtDocumentOrchestrator sourceOrchestrator,
-        ICrdtDocumentOrchestrator targetOrchestrator,
-        ICrdtDocumentMigrator<TSourceState, TTargetState> migrator,
-        CancellationToken cancellationToken)
+    private async Task RunWorkerLoopAsync(
+        IDistributedCrdtScope sourceScope,
+        IDistributedCrdtScope targetScope,
+        CancellationToken stoppingToken)
     {
-        var reader = dirtyDocumentChannel.Reader;
-        while (await reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+        using var serviceScope = rootServiceProvider.CreateScope();
+        var migrator = ResolveMigrator(serviceScope.ServiceProvider);
+
+        while (!stoppingToken.IsCancellationRequested)
         {
-            while (reader.TryRead(out var docId))
+            string docId;
+            try
             {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    return;
-                }
-
-                var isFirstTimeBackfill = !backfilledDocumentsSet.ContainsKey(docId);
-                await ProcessSingleDocumentSafeAsync(
-                    docId,
-                    isFirstTimeBackfill,
-                    sourceOrchestrator,
-                    targetOrchestrator,
-                    migrator,
-                    cancellationToken).ConfigureAwait(false);
+                docId = await dirtyDocumentChannel.Reader.ReadAsync(stoppingToken).ConfigureAwait(false);
             }
-        }
-    }
-
-    private async Task RunBackfillAndReconciliationLoopAsync(
-        ICrdtDocumentOrchestrator sourceOrchestrator,
-        ICrdtDocumentOrchestrator targetOrchestrator,
-        IShardDistributionManager sourceShardManager,
-        ICrdtDocumentMigrator<TSourceState, TTargetState> migrator,
-        CancellationToken cancellationToken)
-    {
-        // Initial backfill pass
-        await ScanSourceRegistryAsync(
-            sourceOrchestrator,
-            targetOrchestrator,
-            sourceShardManager,
-            migrator,
-            cancellationToken).ConfigureAwait(false);
-
-        initialBackfillCompleted = true;
-        Interlocked.Exchange(
-            ref stage,
-            queuedDocuments.IsEmpty && Volatile.Read(ref inFlightTranslations) == 0
-                ? (int)CrdtMigrationStage.Converged
-                : (int)CrdtMigrationStage.StreamingLive);
-
-        logger.LogInformation(
-            "CRDT migration bridge '{MigrationId}' completed initial registry scan. Entering live streaming and reconciliation mode.",
-            options.MigrationId);
-
-        var scanInterval = TimeSpan.FromSeconds(Math.Max(1, options.ReconciliationScanIntervalSeconds));
-        using var timer = new PeriodicTimer(scanInterval);
-
-        while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
-        {
-            if (Interlocked.Exchange(ref registryScanRequested, 0) == 1 || !initialBackfillCompleted)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                await ScanSourceRegistryAsync(
-                    sourceOrchestrator,
-                    targetOrchestrator,
-                    sourceShardManager,
-                    migrator,
-                    cancellationToken).ConfigureAwait(false);
+                break;
             }
+            catch (ChannelClosedException)
+            {
+                break;
+            }
+
+            await ProcessSingleDocumentSafeAsync(docId, sourceScope, targetScope, migrator, stoppingToken).ConfigureAwait(false);
+            UpdateDynamicStage();
         }
     }
 
     private async Task ScanSourceRegistryAsync(
-        ICrdtDocumentOrchestrator sourceOrchestrator,
-        ICrdtDocumentOrchestrator targetOrchestrator,
-        IShardDistributionManager sourceShardManager,
-        ICrdtDocumentMigrator<TSourceState, TTargetState> migrator,
+        IDistributedCrdtScope sourceScope,
+        bool isInitialBackfill,
         CancellationToken cancellationToken)
     {
-        var registryDoc = await sourceOrchestrator.Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-        if (registryDoc.Data?.Documents is null)
+        var registryDoc = sourceScope.Orchestrator.TryGetLocalDocument<CrdtRegistryState>(Constants.SystemRegistryDocumentId);
+        if (registryDoc is null)
         {
             return;
         }
 
-        var batchDelay = TimeSpan.FromMilliseconds(Math.Max(0, options.BackfillBatchDelayMilliseconds));
-        var processedInBatch = 0;
+        var registrySnapshot = await registryDoc.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+        if (registrySnapshot.Data is null)
+        {
+            return;
+        }
 
-        foreach (var kvp in registryDoc.Data.Documents)
+        var shardIdProvider = sourceScope.ServiceProvider.GetService<IShardIdProvider>();
+        var shardDistributionManager = sourceScope.ServiceProvider.GetService<IShardDistributionManager>();
+        var distributedOptions = sourceScope.ServiceProvider.GetService<DistributedCrdtOptions>();
+
+        var activeKeyPrefix = $"{options.SourceTypeAlias}:";
+        long discoveredCount = 0;
+
+        // Scan active and tombstoned documents matching SourceTypeAlias
+        foreach (var kvp in registrySnapshot.Data.Documents)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             var entry = kvp.Value;
             if (!string.Equals(entry.TypeAlias, options.SourceTypeAlias, StringComparison.Ordinal))
             {
+                if (!kvp.Key.StartsWith(activeKeyPrefix, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+            }
+
+            var docId = !string.IsNullOrWhiteSpace(entry.DocumentId)
+                ? entry.DocumentId
+                : ExtractDocumentIdFromCompositeKey(kvp.Key, activeKeyPrefix);
+
+            if (string.IsNullOrWhiteSpace(docId) ||
+                string.Equals(docId, Constants.SystemRegistryDocumentId, StringComparison.Ordinal))
+            {
                 continue;
             }
 
-            var sourceDocId = entry.DocumentId;
-
             if (entry.IsDeleted)
             {
-                if (options.PropagateDocumentTombstones && propagatedTombstonesSet.TryAdd(sourceDocId, 0))
+                if (options.PropagateDocumentTombstones && !propagatedTombstonesSet.ContainsKey(docId))
                 {
-                    var targetDocId = CrdtStringPool.Shared.GetOrAdd(migrator.MapDocumentId(sourceDocId));
-                    var existsInTarget = await targetOrchestrator.DocumentExistsAsync(
-                        targetDocId,
-                        options.TargetTypeAlias,
-                        cancellationToken).ConfigureAwait(false);
-
-                    if (existsInTarget)
-                    {
-                        await targetOrchestrator.DeleteDocumentAsync(
-                            targetDocId,
-                            options.TargetTypeAlias,
-                            options.TargetDeliveryMode,
-                            cancellationToken).ConfigureAwait(false);
-
-                        Interlocked.Increment(ref tombstonesProcessedCount);
-                    }
+                    EnqueueDirtyDocument(docId);
                 }
 
                 continue;
             }
 
-            if (backfilledDocumentsSet.ContainsKey(sourceDocId))
+            // If this document was previously tombstoned and later recreated, clear the tombstone tracking
+            propagatedTombstonesSet.TryRemove(docId, out _);
+
+            if (!await ShouldProcessBackfillDocumentAsync(
+                    docId,
+                    shardIdProvider,
+                    shardDistributionManager,
+                    distributedOptions,
+                    cancellationToken).ConfigureAwait(false))
             {
                 continue;
             }
 
-            var shouldMigrateOnThisNode = await ShouldNodeBackfillDocumentAsync(
-                sourceDocId,
-                sourceOrchestrator,
-                sourceShardManager,
-                cancellationToken).ConfigureAwait(false);
+            discoveredCount++;
 
-            if (!shouldMigrateOnThisNode)
+            if (isInitialBackfill || !backfilledDocumentsSet.ContainsKey(docId))
             {
-                continue;
-            }
+                EnqueueDirtyDocument(docId);
 
-            EnqueueDocumentChange(sourceDocId);
-            processedInBatch++;
-
-            if (batchDelay > TimeSpan.Zero && processedInBatch >= options.MaxConcurrency)
-            {
-                processedInBatch = 0;
-                await Task.Delay(batchDelay, cancellationToken).ConfigureAwait(false);
+                if (options.BackfillBatchDelayMilliseconds > 0 && isInitialBackfill)
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(options.BackfillBatchDelayMilliseconds), cancellationToken).ConfigureAwait(false);
+                }
             }
         }
+
+        Interlocked.Exchange(ref totalSourceDocumentsDiscovered, discoveredCount);
     }
 
-    private async ValueTask<bool> ShouldNodeBackfillDocumentAsync(
-        string sourceDocumentId,
-        ICrdtDocumentOrchestrator sourceOrchestrator,
-        IShardDistributionManager sourceShardManager,
+    private async ValueTask<bool> ShouldProcessBackfillDocumentAsync(
+        string documentId,
+        IShardIdProvider? shardIdProvider,
+        IShardDistributionManager? shardDistributionManager,
+        DistributedCrdtOptions? distributedOptions,
         CancellationToken cancellationToken)
     {
-        if (!options.PartitionBackfillByPrimaryShardOwner)
+        if (!options.PartitionBackfillByPrimaryShardOwner ||
+            distributedOptions is null ||
+            !distributedOptions.EnableSharding ||
+            shardDistributionManager is null)
         {
             return true;
         }
 
-        var shardId = await sourceOrchestrator.TryGetShardIdAsync(sourceDocumentId, options.SourceTypeAlias, cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(shardId))
-        {
-            return true;
-        }
+        var shardId = shardIdProvider is not null
+            ? shardIdProvider.GetShardId<TSourceState>(documentId)
+            : documentId;
 
-        var targetNodes = await sourceShardManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
+        var targetNodes = await shardDistributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
         if (targetNodes.Count == 0)
         {
             return true;
         }
 
-        // The primary owner (index 0 on the consistent hash ring) executes the initial backfill
         return string.Equals(targetNodes[0], options.SourceReplicaId, StringComparison.Ordinal);
     }
 
     private async Task ProcessSingleDocumentSafeAsync(
         string sourceDocumentId,
-        bool isBackfill,
-        ICrdtDocumentOrchestrator sourceOrchestrator,
-        ICrdtDocumentOrchestrator targetOrchestrator,
+        IDistributedCrdtScope sourceScope,
+        IDistributedCrdtScope targetScope,
         ICrdtDocumentMigrator<TSourceState, TTargetState> migrator,
         CancellationToken cancellationToken)
     {
+        var docLock = documentLocks.GetOrAdd(sourceDocumentId, static _ => new SemaphoreSlim(1, 1));
         Interlocked.Increment(ref inFlightTranslations);
+        await docLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            // Remove from queued set BEFORE reading state so any concurrent mutation occurring
+            // Remove from queued set AFTER acquiring the per-document lock and BEFORE reading state
+            // so two workers never process the same document concurrently and any mutation occurring
             // while we are migrating will re-enqueue the documentId and never be lost.
             queuedDocuments.TryRemove(sourceDocumentId, out _);
 
-            var existsInSource = await sourceOrchestrator.DocumentExistsAsync(
+            var existsInSource = await sourceScope.Orchestrator.DocumentExistsAsync(
                 sourceDocumentId,
                 options.SourceTypeAlias,
                 cancellationToken).ConfigureAwait(false);
 
-            var targetDocumentId = CrdtStringPool.Shared.GetOrAdd(migrator.MapDocumentId(sourceDocumentId));
+            var targetDocumentId = migrator.MapDocumentId(sourceDocumentId);
+            if (string.IsNullOrWhiteSpace(targetDocumentId))
+            {
+                targetDocumentId = sourceDocumentId;
+            }
+
+            var targetStorage = targetScope.ServiceProvider.GetService<IDistributedCrdtStorage>();
 
             if (!existsInSource)
             {
-                if (options.PropagateDocumentTombstones && propagatedTombstonesSet.TryAdd(sourceDocumentId, 0))
+                // Check if the document was explicitly tombstoned in the source registry
+                if (options.PropagateDocumentTombstones &&
+                    await IsSourceDocumentTombstonedAsync(sourceScope, sourceDocumentId, cancellationToken).ConfigureAwait(false))
                 {
-                    var existsInTarget = await targetOrchestrator.DocumentExistsAsync(
-                        targetDocumentId,
-                        options.TargetTypeAlias,
-                        cancellationToken).ConfigureAwait(false);
-
-                    if (existsInTarget)
+                    if (propagatedTombstonesSet.TryAdd(sourceDocumentId, 0))
                     {
-                        await targetOrchestrator.DeleteDocumentAsync(
+                        var existsInTarget = await targetScope.Orchestrator.DocumentExistsAsync(
                             targetDocumentId,
                             options.TargetTypeAlias,
-                            options.TargetDeliveryMode,
                             cancellationToken).ConfigureAwait(false);
 
+                        if (existsInTarget)
+                        {
+                            await targetScope.Orchestrator.DeleteDocumentAsync(
+                                targetDocumentId,
+                                options.TargetTypeAlias,
+                                options.TargetDeliveryMode,
+                                cancellationToken).ConfigureAwait(false);
+                        }
+
+                        await ClearPreviousSourceCheckpointAsync(sourceDocumentId, targetStorage, cancellationToken).ConfigureAwait(false);
                         Interlocked.Increment(ref tombstonesProcessedCount);
                     }
                 }
@@ -513,66 +501,229 @@ public sealed class CrdtMigrationBridgeService<TSourceState, TTargetState> : Bac
                 return;
             }
 
-            // If the document was previously deleted and has now been recreated in source,
-            // clear the tombstone marker so any subsequent deletion will be propagated again.
+            // Document is active in source, ensure it is not marked as tombstoned
             propagatedTombstonesSet.TryRemove(sourceDocumentId, out _);
 
-            var sourceDoc = await sourceOrchestrator.GetDocumentStateAsync<TSourceState>(sourceDocumentId, cancellationToken).ConfigureAwait(false);
+            var sourceDoc = await sourceScope.Orchestrator.GetDocumentStateAsync<TSourceState>(sourceDocumentId, cancellationToken).ConfigureAwait(false);
             if (sourceDoc.Data is null)
             {
                 return;
             }
 
-            var targetExists = await targetOrchestrator.DocumentExistsAsync(
+            CrdtDocument<TSourceState> isolatedSourceSnapshot;
+            byte[] sourceDocBytes;
+            while (true)
+            {
+                try
+                {
+                    // Capture an isolated snapshot clone of the current source document before migrating
+                    // so in-place mutations on the live source document do not mutate our stored 3-way merge baseline.
+                    sourceDocBytes = serializer.SerializeToBytes(sourceDoc);
+                    isolatedSourceSnapshot = serializer.DeserializeFromBytes<CrdtDocument<TSourceState>>(sourceDocBytes);
+                    break;
+                }
+                catch (InvalidOperationException)
+                {
+                    // A concurrent mutation on the live source document modified an inner dictionary/collection
+                    // while the serializer was enumerating it; re-fetch the state and retry snapshot capture.
+                    cancellationToken.ThrowIfCancellationRequested();
+                    sourceDoc = await sourceScope.Orchestrator.GetDocumentStateAsync<TSourceState>(sourceDocumentId, cancellationToken).ConfigureAwait(false);
+                    if (sourceDoc.Data is null)
+                    {
+                        return;
+                    }
+                }
+            }
+
+            var previousSourceDoc = await LoadPreviousSourceCheckpointAsync(sourceDocumentId, targetStorage, cancellationToken).ConfigureAwait(false);
+
+            var targetExists = await targetScope.Orchestrator.DocumentExistsAsync(
                 targetDocumentId,
                 options.TargetTypeAlias,
                 cancellationToken).ConfigureAwait(false);
 
             if (!targetExists)
             {
-                await targetOrchestrator.CreateDocumentAsync(
+                await targetScope.Orchestrator.CreateDocumentAsync(
                     targetDocumentId,
                     options.TargetTypeAlias,
                     options.TargetDeliveryMode,
                     cancellationToken).ConfigureAwait(false);
             }
 
-            var targetDoc = await targetOrchestrator.GetDocumentStateAsync<TTargetState>(targetDocumentId, cancellationToken).ConfigureAwait(false);
+            var targetDoc = await targetScope.Orchestrator.GetDocumentStateAsync<TTargetState>(targetDocumentId, cancellationToken).ConfigureAwait(false);
+            if (targetDoc.Data is not null)
+            {
+                while (true)
+                {
+                    try
+                    {
+                        var targetDocBytes = serializer.SerializeToBytes(targetDoc);
+                        targetDoc = serializer.DeserializeFromBytes<CrdtDocument<TTargetState>>(targetDocBytes);
+                        break;
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        targetDoc = await targetScope.Orchestrator.GetDocumentStateAsync<TTargetState>(targetDocumentId, cancellationToken).ConfigureAwait(false);
+                        if (targetDoc.Data is null)
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
 
             await migrator.MigrateDocumentAsync(
                 targetDocumentId,
-                sourceDoc,
+                isolatedSourceSnapshot,
+                previousSourceDoc,
                 targetDoc,
-                targetOrchestrator,
+                targetScope.Orchestrator,
                 options.TargetDeliveryMode,
+                cancellationToken).ConfigureAwait(false);
+
+            await SavePreviousSourceCheckpointAsync(
+                sourceDocumentId,
+                isolatedSourceSnapshot,
+                sourceDocBytes,
+                targetStorage,
                 cancellationToken).ConfigureAwait(false);
 
             if (backfilledDocumentsSet.TryAdd(sourceDocumentId, 0))
             {
                 Interlocked.Increment(ref backfilledDocumentsCount);
             }
-
-            if (!isBackfill)
-            {
-                Interlocked.Increment(ref liveEventsProcessedCount);
-            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            throw;
+            // Re-queue on cancellation so it is not lost if drained later
+            queuedDocuments.TryAdd(sourceDocumentId, 0);
+            dirtyDocumentChannel.Writer.TryWrite(sourceDocumentId);
         }
         catch (Exception ex)
         {
             Interlocked.Increment(ref failedTranslationsCount);
             logger.LogError(
                 ex,
-                "Failed to migrate document '{DocumentId}' in migration bridge '{MigrationId}'.",
+                "Failed to migrate document '{SourceDocumentId}' in migration bridge '{MigrationId}'.",
                 sourceDocumentId,
                 options.MigrationId);
         }
         finally
         {
+            docLock.Release();
             Interlocked.Decrement(ref inFlightTranslations);
         }
+    }
+
+    private async ValueTask<CrdtDocument<TSourceState>?> LoadPreviousSourceCheckpointAsync(
+        string sourceDocumentId,
+        IDistributedCrdtStorage? targetStorage,
+        CancellationToken cancellationToken)
+    {
+        if (previousSourceSnapshots.TryGetValue(sourceDocumentId, out var cachedSnapshot))
+        {
+            return cachedSnapshot;
+        }
+
+        if (targetStorage is null)
+        {
+            return null;
+        }
+
+        var checkpointKey = GetSourceCheckpointStorageKey(sourceDocumentId);
+        var persistedSnapshot = await targetStorage.LoadDocumentAsync<TSourceState>(checkpointKey, checkpointKey, cancellationToken).ConfigureAwait(false);
+        if (persistedSnapshot is not null && persistedSnapshot.Value.Data is not null)
+        {
+            previousSourceSnapshots[sourceDocumentId] = persistedSnapshot.Value;
+            return persistedSnapshot.Value;
+        }
+
+        return null;
+    }
+
+    private async ValueTask SavePreviousSourceCheckpointAsync(
+        string sourceDocumentId,
+        CrdtDocument<TSourceState> isolatedSourceSnapshot,
+        byte[] sourceDocBytes,
+        IDistributedCrdtStorage? targetStorage,
+        CancellationToken cancellationToken)
+    {
+        previousSourceSnapshots[sourceDocumentId] = isolatedSourceSnapshot;
+
+        if (targetStorage is null)
+        {
+            return;
+        }
+
+        var checkpointKey = GetSourceCheckpointStorageKey(sourceDocumentId);
+        await targetStorage.SaveSerializedDocumentAsync<TSourceState>(checkpointKey, checkpointKey, sourceDocBytes, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async ValueTask ClearPreviousSourceCheckpointAsync(
+        string sourceDocumentId,
+        IDistributedCrdtStorage? targetStorage,
+        CancellationToken cancellationToken)
+    {
+        previousSourceSnapshots.TryRemove(sourceDocumentId, out _);
+
+        if (targetStorage is null)
+        {
+            return;
+        }
+
+        var checkpointKey = GetSourceCheckpointStorageKey(sourceDocumentId);
+        await targetStorage.DeleteDocumentAsync(checkpointKey, checkpointKey, cancellationToken).ConfigureAwait(false);
+    }
+
+    private string GetSourceCheckpointStorageKey(string sourceDocumentId)
+    {
+        return $"__migration-checkpoint:{options.MigrationId}:{sourceDocumentId}";
+    }
+
+    private async ValueTask<bool> IsSourceDocumentTombstonedAsync(
+        IDistributedCrdtScope sourceScope,
+        string sourceDocumentId,
+        CancellationToken cancellationToken)
+    {
+        var registryDoc = sourceScope.Orchestrator.TryGetLocalDocument<CrdtRegistryState>(Constants.SystemRegistryDocumentId);
+        if (registryDoc is null)
+        {
+            return false;
+        }
+
+        var snapshot = await registryDoc.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+        if (snapshot.Data is null)
+        {
+            return false;
+        }
+
+        var compositeKey = CrdtRegistryEntry.GetRegistryKey(options.SourceTypeAlias, sourceDocumentId);
+        return snapshot.Data.Documents.TryGetValue(compositeKey, out var entry) && entry.IsDeleted;
+    }
+
+    private ICrdtDocumentMigrator<TSourceState, TTargetState> ResolveMigrator(IServiceProvider scopedProvider)
+    {
+        var keyed = scopedProvider.GetKeyedService<ICrdtDocumentMigrator<TSourceState, TTargetState>>(options.MigrationId);
+        if (keyed is not null)
+        {
+            return keyed;
+        }
+
+        return scopedProvider.GetRequiredService<ICrdtDocumentMigrator<TSourceState, TTargetState>>();
+    }
+
+    private static string ExtractDocumentIdFromCompositeKey(string compositeKey, string prefix)
+    {
+        if (compositeKey.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return compositeKey.Substring(prefix.Length);
+        }
+
+        var colonIndex = compositeKey.IndexOf(':');
+        return colonIndex >= 0 && colonIndex + 1 < compositeKey.Length
+            ? compositeKey.Substring(colonIndex + 1)
+            : compositeKey;
     }
 }

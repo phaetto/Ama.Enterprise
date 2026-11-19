@@ -17,6 +17,7 @@ using Ama.Enterprise.CRDT.Distributed.Models;
 ///     public async Task MigrateDocumentAsync(
 ///         string documentId,
 ///         CrdtDocument&lt;TaskListStateV1&gt; sourceDocument,
+///         CrdtDocument&lt;TaskListStateV1&gt;? previousSourceDocument,
 ///         CrdtDocument&lt;TaskListStateV2&gt; targetDocument,
 ///         ICrdtDocumentOrchestrator targetOrchestrator,
 ///         IntentDeliveryMode deliveryMode,
@@ -33,6 +34,22 @@ using Ama.Enterprise.CRDT.Distributed.Models;
 ///                 nameof(TaskListStateV2.Tasks),
 ///                 deliveryMode,
 ///                 cancellationToken);
+///         }
+///
+///         if (previousSourceDocument?.Data?.Tasks is not null)
+///         {
+///             foreach (var prevKey in previousSourceDocument.Value.Data.Tasks.Keys)
+///             {
+///                 if (!sourceDocument.Data.Tasks.ContainsKey(prevKey))
+///                 {
+///                     await targetOrchestrator.ApplyIntentAsync&lt;TaskListStateV2&gt;(
+///                         documentId,
+///                         new MapRemoveIntent(prevKey),
+///                         nameof(TaskListStateV2.Tasks),
+///                         deliveryMode,
+///                         cancellationToken);
+///                 }
+///             }
 ///         }
 ///     }
 /// }
@@ -61,6 +78,7 @@ public interface ICrdtDocumentMigrator<TSourceState, TTargetState>
     /// </summary>
     /// <param name="targetDocumentId">The resolved document identifier in the target replica.</param>
     /// <param name="sourceDocument">The current materialized state and CRDT metadata of the source document.</param>
+    /// <param name="previousSourceDocument">The last migrated snapshot of the source document, or <see langword="null"/> if this is the first time the document is being migrated. Used for three-way merging so deletions in the source can be distinguished from items created directly in the target.</param>
     /// <param name="targetDocument">The current materialized state and CRDT metadata of the target document.</param>
     /// <param name="targetOrchestrator">The target CRDT orchestrator used to apply intents or patches.</param>
     /// <param name="deliveryMode">The configured delivery mode for target operations.</param>
@@ -71,6 +89,7 @@ public interface ICrdtDocumentMigrator<TSourceState, TTargetState>
     /// await migrator.MigrateDocumentAsync(
     ///     "doc-1",
     ///     sourceDoc,
+    ///     previousSourceDoc,
     ///     targetDoc,
     ///     targetOrchestrator,
     ///     IntentDeliveryMode.Acknowledged,
@@ -80,6 +99,7 @@ public interface ICrdtDocumentMigrator<TSourceState, TTargetState>
     Task MigrateDocumentAsync(
         string targetDocumentId,
         CrdtDocument<TSourceState> sourceDocument,
+        CrdtDocument<TSourceState>? previousSourceDocument,
         CrdtDocument<TTargetState> targetDocument,
         ICrdtDocumentOrchestrator targetOrchestrator,
         IntentDeliveryMode deliveryMode,
