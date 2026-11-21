@@ -126,6 +126,9 @@ public static class Program
 
         services.AddDistributedDocumentType<FleetState>("fleet-list");
         services.AddDistributedCrdtService<IFleetManager, FleetManager>();
+        services.AddDistributedCrdtQuery<FleetState, FleetBatterySearchQuery, FleetBatterySearchResultDto, FleetManager>("fleet-low-battery-search");
+        services.AddDistributedCrdtMapReduce<FleetState, FleetBatteryStatsInput, FleetBatteryStatsAccumulatorDto, FleetBatteryHealthReportDto, FleetBatteryAnalyticsMapReduce>("fleet-battery-stats");
+        services.AddDistributedCrdtQuery<FleetState, PurgeOfflineDevicesCommand, PurgeOfflineDevicesSummaryDto, PurgeOfflineDevicesMapReduce>("fleet-purge-offline");
 
         // Register Showcase file-based CRDT storage overriding memory fallbacks for all documents
         services.AddDistributedCrdtStorage<ShowCaseCrdtStorage>();
@@ -325,6 +328,61 @@ public static class Program
                                 await fleetManager.RemoveDeviceAsync(parts[1], parts[2], cts.Token).ConfigureAwait(false);
                             else
                                 WriteLineLocked("Usage: fdel <docId> <deviceId>");
+                            break;
+
+                        case "fsearch":
+                            if (parts.Length >= 2 && int.TryParse(parts[1], out var maxBatt))
+                            {
+                                var onlineOnly = parts.Length >= 3 && bool.TryParse(parts[2], out var parsedOnline) && parsedOnline;
+                                var searchSw = Stopwatch.StartNew();
+                                var searchRes = await fleetManager.SearchLowBatteryDevicesAsync(maxBatt, onlineOnly, cts.Token).ConfigureAwait(false);
+                                searchSw.Stop();
+
+                                var matches = searchRes.Result.Matches ?? Array.Empty<LowBatteryDeviceMatchDto>();
+                                WriteLineLocked($"[Cluster Query] Found {matches.Count} device(s) (<= {maxBatt}%, OnlineOnly={onlineOnly}) across {searchRes.TotalDocumentsTargeted} fleets (Local: {searchRes.LocalDocumentsEvaluated}, Remote: {searchRes.RemoteDocumentsEvaluated}, Peers RPCs: {searchRes.RemotePeersContacted}) in {searchSw.ElapsedMilliseconds} ms.");
+                                foreach (var match in matches.Take(25))
+                                {
+                                    WriteLineLocked($"   -> [{match.FleetDocumentId}] {match.DeviceId}: Battery={match.BatteryLevel}%, Online={match.IsOnline}");
+                                }
+
+                                if (matches.Count > 25)
+                                {
+                                    WriteLineLocked($"   ... and {matches.Count - 25} more match(es).");
+                                }
+                            }
+                            else
+                            {
+                                WriteLineLocked("Usage: fsearch <maxBatteryThreshold> [onlineOnly:true|false]");
+                            }
+                            break;
+
+                        case "fstats":
+                            {
+                                var onlineOnly = parts.Length >= 2 && bool.TryParse(parts[1], out var parsedOnline) && parsedOnline;
+                                var statsSw = Stopwatch.StartNew();
+                                var statsRes = await fleetManager.GetClusterBatteryStatsAsync(onlineOnly, cts.Token).ConfigureAwait(false);
+                                statsSw.Stop();
+
+                                var report = statsRes.Result;
+                                WriteLineLocked($"[Map/Reduce Stats] Fleets Targeted: {statsRes.TotalDocumentsTargeted} (Local: {statsRes.LocalDocumentsEvaluated}, Remote: {statsRes.RemoteDocumentsEvaluated}, Peer RPCs: {statsRes.RemotePeersContacted}) in {statsSw.ElapsedMilliseconds} ms:");
+                                WriteLineLocked($"   Total Devices : {report.TotalDevices:N0} (OnlineOnly={onlineOnly})");
+                                WriteLineLocked($"   Mean Battery  : {report.MeanBatteryLevel:F2}% | StdDev: {report.StandardDeviation:F2}% | Min: {report.MinBatteryLevel}% | Max: {report.MaxBatteryLevel}%");
+                            }
+                            break;
+
+                        case "fpurge":
+                            if (parts.Length >= 2 && int.TryParse(parts[1], out var purgeThreshold))
+                            {
+                                var purgeSw = Stopwatch.StartNew();
+                                var purgeRes = await fleetManager.PurgeOfflineDevicesAsync(purgeThreshold, cts.Token).ConfigureAwait(false);
+                                purgeSw.Stop();
+
+                                WriteLineLocked($"[Map/Reduce Purge] Purged {purgeRes.Result.PurgedDeviceCount} offline device(s) (<= {purgeThreshold}%) across {purgeRes.Result.ModifiedDocumentCount} modified fleet(s) (Targeted: {purgeRes.TotalDocumentsTargeted}, Local: {purgeRes.LocalDocumentsEvaluated}, Remote: {purgeRes.RemoteDocumentsEvaluated}, Peer RPCs: {purgeRes.RemotePeersContacted}) in {purgeSw.ElapsedMilliseconds} ms.");
+                            }
+                            else
+                            {
+                                WriteLineLocked("Usage: fpurge <maxBatteryThreshold>");
+                            }
                             break;
 
                         case "gen-fleets":
@@ -620,6 +678,9 @@ public static class Program
             Console.WriteLine(" tdel <docId> <taskId>                          - Removes a task item");
             Console.WriteLine(" fset <docId> <deviceId> <true|false> <batt>    - Adds/Updates a fleet device");
             Console.WriteLine(" fdel <docId> <deviceId>                        - Removes a fleet device");
+            Console.WriteLine(" fsearch <maxBatt> [onlineOnly]                 - Cluster-wide query for low-battery devices across all shards");
+            Console.WriteLine(" fstats [onlineOnly]                            - Cluster-wide Map/Reduce statistical battery health report");
+            Console.WriteLine(" fpurge <maxBatt>                               - In-place distributed purge of offline low-battery devices");
             Console.WriteLine(" gen-fleets <count> <devices>                   - Generates <count> fleets with <devices> devices each");
             Console.WriteLine(" hammer <cps>                                   - Pumps <cps> changes/sec into 5 sharded documents (0 to stop)");
             Console.WriteLine(" print                                          - Prints the current state of documents hosted on this node");

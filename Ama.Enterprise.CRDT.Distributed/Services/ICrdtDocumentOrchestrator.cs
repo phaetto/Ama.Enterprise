@@ -199,4 +199,70 @@ public interface ICrdtDocumentOrchestrator
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous flush operation.</returns>
     Task FlushAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Executes a compiled Map/Reduce job across all active shards hosting documents of type <typeparamref name="TState"/>
+    /// and returns the final reduced result.
+    /// </summary>
+    /// <typeparam name="TState">The CRDT document state type.</typeparam>
+    /// <typeparam name="TInput">The serializable input DTO type.</typeparam>
+    /// <typeparam name="TAccumulate">The serializable intermediate accumulator DTO type.</typeparam>
+    /// <typeparam name="TResult">The final reduced result type.</typeparam>
+    /// <param name="input">The input parameters for the Map/Reduce job.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The final reduced result.</returns>
+    Task<TResult> ExecuteMapReduceAsync<TState, TInput, TAccumulate, TResult>(
+        TInput input,
+        CancellationToken cancellationToken = default)
+        where TState : class, new();
+
+    /// <summary>
+    /// Executes a compiled Map/Reduce job across shards matching the specified <paramref name="scope"/>
+    /// and returns the final reduced result with execution diagnostics.
+    /// </summary>
+    /// <typeparam name="TState">The CRDT document state type.</typeparam>
+    /// <typeparam name="TInput">The serializable input DTO type.</typeparam>
+    /// <typeparam name="TAccumulate">The serializable intermediate accumulator DTO type.</typeparam>
+    /// <typeparam name="TResult">The final reduced result type.</typeparam>
+    /// <param name="input">The input parameters for the Map/Reduce job.</param>
+    /// <param name="scope">The targeting filters and routing mode for the execution.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The final reduced result along with execution diagnostics.</returns>
+    Task<CrdtMapReduceResultDto<TResult>> ExecuteMapReduceAsync<TState, TInput, TAccumulate, TResult>(
+        TInput input,
+        CrdtMapReduceScopeDto scope,
+        CancellationToken cancellationToken = default)
+        where TState : class, new();
+
+    /// <summary>
+    /// Executes a compiled cluster query (where <typeparamref name="TResult"/> is both the accumulator and final result)
+    /// across all active shards hosting documents of type <typeparamref name="TState"/>.
+    /// </summary>
+    /// <typeparam name="TState">The CRDT document state type.</typeparam>
+    /// <typeparam name="TQuery">The serializable query request DTO type.</typeparam>
+    /// <typeparam name="TResult">The serializable query result DTO type.</typeparam>
+    /// <param name="query">The query parameters.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The combined query result.</returns>
+    Task<TResult> QueryClusterAsync<TState, TQuery, TResult>(
+        TQuery query,
+        CancellationToken cancellationToken = default)
+        where TState : class, new();
+
+    /// <summary>
+    /// Executes a compiled cluster query across shards matching the specified <paramref name="scope"/>
+    /// and returns the reduced result with execution diagnostics.
+    /// </summary>
+    /// <typeparam name="TState">The CRDT document state type.</typeparam>
+    /// <typeparam name="TQuery">The serializable query request DTO type.</typeparam>
+    /// <typeparam name="TResult">The serializable query result DTO type.</typeparam>
+    /// <param name="query">The query parameters.</param>
+    /// <param name="scope">The targeting filters and routing mode for the execution.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The combined query result along with execution diagnostics.</returns>
+    Task<CrdtMapReduceResultDto<TResult>> QueryClusterAsync<TState, TQuery, TResult>(
+        TQuery query,
+        CrdtMapReduceScopeDto scope,
+        CancellationToken cancellationToken = default)
+        where TState : class, new();
 }

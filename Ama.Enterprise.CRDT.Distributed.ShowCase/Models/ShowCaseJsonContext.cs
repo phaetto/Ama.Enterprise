@@ -12,6 +12,13 @@ using Ama.CRDT.Models;
 [JsonSerializable(typeof(DeviceStatus))]
 [JsonSerializable(typeof(CrdtDocument<TaskListState>))]
 [JsonSerializable(typeof(CrdtDocument<FleetState>))]
+[JsonSerializable(typeof(FleetBatterySearchQuery))]
+[JsonSerializable(typeof(LowBatteryDeviceMatchDto))]
+[JsonSerializable(typeof(FleetBatterySearchResultDto))]
+[JsonSerializable(typeof(FleetBatteryStatsInput))]
+[JsonSerializable(typeof(FleetBatteryStatsAccumulatorDto))]
+[JsonSerializable(typeof(PurgeOfflineDevicesCommand))]
+[JsonSerializable(typeof(PurgeOfflineDevicesSummaryDto))]
 public sealed partial class ShowCaseJsonContext : JsonSerializerContext
 {
 }

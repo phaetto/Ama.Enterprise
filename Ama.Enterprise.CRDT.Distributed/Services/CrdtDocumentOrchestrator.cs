@@ -1301,6 +1301,574 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
     }
 
+    /// <inheritdoc />
+    public async Task<TResult> ExecuteMapReduceAsync<TState, TInput, TAccumulate, TResult>(
+        TInput input,
+        CancellationToken cancellationToken = default)
+        where TState : class, new()
+    {
+        var resultDto = await ExecuteMapReduceAsync<TState, TInput, TAccumulate, TResult>(
+            input,
+            default,
+            cancellationToken).ConfigureAwait(false);
+        return resultDto.Result;
+    }
+
+    /// <inheritdoc />
+    public Task<TResult> QueryClusterAsync<TState, TQuery, TResult>(
+        TQuery query,
+        CancellationToken cancellationToken = default)
+        where TState : class, new()
+    {
+        return ExecuteMapReduceAsync<TState, TQuery, TResult, TResult>(query, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<CrdtMapReduceResultDto<TResult>> QueryClusterAsync<TState, TQuery, TResult>(
+        TQuery query,
+        CrdtMapReduceScopeDto scope,
+        CancellationToken cancellationToken = default)
+        where TState : class, new()
+    {
+        return ExecuteMapReduceAsync<TState, TQuery, TResult, TResult>(query, scope, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<CrdtMapReduceResultDto<TResult>> ExecuteMapReduceAsync<TState, TInput, TAccumulate, TResult>(
+        TInput input,
+        CrdtMapReduceScopeDto scope,
+        CancellationToken cancellationToken = default)
+        where TState : class, new()
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        var handler = serviceProvider.GetService<ICrdtMapReduce<TState, TInput, TAccumulate, TResult>>()
+            ?? throw new InvalidOperationException(
+                $"No Map/Reduce or Cluster Query handler is registered for ({typeof(TState).Name}, {typeof(TInput).Name}, {typeof(TAccumulate).Name}, {typeof(TResult).Name}). " +
+                "Register it using AddDistributedCrdtMapReduce or AddDistributedCrdtQuery.");
+
+        var jobAlias = ResolveMapReduceJobAlias<TState, TInput, TAccumulate, TResult>();
+        var documentTypeAlias = GetTypeAlias<TState>() ?? typeof(TState).Name;
+        var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
+        var clusterStateTracker = serviceProvider.GetRequiredService<IClusterStateTracker>();
+        var shardIdProvider = serviceProvider.GetRequiredService<IShardIdProvider>();
+
+        var candidateDocuments = await ResolveCandidateMapReduceDocumentsAsync<TState>(
+            documentTypeAlias,
+            scope,
+             cancellationToken).ConfigureAwait(false);
+
+        if (candidateDocuments.Count == 0)
+        {
+            var emptyCombined = handler.Combine(input, Array.Empty<TAccumulate>());
+            var emptyResult = handler.Reduce(input, emptyCombined);
+            telemetry.RecordOrchestratorMapReduceExecuted(jobAlias, 0);
+            return new CrdtMapReduceResultDto<TResult>(
+                emptyResult,
+                TotalDocumentsTargeted: 0,
+                LocalDocumentsEvaluated: 0,
+                RemoteDocumentsEvaluated: 0,
+                RemotePeersContacted: 0,
+                WasShortCircuited: false,
+                UnreachableDocumentIds: Array.Empty<string>());
+        }
+
+        // Plan local vs remote batches based on the requested routing mode
+        var localDocumentBatch = new List<string>();
+        var remoteBatchesByReplicaId = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var docCandidateReplicas = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var unreachableDocumentIds = new List<string>();
+
+        foreach (var item in candidateDocuments)
+        {
+            var docId = item.DocumentId;
+            var shardId = item.ShardId;
+            var targetNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
+            var orderedReplicas = new List<string>();
+            if (targetNodes != null)
+            {
+                for (var i = 0; i < targetNodes.Count; i++)
+                {
+                    if (!orderedReplicas.Contains(targetNodes[i]))
+                    {
+                        orderedReplicas.Add(targetNodes[i]);
+                    }
+                }
+            }
+
+            docCandidateReplicas[docId] = orderedReplicas;
+
+            switch (scope.RoutingMode)
+            {
+                case CrdtMapReduceRoutingMode.MinimalShardCover:
+                {
+                    var isLoadedLocally = TryGetLocalDocument<TState>(docId) != null;
+                    var isLocalReplicaInRing = orderedReplicas.Contains(replicaContext.ReplicaId);
+
+                    if (isLoadedLocally || isLocalReplicaInRing)
+                    {
+                        localDocumentBatch.Add(docId);
+                        break;
+                    }
+
+                    string? chosenRemote = null;
+                    // Greedily pick an already-scheduled remote replica in targetNodes
+                    for (var i = 0; i < orderedReplicas.Count; i++)
+                    {
+                        var candidate = orderedReplicas[i];
+                        if (!string.Equals(candidate, replicaContext.ReplicaId, StringComparison.Ordinal) &&
+                            remoteBatchesByReplicaId.ContainsKey(candidate) &&
+                            !string.IsNullOrWhiteSpace(clusterStateTracker.GetPeerIdByReplicaId(candidate)))
+                        {
+                            chosenRemote = candidate;
+                            break;
+                        }
+                    }
+
+                    if (chosenRemote is null)
+                    {
+                        for (var i = 0; i < orderedReplicas.Count; i++)
+                        {
+                            var candidate = orderedReplicas[i];
+                            if (!string.Equals(candidate, replicaContext.ReplicaId, StringComparison.Ordinal) &&
+                                !string.IsNullOrWhiteSpace(clusterStateTracker.GetPeerIdByReplicaId(candidate)))
+                            {
+                                chosenRemote = candidate;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (chosenRemote is null)
+                    {
+                        var fallbackRemotes = await GetCandidateRemoteReplicasForShardAsync(shardId, replicaContext.ReplicaId, clusterStateTracker, cancellationToken).ConfigureAwait(false);
+                        for (var i = 0; i < fallbackRemotes.Count; i++)
+                        {
+                            var candidate = fallbackRemotes[i];
+                            if (!orderedReplicas.Contains(candidate))
+                            {
+                                orderedReplicas.Add(candidate);
+                            }
+
+                            if (chosenRemote is null && !string.IsNullOrWhiteSpace(clusterStateTracker.GetPeerIdByReplicaId(candidate)))
+                            {
+                                chosenRemote = candidate;
+                            }
+                        }
+                    }
+
+                    if (chosenRemote is not null)
+                    {
+                        if (!remoteBatchesByReplicaId.TryGetValue(chosenRemote, out var list))
+                        {
+                            list = new List<string>();
+                            remoteBatchesByReplicaId[chosenRemote] = list;
+                        }
+
+                        list.Add(docId);
+                    }
+                    else
+                    {
+                        unreachableDocumentIds.Add(docId);
+                    }
+
+                    break;
+                }
+
+                case CrdtMapReduceRoutingMode.PrimaryReplicaOnly:
+                {
+                    string? chosenPrimary = null;
+                    for (var i = 0; i < orderedReplicas.Count; i++)
+                    {
+                        var candidate = orderedReplicas[i];
+                        if (string.Equals(candidate, replicaContext.ReplicaId, StringComparison.Ordinal))
+                        {
+                            chosenPrimary = candidate;
+                            break;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(clusterStateTracker.GetPeerIdByReplicaId(candidate)))
+                        {
+                            chosenPrimary = candidate;
+                            break;
+                        }
+                    }
+
+                    if (chosenPrimary is null)
+                    {
+                        var fallbackRemotes = await GetCandidateRemoteReplicasForShardAsync(shardId, replicaContext.ReplicaId, clusterStateTracker, cancellationToken).ConfigureAwait(false);
+                        for (var i = 0; i < fallbackRemotes.Count; i++)
+                        {
+                            var candidate = fallbackRemotes[i];
+                            if (!orderedReplicas.Contains(candidate))
+                            {
+                                orderedReplicas.Add(candidate);
+                            }
+
+                            if (chosenPrimary is null && !string.IsNullOrWhiteSpace(clusterStateTracker.GetPeerIdByReplicaId(candidate)))
+                            {
+                                chosenPrimary = candidate;
+                            }
+                        }
+                    }
+
+                    if (chosenPrimary is null)
+                    {
+                        unreachableDocumentIds.Add(docId);
+                    }
+                    else if (string.Equals(chosenPrimary, replicaContext.ReplicaId, StringComparison.Ordinal))
+                    {
+                        localDocumentBatch.Add(docId);
+                    }
+                    else
+                    {
+                        if (!remoteBatchesByReplicaId.TryGetValue(chosenPrimary, out var list))
+                        {
+                            list = new List<string>();
+                            remoteBatchesByReplicaId[chosenPrimary] = list;
+                        }
+
+                        list.Add(docId);
+                    }
+
+                    break;
+                }
+
+                case CrdtMapReduceRoutingMode.AllReplicas:
+                {
+                    var assignedAny = false;
+                    for (var i = 0; i < orderedReplicas.Count; i++)
+                    {
+                        var replica = orderedReplicas[i];
+                        if (string.Equals(replica, replicaContext.ReplicaId, StringComparison.Ordinal))
+                        {
+                            localDocumentBatch.Add(docId);
+                            assignedAny = true;
+                        }
+                        else if (!string.IsNullOrWhiteSpace(clusterStateTracker.GetPeerIdByReplicaId(replica)))
+                        {
+                            if (!remoteBatchesByReplicaId.TryGetValue(replica, out var list))
+                            {
+                                list = new List<string>();
+                                remoteBatchesByReplicaId[replica] = list;
+                            }
+
+                            list.Add(docId);
+                            assignedAny = true;
+                        }
+                    }
+
+                    if (!assignedAny)
+                    {
+                        unreachableDocumentIds.Add(docId);
+                    }
+
+                    break;
+                }
+            }
+        }
+
+        if (unreachableDocumentIds.Count > 0 && !scope.AllowPartialResultsOnPeerFailure)
+        {
+            throw new InvalidOperationException(
+                $"Cannot execute Map/Reduce job '{jobAlias}': no active replicas found for document(s) [{string.Join(", ", unreachableDocumentIds)}].");
+        }
+
+        var allNodeAccumulators = new List<TAccumulate>();
+        var localDocsEvaluated = 0;
+        var remoteDocsEvaluated = 0;
+        var remotePeersContacted = 0;
+        var wasShortCircuited = false;
+
+        // Step 3: Local Execution + Early Short-Circuit Check
+        if (localDocumentBatch.Count > 0)
+        {
+            var localAccumulators = new List<TAccumulate>(localDocumentBatch.Count);
+            var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
+
+            for (var i = 0; i < localDocumentBatch.Count; i++)
+            {
+                var docId = localDocumentBatch[i];
+                var liveDoc = TryGetLocalDocument<TState>(docId);
+                if (liveDoc is null)
+                {
+                    var promoted = await ResolveOrPromoteLocalDocumentAsync(docId, documentTypeAlias, cancellationToken).ConfigureAwait(false);
+                    liveDoc = promoted as IDistributedCrdtDocument<TState>;
+                }
+
+                if (liveDoc is not null)
+                {
+                    var crdtDoc = await liveDoc.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+                    var context = new CrdtMapContext<TState>(
+                        docId,
+                        liveDoc.ShardId,
+                        replicaContext.ReplicaId,
+                        crdtDoc,
+                        liveDoc);
+
+                    var acc = await handler.MapDocumentAsync(context, input, cancellationToken).ConfigureAwait(false);
+                    localAccumulators.Add(acc);
+                    localDocsEvaluated++;
+
+                    if (handler.CanShortCircuit(input, acc))
+                    {
+                        wasShortCircuited = true;
+                        break;
+                    }
+
+                    continue;
+                }
+
+                var storedBytes = await TryLoadStoredDocumentSnapshotBytesAsync(docId, documentTypeAlias, cancellationToken).ConfigureAwait(false);
+                if (storedBytes is { Length: > 0 })
+                {
+                    var storedDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(storedBytes);
+                    if (storedDoc.Data is not null)
+                    {
+                        var shardId = shardIdProvider.GetShardId<TState>(docId) ?? docId;
+                        var demotedContext = new CrdtMapContext<TState>(
+                            docId,
+                            shardId,
+                            replicaContext.ReplicaId,
+                            storedDoc,
+                            LiveDocumentHandle: null);
+
+                        var acc = await handler.MapDocumentAsync(demotedContext, input, cancellationToken).ConfigureAwait(false);
+                        localAccumulators.Add(acc);
+                        localDocsEvaluated++;
+
+                        if (handler.CanShortCircuit(input, acc))
+                        {
+                            wasShortCircuited = true;
+                            break;
+                        }
+
+                        continue;
+                    }
+                }
+
+                // Local node could not evaluate the document; schedule for remote failover if possible
+                if (scope.RoutingMode != CrdtMapReduceRoutingMode.AllReplicas &&
+                    TryAssignFallbackReplica(docId, replicaContext.ReplicaId, docCandidateReplicas, new HashSet<string>(StringComparer.Ordinal) { replicaContext.ReplicaId }, clusterStateTracker, out var fallbackReplica))
+                {
+                    if (!remoteBatchesByReplicaId.TryGetValue(fallbackReplica!, out var list))
+                    {
+                        list = new List<string>();
+                        remoteBatchesByReplicaId[fallbackReplica!] = list;
+                    }
+
+                    list.Add(docId);
+                }
+                else
+                {
+                    unreachableDocumentIds.Add(docId);
+                }
+            }
+
+            if (localAccumulators.Count > 0)
+            {
+                var localCombined = localAccumulators.Count == 1
+                    ? localAccumulators[0]
+                    : handler.Combine(input, localAccumulators);
+                allNodeAccumulators.Add(localCombined);
+            }
+        }
+
+        // Step 4: Parallel Remote Batched RPCs & Failover
+        if (!wasShortCircuited && remoteBatchesByReplicaId.Count > 0)
+        {
+            var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
+            var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
+            var rpcCorrelator = serviceProvider.GetRequiredService<IP2pRpcCorrelator>();
+
+            var serializedInput = serializer.SerializeToBytes(input);
+            var maxRetries = Math.Max(1, options.RpcMaxRetries);
+            var rpcTimeout = TimeSpan.FromMilliseconds(Math.Max(1, options.RpcTimeoutMilliseconds));
+            var retryDelayMs = Math.Max(0, options.RpcRetryDelayMilliseconds);
+
+            var triedReplicasPerDoc = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+            var currentBatches = new Dictionary<string, List<string>>(remoteBatchesByReplicaId, StringComparer.Ordinal);
+            var contactedPeersSet = new HashSet<string>(StringComparer.Ordinal);
+            Exception? lastRemoteException = null;
+
+            for (var attempt = 0; attempt < maxRetries && currentBatches.Count > 0 && !wasShortCircuited; attempt++)
+            {
+                if (attempt > 0 && retryDelayMs > 0)
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(retryDelayMs * attempt), cancellationToken).ConfigureAwait(false);
+                }
+
+                using var remoteCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                var batchEntries = new List<KeyValuePair<string, List<string>>>(currentBatches);
+                var batchTasks = new Task<RemoteBatchAttemptOutcome>[batchEntries.Count];
+
+                for (var i = 0; i < batchEntries.Count; i++)
+                {
+                    var targetReplicaId = batchEntries[i].Key;
+                    var docBatch = batchEntries[i].Value;
+                    contactedPeersSet.Add(targetReplicaId);
+
+                    for (var d = 0; d < docBatch.Count; d++)
+                    {
+                        var docId = docBatch[d];
+                        if (!triedReplicasPerDoc.TryGetValue(docId, out var triedSet))
+                        {
+                            triedSet = new HashSet<string>(StringComparer.Ordinal);
+                            triedReplicasPerDoc[docId] = triedSet;
+                        }
+
+                        triedSet.Add(targetReplicaId);
+                    }
+
+                    batchTasks[i] = DispatchRemoteMapReduceBatchAsync(
+                        targetReplicaId,
+                        jobAlias,
+                        documentTypeAlias,
+                        docBatch,
+                        serializedInput,
+                        rpcTimeout,
+                        clusterStateTracker,
+                        directSender,
+                        rpcCorrelator,
+                        serializer,
+                        remoteCts.Token);
+                }
+
+                var pendingTasks = new List<Task<RemoteBatchAttemptOutcome>>(batchTasks);
+                var failedOrMissingDocs = new List<string>();
+
+                while (pendingTasks.Count > 0)
+                {
+                    var completedTask = await Task.WhenAny(pendingTasks).ConfigureAwait(false);
+                    pendingTasks.Remove(completedTask);
+
+                    var outcome = await completedTask.ConfigureAwait(false);
+                    if (outcome.IsSuccess)
+                    {
+                        remoteDocsEvaluated += outcome.EvaluatedDocumentCount;
+                        if (outcome.HasAccumulator)
+                        {
+                            var peerAcc = serializer.DeserializeFromBytes<TAccumulate>(outcome.SerializedAccumulator);
+                            if (peerAcc is not null)
+                            {
+                                allNodeAccumulators.Add(peerAcc);
+                                if (handler.CanShortCircuit(input, peerAcc))
+                                {
+                                    wasShortCircuited = true;
+                                    await remoteCts.CancelAsync().ConfigureAwait(false);
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (outcome.MissingDocumentIds is { Count: > 0 })
+                        {
+                            failedOrMissingDocs.AddRange(outcome.MissingDocumentIds);
+                        }
+                    }
+                    else
+                    {
+                        if (outcome.Exception is not null)
+                        {
+                            lastRemoteException = outcome.Exception;
+                        }
+                        else if (!string.IsNullOrWhiteSpace(outcome.ErrorMessage))
+                        {
+                            lastRemoteException = new InvalidOperationException(outcome.ErrorMessage);
+                        }
+
+                        if (!wasShortCircuited)
+                        {
+                            failedOrMissingDocs.AddRange(outcome.RequestedDocumentIds);
+                        }
+                    }
+                }
+
+                currentBatches.Clear();
+
+                if (wasShortCircuited || failedOrMissingDocs.Count == 0)
+                {
+                    break;
+                }
+
+                if (scope.RoutingMode == CrdtMapReduceRoutingMode.AllReplicas)
+                {
+                    for (var i = 0; i < failedOrMissingDocs.Count; i++)
+                    {
+                        if (!unreachableDocumentIds.Contains(failedOrMissingDocs[i]))
+                        {
+                            unreachableDocumentIds.Add(failedOrMissingDocs[i]);
+                        }
+                    }
+
+                    break;
+                }
+
+                // Re-batch failed or missing documents onto the next untried candidate replica
+                for (var i = 0; i < failedOrMissingDocs.Count; i++)
+                {
+                    var failedDocId = failedOrMissingDocs[i];
+                    if (!triedReplicasPerDoc.TryGetValue(failedDocId, out var triedSet))
+                    {
+                        triedSet = new HashSet<string>(StringComparer.Ordinal);
+                        triedReplicasPerDoc[failedDocId] = triedSet;
+                    }
+
+                    if (attempt < maxRetries - 1 &&
+                        TryAssignFallbackReplica(failedDocId, replicaContext.ReplicaId, docCandidateReplicas, triedSet, clusterStateTracker, out var nextReplica))
+                    {
+                        if (!currentBatches.TryGetValue(nextReplica!, out var list))
+                        {
+                            list = new List<string>();
+                            currentBatches[nextReplica!] = list;
+                        }
+
+                        list.Add(failedDocId);
+                    }
+                    else
+                    {
+                        if (!unreachableDocumentIds.Contains(failedDocId))
+                        {
+                            unreachableDocumentIds.Add(failedDocId);
+                        }
+                    }
+                }
+            }
+
+            remotePeersContacted = contactedPeersSet.Count;
+
+            if (!wasShortCircuited && unreachableDocumentIds.Count > 0 && !scope.AllowPartialResultsOnPeerFailure)
+            {
+                if (lastRemoteException is not null)
+                {
+                    throw new InvalidOperationException(
+                        $"Map/Reduce job '{jobAlias}' failed for document(s) [{string.Join(", ", unreachableDocumentIds)}]: {lastRemoteException.Message}",
+                        lastRemoteException);
+                }
+
+                throw new TimeoutException(
+                    $"Map/Reduce job '{jobAlias}' could not reach any replica for document(s) [{string.Join(", ", unreachableDocumentIds)}].");
+            }
+        }
+
+        // Step 5: Coordinator Final Combine & Reduce
+        var finalAccumulator = allNodeAccumulators.Count == 1
+            ? allNodeAccumulators[0]
+            : handler.Combine(input, allNodeAccumulators);
+
+        var finalResult = handler.Reduce(input, finalAccumulator);
+        telemetry.RecordOrchestratorMapReduceExecuted(jobAlias, remotePeersContacted);
+
+        return new CrdtMapReduceResultDto<TResult>(
+            finalResult,
+            TotalDocumentsTargeted: candidateDocuments.Count,
+            LocalDocumentsEvaluated: localDocsEvaluated,
+            RemoteDocumentsEvaluated: remoteDocsEvaluated,
+            RemotePeersContacted: remotePeersContacted,
+            WasShortCircuited: wasShortCircuited,
+            UnreachableDocumentIds: unreachableDocumentIds);
+    }
+
     public void Dispose()
     {
         telemetryRegistration.Dispose();
@@ -2075,6 +2643,256 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to push final snapshot for demoted document {DocumentId} ({TypeAlias}).", doc.DocumentId, doc.TypeAlias);
+        }
+    }
+
+    private readonly record struct CandidateMapReduceDocument(string DocumentId, string ShardId);
+
+    private readonly record struct RemoteBatchAttemptOutcome(
+        bool IsSuccess,
+        bool HasAccumulator,
+        int EvaluatedDocumentCount,
+        byte[] SerializedAccumulator,
+        IReadOnlyList<string> RequestedDocumentIds,
+        IList<string>? MissingDocumentIds,
+        string? ErrorMessage,
+        Exception? Exception);
+
+    private string ResolveMapReduceJobAlias<TState, TInput, TAccumulate, TResult>()
+    {
+        foreach (var executor in serviceProvider.GetServices<ICrdtMapReduceExecutor>())
+        {
+            if (executor.StateType == typeof(TState) &&
+                executor.InputType == typeof(TInput) &&
+                executor.AccumulateType == typeof(TAccumulate) &&
+                executor.ResultType == typeof(TResult))
+            {
+                return executor.JobAlias;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"No ICrdtMapReduceExecutor is registered for ({typeof(TState).Name}, {typeof(TInput).Name}, {typeof(TAccumulate).Name}, {typeof(TResult).Name}).");
+    }
+
+    private async Task<List<CandidateMapReduceDocument>> ResolveCandidateMapReduceDocumentsAsync<TState>(
+        string documentTypeAlias,
+        CrdtMapReduceScopeDto scope,
+        CancellationToken cancellationToken)
+        where TState : class, new()
+    {
+        var candidates = new List<CandidateMapReduceDocument>();
+        var seenDocIds = new HashSet<string>(StringComparer.Ordinal);
+        HashSet<string>? targetShardSet = null;
+
+        if (scope.TargetShardIds is { Count: > 0 })
+        {
+            targetShardSet = new HashSet<string>(scope.TargetShardIds, StringComparer.Ordinal);
+        }
+
+        var registry = Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
+        var registryDoc = await registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+        var registryMap = registryDoc.Data.Documents;
+
+        if (scope.TargetDocumentIds is { Count: > 0 })
+        {
+            for (var i = 0; i < scope.TargetDocumentIds.Count; i++)
+            {
+                var docId = scope.TargetDocumentIds[i];
+                if (string.IsNullOrWhiteSpace(docId))
+                {
+                    continue;
+                }
+
+                docId = stringPool.GetOrAdd(docId);
+                if (!seenDocIds.Add(docId))
+                {
+                    continue;
+                }
+
+                if (TryFindRegistryEntry(registryMap, docId, documentTypeAlias, out var entry) && entry != null && entry.IsDeleted)
+                {
+                    continue;
+                }
+
+                var shardId = await GetShardIdAsync<TState>(docId, cancellationToken).ConfigureAwait(false);
+                if (targetShardSet is null || targetShardSet.Contains(shardId))
+                {
+                    candidates.Add(new CandidateMapReduceDocument(docId, shardId));
+                }
+            }
+
+            return candidates;
+        }
+
+        foreach (var kvp in registryMap)
+        {
+            var entry = kvp.Value;
+            if (entry.IsDeleted || !string.Equals(entry.TypeAlias, documentTypeAlias, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!seenDocIds.Add(entry.DocumentId))
+            {
+                continue;
+            }
+
+            var shardId = await GetShardIdAsync<TState>(entry.DocumentId, cancellationToken).ConfigureAwait(false);
+            if (targetShardSet is null || targetShardSet.Contains(shardId))
+            {
+                candidates.Add(new CandidateMapReduceDocument(entry.DocumentId, shardId));
+            }
+        }
+
+        foreach (var activeDoc in activeDocuments.Values)
+        {
+            if (!string.Equals(activeDoc.TypeAlias, documentTypeAlias, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!seenDocIds.Add(activeDoc.DocumentId))
+            {
+                continue;
+            }
+
+            if (targetShardSet is null || targetShardSet.Contains(activeDoc.ShardId))
+            {
+                candidates.Add(new CandidateMapReduceDocument(activeDoc.DocumentId, activeDoc.ShardId));
+            }
+        }
+
+        return candidates;
+    }
+
+    private static bool TryAssignFallbackReplica(
+        string docId,
+        string localReplicaId,
+        Dictionary<string, List<string>> docCandidateReplicas,
+        HashSet<string> triedReplicas,
+        IClusterStateTracker clusterStateTracker,
+        out string? fallbackReplica)
+    {
+        fallbackReplica = null;
+
+        if (docCandidateReplicas.TryGetValue(docId, out var candidates))
+        {
+            for (var i = 0; i < candidates.Count; i++)
+            {
+                var candidate = candidates[i];
+                if (string.Equals(candidate, localReplicaId, StringComparison.Ordinal) || triedReplicas.Contains(candidate))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(clusterStateTracker.GetPeerIdByReplicaId(candidate)))
+                {
+                    fallbackReplica = candidate;
+                    return true;
+                }
+            }
+        }
+
+        var activeReplicas = clusterStateTracker.GetActiveReplicaIds();
+        for (var i = 0; i < activeReplicas.Count; i++)
+        {
+            var candidate = activeReplicas[i];
+            if (string.Equals(candidate, localReplicaId, StringComparison.Ordinal) || triedReplicas.Contains(candidate))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(clusterStateTracker.GetPeerIdByReplicaId(candidate)))
+            {
+                fallbackReplica = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static async Task<RemoteBatchAttemptOutcome> DispatchRemoteMapReduceBatchAsync(
+        string targetReplicaId,
+        string jobAlias,
+        string documentTypeAlias,
+        IReadOnlyList<string> documentBatch,
+        byte[] serializedInput,
+        TimeSpan rpcTimeout,
+        IClusterStateTracker clusterStateTracker,
+        IDirectMessageSender directSender,
+        IP2pRpcCorrelator rpcCorrelator,
+        ICrdtSerializer serializer,
+        CancellationToken cancellationToken)
+    {
+        var peerIdStr = clusterStateTracker.GetPeerIdByReplicaId(targetReplicaId);
+        if (string.IsNullOrWhiteSpace(peerIdStr) || !Guid.TryParse(peerIdStr, out var peerGuid))
+        {
+            return new RemoteBatchAttemptOutcome(
+                IsSuccess: false,
+                HasAccumulator: false,
+                EvaluatedDocumentCount: 0,
+                SerializedAccumulator: Array.Empty<byte>(),
+                RequestedDocumentIds: documentBatch,
+                MissingDocumentIds: null,
+                ErrorMessage: $"No active network peer ID found for replica '{targetReplicaId}'.",
+                Exception: null);
+        }
+
+        var correlationId = Guid.NewGuid();
+        var req = new CrdtMapReduceRequestDto
+        {
+            CorrelationId = correlationId,
+            JobAlias = jobAlias,
+            DocumentTypeAlias = documentTypeAlias,
+            DocumentIds = documentBatch as IList<string> ?? new List<string>(documentBatch),
+            SerializedInput = serializedInput
+        };
+
+        var reqBytes = serializer.SerializeToBytes(req);
+        var wrapper = new CrdtMessageWrapper("Cluster", "CrdtMapReduceReq", reqBytes, documentTypeAlias);
+        var wrapperBytes = serializer.SerializeToBytes(wrapper);
+
+        try
+        {
+            var waitTask = rpcCorrelator.RegisterRequestAsync<CrdtMapReduceResponseDto>(correlationId, rpcTimeout, cancellationToken);
+            await directSender.SendDirectAsync(new PeerId(peerGuid), wrapperBytes, cancellationToken).ConfigureAwait(false);
+            var response = await waitTask.ConfigureAwait(false);
+
+            return new RemoteBatchAttemptOutcome(
+                IsSuccess: response.IsSuccess,
+                HasAccumulator: response.HasAccumulator,
+                EvaluatedDocumentCount: response.EvaluatedDocumentCount,
+                SerializedAccumulator: response.SerializedAccumulator ?? Array.Empty<byte>(),
+                RequestedDocumentIds: documentBatch,
+                MissingDocumentIds: response.MissingDocumentIds,
+                ErrorMessage: response.ErrorMessage,
+                Exception: null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return new RemoteBatchAttemptOutcome(
+                IsSuccess: false,
+                HasAccumulator: false,
+                EvaluatedDocumentCount: 0,
+                SerializedAccumulator: Array.Empty<byte>(),
+                RequestedDocumentIds: documentBatch,
+                MissingDocumentIds: null,
+                ErrorMessage: "Map/Reduce RPC cancelled.",
+                Exception: null);
+        }
+        catch (Exception ex)
+        {
+            return new RemoteBatchAttemptOutcome(
+                IsSuccess: false,
+                HasAccumulator: false,
+                EvaluatedDocumentCount: 0,
+                SerializedAccumulator: Array.Empty<byte>(),
+                RequestedDocumentIds: documentBatch,
+                MissingDocumentIds: null,
+                ErrorMessage: ex.Message,
+                Exception: ex);
         }
     }
 }

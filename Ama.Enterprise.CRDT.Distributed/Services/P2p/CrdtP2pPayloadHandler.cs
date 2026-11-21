@@ -107,7 +107,8 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
         messagesProcessedCounter.Add(1, new KeyValuePair<string, object?>("message_type", wrapper.MessageType));
 
         if (wrapper.MessageType == "CrdtReadReq" || wrapper.MessageType == "CrdtReadRes" || 
-            wrapper.MessageType == "CrdtIntentReq" || wrapper.MessageType == "CrdtIntentRes")
+            wrapper.MessageType == "CrdtIntentReq" || wrapper.MessageType == "CrdtIntentRes" ||
+            wrapper.MessageType == "CrdtMapReduceReq" || wrapper.MessageType == "CrdtMapReduceRes")
         {
             await ProcessProxyRpcPayloadsAsync(scope, meshId, wrapper, senderId, cancellationToken).ConfigureAwait(false);
             return;
@@ -234,6 +235,73 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             else if (wrapper.MessageType == "CrdtIntentRes")
             {
                 var res = serializer.DeserializeFromBytes<CrdtIntentForwardResponseDto>(wrapper.Payload!);
+                var rpcCorrelator = scope.ServiceProvider.GetRequiredService<IP2pRpcCorrelator>();
+                rpcCorrelator.ResolveRequest(res.CorrelationId, wrapper.Payload!);
+            }
+            else if (wrapper.MessageType == "CrdtMapReduceReq")
+            {
+                var req = serializer.DeserializeFromBytes<CrdtMapReduceRequestDto>(wrapper.Payload!);
+                var typeAlias = !string.IsNullOrWhiteSpace(req.DocumentTypeAlias) ? req.DocumentTypeAlias : wrapper.DocumentTypeAlias;
+                CrdtMapReduceResponseDto responseDto;
+
+                var executor = scope.ServiceProvider.GetKeyedService<ICrdtMapReduceExecutor>(req.JobAlias);
+                if (executor is null)
+                {
+                    responseDto = new CrdtMapReduceResponseDto
+                    {
+                        CorrelationId = req.CorrelationId,
+                        IsSuccess = false,
+                        HasAccumulator = false,
+                        EvaluatedDocumentCount = 0,
+                        SerializedAccumulator = Array.Empty<byte>(),
+                        ErrorMessage = $"Map/Reduce job alias '{req.JobAlias}' is not registered on replica '{scope.ReplicaId}'."
+                    };
+                }
+                else
+                {
+                    try
+                    {
+                        var docList = req.DocumentIds as IReadOnlyList<string> ?? req.DocumentIds.ToList();
+                        var outcome = await executor.ExecuteSerializedLocalBatchAsync(
+                            scope.ServiceProvider,
+                            docList,
+                            req.SerializedInput,
+                            cancellationToken).ConfigureAwait(false);
+
+                        responseDto = new CrdtMapReduceResponseDto
+                        {
+                            CorrelationId = req.CorrelationId,
+                            IsSuccess = outcome.IsSuccess,
+                            HasAccumulator = outcome.HasAccumulator,
+                            EvaluatedDocumentCount = outcome.EvaluatedDocumentCount,
+                            SerializedAccumulator = outcome.SerializedAccumulator,
+                            MissingDocumentIds = outcome.MissingDocumentIds,
+                            ErrorMessage = outcome.ErrorMessage
+                        };
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Failed to execute local Map/Reduce batch for job {JobAlias}.", req.JobAlias);
+                        responseDto = new CrdtMapReduceResponseDto
+                        {
+                            CorrelationId = req.CorrelationId,
+                            IsSuccess = false,
+                            HasAccumulator = false,
+                            EvaluatedDocumentCount = 0,
+                            SerializedAccumulator = Array.Empty<byte>(),
+                            ErrorMessage = ex.Message
+                        };
+                    }
+                }
+
+                var resPayload = serializer.SerializeToBytes(responseDto);
+                var resWrapper = new CrdtMessageWrapper(wrapper.DocumentId, "CrdtMapReduceRes", resPayload, typeAlias);
+                var directSender = scope.ServiceProvider.GetRequiredService<IDirectMessageSender>();
+                await directSender.SendDirectAsync(senderId, serializer.SerializeToBytes(resWrapper), cancellationToken).ConfigureAwait(false);
+            }
+            else if (wrapper.MessageType == "CrdtMapReduceRes")
+            {
+                var res = serializer.DeserializeFromBytes<CrdtMapReduceResponseDto>(wrapper.Payload!);
                 var rpcCorrelator = scope.ServiceProvider.GetRequiredService<IP2pRpcCorrelator>();
                 rpcCorrelator.ResolveRequest(res.CorrelationId, wrapper.Payload!);
             }

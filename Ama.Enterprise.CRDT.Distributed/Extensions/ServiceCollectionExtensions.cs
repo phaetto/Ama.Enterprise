@@ -223,6 +223,90 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Registers an AOT-compiled distributed Map/Reduce handler that can execute in-memory
+    /// computations, aggregations, and bulk mutations across local and remote CRDT shards.
+    /// </summary>
+    /// <typeparam name="TState">The CRDT document state type.</typeparam>
+    /// <typeparam name="TInput">The serializable input DTO type.</typeparam>
+    /// <typeparam name="TAccumulate">The serializable intermediate accumulator DTO type.</typeparam>
+    /// <typeparam name="TResult">The final reduced result type.</typeparam>
+    /// <typeparam name="THandler">The concrete Map/Reduce handler implementation type.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <param name="jobAlias">The unique wire alias identifying this Map/Reduce job across peers.</param>
+    /// <returns>The updated service collection.</returns>
+    public static IServiceCollection AddDistributedCrdtMapReduce<
+        TState,
+        TInput,
+        TAccumulate,
+        TResult,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] THandler>(
+        this IServiceCollection services,
+        string jobAlias)
+        where TState : class, new()
+        where THandler : class, ICrdtMapReduce<TState, TInput, TAccumulate, TResult>
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        if (string.IsNullOrWhiteSpace(jobAlias))
+        {
+            throw new ArgumentException("Job alias cannot be null or empty.", nameof(jobAlias));
+        }
+
+        jobAlias = CrdtStringPool.Shared.GetOrAdd(jobAlias);
+
+        services.TryAddScoped<THandler>();
+        services.TryAddScoped<ICrdtMapReduce<TState, TInput, TAccumulate, TResult>>(
+            sp => sp.GetRequiredService<THandler>());
+
+        var executor = new CrdtMapReduceExecutor<TState, TInput, TAccumulate, TResult>(jobAlias);
+        services.AddSingleton<ICrdtMapReduceExecutor>(executor);
+        services.AddKeyedSingleton<ICrdtMapReduceExecutor>(jobAlias, executor);
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers an AOT-compiled distributed cluster query handler (where the intermediate accumulator
+    /// and final result are the same type <typeparamref name="TResult"/>) across local and remote CRDT shards.
+    /// </summary>
+    /// <typeparam name="TState">The CRDT document state type.</typeparam>
+    /// <typeparam name="TQuery">The serializable query request DTO type.</typeparam>
+    /// <typeparam name="TResult">The serializable query result DTO type.</typeparam>
+    /// <typeparam name="THandler">The concrete cluster query handler implementation type.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <param name="queryAlias">The unique wire alias identifying this query across peers.</param>
+    /// <returns>The updated service collection.</returns>
+    public static IServiceCollection AddDistributedCrdtQuery<
+        TState,
+        TQuery,
+        TResult,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] THandler>(
+        this IServiceCollection services,
+        string queryAlias)
+        where TState : class, new()
+        where THandler : class, ICrdtClusterQuery<TState, TQuery, TResult>
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        if (string.IsNullOrWhiteSpace(queryAlias))
+        {
+            throw new ArgumentException("Query alias cannot be null or empty.", nameof(queryAlias));
+        }
+
+        queryAlias = CrdtStringPool.Shared.GetOrAdd(queryAlias);
+
+        services.TryAddScoped<THandler>();
+        services.TryAddScoped<ICrdtClusterQuery<TState, TQuery, TResult>>(
+            sp => sp.GetRequiredService<THandler>());
+        services.TryAddScoped<ICrdtMapReduce<TState, TQuery, TResult, TResult>>(
+            sp => sp.GetRequiredService<THandler>());
+
+        var executor = new CrdtMapReduceExecutor<TState, TQuery, TResult, TResult>(queryAlias);
+        services.AddSingleton<ICrdtMapReduceExecutor>(executor);
+        services.AddKeyedSingleton<ICrdtMapReduceExecutor>(queryAlias, executor);
+
+        return services;
+    }
+
+    /// <summary>
     /// Binds the current P2P mesh builder to a local CRDT replica and registers the replica in the global inventory.
     /// If <paramref name="replicaId"/> is omitted or null, <see cref="IP2pMeshBuilder.MeshId"/> is used as the replica ID.
     /// </summary>

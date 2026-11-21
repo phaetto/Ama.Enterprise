@@ -175,4 +175,18 @@ public interface IDistributedCrdtDocument<TState> : IDistributedCrdtDocument whe
     /// Exposes the strictly typed underlying CRDT document containing the application state.
     /// </summary>
     ValueTask<CrdtDocument<TState>> GetDocumentAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Generates and applies an operation intent directly against this local active document using the replica's patcher.
+    /// </summary>
+    /// <param name="intent">The operation intent to apply.</param>
+    /// <param name="targetProperty">The target property name on <typeparamref name="TState"/>.</param>
+    /// <param name="deliveryMode">The delivery mode specifying whether to wait for completion or enqueue as fire-and-forget.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns><c>true</c> if the intent was applied; otherwise, <c>false</c>.</returns>
+    Task<bool> ApplyIntentAsync(
+        IOperationIntent intent,
+        string targetProperty,
+        IntentDeliveryMode deliveryMode = IntentDeliveryMode.Acknowledged,
+        CancellationToken cancellationToken = default);
 }

@@ -79,6 +79,13 @@ public interface IDistributedCrdtTelemetry
     void RecordOrchestratorPatchForwarded(string documentId);
 
     /// <summary>
+    /// Records that a distributed Map/Reduce job or cluster query was executed by the orchestrator.
+    /// </summary>
+    /// <param name="jobAlias">The wire alias of the Map/Reduce job.</param>
+    /// <param name="remotePeersContacted">The number of remote peers contacted.</param>
+    void RecordOrchestratorMapReduceExecuted(string jobAlias, int remotePeersContacted);
+
+    /// <summary>
     /// Records that an orchestrator command was enqueued.
     /// </summary>
     void RecordOrchestratorCommandEnqueued();

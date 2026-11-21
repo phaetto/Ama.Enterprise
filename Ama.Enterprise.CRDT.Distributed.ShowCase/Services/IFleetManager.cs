@@ -66,4 +66,36 @@ public interface IFleetManager
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     Task RemoveDeviceAsync(string documentId, string id, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Executes a cluster-wide search across all sharded fleet documents for devices with a battery level at or below the threshold.
+    /// </summary>
+    /// <param name="maxBatteryThreshold">The maximum battery percentage to match.</param>
+    /// <param name="onlineOnly">Whether to only match devices that are currently online.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The search results along with distributed execution diagnostics.</returns>
+    Task<CrdtMapReduceResultDto<FleetBatterySearchResultDto>> SearchLowBatteryDevicesAsync(
+        int maxBatteryThreshold,
+        bool onlineOnly,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Executes a multi-stage statistical Map/Reduce job across all fleet shards to compute global battery health metrics.
+    /// </summary>
+    /// <param name="onlineOnly">Whether to only include online devices in the statistical calculation.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The global battery health report along with distributed execution diagnostics.</returns>
+    Task<CrdtMapReduceResultDto<FleetBatteryHealthReportDto>> GetClusterBatteryStatsAsync(
+        bool onlineOnly,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Executes an in-place distributed bulk purge across all primary fleet shards, removing offline devices at or below the battery threshold.
+    /// </summary>
+    /// <param name="maxBatteryThreshold">The maximum battery percentage for offline devices to be purged.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The purge summary along with distributed execution diagnostics.</returns>
+    Task<CrdtMapReduceResultDto<PurgeOfflineDevicesSummaryDto>> PurgeOfflineDevicesAsync(
+        int maxBatteryThreshold,
+        CancellationToken cancellationToken = default);
 }

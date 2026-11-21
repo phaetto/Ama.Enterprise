@@ -17,6 +17,8 @@ using Ama.CRDT.Models.Intents;
 [JsonSerializable(typeof(CrdtReadResponseDto))]
 [JsonSerializable(typeof(CrdtIntentForwardRequestDto))]
 [JsonSerializable(typeof(CrdtIntentForwardResponseDto))]
+[JsonSerializable(typeof(CrdtMapReduceRequestDto))]
+[JsonSerializable(typeof(CrdtMapReduceResponseDto))]
 [JsonSerializable(typeof(IOperationIntent))]
 public sealed partial class DistributedCrdtP2pJsonContext : JsonSerializerContext
 {

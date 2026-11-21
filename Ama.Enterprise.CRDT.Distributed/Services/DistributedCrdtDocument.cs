@@ -171,6 +171,19 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     }
 
     /// <inheritdoc />
+    public Task<bool> ApplyIntentAsync(
+        IOperationIntent intent,
+        string targetProperty,
+        IntentDeliveryMode deliveryMode = IntentDeliveryMode.Acknowledged,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(intent);
+
+        var patcher = serviceProvider.GetRequiredService<IAsyncCrdtPatcher>();
+        return ApplyRemoteIntentAsync(intent, targetProperty, patcher, deliveryMode, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public async Task<bool> ApplyRemoteIntentAsync(IOperationIntent intent, string targetProperty, IAsyncCrdtPatcher patcher, IntentDeliveryMode deliveryMode = IntentDeliveryMode.Acknowledged, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(intent);

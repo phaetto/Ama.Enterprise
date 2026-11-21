@@ -27,6 +27,8 @@ public sealed class DistributedCrdtTelemetry : IDistributedCrdtTelemetry, IDispo
     private readonly Counter<long> intentsForwardedCounter;
     private readonly Counter<long> orchestratorIntentsFailedCounter;
     private readonly Counter<long> patchesForwardedCounter;
+    private readonly Counter<long> mapReduceJobsExecutedCounter;
+    private readonly Counter<long> mapReduceRemoteBatchesSentCounter;
     private readonly Counter<long> orchestratorCommandsEnqueuedCounter;
     private readonly Counter<long> orchestratorCommandsProcessedCounter;
     private readonly Counter<long> orchestratorCommandFailuresCounter;
@@ -100,6 +102,14 @@ public sealed class DistributedCrdtTelemetry : IDistributedCrdtTelemetry, IDispo
             "crdt.orchestrator.patches_forwarded",
             "patches",
             "Total CRDT patches forwarded to remote nodes");
+        this.mapReduceJobsExecutedCounter = this.orchestratorMeter.CreateCounter<long>(
+            "crdt.orchestrator.mapreduce_executed",
+            "jobs",
+            "Total distributed Map/Reduce and cluster query jobs executed");
+        this.mapReduceRemoteBatchesSentCounter = this.orchestratorMeter.CreateCounter<long>(
+            "crdt.orchestrator.mapreduce_remote_batches",
+            "batches",
+            "Total remote peer RPC batches dispatched during Map/Reduce jobs");
         this.orchestratorCommandsEnqueuedCounter = this.orchestratorMeter.CreateCounter<long>(
             "crdt.orchestrator.channel.commands_enqueued",
             "commands",
@@ -259,6 +269,18 @@ public sealed class DistributedCrdtTelemetry : IDistributedCrdtTelemetry, IDispo
     {
         if (string.IsNullOrWhiteSpace(documentId)) return;
         patchesForwardedCounter.Add(1, new KeyValuePair<string, object?>("document_id", documentId));
+    }
+
+    /// <inheritdoc />
+    public void RecordOrchestratorMapReduceExecuted(string jobAlias, int remotePeersContacted)
+    {
+        if (string.IsNullOrWhiteSpace(jobAlias)) return;
+        var tag = new KeyValuePair<string, object?>("job_alias", jobAlias);
+        mapReduceJobsExecutedCounter.Add(1, tag);
+        if (remotePeersContacted > 0)
+        {
+            mapReduceRemoteBatchesSentCounter.Add(remotePeersContacted, tag);
+        }
     }
 
     /// <inheritdoc />
