@@ -19,7 +19,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/ConsistentHashShardDistributionManagerIntegrationTests.cs` | Added edge-case test verifying multi-mesh replica bindings aggregate and deduplicate active peers across bound meshes while ignoring unrelated meshes. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/DocumentOrchestratorIntegrationTests.cs` | Updated `Orchestrator_ReevaluateTopologyAsync_ShouldDemoteNonLocalDocuments_WhilePreservingSharedLocalShardDvv` to assert that shard DVV history is preserved upon shard demotion. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/DvvExchangeAndOscillationIntegrationTests.cs` | Added edge-case test verifying live nodes sanitize incoming snapshot DVVs that carry inflated versions or dots for the local replica ID. |
-| `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/DynamicShardingTopologyIntegrationTests.cs` | Added integration test verifying immediate peer hydration on shard promotion and demotion without waiting for background anti-entropy. |
+| `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/DynamicShardingTopologyIntegrationTests.cs` | Added integration tests verifying immediate peer hydration on shard promotion/demotion and preventing circular 5-second RPC hydration deadlocks during single-node and concurrent document creation. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/EvictionIntegrationTests.cs` | Added edge-case test verifying `EvictPeersAsync` with `IntentDeliveryMode.FireAndForget`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/GracefulShutdownIntegrationTests.cs` | Added edge-case test verifying fault isolation across multiple replica scopes when one scope throws during shutdown checkpointing. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/JournalingAndSnapshottingIntegrationTests.cs` | Added edge-case test verifying `StorageJournalForwarder` checkpoints all documents in a shared shard and persists the refreshed shard DVV before trimming the journal. |
@@ -49,7 +49,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Extensions/ServiceCollectionExtensions.cs` | Simplified Table Storage DI extensions to strictly register a single unified scoped storage using `TryAddSingleton` to register default AOT JSON fallbacks safely bridging implementations. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Models/CrdtTableEntity.cs` | Refactored into a static helper directly mapping chunks onto the dictionary-backed `TableEntity` avoiding reflection-heavy SDK deserialization limits ensuring AOT compatibility. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Models/TableStorageCrdtOptions.cs` | Configuration structure holding Azure Table Storage endpoints and table bindings. Added `UseBinarySerialization` option to pivot between human-readable JSON rows and cost-optimized high-performance binary structures without tight coupling to a specific format. |
-| `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Services/TableStorageDistributedCrdtStorage.cs` | Optimized `LoadOrphanedDocumentAsync` to perform direct point reads across known peer replica partitions in the existing Table Storage schema and merge multiple replica states via `IAsyncCrdtMerger`. |
+| `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Services/TableStorageDistributedCrdtStorage.cs` | Restricted the full-table scan fallback in `LoadOrphanedDocumentAsync` to cold-boot initialization and parallelized peer partition point reads. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase.csproj` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Constants.cs` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Models/DeviceStatus.cs` | No description provided. |
@@ -112,7 +112,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ConsistentHashShardDistributionManager.cs` | Injected scoped `ReplicaContext` instead of singleton `DistributedCrdtReplicaRegistration` so multi-replica hosts resolve the correct local replica ID per scope. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtCheckpointService.cs` | Delegated shard version vector snapshot creation to `IShardVersionVectorManager`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtCompactionService.cs` | Background hosted service that periodically runs CRDT metadata compaction across active documents in all replica scopes. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Implemented distributed Map/Reduce topology planning, local batch execution, early short-circuiting, parallel remote batched RPCs, replica failover, and final reduction. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Registered newly promoted documents in `activeDocuments` prior to peer hydration and parallelized `HydratePromotedDocumentFromPeersAsync` queries to prevent circular RPC promotion deadlocks. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtEvictionService.cs` | Implemented `EvictPeersAsync` overload accepting `IntentDeliveryMode` and forwarding it to `IDistributedCrdtDocument.EvictReplicaAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtInitializationService.cs` | Added retry loop with configurable backoff during replica initialization and fatal failure handling that stops the application and rethrows if all retries fail. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtJournalFlushService.cs` | Background hosted service that drains `BufferedDistributedCrdtStorageDecorator` queues in batches and flushes remaining operations on graceful shutdown. |
@@ -162,7 +162,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/Observers/OrchestratorClusterStateObserver.cs` | Replaced `Task.Run` background task allocation with `ReevaluateTopologyAsync(IntentDeliveryMode.FireAndForget)`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/Observers/OrchestratorRegistryStateObserver.cs` | Observer implementation for `IDocumentStateObserver<CrdtRegistryState>` that triggers orchestrator topology re-evaluation when the system registry state changes. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtAntiEntropyService.cs` | Implemented adaptive polling interval evaluation during background looping utilizing `Stopwatch` boundaries to enforce faster initial startup sync phases avoiding long delays on load. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtP2pPayloadHandler.cs` | Added `"CrdtMapReduceReq"` and `"CrdtMapReduceRes"` dispatch handling in `ProcessProxyRpcPayloadsAsync`. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtP2pPayloadHandler.cs` | Guarded `"CrdtReadReq"` in `ProcessProxyRpcPayloadsAsync` with `DocumentExistsAsync` before falling back to `TryLoadStoredDocumentSnapshotBytesAsync` so hydration probes for uncreated documents do not trigger circular promotions. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtPatchBroadcaster.cs` | Updated `FlushAsync` to enqueue a barrier item instead of permanently closing the broadcast channel with `Writer.TryComplete()`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/P2p/CrdtTopologyObserver.cs` | Updated `OnPeerJoinedAsync` to check `IScopeTopologyProvider.IsPeerExpectedAsync` before consuming the one-time initial state sync trigger. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ShardVersionVectorManager.cs` | Sanitized incoming DVVs in `MergeDvvIntoShard` to strip the local replica ID's versions and dots so remote snapshots cannot corrupt or advance the local replica's own causal clock. |
@@ -189,24 +189,27 @@
 | `$/Ama.Enterprise.CRDT.MessagePack/Formatters/CrdtPolymorphicMessagePackRegistry.cs` | Centralized registry caching typed AOT polymorphic serialization delegates for MessagePack. |
 | `$/Ama.Enterprise.CRDT.MessagePack/MessagePackCrdtSerializer.cs` | Replaced `bytes.ToArray()` allocations in `DeserializeFromBytes` with `ArrayPool<byte>.Shared` buffers. |
 | `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Ama.Enterprise.FeatureFlags.IntegrationTests.csproj` | Redirected shared tests project reference pointing to renamed `Ama.Enterprise.Project.Tests.Common`. |
-| `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Services/FeatureFlagDomainIntegrationTests.cs` | Replaced `AddDistributedCrdtP2p` with `AddDistributedCrdtReplica("integration-replica-1", "integration-mesh")`. |
+| `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Services/FeatureFlagDomainIntegrationTests.cs` | Added test assertions verifying that identically named feature flags across different product/tenant documents do not overwrite one another in `GetAllFlagsAsync`. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj` | Appended an MSBuild target to automatically execute the local native Azurite startup batch script during the build process. Added `DisableFastUpToDateCheck` to ensure Visual Studio always evaluates the pre-build Azurite checks even when C# files haven't changed. |
-| `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Updated replica registration to `AddDistributedCrdtReplica(replicaId, "feature-flags-internal-mesh")`. |
+| `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Redrew feature flags immediately after `set` and `del` commands, observed `CrdtRegistryState` changes for cross-shard redraws, and lowered showcase `GossipInterval` to 250ms. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/start-azurite.bat` | Windows batch script that automatically discovers and executes natively installed Azurite instances (via Visual Studio or NPM) bypassing Docker requirements, explicitly detached via PowerShell to prevent MSBuild hangs. |
 | `$/Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
-| `$/Ama.Enterprise.FeatureFlags/Constants.cs` | Global constants for the Feature Flags module, defining common identifiers and document types. |
-| `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | Updated to register the distinct decoupled `FeatureFlagStateObserver`. |
+| `$/Ama.Enterprise.FeatureFlags/Constants.cs` | Removed `GlobalDocumentId` and `DefaultScope`; updated `GetDocumentId(productId, tenantId)` to require non-empty `productId` and `tenantId`. |
+| `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | Removed `FeatureFlagBootstrapper` registration as feature flag documents are now lazily created per product and tenant shard. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlag.cs` | Represents a single enterprise feature flag in the system incorporating audit and ownership structures. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagAudit.cs` | Audit trace structure tracking temporal modifications for a specific feature flag. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagMetadata.cs` | Metadata structure encapsulating enterprise multi-tenancy and product domain boundaries. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagOwnership.cs` | Ownership details specifying team contact routing for a feature flag. |
-| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagState.cs` | The root state dictionary representing active and tombstoned feature flags. |
-| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsCrdtAotContext.cs` | AOT reflection context for the Feature Flags CRDT models. |
-| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsJsonContext.cs` | AOT-friendly JSON context for Feature Flags serialization. |
+| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagQueryDto.cs` | Request DTO for filtering feature flags by product and tenant across sharded cluster documents. |
+| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagQueryResultDto.cs` | Result DTO containing aggregated feature flags collected across sharded product and tenant documents. |
+| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagState.cs` | Defaulted `Id` to `string.Empty` instead of a global singleton document ID. |
+| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsCrdtAotContext.cs` | Registered `FeatureFlagQueryDto` and `FeatureFlagQueryResultDto` in the AOT reflection context. |
+| `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlagsJsonContext.cs` | Registered `FeatureFlagQueryDto` and `FeatureFlagQueryResultDto` in the AOT JSON serialization context. |
 | `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagBootstrapper.cs` | Background service initializing the singleton feature flags state across replica scopes. |
-| `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagCrdtManager.cs` | No description provided. |
-| `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagStateObserver.cs` | New dedicated observer implementation explicitly tracking feature flag distributed state modifications securely decoupled from the core manager. |
-| `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagCrdtManager.cs` | No description provided. |
+| `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagClusterQuery.cs` | Keyed aggregated cluster query results by `{ProductId}:{TenantId}:{FlagName}` so flags with the same name across different product or tenant documents do not overwrite each other during reduction. |
+| `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagCrdtManager.cs` | Standardized `GetAllFlagsAsync` to always route through `FeatureFlagClusterQuery` for consistent composite keying across documents. |
+| `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagStateObserver.cs` | Updated `OnStateChangedAsync` to match `feature-flag:{productId}:{tenantId}` document IDs without any global document fallback. |
+| `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagCrdtManager.cs` | Updated contract to require `productId` and `tenantId` on `SetFlagAsync`, `RemoveFlagAsync`, and `GetFlagsAsync`, plus `GetAllFlagsAsync` for cluster-wide queries. |
 | `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagStateObserver.cs` | Dedicated Feature Flag domain observer contract enabling consumer systems explicitly routing decoupled tracking dynamically perfectly securely. |
 | `$/Ama.Enterprise.Licensing.UnitTests/Ama.Enterprise.Licensing.UnitTests.csproj` | No description provided. |
 | `$/Ama.Enterprise.Licensing.UnitTests/Services/CertificateLoaderTests.cs` | Unit tests verifying certificate loading capabilities from multiple inputs evaluating null constraints and cryptographic formats. |

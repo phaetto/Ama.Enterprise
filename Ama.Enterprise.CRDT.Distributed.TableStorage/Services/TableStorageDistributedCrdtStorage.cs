@@ -291,25 +291,40 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
                     candidateReplicas.Remove(localReplicaId);
                 }
 
-                foreach (var peerReplicaId in candidateReplicas)
+                if (candidateReplicas.Count == 1)
                 {
-                    var peerPartitionKey = $"{peerReplicaId}_{DocumentStatePartitionKey}_{shardId}";
-                    try
+                    foreach (var peerReplicaId in candidateReplicas)
                     {
-                        var response = await this.tableClient.GetEntityAsync<TableEntity>(peerPartitionKey, documentId, cancellationToken: cancellationToken).ConfigureAwait(false);
-                        if (response?.Value != null)
+                        var entity = await this.TryGetPeerDocumentEntityAsync(peerReplicaId, shardId, documentId, cancellationToken).ConfigureAwait(false);
+                        if (entity != null)
                         {
-                            matchedEntities.Add(response.Value);
+                            matchedEntities.Add(entity);
                         }
                     }
-                    catch (RequestFailedException ex) when (ex.Status == 404 && ex.ErrorCode != "TableNotFound")
+                }
+                else if (candidateReplicas.Count > 1)
+                {
+                    var tasks = new List<Task<TableEntity?>>(candidateReplicas.Count);
+                    foreach (var peerReplicaId in candidateReplicas)
                     {
-                        // Peer partition does not have a checkpoint for this document
+                        tasks.Add(this.TryGetPeerDocumentEntityAsync(peerReplicaId, shardId, documentId, cancellationToken));
+                    }
+
+                    var results = await Task.WhenAll(tasks).ConfigureAwait(false);
+                    for (int i = 0; i < results.Length; i++)
+                    {
+                        if (results[i] != null)
+                        {
+                            matchedEntities.Add(results[i]!);
+                        }
                     }
                 }
             }
 
-            if (matchedEntities.Count == 0)
+            var orchestrator = this.serviceProvider.GetService<ICrdtDocumentOrchestrator>();
+            var isColdBoot = orchestrator == null || orchestrator.InitializationStage != OrchestratorInitializationStage.Initialized;
+
+            if (matchedEntities.Count == 0 && isColdBoot)
             {
                 // Fallback for cold boot before cluster state tracker has discovered peer replica IDs
                 var expectedSuffix = $"_{DocumentStatePartitionKey}_{shardId}";
@@ -828,6 +843,24 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         {
             this.logger.LogError(ex, "Storage connection failed during SaveDocumentAsync.");
             throw;
+        }
+    }
+
+    private async Task<TableEntity?> TryGetPeerDocumentEntityAsync(
+        string peerReplicaId,
+        string shardId,
+        string documentId,
+        CancellationToken cancellationToken)
+    {
+        var peerPartitionKey = $"{peerReplicaId}_{DocumentStatePartitionKey}_{shardId}";
+        try
+        {
+            var response = await this.tableClient.GetEntityAsync<TableEntity>(peerPartitionKey, documentId, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return response?.Value;
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404 && ex.ErrorCode != "TableNotFound")
+        {
+            return null;
         }
     }
     

@@ -168,7 +168,13 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             {
                 var req = serializer.DeserializeFromBytes<CrdtReadRequestDto>(wrapper.Payload!);
                 var typeAlias = !string.IsNullOrWhiteSpace(req.DocumentTypeAlias) ? req.DocumentTypeAlias : wrapper.DocumentTypeAlias;
-                var targetDoc = await ResolveLocalDocumentAsync(scope, req.DocumentId, typeAlias, cancellationToken).ConfigureAwait(false);
+                IDistributedCrdtDocument? targetDoc = null;
+
+                if (!string.IsNullOrWhiteSpace(req.DocumentId) &&
+                    await scope.Orchestrator.DocumentExistsAsync(req.DocumentId, typeAlias, cancellationToken).ConfigureAwait(false))
+                {
+                    targetDoc = await ResolveLocalDocumentAsync(scope, req.DocumentId, typeAlias, cancellationToken).ConfigureAwait(false);
+                }
 
                 byte[] statePayload = [];
                 if (targetDoc != null)
@@ -179,6 +185,15 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                 else if (!string.IsNullOrWhiteSpace(req.DocumentId))
                 {
                     statePayload = await scope.Orchestrator.TryLoadStoredDocumentSnapshotBytesAsync(req.DocumentId, typeAlias, cancellationToken).ConfigureAwait(false);
+                    if (statePayload.Length > 0)
+                    {
+                        targetDoc = await scope.Orchestrator.ResolveOrPromoteLocalDocumentAsync(req.DocumentId, typeAlias, cancellationToken).ConfigureAwait(false);
+                        if (targetDoc != null)
+                        {
+                            var snapshot = await targetDoc.GetSnapshotDataAsync(cancellationToken).ConfigureAwait(false);
+                            statePayload = snapshot.SnapshotData;
+                        }
+                    }
                 }
 
                 var res = new CrdtReadResponseDto { CorrelationId = req.CorrelationId, StatePayload = statePayload };

@@ -2061,7 +2061,6 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         var doc = factory.CreateDocument(serviceProvider, documentId);
         await doc.InitializeAsync(cancellationToken).ConfigureAwait(false);
-        await HydratePromotedDocumentFromPeersAsync(doc, CancellationToken.None).ConfigureAwait(false);
 
         if (activeDocuments.TryAdd(compositeKey, doc))
         {
@@ -2070,6 +2069,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
             telemetry.RecordOrchestratorDocumentCreated(documentId);
             logger.LogDebug("Lazily promoted active CRDT document: {DocumentId} ({TypeAlias})", documentId, typeAlias);
+            await HydratePromotedDocumentFromPeersAsync(doc, CancellationToken.None).ConfigureAwait(false);
             await NotifyTopologyChangedAsync(cancellationToken).ConfigureAwait(false);
         }
         else
@@ -2162,7 +2162,6 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                             {
                                 var doc = factory.CreateDocument(serviceProvider, entry.DocumentId);
                                 await doc.InitializeAsync(cancellationToken).ConfigureAwait(false);
-                                await HydratePromotedDocumentFromPeersAsync(doc, CancellationToken.None).ConfigureAwait(false);
                                 
                                 if (activeDocuments.TryAdd(compositeKey, doc))
                                 {
@@ -2171,6 +2170,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                                     logger.LogDebug("Mapped new active CRDT document: {DocumentId} ({TypeAlias})", entry.DocumentId, entry.TypeAlias);
                                     
                                     versionVectorManager.EnsureShardRegistered(doc.ShardId);
+                                    await HydratePromotedDocumentFromPeersAsync(doc, CancellationToken.None).ConfigureAwait(false);
                                 }
                                 else
                                 {
@@ -2538,6 +2538,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             }
 
             var rpcTimeout = TimeSpan.FromMilliseconds(Math.Max(1, options.RpcTimeoutMilliseconds));
+            var hydrationTasks = new List<Task<byte[]?>>(candidateReplicas.Count);
 
             for (int i = 0; i < candidateReplicas.Count; i++)
             {
@@ -2548,42 +2549,29 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                     continue;
                 }
 
-                var correlationId = Guid.NewGuid();
-                var req = new CrdtReadRequestDto
-                {
-                    CorrelationId = correlationId,
-                    DocumentId = doc.DocumentId,
-                    DocumentTypeAlias = doc.TypeAlias
-                };
+                hydrationTasks.Add(FetchPeerSnapshotForHydrationAsync(
+                    doc,
+                    candidateReplica,
+                    new PeerId(peerGuid),
+                    rpcTimeout,
+                    directSender,
+                    rpcCorrelator,
+                    serializer,
+                    cancellationToken));
+            }
 
-                var reqPayload = serializer.SerializeToBytes(req);
-                var wrapper = new CrdtMessageWrapper(doc.DocumentId, "CrdtReadReq", reqPayload, doc.TypeAlias);
-                var wrapperBytes = serializer.SerializeToBytes(wrapper);
+            if (hydrationTasks.Count == 0)
+            {
+                return;
+            }
 
-                try
+            var snapshots = await Task.WhenAll(hydrationTasks).ConfigureAwait(false);
+            for (int i = 0; i < snapshots.Length; i++)
+            {
+                var statePayload = snapshots[i];
+                if (statePayload != null && statePayload.Length > 0)
                 {
-                    var waitTask = rpcCorrelator.RegisterRequestAsync<CrdtReadResponseDto>(correlationId, rpcTimeout, cancellationToken);
-                    await directSender.SendDirectAsync(new PeerId(peerGuid), wrapperBytes, cancellationToken).ConfigureAwait(false);
-                    var response = await waitTask.ConfigureAwait(false);
-
-                    if (response.StatePayload != null && response.StatePayload.Length > 0)
-                    {
-                        await doc.MergeSnapshotAsync(response.StatePayload, new ShardVersionVectorMap(), IntentDeliveryMode.Acknowledged, cancellationToken).ConfigureAwait(false);
-                        logger.LogDebug(
-                            "Hydrated promoted document {DocumentId} ({TypeAlias}) on shard {ShardId} from peer replica {PeerReplica}.",
-                            doc.DocumentId,
-                            doc.TypeAlias,
-                            doc.ShardId,
-                            candidateReplica);
-                    }
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    logger.LogTrace(ex, "Peer hydration query to replica {TargetReplica} for document {DocumentId} did not return state.", candidateReplica, doc.DocumentId);
+                    await doc.MergeSnapshotAsync(statePayload, new ShardVersionVectorMap(), IntentDeliveryMode.Acknowledged, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -2591,6 +2579,57 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         {
             logger.LogWarning(ex, "Failed to hydrate promoted document {DocumentId} ({TypeAlias}) from peers.", doc.DocumentId, doc.TypeAlias);
         }
+    }
+
+    private async Task<byte[]?> FetchPeerSnapshotForHydrationAsync(
+        IDistributedCrdtDocument doc,
+        string candidateReplica,
+        PeerId peerId,
+        TimeSpan rpcTimeout,
+        IDirectMessageSender directSender,
+        IP2pRpcCorrelator rpcCorrelator,
+        ICrdtSerializer serializer,
+        CancellationToken cancellationToken)
+    {
+        var correlationId = Guid.NewGuid();
+        var req = new CrdtReadRequestDto
+        {
+            CorrelationId = correlationId,
+            DocumentId = doc.DocumentId,
+            DocumentTypeAlias = doc.TypeAlias
+        };
+
+        var reqPayload = serializer.SerializeToBytes(req);
+        var wrapper = new CrdtMessageWrapper(doc.DocumentId, "CrdtReadReq", reqPayload, doc.TypeAlias);
+        var wrapperBytes = serializer.SerializeToBytes(wrapper);
+
+        try
+        {
+            var waitTask = rpcCorrelator.RegisterRequestAsync<CrdtReadResponseDto>(correlationId, rpcTimeout, cancellationToken);
+            await directSender.SendDirectAsync(peerId, wrapperBytes, cancellationToken).ConfigureAwait(false);
+            var response = await waitTask.ConfigureAwait(false);
+
+            if (response.StatePayload != null && response.StatePayload.Length > 0)
+            {
+                logger.LogDebug(
+                    "Hydrated promoted document {DocumentId} ({TypeAlias}) on shard {ShardId} from peer replica {PeerReplica}.",
+                    doc.DocumentId,
+                    doc.TypeAlias,
+                    doc.ShardId,
+                    candidateReplica);
+                return response.StatePayload;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogTrace(ex, "Peer hydration query to replica {TargetReplica} for document {DocumentId} did not return state.", candidateReplica, doc.DocumentId);
+        }
+
+        return null;
     }
 
     private async Task PushDemotedDocumentSnapshotToTargetPeersAsync(IDistributedCrdtDocument doc, CancellationToken cancellationToken)

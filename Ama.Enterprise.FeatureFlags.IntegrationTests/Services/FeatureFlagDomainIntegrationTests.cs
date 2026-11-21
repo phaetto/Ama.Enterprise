@@ -19,7 +19,7 @@ using Shouldly;
 public sealed class FeatureFlagDomainIntegrationTests
 {
     [IntegrationFact]
-    public async Task PrematureAccess_ThrowsInvalidOperationException_BeforeBootstrapperExecution()
+    public async Task PrematureAccess_ThrowsInvalidOperationException_BeforeOrchestratorInitialization()
     {
         // Arrange
         using var provider = BuildTestProvider();
@@ -29,13 +29,13 @@ public sealed class FeatureFlagDomainIntegrationTests
 
         // Act & Assert
         var exception = await Should.ThrowAsync<InvalidOperationException>(async () => 
-            await manager.SetFlagAsync("TestFlag", true, "TestUser", null, null, IntentDeliveryMode.Acknowledged, CancellationToken.None));
+            await manager.SetFlagAsync("EnterpriseERP", "Tenant-XYZ", "TestFlag", true, "TestUser", null, IntentDeliveryMode.Acknowledged, CancellationToken.None));
             
         exception.Message.ShouldContain("Orchestrator registry is not initialized");
     }
 
     [IntegrationFact]
-    public async Task Bootstrapper_EagerlyInitializesGlobalDocument_And_ManagerExposesState()
+    public async Task GetFlagsAsync_BeforeAnyFlagsCreated_ReturnsEmpty()
     {
         // Arrange
         using var provider = BuildTestProvider();
@@ -47,9 +47,13 @@ public sealed class FeatureFlagDomainIntegrationTests
         await StartAllHostedServicesAsync(provider);
 
         // Assert
-        var flags = await manager.GetFlagsAsync(CancellationToken.None);
+        var flags = await manager.GetFlagsAsync("EnterpriseERP", "Tenant-XYZ", CancellationToken.None);
         flags.ShouldNotBeNull();
         flags.ShouldBeEmpty();
+
+        var allFlags = await manager.GetAllFlagsAsync(CancellationToken.None);
+        allFlags.ShouldNotBeNull();
+        allFlags.ShouldBeEmpty();
     }
 
     [IntegrationFact]
@@ -64,13 +68,12 @@ public sealed class FeatureFlagDomainIntegrationTests
 
         await StartAllHostedServicesAsync(provider);
 
-        var initialMetadata = new FeatureFlagMetadata { ProductId = "EnterpriseERP", TenantId = "Tenant-XYZ" };
         var initialOwnership = new FeatureFlagOwnership { Owner = "BackendTeam", ContactInfo = "backend@ama.com" };
 
         await observer.WaitForStateChangeAsync(() => 
-            manager.SetFlagAsync("BetaFeature", true, "Admin", initialMetadata, initialOwnership, IntentDeliveryMode.Acknowledged, CancellationToken.None));
+            manager.SetFlagAsync("EnterpriseERP", "Tenant-XYZ", "BetaFeature", true, "Admin", initialOwnership, IntentDeliveryMode.Acknowledged, CancellationToken.None));
 
-        var initialFlags = await manager.GetFlagsAsync(CancellationToken.None);
+        var initialFlags = await manager.GetFlagsAsync("EnterpriseERP", "Tenant-XYZ", CancellationToken.None);
         var initialFlag = initialFlags["BetaFeature"];
         
         // Wait slightly to ensure DateTimeOffset ticks advance naturally for the audit trail assertion
@@ -78,10 +81,10 @@ public sealed class FeatureFlagDomainIntegrationTests
 
         // Act - Partial Update dropping specific fields
         await observer.WaitForStateChangeAsync(() => 
-            manager.SetFlagAsync("BetaFeature", false, "SystemAuto", metadata: null, ownership: null, IntentDeliveryMode.Acknowledged, CancellationToken.None));
+            manager.SetFlagAsync("EnterpriseERP", "Tenant-XYZ", "BetaFeature", false, "SystemAuto", ownership: null, IntentDeliveryMode.Acknowledged, CancellationToken.None));
 
         // Assert
-        var updatedFlags = await manager.GetFlagsAsync(CancellationToken.None);
+        var updatedFlags = await manager.GetFlagsAsync("EnterpriseERP", "Tenant-XYZ", CancellationToken.None);
         var updatedFlag = updatedFlags["BetaFeature"];
 
         updatedFlag.IsEnabled.ShouldBeFalse();
@@ -90,6 +93,7 @@ public sealed class FeatureFlagDomainIntegrationTests
         updatedFlag.Audit.UpdatedAt.ShouldBeGreaterThan(initialFlag.Audit.UpdatedAt);
         
         updatedFlag.Metadata.ProductId.ShouldBe("EnterpriseERP");
+        updatedFlag.Metadata.TenantId.ShouldBe("Tenant-XYZ");
         updatedFlag.Ownership.Owner.ShouldBe("BackendTeam");
     }
 
@@ -106,18 +110,86 @@ public sealed class FeatureFlagDomainIntegrationTests
         await StartAllHostedServicesAsync(provider);
 
         await observer.WaitForStateChangeAsync(() => 
-            manager.SetFlagAsync("ObsoleteFeature", true, "Admin", null, null, IntentDeliveryMode.Acknowledged, CancellationToken.None));
+            manager.SetFlagAsync("EnterpriseERP", "Tenant-XYZ", "ObsoleteFeature", true, "Admin", null, IntentDeliveryMode.Acknowledged, CancellationToken.None));
 
-        var flagsBefore = await manager.GetFlagsAsync(CancellationToken.None);
+        var flagsBefore = await manager.GetFlagsAsync("EnterpriseERP", "Tenant-XYZ", CancellationToken.None);
         flagsBefore.ShouldContainKey("ObsoleteFeature");
 
         // Act
         await observer.WaitForStateChangeAsync(() => 
-            manager.RemoveFlagAsync("ObsoleteFeature", CancellationToken.None));
+            manager.RemoveFlagAsync("EnterpriseERP", "Tenant-XYZ", "ObsoleteFeature", IntentDeliveryMode.Acknowledged, CancellationToken.None));
 
         // Assert
-        var flagsAfter = await manager.GetFlagsAsync(CancellationToken.None);
+        var flagsAfter = await manager.GetFlagsAsync("EnterpriseERP", "Tenant-XYZ", CancellationToken.None);
         flagsAfter.ShouldNotContainKey("ObsoleteFeature");
+    }
+
+    [IntegrationFact]
+    public async Task SetFlagAsync_ShardsDocumentsPerProductAndTenant_And_AggregatesAcrossCluster()
+    {
+        // Arrange
+        using var provider = BuildTestProvider();
+        var scopeFactory = provider.GetRequiredService<DistributedCrdtScopeManager>();
+        var crdtScope = scopeFactory.GetOrCreateScope("integration-replica-1");
+        var manager = crdtScope.ServiceProvider.GetRequiredService<IFeatureFlagCrdtManager>();
+        var orchestrator = crdtScope.Orchestrator;
+        var observer = provider.GetRequiredService<TestStateObserver>();
+
+        await StartAllHostedServicesAsync(provider);
+
+        // Act
+        await observer.WaitForStateChangeAsync(() =>
+            manager.SetFlagAsync("ProductA", "Tenant1", "FlagA1", true, "Admin", null, IntentDeliveryMode.Acknowledged, CancellationToken.None));
+
+        await observer.WaitForStateChangeAsync(() =>
+            manager.SetFlagAsync("ProductB", "Tenant2", "FlagB2", false, "Admin", null, IntentDeliveryMode.Acknowledged, CancellationToken.None));
+
+        await observer.WaitForStateChangeAsync(() =>
+            manager.SetFlagAsync("ProductA", "Tenant1", "SharedFlag", true, "Admin", null, IntentDeliveryMode.Acknowledged, CancellationToken.None));
+
+        await observer.WaitForStateChangeAsync(() =>
+            manager.SetFlagAsync("ProductA", "Tenant2", "SharedFlag", false, "Admin", null, IntentDeliveryMode.Acknowledged, CancellationToken.None));
+
+        // Assert - Individual documents exist per product & tenant
+        var docId1 = Constants.GetDocumentId("ProductA", "Tenant1");
+        var docId2 = Constants.GetDocumentId("ProductB", "Tenant2");
+        var docId3 = Constants.GetDocumentId("ProductA", "Tenant2");
+
+        (await orchestrator.DocumentExistsAsync<FeatureFlagState>(docId1, CancellationToken.None)).ShouldBeTrue();
+        (await orchestrator.DocumentExistsAsync<FeatureFlagState>(docId2, CancellationToken.None)).ShouldBeTrue();
+        (await orchestrator.DocumentExistsAsync<FeatureFlagState>(docId3, CancellationToken.None)).ShouldBeTrue();
+
+        var productATenant1Flags = await manager.GetFlagsAsync("ProductA", "Tenant1", CancellationToken.None);
+        productATenant1Flags.Count.ShouldBe(2);
+        productATenant1Flags.ShouldContainKey("FlagA1");
+        productATenant1Flags.ShouldContainKey("SharedFlag");
+        productATenant1Flags["SharedFlag"].IsEnabled.ShouldBeTrue();
+
+        var productATenant2Flags = await manager.GetFlagsAsync("ProductA", "Tenant2", CancellationToken.None);
+        productATenant2Flags.Count.ShouldBe(1);
+        productATenant2Flags.ShouldContainKey("SharedFlag");
+        productATenant2Flags["SharedFlag"].IsEnabled.ShouldBeFalse();
+
+        var productBFlags = await manager.GetFlagsAsync("ProductB", "Tenant2", CancellationToken.None);
+        productBFlags.Count.ShouldBe(1);
+        productBFlags.ShouldContainKey("FlagB2");
+
+        // All flags query aggregates across all product/tenant documents without colliding on flag name
+        var allFlags = await manager.GetAllFlagsAsync(CancellationToken.None);
+        allFlags.Count.ShouldBe(4);
+        allFlags.ShouldContainKey("ProductA:Tenant1:FlagA1");
+        allFlags.ShouldContainKey("ProductB:Tenant2:FlagB2");
+        allFlags.ShouldContainKey("ProductA:Tenant1:SharedFlag");
+        allFlags.ShouldContainKey("ProductA:Tenant2:SharedFlag");
+        allFlags["ProductA:Tenant1:SharedFlag"].IsEnabled.ShouldBeTrue();
+        allFlags["ProductA:Tenant2:SharedFlag"].IsEnabled.ShouldBeFalse();
+
+        // Targeted removal from a specific product/tenant shard
+        await observer.WaitForStateChangeAsync(() =>
+            manager.RemoveFlagAsync("ProductA", "Tenant1", "FlagA1", IntentDeliveryMode.Acknowledged, CancellationToken.None));
+
+        var productAFlagsAfter = await manager.GetFlagsAsync("ProductA", "Tenant1", CancellationToken.None);
+        productAFlagsAfter.ShouldNotContainKey("FlagA1");
     }
 
     [IntegrationFact]

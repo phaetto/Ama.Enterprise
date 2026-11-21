@@ -9,7 +9,7 @@ using Ama.Enterprise.FeatureFlags.Models;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Observer tracking feature flag distributed state modifications securely decoupled from the core manager.
+/// Observer tracking feature flag distributed state modifications decoupled from the core manager.
 /// </summary>
 public sealed class FeatureFlagStateObserver : IDocumentStateObserver<FeatureFlagState>
 {
@@ -27,17 +27,22 @@ public sealed class FeatureFlagStateObserver : IDocumentStateObserver<FeatureFla
     /// <inheritdoc />
     public Task OnStateChangedAsync(string documentId, CancellationToken cancellationToken = default)
     {
-        if (documentId == Constants.GlobalDocumentId)
+        if (string.IsNullOrWhiteSpace(documentId))
+        {
+            return Task.CompletedTask;
+        }
+
+        if (documentId.StartsWith(Constants.FeatureFlagDocumentType + ":", StringComparison.Ordinal))
         {
             _ = Task.Run(async () => 
             {
-                foreach(var observer in domainObservers)
+                foreach (var observer in domainObservers)
                 {
                     try 
                     { 
                         await observer.OnFeatureFlagsUpdatedAsync(cancellationToken).ConfigureAwait(false); 
                     }
-                    catch(Exception ex) 
+                    catch (Exception ex) 
                     { 
                         logger.LogError(ex, "Error notifying domain feature flag observer decoupled from structural synchronization pipeline."); 
                     }

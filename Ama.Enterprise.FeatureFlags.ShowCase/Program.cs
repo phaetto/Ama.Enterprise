@@ -1,7 +1,9 @@
 namespace Ama.Enterprise.FeatureFlags.ShowCase;
 
 using Ama.Enterprise.CRDT.Distributed.Extensions;
+using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
+using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 using Ama.Enterprise.CRDT.Distributed.TableStorage.Extensions;
 using Ama.Enterprise.CRDT.MessagePack.Extensions;
 using Ama.Enterprise.CRDT.MessagePack.Resolvers;
@@ -73,6 +75,7 @@ public static class Program
         // Map central UI generic redraw observer tracking natively distributed states explicitly
         services.AddSingleton<ConsoleRedrawObserver>();
         services.AddSingleton<IFeatureFlagStateObserver>(sp => sp.GetRequiredService<ConsoleRedrawObserver>());
+        services.AddSingleton<IDocumentStateObserver<CrdtRegistryState>>(sp => sp.GetRequiredService<ConsoleRedrawObserver>());
 
         // Register Showcase tablestorage persistence provider
         services.AddDistributedCrdtTableStorage(options => {
@@ -106,7 +109,7 @@ public static class Program
                 })
                 .AddGossipNetwork(options =>
                 {
-                    options.GossipInterval = TimeSpan.FromMilliseconds(1500);
+                    options.GossipInterval = TimeSpan.FromMilliseconds(250);
                     options.Fanout = 3;
                     options.DefaultTimeToLive = 3;
                 })
@@ -175,7 +178,7 @@ public static class Program
                     if (needsRedraw)
                     {
                         needsRedraw = false;
-                        var flags = await clusterManager.GetFlagsAsync(cts.Token).ConfigureAwait(false);
+                        var flags = await clusterManager.GetAllFlagsAsync(cts.Token).ConfigureAwait(false);
                         DrawFlags(flags);
                     }
                 }
@@ -199,7 +202,7 @@ public static class Program
             DrawMenu();
 
             // Initial UI draw
-            var initialFlags = await clusterManager.GetFlagsAsync(cts.Token).ConfigureAwait(false);
+            var initialFlags = await clusterManager.GetAllFlagsAsync(cts.Token).ConfigureAwait(false);
             DrawFlags(initialFlags);
 
             var shutdownCoordinator = provider.GetRequiredService<ICrdtShutdownCoordinator>();
@@ -227,30 +230,48 @@ public static class Program
                     switch (command)
                     {
                         case "set":
-                            if (parts.Length >= 3 && bool.TryParse(parts[2], out var isEnabled))
+                            if (parts.Length >= 5 && bool.TryParse(parts[4], out var isEnabled))
                             {
-                                await clusterManager.SetFlagAsync(parts[1], isEnabled, cancellationToken: cts.Token).ConfigureAwait(false);
+                                await clusterManager.SetFlagAsync(parts[1], parts[2], parts[3], isEnabled, cancellationToken: cts.Token).ConfigureAwait(false);
+                                needsRedraw = false;
+                                var flagsAfterSet = await clusterManager.GetAllFlagsAsync(cts.Token).ConfigureAwait(false);
+                                DrawFlags(flagsAfterSet);
                             }
                             else
                             {
-                                WriteLineLocked("Usage: set <name> <true|false>");
+                                WriteLineLocked("Usage: set <productId> <tenantId> <name> <true|false>");
                             }
                             break;
 
                         case "del":
-                            if (parts.Length >= 2)
+                            if (parts.Length >= 4)
                             {
-                                await clusterManager.RemoveFlagAsync(parts[1], cts.Token).ConfigureAwait(false);
+                                await clusterManager.RemoveFlagAsync(parts[1], parts[2], parts[3], cancellationToken: cts.Token).ConfigureAwait(false);
+                                needsRedraw = false;
+                                var flagsAfterDelete = await clusterManager.GetAllFlagsAsync(cts.Token).ConfigureAwait(false);
+                                DrawFlags(flagsAfterDelete);
                             }
                             else
                             {
-                                WriteLineLocked("Usage: del <name>");
+                                WriteLineLocked("Usage: del <productId> <tenantId> <name>");
                             }
                             break;
 
                         case "list":
-                            var currentFlags = await clusterManager.GetFlagsAsync(cts.Token).ConfigureAwait(false);
-                            DrawFlags(currentFlags);
+                            if (parts.Length == 1)
+                            {
+                                var allFlags = await clusterManager.GetAllFlagsAsync(cts.Token).ConfigureAwait(false);
+                                DrawFlags(allFlags);
+                            }
+                            else if (parts.Length >= 3)
+                            {
+                                var scopedFlags = await clusterManager.GetFlagsAsync(parts[1], parts[2], cts.Token).ConfigureAwait(false);
+                                DrawFlags(scopedFlags);
+                            }
+                            else
+                            {
+                                WriteLineLocked("Usage: list [<productId> <tenantId>]");
+                            }
                             break;
 
                         case "clone":
@@ -326,11 +347,11 @@ public static class Program
             Console.WriteLine($" Feature Flags Peer Node - Listening on Port {currentPort}");
             Console.WriteLine("=================================================");
             Console.WriteLine("Commands:");
-            Console.WriteLine(" set <flagName> <true|false>  - Adds or Updates a flag");
-            Console.WriteLine(" del <flagName>               - Removes a flag entirely");
-            Console.WriteLine(" list                         - Prints all currently known flags");
-            Console.WriteLine(" clone [count]                - Spawns new cluster node(s) in a new window (default 1)");
-            Console.WriteLine(" exit                         - Shuts down this node gracefully");
+            Console.WriteLine(" set <product> <tenant> <flagName> <true|false> - Adds or Updates a flag in its shard");
+            Console.WriteLine(" del <product> <tenant> <flagName>              - Removes a flag from its shard");
+            Console.WriteLine(" list [<product> <tenant>]                      - Prints all flags (or for a specific shard)");
+            Console.WriteLine(" clone [count]                                  - Spawns new cluster node(s) in a new window (default 1)");
+            Console.WriteLine(" exit                                           - Shuts down this node gracefully");
             Console.WriteLine("=================================================\n");
         }
     }
@@ -348,7 +369,10 @@ public static class Program
             {
                 foreach (var flag in flags.OrderBy(f => f.Key))
                 {
-                    Console.WriteLine($" => [{flag.Key}]: {(flag.Value.IsEnabled ? "ENABLED" : "DISABLED")}");
+                    var product = flag.Value.Metadata?.ProductId ?? "unknown";
+                    var tenant = flag.Value.Metadata?.TenantId ?? "unknown";
+                    var flagName = string.IsNullOrWhiteSpace(flag.Value.Name) ? flag.Key : flag.Value.Name;
+                    Console.WriteLine($" => [{product}/{tenant}] [{flagName}]: {(flag.Value.IsEnabled ? "ENABLED" : "DISABLED")}");
                 }
             }
             Console.WriteLine("------------------------------------\n> ");
@@ -433,9 +457,15 @@ public static class Program
         return base64Key;
     }
 
-    private sealed class ConsoleRedrawObserver : IFeatureFlagStateObserver
+    private sealed class ConsoleRedrawObserver : IFeatureFlagStateObserver, IDocumentStateObserver<CrdtRegistryState>
     {
         public Task OnFeatureFlagsUpdatedAsync(CancellationToken cancellationToken = default)
+        {
+            needsRedraw = true;
+            return Task.CompletedTask;
+        }
+
+        public Task OnStateChangedAsync(string documentId, CancellationToken cancellationToken = default)
         {
             needsRedraw = true;
             return Task.CompletedTask;

@@ -32,13 +32,14 @@ public static class ServiceCollectionExtensions
         // Map domain types inside the centralized document pool
         services.AddDistributedDocumentType<FeatureFlagState>(Constants.FeatureFlagDocumentType);
 
+        // Register distributed cluster query for scatter-gather flag retrieval across product/tenant shards
+        services.AddDistributedCrdtQuery<FeatureFlagState, FeatureFlagQueryDto, FeatureFlagQueryResultDto, FeatureFlagClusterQuery>(
+            Constants.FeatureFlagClusterQueryAlias);
+
         // Register the business logic domain wrapper scoped to the CRDT hierarchy
         services.AddDistributedCrdtService<IFeatureFlagCrdtManager, FeatureFlagCrdtManager>();
 
         services.AddSingleton<IDocumentStateObserver<FeatureFlagState>, FeatureFlagStateObserver>();
-
-        // Register the background initialization service to build the global scope
-        services.AddHostedService<FeatureFlagBootstrapper>();
 
         return services;
     }

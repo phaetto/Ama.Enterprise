@@ -16,7 +16,7 @@ public sealed class FeatureFlagState : IEquatable<FeatureFlagState>, IExtensible
     /// <summary>
     /// Gets or sets the document identifier.
     /// </summary>
-    public string Id { get; set; } = Constants.GlobalDocumentId;
+    public string Id { get; set; } = string.Empty;
 
     /// <summary>
     /// A map of feature flags where the key is the flag name.
