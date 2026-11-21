@@ -6,6 +6,7 @@
 		<Nullable>enable</Nullable>
 		<IsPackable>false</IsPackable>
 		<NoWarn>NU1701</NoWarn>
+		<Features>runtime-async=on</Features>
 	</PropertyGroup>
 
 	<ItemGroup>

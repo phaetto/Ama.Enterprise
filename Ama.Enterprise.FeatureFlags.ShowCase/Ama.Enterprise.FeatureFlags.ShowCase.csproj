@@ -9,6 +9,7 @@
 		<InvariantGlobalization>true</InvariantGlobalization>
 		<!-- Disables Visual Studio's fast up-to-date check so the MSBuild StartAzurite target runs every time you press F5, even if no C# files changed -->
 		<DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
+		<Features>runtime-async=on</Features>
 	</PropertyGroup>
 
 	<ItemGroup>

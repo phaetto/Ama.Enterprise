@@ -6,12 +6,12 @@
 | `$/.github/workflows/publish-preview-to-nuget.yml` | Updated prerelease unlisting step to query the NuGet V3 Registration API for listed-only packages (excluding the newly published preview version) and capped unlisting to the last 10 versions. |
 | `$/.github/workflows/publish-release-to-nuget-manual.yml` | Updated release versioning to use user-entered `major_version` and `minor_version` with an automatically generated `YYMMDD` patch number and valid `< 65536` `AssemblyVersion` build/revision numbers. |
 | `$/.gitignore` | No description provided. |
-| `$/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests.csproj` | Unit test project for `Ama.Enterprise.CRDT.Distributed.Analyzers`. |
+| `$/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.CRDT.Distributed.Analyzers.UnitTests/CrdtReplicaAndMeshConfigurationAnalyzerTests.cs` | Updated analyzer unit tests to use `AddDistributedCrdtReplica(replicaId, params meshIds)` and `BindCrdtReplica` after removing `AddDistributedCrdtP2p`. |
-| `$/Ama.Enterprise.CRDT.Distributed.Analyzers/Ama.Enterprise.CRDT.Distributed.Analyzers.csproj` | Roslyn analyzer project validating Distributed CRDT and P2P mesh registration rules. |
+| `$/Ama.Enterprise.CRDT.Distributed.Analyzers/Ama.Enterprise.CRDT.Distributed.Analyzers.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.CRDT.Distributed.Analyzers/CrdtReplicaAndMeshConfigurationAnalyzer.cs` | Updated analyzer rules and invocation analysis to support the unified `AddDistributedCrdtReplica(replicaId, params meshIds)` and `BindCrdtReplica` APIs. |
 | `$/Ama.Enterprise.CRDT.Distributed.Analyzers/IsExternalInit.cs` | Polyfill for `System.Runtime.CompilerServices.IsExternalInit` to support primary constructor `record struct` properties on `netstandard2.0`. |
-| `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/Ama.Enterprise.CRDT.Distributed.IntegrationTests.csproj` | Updated reference from `Ama.Enterprise.UnitTests` to the renamed `Ama.Enterprise.Project.Tests.Common`. |
+| `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/Ama.Enterprise.CRDT.Distributed.IntegrationTests.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/AntiEntropyStateSyncIntegrationTests.cs` | Replaced `AddDistributedCrdtP2p` with `AddDistributedCrdtReplica(replicaId, TestMeshId)`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/ClusterMapReduceIntegrationTests.cs` | End-to-end multi-node integration tests verifying scatter-gather queries, multi-stage statistical aggregations, in-place shard mutations, `AllReplicas` convergence auditing, domain-aligned sharding, short-circuiting, and replica failover. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/ClusterStatePersistenceIntegrationTests.cs` | Added edge-case tests verifying `UpdatePeerState` rejection for tombstoned replicas and `EvictStalePeers` handling of zero/negative TTLs. |
@@ -27,7 +27,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/MultiReplicaSyncIntegrationTests.cs` | Replaced `AddDistributedCrdtP2p` with `AddDistributedCrdtReplica(replicaId, "TestMesh")`. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/ObserversIntegrationTests.cs` | Integration tests verifying that `IDocumentStateObserver<TState>`, `IDocumentPatchObserver`, `ICrdtOrchestratorObserver`, and `IClusterStateObserver` are invoked across all execution paths and isolate exceptions thrown by faulty observers. |
 | `$/Ama.Enterprise.CRDT.Distributed.IntegrationTests/ScopeTopologyProviderIntegrationTests.cs` | Replaced `AddDistributedCrdtP2p` with `AddDistributedCrdtReplica(replicaId, TestMeshId)`. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Ama.Enterprise.CRDT.Distributed.ShowCase.csproj` | Updated reference mapping the renamed `Ama.Enterprise.CRDT.MessagePack.SourceGenerators` compilation target. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Ama.Enterprise.CRDT.Distributed.ShowCase.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Constants.cs` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/DeviceStatus.cs` | Data structure representing the status of an IoT device. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/FleetMapReduceModels.cs` | Query, accumulator, report, and command DTOs for cluster-wide fleet low-battery search, statistical battery health aggregation, and in-place offline device purging. |
@@ -45,12 +45,12 @@
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseCrdtStorage.cs` | Implemented `AppendBatchAsync` wrapping cross-document operations in a single SQLite transaction. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseShardIdProvider.cs` | Custom shard ID provider decoupling overarching multi-document structures into isolated causal tracking domains. Implemented lightweight `GetShardId` overloads avoiding document allocations. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/TaskManager.cs` | Added `DocumentExistsAsync` check and input validation to `GetTasksAsync`. |
-| `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Ama.Enterprise.CRDT.Distributed.TableStorage.csproj` | Added target framework conditions to reference `10.0.0` `Microsoft.Extensions.*` packages on `net10.0` and `11.0.0` on `net11.0`. |
+| `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Ama.Enterprise.CRDT.Distributed.TableStorage.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Extensions/ServiceCollectionExtensions.cs` | Simplified Table Storage DI extensions to strictly register a single unified scoped storage using `TryAddSingleton` to register default AOT JSON fallbacks safely bridging implementations. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Models/CrdtTableEntity.cs` | Refactored into a static helper directly mapping chunks onto the dictionary-backed `TableEntity` avoiding reflection-heavy SDK deserialization limits ensuring AOT compatibility. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Models/TableStorageCrdtOptions.cs` | Configuration structure holding Azure Table Storage endpoints and table bindings. Added `UseBinarySerialization` option to pivot between human-readable JSON rows and cost-optimized high-performance binary structures without tight coupling to a specific format. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Services/TableStorageDistributedCrdtStorage.cs` | Restricted the full-table scan fallback in `LoadOrphanedDocumentAsync` to cold-boot initialization and parallelized peer partition point reads. |
-| `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase.csproj` | No description provided. |
+| `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Constants.cs` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Models/DeviceStatus.cs` | No description provided. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Models/FleetState.cs` | No description provided. |
@@ -68,7 +68,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/ShowCaseCrdtStorage.cs` | Implemented `AppendBatchAsync` wrapping cross-document operations in a single SQLite transaction. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/ShowCaseTokenValidator.cs` | Refactored token validator evaluating structured session constraints to resolve Keyed DI construction limits. |
 | `$/Ama.Enterprise.CRDT.Distributed.Topology.ShowCase/Services/TaskManager.cs` | Added `DocumentExistsAsync` check and input validation to `GetTasksAsync`. |
-| `$/Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj` | Removed `PrivateAssets="all"` from the `Ama.Enterprise.CRDT.Distributed.Analyzers` `ProjectReference` so the analyzer flows transitively to client projects in the solution. |
+| `$/Ama.Enterprise.CRDT.Distributed/Ama.Enterprise.CRDT.Distributed.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Constants.cs` | Global constants for the distributed CRDT module, including the reserved `SystemRegistryDocumentId` (`system-document-registry`). |
 | `$/Ama.Enterprise.CRDT.Distributed/Extensions/ServiceCollectionExtensions.cs` | Added `AddDistributedCrdtMapReduce` and `AddDistributedCrdtQuery` registration extensions. |
 | `$/Ama.Enterprise.CRDT.Distributed/Models/ClusterStateSnapshotDto.cs` | Updated to map tombstoned replicas to their eviction timestamp tracking the exact eviction moment for safe cooldown expirations. |
@@ -170,30 +170,30 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/SystemRegistryDocumentIdProviderDecorator.cs` | Decorator for `IDocumentIdProvider` that handles `CrdtRegistryState` document ID extraction, assignment, and instantiation before delegating to the user-configured provider. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/SystemRegistryServiceProvider.cs` | Updated to wrap resolved `IDocumentIdProvider` instances in `SystemRegistryDocumentIdProviderDecorator` regardless of DI registration order. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/SystemRegistryShardIdProviderDecorator.cs` | Referenced `Constants.SystemRegistryDocumentId` when resolving the shard ID for `CrdtRegistryState`. |
-| `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Ama.Enterprise.CRDT.MessagePack.IntegrationTests.csproj` | Switched references to newly renamed `.SourceGenerators` and `.Tests.Common` projects mapping logic. |
+| `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Ama.Enterprise.CRDT.MessagePack.IntegrationTests.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Models/IntegrationTestModels.cs` | Added `ConcurrentDictionaryModel` to test `ConcurrentDictionary<TKey, TValue>` AOT MessagePack serialization. |
 | `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Services/MessagePackSerializerIntegrationTests.cs` | Added integration test verifying `ConcurrentDictionary<TKey, TValue>` serialization and deserialization. |
 | `$/Ama.Enterprise.CRDT.MessagePack.IntegrationTests/Services/TolerantReaderIntegrationTests.cs` | Integration tests validating standard STJ contextual mappings and MessagePack arrays tracking tolerant reader capabilities and executing DI resolutions. |
-| `$/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.UnitTests/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.UnitTests.csproj` | Updated project reference to the renamed `Ama.Enterprise.CRDT.MessagePack.SourceGenerators` project. |
+| `$/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.UnitTests/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.UnitTests.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.UnitTests/Architecture/KnownContextsArchitectureTests.cs` | No description provided. |
-| `$/Ama.Enterprise.CRDT.MessagePack.SourceGenerators/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.csproj` | No description provided. |
+| `$/Ama.Enterprise.CRDT.MessagePack.SourceGenerators/Ama.Enterprise.CRDT.MessagePack.SourceGenerators.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.CRDT.MessagePack.SourceGenerators/Generators/MessagePackFormatterGenerator.cs` | Updated generated MessagePack deserializers to pool deserialized `string` properties and constructor arguments via `CrdtStringPool.Shared`. |
-| `$/Ama.Enterprise.CRDT.MessagePack.UnitTests/Ama.Enterprise.CRDT.MessagePack.UnitTests.csproj` | No description provided. |
+| `$/Ama.Enterprise.CRDT.MessagePack.UnitTests/Ama.Enterprise.CRDT.MessagePack.UnitTests.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.CRDT.MessagePack.UnitTests/Formatters/CrdtPolymorphicMessagePackFormatterTests.cs` | Unit tests for `CrdtPolymorphicMessagePackFormatter` verifying array formatting logic and unregistered polymorphic bounds throwing. |
 | `$/Ama.Enterprise.CRDT.MessagePack.UnitTests/Formatters/CrdtPolymorphicMessagePackRegistryTests.cs` | Unit tests verifying generic AOT delegate caching and resolution bounded in CrdtPolymorphicMessagePackRegistry. |
 | `$/Ama.Enterprise.CRDT.MessagePack.UnitTests/Models/TestModel.cs` | Test model simulating a binary serializable DTO utilizing `MessagePackObject` annotations. |
 | `$/Ama.Enterprise.CRDT.MessagePack.UnitTests/Services/MessagePackCrdtSerializerTests.cs` | Appended structural serialization boundaries verifying `byte[]` arrays convert to MessagePack BIN formats rather than polymorphic generics. |
-| `$/Ama.Enterprise.CRDT.MessagePack/Ama.Enterprise.CRDT.MessagePack.csproj` | Modified analyzer bindings replacing references to use renamed `Ama.Enterprise.CRDT.MessagePack.SourceGenerators`. |
+| `$/Ama.Enterprise.CRDT.MessagePack/Ama.Enterprise.CRDT.MessagePack.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.CRDT.MessagePack/Extensions/ServiceCollectionExtensions.cs` | Dependency injection extensions bootstrapping the decoupled custom `MessagePackCrdtSerializer` instance globally. Exposed `params` overload bridging multi-assembly mapped bounds and chaining execution fallback boundaries. |
 | `$/Ama.Enterprise.CRDT.MessagePack/Formatters/CrdtPolymorphicMessagePackFormatter.cs` | Pooled polymorphic type discriminators and deserialized string payloads via `CrdtStringPool.Shared`. |
 | `$/Ama.Enterprise.CRDT.MessagePack/Formatters/CrdtPolymorphicMessagePackRegistry.cs` | Centralized registry caching typed AOT polymorphic serialization delegates for MessagePack. |
 | `$/Ama.Enterprise.CRDT.MessagePack/MessagePackCrdtSerializer.cs` | Replaced `bytes.ToArray()` allocations in `DeserializeFromBytes` with `ArrayPool<byte>.Shared` buffers. |
-| `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Ama.Enterprise.FeatureFlags.IntegrationTests.csproj` | Redirected shared tests project reference pointing to renamed `Ama.Enterprise.Project.Tests.Common`. |
+| `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Ama.Enterprise.FeatureFlags.IntegrationTests.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.FeatureFlags.IntegrationTests/Services/FeatureFlagDomainIntegrationTests.cs` | Added test assertions verifying that identically named feature flags across different product/tenant documents do not overwrite one another in `GetAllFlagsAsync`. |
-| `$/Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj` | Appended an MSBuild target to automatically execute the local native Azurite startup batch script during the build process. Added `DisableFastUpToDateCheck` to ensure Visual Studio always evaluates the pre-build Azurite checks even when C# files haven't changed. |
+| `$/Ama.Enterprise.FeatureFlags.ShowCase/Ama.Enterprise.FeatureFlags.ShowCase.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/Program.cs` | Redrew feature flags immediately after `set` and `del` commands, observed `CrdtRegistryState` changes for cross-shard redraws, and lowered showcase `GossipInterval` to 250ms. |
 | `$/Ama.Enterprise.FeatureFlags.ShowCase/start-azurite.bat` | Windows batch script that automatically discovers and executes natively installed Azurite instances (via Visual Studio or NPM) bypassing Docker requirements, explicitly detached via PowerShell to prevent MSBuild hangs. |
-| `$/Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
+| `$/Ama.Enterprise.FeatureFlags/Ama.Enterprise.FeatureFlags.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.FeatureFlags/Constants.cs` | Removed `GlobalDocumentId` and `DefaultScope`; updated `GetDocumentId(productId, tenantId)` to require non-empty `productId` and `tenantId`. |
 | `$/Ama.Enterprise.FeatureFlags/Extensions/ServiceCollectionExtensions.cs` | Removed `FeatureFlagBootstrapper` registration as feature flag documents are now lazily created per product and tenant shard. |
 | `$/Ama.Enterprise.FeatureFlags/Models/FeatureFlag.cs` | Represents a single enterprise feature flag in the system incorporating audit and ownership structures. |
@@ -211,10 +211,10 @@
 | `$/Ama.Enterprise.FeatureFlags/Services/FeatureFlagStateObserver.cs` | Updated `OnStateChangedAsync` to match `feature-flag:{productId}:{tenantId}` document IDs without any global document fallback. |
 | `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagCrdtManager.cs` | Updated contract to require `productId` and `tenantId` on `SetFlagAsync`, `RemoveFlagAsync`, and `GetFlagsAsync`, plus `GetAllFlagsAsync` for cluster-wide queries. |
 | `$/Ama.Enterprise.FeatureFlags/Services/IFeatureFlagStateObserver.cs` | Dedicated Feature Flag domain observer contract enabling consumer systems explicitly routing decoupled tracking dynamically perfectly securely. |
-| `$/Ama.Enterprise.Licensing.UnitTests/Ama.Enterprise.Licensing.UnitTests.csproj` | No description provided. |
+| `$/Ama.Enterprise.Licensing.UnitTests/Ama.Enterprise.Licensing.UnitTests.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.Licensing.UnitTests/Services/CertificateLoaderTests.cs` | Unit tests verifying certificate loading capabilities from multiple inputs evaluating null constraints and cryptographic formats. |
 | `$/Ama.Enterprise.Licensing.UnitTests/Services/HonorLicenseManagerTests.cs` | Evaluates generic honor checks mapping cryptography bounds. Updated constructor payloads mapping new structural bounds matching the expanded payload fields evaluating assertions. |
-| `$/Ama.Enterprise.Licensing/Ama.Enterprise.Licensing.csproj` | Added target framework conditions to reference `10.0.0` `Microsoft.Extensions.Hosting.Abstractions` on `net10.0` and `11.0.0` on `net11.0`. |
+| `$/Ama.Enterprise.Licensing/Ama.Enterprise.Licensing.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.Licensing/Extensions/ServiceCollectionExtensions.cs` | Redesigned configuration pipeline splitting Open Source and Enterprise declarations into distinct APIs. Applied `[UnsupportedOSPlatform("browser")]` to the Enterprise configuration to enforce compile-time compiler warnings/errors on Blazor WebAssembly. |
 | `$/Ama.Enterprise.Licensing/Models/DeclaredLicenseType.cs` | Enum defining user choices for license declaration (OpenSource, Enterprise, Unknown). |
 | `$/Ama.Enterprise.Licensing/Models/LicenseOptions.cs` | Configuration structure holding license strings and extended options. Adjusted `DeclaredLicenseType` to utilize an internal set preventing external bypasses to the DI assignment bounds. |
@@ -226,23 +226,23 @@
 | `$/Ama.Enterprise.Licensing/Services/ILicenseManager.cs` | Interface separating generic honor-based logic capabilities avoiding tightly coupled bounds. Added explicit getters matching the expanded structured bounds. |
 | `$/Ama.Enterprise.Licensing/Services/LicenseStartupService.cs` | Starts up evaluations executing internal generic licensing checks. |
 | `$/Ama.Enterprise.Licensing/ama-license.cer` | No description provided. |
-| `$/Ama.Enterprise.Monitoring.Cli/Ama.Enterprise.Monitoring.Cli.csproj` | Added target framework conditions for `Microsoft.Extensions.Configuration` and `Microsoft.Extensions.Configuration.CommandLine` across `net10.0` and `net11.0`. |
+| `$/Ama.Enterprise.Monitoring.Cli/Ama.Enterprise.Monitoring.Cli.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.Monitoring.Cli/Program.cs` | Refactored internal architecture mapping UI generation explicitly bounded to modular distinct generic boundaries decoupled from program setups traversing dependencies explicitly. |
 | `$/Ama.Enterprise.Monitoring.Cli/Services/IUserInterfaceOrchestrator.cs` | Contract decoupling terminal GUI orchestrations avoiding inline Program allocations and generic boundaries. |
 | `$/Ama.Enterprise.Monitoring.Cli/Services/UserInterfaceOrchestrator.cs` | Implements CLI user interface initializations managing standard generic window layouts. |
 | `$/Ama.Enterprise.Monitoring.Cli/UI/CommandPane.cs` | Terminal UI frame evaluating input controls decoupling internal commands traversing text inputs. |
 | `$/Ama.Enterprise.Monitoring.Cli/UI/DashboardPane.cs` | Terminal UI frame managing the dashboards generic bounds. |
 | `$/Ama.Enterprise.Monitoring.Cli/UI/MainWindow.cs` | Standard application main layout structure binding command inputs. |
-| `$/Ama.Enterprise.Monitoring/Ama.Enterprise.Monitoring.csproj` | No description provided. |
+| `$/Ama.Enterprise.Monitoring/Ama.Enterprise.Monitoring.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.Monitoring/Constants.cs` | Global constants for the monitoring module, defining default identifiers. |
 | `$/Ama.Enterprise.Monitoring/Extensions/ServiceCollectionExtensions.cs` | Updated `AddMonitoringMesh` builder transparently executing explicit internal MessagePack pipeline executions mapping injected DI delegations decoupled. |
 | `$/Ama.Enterprise.Monitoring/Models/MonitoringOptions.cs` | Added explicit decoupled properties `UseBinarySerialization` and `ConfigureBinarySerialization` exposing format orchestration hooks directly within the monitoring DI bounds. |
 | `$/Ama.Enterprise.Monitoring/Services/WebRtcMonitoringBootstrapper.cs` | Background hosted service managing automatic out-of-band WebRTC signaling connections discovering a central monitoring aggregator node. |
-| `$/Ama.Enterprise.P2p.AspNetCore.IntegrationTests/Ama.Enterprise.P2p.AspNetCore.IntegrationTests.csproj` | Redirected shared tests project reference pointing to renamed `Ama.Enterprise.Project.Tests.Common`. |
+| `$/Ama.Enterprise.P2p.AspNetCore.IntegrationTests/Ama.Enterprise.P2p.AspNetCore.IntegrationTests.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.P2p.AspNetCore.IntegrationTests/Services/AspNetCorePeerDiscoveryIntegrationTests.cs` | Updated integration test mapping evaluating `TargetHost`, `TargetPort`, and `TargetUseHttps` decoupling dynamically built `UriBuilder` HTTP routing, bypassing string concatenation vulnerabilities. |
 | `$/Ama.Enterprise.P2p.AspNetCore.IntegrationTests/Services/AspNetCorePeerHandshakeIntegrationTests.cs` | Refactored integration tests verifying the decoupled ASP.NET Core Standalone peer handshaker discovering topologies. |
 | `$/Ama.Enterprise.P2p.AspNetCore.IntegrationTests/Services/AspNetCoreTransportIntegrationTests.cs` | Upgraded end-to-end multi-mesh generic routing tests evaluating ASP.NET Core and Standalone structures. |
-| `$/Ama.Enterprise.P2p.AspNetCore/Ama.Enterprise.P2p.AspNetCore.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
+| `$/Ama.Enterprise.P2p.AspNetCore/Ama.Enterprise.P2p.AspNetCore.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.P2p.AspNetCore/Extensions/AspNetCoreDiscoveryServiceCollectionExtensions.cs` | Updated DI registrations to inject `IPeerRegistry` and `IFailureDetector` dependencies into the `AspNetCorePeerHandshaker` bounds. |
 | `$/Ama.Enterprise.P2p.AspNetCore/Extensions/EndpointRouteBuilderExtensions.cs` | Refactored ASP.NET Core endpoint routing to use `RequestDelegate` handlers extracting routing context, resolving AOT serialization and trimming warnings. |
 | `$/Ama.Enterprise.P2p.AspNetCore/Extensions/ServiceCollectionExtensions.cs` | Removed implicit `IsEnabled` assignments mapping abstract generic pipeline dependencies. |
@@ -272,13 +272,13 @@
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/UdpNetworkIntegrationTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/UdpPeerDiscoveryIntegrationTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/WireEncryptionIntegrationTests.cs` | Integration tests validating End-to-End (E2E) AES-GCM data-in-transit wire encryption logic mapping dynamically without topology drops across shared network configurations. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Ama.Enterprise.P2p.IntegrationTests.csproj` | Redirected shared tests project reference pointing to renamed `Ama.Enterprise.Project.Tests.Common`. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Ama.Enterprise.P2p.IntegrationTests.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Architecture/VersioningArchitectureTests.cs` | Architectural tests that parse the CI/CD deployment files ensuring specific deployed versions possess test coverage. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Discovery/DnsPeerDiscoveryIntegrationTests.cs` | Integration tests verifying DNS peer discovery resolves target domains and dispatches Phase 2 handshakes against discovered IPs. |
-| `$/Ama.Enterprise.P2p.Mqtt.IntegrationTests/Ama.Enterprise.P2p.Mqtt.IntegrationTests.csproj` | Redirected shared tests project reference pointing to renamed `Ama.Enterprise.Project.Tests.Common`. |
+| `$/Ama.Enterprise.P2p.Mqtt.IntegrationTests/Ama.Enterprise.P2p.Mqtt.IntegrationTests.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.P2p.Mqtt.IntegrationTests/Services/MqttPeerDiscoveryIntegrationTests.cs` | Integration tests verifying MQTT peer discovery mapping decoupled multi-mesh architectures. Migrated to use `TcpTransport` and `TcpPeerEndpoint` dropping obsolete HTTP transport bindings. |
 | `$/Ama.Enterprise.P2p.Mqtt.IntegrationTests/Services/MqttTransportIntegrationTests.cs` | Integration tests verifying end-to-end MQTT transport functionality evaluating isolated inbound subscriptions. |
-| `$/Ama.Enterprise.P2p.Mqtt/Ama.Enterprise.P2p.Mqtt.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
+| `$/Ama.Enterprise.P2p.Mqtt/Ama.Enterprise.P2p.Mqtt.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.P2p.Mqtt/Extensions/MqttDiscoveryServiceCollectionExtensions.cs` | Updated DI registrations to inject `IPeerRegistry` and `IFailureDetector` dependencies natively into the `MqttPeerHandshaker` bounds. |
 | `$/Ama.Enterprise.P2p.Mqtt/Extensions/ServiceCollectionExtensions.cs` | Extracted MQTT JSON AOT polymorphic registrations into a reusable idempotent block tracking distinct bounds, ensuring generic network initializations. |
 | `$/Ama.Enterprise.P2p.Mqtt/Models/MqttDiscoveryJsonContext.cs` | JSON serialization context for Phase 1 and Phase 2 generic discovery primitives in MQTT. |
@@ -296,13 +296,13 @@
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttClientManager.cs` | Updated to isolate topic subscriptions and client connection IDs by injecting the `meshId`, preventing cross-mesh broker collisions. |
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransport.cs` | Integrated unified format mapping encrypting outgoing structural streams. |
 | `$/Ama.Enterprise.P2p.Mqtt/Services/MqttTransportListener.cs` | Extracted the deserialization bridging directly via generic decoders handling incoming payloads. |
-| `$/Ama.Enterprise.P2p.Telemetry.Cli/Ama.Enterprise.P2p.Telemetry.Cli.csproj` | Updated analyzer generic tracking linking to the renamed `Ama.Enterprise.CRDT.MessagePack.SourceGenerators` bounds. |
+| `$/Ama.Enterprise.P2p.Telemetry.Cli/Ama.Enterprise.P2p.Telemetry.Cli.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.P2p.Telemetry.Cli/Program.cs` | Refactored internal architecture replacing `Spectre.Console` bounds with `Terminal.Gui` structural mappings. Addressed UI framerate stuttering by shifting string building and data sorting to background threads avoiding blocking UI capabilities, while standardizing single-assignment `IList<string>` data sources circumventing layout recalculation storms present in `ObservableCollection`. Enforced standard coding practices removing prefixed fields, introducing null guard checks, and utilizing interfaces. |
-| `$/Ama.Enterprise.P2p.Telemetry.IntegrationTests/Ama.Enterprise.P2p.Telemetry.IntegrationTests.csproj` | Redirected shared tests project reference pointing to renamed `Ama.Enterprise.Project.Tests.Common`. |
+| `$/Ama.Enterprise.P2p.Telemetry.IntegrationTests/Ama.Enterprise.P2p.Telemetry.IntegrationTests.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.P2p.Telemetry.IntegrationTests/Services/TelemetryNetworkIntegrationTests.cs` | Updated to test custom meter boundaries by asserting on custom metric scopes configurations. |
-| `$/Ama.Enterprise.P2p.Telemetry.UnitTests/Ama.Enterprise.P2p.Telemetry.UnitTests.csproj` | Unit tests project for validating P2P telemetry aggregations and metric extrapolation behaviors tracking .NET 10 time boundaries. |
+| `$/Ama.Enterprise.P2p.Telemetry.UnitTests/Ama.Enterprise.P2p.Telemetry.UnitTests.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.P2p.Telemetry.UnitTests/Services/ClusterMetricsAggregatorTests.cs` | Unit tests validating the `ClusterMetricsAggregator` tracking time series histories calculating deltas avoiding logic errors. Appended verification bounds securing standard behavior mappings across Histograms, UpDownCounters, and monotonic metric bounds. |
-| `$/Ama.Enterprise.P2p.Telemetry/Ama.Enterprise.P2p.Telemetry.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
+| `$/Ama.Enterprise.P2p.Telemetry/Ama.Enterprise.P2p.Telemetry.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.P2p.Telemetry/Constants.cs` | Defines the core meter names evaluated by the telemetry network listeners isolating generic algorithms. |
 | `$/Ama.Enterprise.P2p.Telemetry/Extensions/ServiceCollectionExtensions.cs` | Updated DI to map singletons for the `TelemetryPushProtocol` ensuring generic instance isolation matching background network hooks. |
 | `$/Ama.Enterprise.P2p.Telemetry/Models/ClusterMetricAggregation.cs` | Data structure representing the computed aggregated statistics for a specific metric across a cluster of nodes. |
@@ -318,14 +318,14 @@
 | `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryForwarderService.cs` | Prepended the fixed `MagicHeader` bytes to outgoing metric broadcasts ensuring compatibility with the fast-path telemetry boundary evaluation mechanism. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryPayloadHandler.cs` | Implemented binary header slicing, evaluating payloads for magic bytes and dropping unknown streams, bypassing heavy `MessagePackSerializationException` CPU spikes. |
 | `$/Ama.Enterprise.P2p.Telemetry/Services/TelemetryPushAlgorithm.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p.UnitTests/Ama.Enterprise.P2p.UnitTests.csproj` | No description provided. |
+| `$/Ama.Enterprise.P2p.UnitTests/Ama.Enterprise.P2p.UnitTests.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.P2p.UnitTests/Services/Core/InMemoryPeerRegistryTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.UnitTests/Services/Core/MessageDispatcherTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.UnitTests/Services/Core/RandomPeerSelectorTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.UnitTests/Services/Core/TimeBasedFailureDetectorTests.cs` | No description provided. |
-| `$/Ama.Enterprise.P2p.WebRTC.AspNetCore.IntegrationTests/Ama.Enterprise.P2p.WebRTC.AspNetCore.IntegrationTests.csproj` | Redirected shared tests project reference pointing to renamed `Ama.Enterprise.Project.Tests.Common`. |
+| `$/Ama.Enterprise.P2p.WebRTC.AspNetCore.IntegrationTests/Ama.Enterprise.P2p.WebRTC.AspNetCore.IntegrationTests.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.P2p.WebRTC.AspNetCore.IntegrationTests/Services/WebRtcSignalingIntegrationTests.cs` | Extended integration coverage to assess strict ASP.NET Core WSS (Secure WebSockets) Standalone and Integrated HTTPS WebRTC out-of-band signaling negotiation tracking local X.509 definitions and avoiding handshake drops. |
-| `$/Ama.Enterprise.P2p.WebRTC.AspNetCore/Ama.Enterprise.P2p.WebRTC.AspNetCore.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
+| `$/Ama.Enterprise.P2p.WebRTC.AspNetCore/Ama.Enterprise.P2p.WebRTC.AspNetCore.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.P2p.WebRTC.AspNetCore/Extensions/EndpointRouteBuilderExtensions.cs` | Maps inbound WebRTC signaling endpoints managing WebSocket isolated handshakes negotiating SDP descriptors, reading route prefixes directly from injected settings. |
 | `$/Ama.Enterprise.P2p.WebRTC.AspNetCore/Extensions/ServiceCollectionExtensions.cs` | Updated the dependency injection setup matching the newly integrated zero-trust dependencies (`IPeerAuthenticator`, `P2pNodeOptions`, `PeerEndpoint`, `IFailureDetector`) securing ASP.NET Core WebRTC components explicitly. |
 | `$/Ama.Enterprise.P2p.WebRTC.AspNetCore/Models/WebRtcSignalingAction.cs` | Added `AuthRequest` and `AuthResponse` protocol actions orchestrating strict zero-trust explicit out-of-band WebSockets signaling. |
@@ -336,9 +336,9 @@
 | `$/Ama.Enterprise.P2p.WebRTC.AspNetCore/Services/WebRtcSignalingClient.cs` | Injected local `AuthRequest` mappings prior to signaling bounds, returning dynamic remote configurations. |
 | `$/Ama.Enterprise.P2p.WebRTC.AspNetCore/Services/WebRtcSignalingServer.cs` | Bound zero-trust evaluations mapping incoming `AuthRequest`, tracking client `PeerId` and dropping disconnected `ConnectionId` references. |
 | `$/Ama.Enterprise.P2p.WebRTC.AspNetCore/Services/WebRtcSignalingWsHelper.cs` | Internal helper wrapping WebSockets bounds isolating generic out-of-band envelope negotiations. |
-| `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling.IntegrationTests/Ama.Enterprise.P2p.WebRTC.DistributedSignaling.IntegrationTests.csproj` | No description provided. |
+| `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling.IntegrationTests/Ama.Enterprise.P2p.WebRTC.DistributedSignaling.IntegrationTests.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling.IntegrationTests/Services/WebRtcDistributedSignalingIntegrationTests.cs` | Replaced `AddDistributedCrdtP2p` with `AddDistributedCrdtReplica(replicaId, meshId)`. |
-| `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Ama.Enterprise.P2p.WebRTC.DistributedSignaling.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
+| `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Ama.Enterprise.P2p.WebRTC.DistributedSignaling.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Constants.cs` | Defines global constants such as document type aliases and default IDs for the WebRTC CRDT distributed signaling components. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Extensions/EndpointRouteBuilderExtensions.cs` | Refactored routes to require `replicaId` mapping distinct localized `ICrdtSignalingManager` from `DistributedCrdtScopeManager`, bypassing global mesh boundaries. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Extensions/ServiceCollectionExtensions.cs` | Updated WebRTC Distributed Signaling DI pipeline replacing global singleton tracking with `AddDistributedCrdtService`, scoping the manager to local CRDT replica bounds, bypassing multi-mesh overlap limits. |
@@ -351,9 +351,9 @@
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Services/IWebRtcSignalingOrchestrator.cs` | Appended `replicaId` tracking executing constraints alongside `meshId` tracking bounds matching local CRDT generic orchestrations. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Services/WebRtcDistributedSignalingClient.cs` | Updated HTTP signaling boundaries executing `replicaId` targeted bounds tracking multi-replica architectural routes avoiding unstructured multi-mesh amnesia limits. |
 | `$/Ama.Enterprise.P2p.WebRTC.DistributedSignaling/Services/WebRtcSignalingOrchestrator.cs` | Updated `replicaId` injection scoping active background multi-party synchronization evaluations against multi-mesh tracking states targeting explicit bounds. |
-| `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Ama.Enterprise.P2p.WebRTC.IntegrationTests.csproj` | Redirected shared tests project reference pointing to renamed `Ama.Enterprise.Project.Tests.Common`. |
+| `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Ama.Enterprise.P2p.WebRTC.IntegrationTests.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.P2p.WebRTC.IntegrationTests/Services/WebRtcTransportIntegrationTests.cs` | Updated `TestMessage` implementing the newly enforced `ProtocolVersion` satisfying `IMeshMessage`. |
-| `$/Ama.Enterprise.P2p.WebRTC/Ama.Enterprise.P2p.WebRTC.csproj` | Updated to include and pack the solution-level README.md file as standard NuGet documentation resolving the `NU5046` package warning. |
+| `$/Ama.Enterprise.P2p.WebRTC/Ama.Enterprise.P2p.WebRTC.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.P2p.WebRTC/Extensions/ServiceCollectionExtensions.cs` | WebRTC dependency injection pipeline overriding standard time-based failure detectors, replacing them with isolated `WebRtcFailureDetector` tracking. |
 | `$/Ama.Enterprise.P2p.WebRTC/Models/WebRtcHandshakeMessage.cs` | In-band signaling structure notifying local identity topologies through initialized WebRTC channels. |
 | `$/Ama.Enterprise.P2p.WebRTC/Models/WebRtcInvitationAnswer.cs` | DTO representing a WebRTC invitation answer containing the connection identifier and the SDP answer string. |
@@ -367,7 +367,7 @@
 | `$/Ama.Enterprise.P2p.WebRTC/Services/WebRtcFailureDetector.cs` | A dedicated implementation of `IFailureDetector` for WebRTC bypassing standard protocol heartbeats and evaluating exact local connection data channel presence. |
 | `$/Ama.Enterprise.P2p.WebRTC/Services/WebRtcTransport.cs` | Delegated polymorphic bounding directly to internal encoder mapping for handling data. |
 | `$/Ama.Enterprise.P2p.WebRTC/Services/WebRtcTransportListener.cs` | Transformed evaluation pipeline mapping directly generic structural decryption. |
-| `$/Ama.Enterprise.P2p/Ama.Enterprise.P2p.csproj` | Added target framework conditions to reference `10.0.0` `Microsoft.Extensions.Http` on `net10.0` and `11.0.0` on `net11.0`. |
+| `$/Ama.Enterprise.P2p/Ama.Enterprise.P2p.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.P2p/Constants.cs` | Global constants for the P2P module, including protocol versions and payload size limits. |
 | `$/Ama.Enterprise.P2p/Extensions/CertificateAuthenticatorServiceCollectionExtensions.cs` | Pooled `meshId` and registration keys via `CrdtStringPool.Shared`. |
 | `$/Ama.Enterprise.P2p/Extensions/DnsDiscoveryServiceCollectionExtensions.cs` | Pooled `meshId` and keyed service identifiers via `CrdtStringPool.Shared`. |
@@ -464,21 +464,21 @@
 | `$/Ama.Enterprise.P2p/Services/Transports/TcpTransportListener.cs` | Passed the rented buffer slice directly as `ReadOnlySpan<byte>` to `IMeshWireEncoder.Decode` and pooled the 4-byte length buffer. |
 | `$/Ama.Enterprise.P2p/Services/Transports/UdpTransport.cs` | Bounded data-in-transit payloads traversing network streams through explicit generic structured formatting. |
 | `$/Ama.Enterprise.P2p/Services/Transports/UdpTransportListener.cs` | Overhauled byte extraction evaluating mapped decryptions via injected structural `IMeshWireEncoder` dependencies. |
-| `$/Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj` | No description provided. |
+| `$/Ama.Enterprise.Project.Analyzers.UnitTests/Ama.Enterprise.Project.Analyzers.UnitTests.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/DirectSerializationUsageAnalyzerTests.cs` | Unit tests for `DirectSerializationUsageAnalyzer` to ensure diagnostics are reported for `System.Text.Json` usages and ignored for correct generic interfaces. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/JsonSerializableExtensiblePayloadAnalyzerTests.cs` | Unit tests evaluating diagnostic scenarios verifying constraints validating generic enumerations, nested custom list structures, explicit system exclusions, and strictly tracked options bounds avoiding validation storms. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/PropertyInfoUsageAnalyzerTests.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/SystemConvertUsageAnalyzerTests.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/TaskDelayWithoutOptionsAnalyzerTests.cs` | Added explicit test cases verifying the correct analyzer behavior for dynamic configuration variables used alongside `TimeSpan` structural factories. Adjusted test assertions to accurately expect `DiagnosticSeverity.Error` to align with configured rule. |
 | `$/Ama.Enterprise.Project.Analyzers.UnitTests/ThreadSleepUsageAnalyzerTests.cs` | Unit tests evaluating diagnostic evaluation scenarios for `ThreadSleepUsageAnalyzer`. |
-| `$/Ama.Enterprise.Project.Analyzers/Ama.Enterprise.Project.Analyzers.csproj` | No description provided. |
+| `$/Ama.Enterprise.Project.Analyzers/Ama.Enterprise.Project.Analyzers.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.Project.Analyzers/DirectSerializationUsageAnalyzer.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers/JsonSerializableExtensiblePayloadAnalyzer.cs` | Roslyn diagnostic analyzer enforcing that all models injected into P2P `JsonSerializerContext` classes correctly implement the `IExtensibleDistributedPayload` interface, identifying options structures erroneously injected into AOT mapping arrays explicitly. |
 | `$/Ama.Enterprise.Project.Analyzers/PropertyInfoUsageAnalyzer.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers/SystemConvertUsageAnalyzer.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Analyzers/TaskDelayWithoutOptionsAnalyzer.cs` | Fixed a bug where `TimeSpan` static methods (like `FromSeconds`) parameterized with dynamically bound variables (e.g. nested calls like `Math.Max` acting on options) were incorrectly flagged as hardcoded constants. |
 | `$/Ama.Enterprise.Project.Analyzers/ThreadSleepUsageAnalyzer.cs` | Roslyn diagnostic analyzer enforcing the prohibition of synchronous `Thread.Sleep` invocations to prevent thread starvation and poor asynchronous performance. |
-| `$/Ama.Enterprise.Project.Tests.Common/Ama.Enterprise.Project.Tests.Common.csproj` | No description provided. |
+| `$/Ama.Enterprise.Project.Tests.Common/Ama.Enterprise.Project.Tests.Common.csproj` | Added `<Features>runtime-async=on</Features>`. |
 | `$/Ama.Enterprise.Project.Tests.Common/Attributes/IntegrationFactAttribute.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Tests.Common/Attributes/TestedProtocolVersionAttribute.cs` | No description provided. |
 | `$/Ama.Enterprise.Project.Tests.Common/Extensions/XunitLoggingBuilderExtensions.cs` | No description provided. |

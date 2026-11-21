@@ -9,6 +9,7 @@
 		<InvariantGlobalization>true</InvariantGlobalization>
 		<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
 		<IsAotCompatible>true</IsAotCompatible>
+		<Features>runtime-async=on</Features>
 	</PropertyGroup>
 
 	<!-- NuGet Packaging & .NET Tool configuration -->

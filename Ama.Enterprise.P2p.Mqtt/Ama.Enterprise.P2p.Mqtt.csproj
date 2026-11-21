@@ -6,6 +6,7 @@
 		<Nullable>enable</Nullable>
 		<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
 		<IsAotCompatible>true</IsAotCompatible>
+		<Features>runtime-async=on</Features>
 	</PropertyGroup>
 
 	<PropertyGroup>
