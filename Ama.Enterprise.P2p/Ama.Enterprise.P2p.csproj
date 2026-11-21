@@ -36,15 +36,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Ama.CRDT" Version="5.0.0" />
-	</ItemGroup>
-
-	<ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
-		<PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />
-	</ItemGroup>
-
-	<ItemGroup Condition="'$(TargetFramework)' == 'net11.0'">
-		<PackageReference Include="Microsoft.Extensions.Http" Version="11.0.0" />
+		<PackageReference Include="Ama.CRDT" Version="5.0.261121" />
 	</ItemGroup>
 
 	<ItemGroup>
