@@ -100,11 +100,11 @@ public static class Program
             options.MaintenanceIntervalSeconds = 5 * 60;
             options.CompactionTtlSeconds = 5 * 60;
             options.ShardReplicationFactor = 2;
-            //options.EnableSharding = true;
-            //options.JournalMode = CrdtJournalMode.InMemoryBuffer;
-            //options.WalChannelCapacity = 100000;
-            //options.WalMaxBatchSize = 10000;
-            //options.WalDirectoryPath = AppContext.BaseDirectory;
+            options.EnableSharding = true;
+            options.JournalMode = CrdtJournalMode.InMemoryBuffer;
+            options.WalChannelCapacity = 100000;
+            options.WalMaxBatchSize = 10000;
+            options.WalDirectoryPath = AppContext.BaseDirectory;
         });
 
         // Register the showcase JSON AOT and CRDT AOT contexts directly into the generic CRDT pipeline
@@ -114,7 +114,7 @@ public static class Program
                 .AddCrdtSerializableType<TaskItem>("task-item")
                 .AddCrdtSerializableType<DeviceStatus>("device-status")
                 .AddCrdtSystemTextJson(useBrotliCompression: true)
-                ; //.AddCrdtShardIdProvider<ShowCaseShardIdProvider>();
+                .AddCrdtShardIdProvider<ShowCaseShardIdProvider>();
 
         services.AddCrdtMessagePack(
             MessagePack.Resolvers.Ama_Enterprise_CRDT_MessagePack_MessagePackResolver.Instance,

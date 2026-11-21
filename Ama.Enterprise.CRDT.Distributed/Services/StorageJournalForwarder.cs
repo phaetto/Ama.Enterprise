@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Ama.CRDT.Models;
 using Ama.CRDT.Services;
 using Ama.CRDT.Services.Journaling;
+using Ama.CRDT.Services.Versioning;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -393,6 +394,8 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         var replicaContext = this.serviceProvider.GetRequiredService<ReplicaContext>();
         var versionVectorManager = this.serviceProvider.GetRequiredService<IShardVersionVectorManager>();
         var orchestrator = this.serviceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var clusterTracker = this.serviceProvider.GetService<IClusterStateTracker>();
+        var syncService = this.serviceProvider.GetService<IVersionVectorSyncService>();
         
         var documents = orchestrator.GetActiveDocuments();
         var safelyPersistedMap = versionVectorManager.GetFullSnapshot();
@@ -416,14 +419,49 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
 
         await this.storage.SaveShardVersionVectorMapAsync(replicaContext.ReplicaId, safelyPersistedMap, cancellationToken).ConfigureAwait(false);
 
+        var clusterStates = clusterTracker?.GetClusterStates();
+        var countBeforeUpdate = Volatile.Read(ref this.estimatedJournalCount);
+        var hardThreshold = this.options.Value.JournalHardTrimThreshold;
+        var isHardEmergency = hardThreshold > 0 && countBeforeUpdate >= hardThreshold;
+
         long remainingCount = 0;
         foreach (var shardKvp in safelyPersistedMap)
         {
-            await this.storage.TrimAsync(shardKvp.Key, shardKvp.Value.Versions.AsReadOnly(), cancellationToken).ConfigureAwait(false);
-            remainingCount += await this.storage.GetJournalCountAsync(shardKvp.Key, cancellationToken).ConfigureAwait(false);
+            IReadOnlyDictionary<string, long> trimVector = shardKvp.Value.Versions.AsReadOnly();
+
+            // Prefer trimming up to the Cluster Global Minimum Version Vector (GMVV) when peers are known
+            // so lagging peers can still catch up via journaled patches instead of triggering full snapshot storms.
+            if (clusterStates != null && clusterStates.Count > 0 && syncService != null)
+            {
+                var shardVectors = new List<DottedVersionVector>(clusterStates.Count + 1) { shardKvp.Value };
+                for (int i = 0; i < clusterStates.Count; i++)
+                {
+                    if (clusterStates[i].TryGetValue(shardKvp.Key, out var peerDvv))
+                    {
+                        shardVectors.Add(peerDvv);
+                    }
+                }
+
+                if (shardVectors.Count > 1)
+                {
+                    trimVector = syncService.CalculateGlobalMinimumVersionVector(shardVectors);
+                }
+            }
+
+            await this.storage.TrimAsync(shardKvp.Key, trimVector, cancellationToken).ConfigureAwait(false);
+            var shardJournalCount = await this.storage.GetJournalCountAsync(shardKvp.Key, cancellationToken).ConfigureAwait(false);
+
+            // If we hit the hard threshold and lagging peers prevented GMVV from freeing sufficient journal space,
+            // fall back to trimming up to the local checkpointed version vector to protect node memory/storage bounds.
+            if (isHardEmergency && shardJournalCount >= hardThreshold)
+            {
+                await this.storage.TrimAsync(shardKvp.Key, shardKvp.Value.Versions.AsReadOnly(), cancellationToken).ConfigureAwait(false);
+                shardJournalCount = await this.storage.GetJournalCountAsync(shardKvp.Key, cancellationToken).ConfigureAwait(false);
+            }
+
+            remainingCount += shardJournalCount;
         }
 
-        var countBeforeUpdate = Volatile.Read(ref this.estimatedJournalCount);
         Interlocked.Exchange(ref this.estimatedJournalCount, remainingCount);
         
         this.aggressiveTrimsCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));

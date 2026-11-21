@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services.P2p;
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
 using System.Linq;
@@ -37,6 +38,10 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
     private readonly Counter<long> rpcRequestsProcessedCounter;
     private readonly Counter<long> stateSyncsProcessedCounter;
     private readonly Counter<long> patchesProcessedCounter;
+
+    private readonly ConcurrentDictionary<(string PeerReplicaId, string ShardId), SnapshotDispatchState> recentSnapshotDispatches = new();
+
+    private readonly record struct SnapshotDispatchState(long DispatchedAtTicks, DottedVersionVector DispatchedDvv);
 
     public CrdtP2pPayloadHandler(
         string replicaId,
@@ -446,8 +451,57 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
 
             if (shardsRequiringSnapshot.Count > 0)
             {
+                var nowTicks = Environment.TickCount64;
+                var options = scope.ServiceProvider.GetService<Microsoft.Extensions.Options.IOptions<DistributedCrdtOptions>>()?.Value;
+                var cooldownMs = Math.Max(2000L, (options?.AntiEntropyStartupIntervalSeconds ?? 2) * 2000L);
+
+                shardsRequiringSnapshot.RemoveWhere(shardId =>
+                {
+                    var key = (syncMsg.ReplicaId, shardId);
+                    if (!recentSnapshotDispatches.TryGetValue(key, out var prevDispatch))
+                    {
+                        return false;
+                    }
+
+                    if (nowTicks - prevDispatch.DispatchedAtTicks >= cooldownMs)
+                    {
+                        return false;
+                    }
+
+                    if (!safeLocalState.TryGetValue(shardId, out var currentLocalDvv))
+                    {
+                        return true;
+                    }
+
+                    // Suppress redundant snapshot re-sends within the cooldown window if our local shard DVV
+                    // has not advanced beyond the snapshot DVV we already just sent to this peer.
+                    var deltaReq = syncService.CalculateRequirement(
+                        syncMsg.ReplicaId,
+                        prevDispatch.DispatchedDvv,
+                        replicaContext.ReplicaId,
+                        currentLocalDvv,
+                        shardId);
+
+                    return !deltaReq.IsBehind;
+                });
+            }
+
+            if (shardsRequiringSnapshot.Count > 0)
+            {
                 logger.LogWarning("[{ReplicaId}] Journal missing or trimmed for {ShardCount} shard(s). Sending full snapshots for affected shards.", replicaContext.ReplicaId, shardsRequiringSnapshot.Count);
                 var sentSnapshots = new HashSet<string>(StringComparer.Ordinal);
+                var dispatchedShardState = new ShardVersionVectorMap();
+                var dispatchTimestamp = Environment.TickCount64;
+
+                foreach (var shardId in shardsRequiringSnapshot)
+                {
+                    if (safeLocalState.TryGetValue(shardId, out var localShardDvv))
+                    {
+                        dispatchedShardState[shardId] = localShardDvv;
+                        recentSnapshotDispatches[(syncMsg.ReplicaId, shardId)] = new SnapshotDispatchState(dispatchTimestamp, localShardDvv);
+                    }
+                }
+
                 foreach (var targetDoc in documents)
                 {
                     if (shardsRequiringSnapshot.Contains(targetDoc.ShardId))
@@ -478,6 +532,18 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                         sentSnapshots.Add(compositeKey);
                         await scope.Orchestrator.ProvideSnapshotAsync(entry.DocumentId, entry.TypeAlias, syncMsg.ReplicaId, senderId, cancellationToken).ConfigureAwait(false);
                     }
+                }
+
+                if (dispatchedShardState.Count > 0)
+                {
+                    var latestSnapshotState = await versionVectorManager.GetShardsSnapshotAsync(shardsRequiringSnapshot, cancellationToken).ConfigureAwait(false);
+                    foreach (var kvp in latestSnapshotState)
+                    {
+                        dispatchedShardState[kvp.Key] = kvp.Value;
+                        recentSnapshotDispatches[(syncMsg.ReplicaId, kvp.Key)] = new SnapshotDispatchState(Environment.TickCount64, kvp.Value);
+                    }
+
+                    scope.ClusterTracker.UpdatePeerState(syncMsg.ReplicaId, senderId.Value.ToString(), dispatchedShardState);
                 }
             }
 

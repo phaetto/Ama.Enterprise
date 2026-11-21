@@ -243,6 +243,9 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         {
             if (!docMap.ContainsKey(activeDocId))
             {
+                // Always advance at least to the incoming DVV so partial or single-document snapshots
+                // within a multi-document shard never leave the receiver's shard DVV stalled at zero.
+                MergeDvvIntoShard(shardId, clonedIncoming);
                 return;
             }
         }
@@ -259,7 +262,8 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         if (dvvList.Count == activeShardDocumentIds.Count)
         {
             var gmvv = syncService.CalculateGlobalMinimumVersionVector(dvvList);
-            var safeFloorDvv = new DottedVersionVector(new Dictionary<string, long>(gmvv), new Dictionary<string, ISet<long>>());
+            var mergedDots = IntersectSnapshotDots(dvvList, gmvv, stringPool);
+            var safeFloorDvv = new DottedVersionVector(new Dictionary<string, long>(gmvv), mergedDots);
             MergeDvvIntoShard(shardId, safeFloorDvv);
             docMap.Clear();
         }
@@ -446,5 +450,77 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         }
 
         return new DottedVersionVector(copiedVersions, copiedDots);
+    }
+
+    private static IDictionary<string, ISet<long>> IntersectSnapshotDots(
+        IReadOnlyList<DottedVersionVector> dvvList,
+        IReadOnlyDictionary<string, long> gmvv,
+        ICrdtStringPool stringPool)
+    {
+        var result = new Dictionary<string, ISet<long>>(StringComparer.Ordinal);
+        if (dvvList.Count == 0)
+        {
+            return result;
+        }
+
+        var allReplicasWithDots = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < dvvList.Count; i++)
+        {
+            var dots = dvvList[i].Dots;
+            if (dots != null)
+            {
+                foreach (var replicaId in dots.Keys)
+                {
+                    allReplicasWithDots.Add(replicaId);
+                }
+            }
+        }
+
+        foreach (var replicaId in allReplicasWithDots)
+        {
+            var floorVersion = gmvv.TryGetValue(replicaId, out var fv) ? fv : 0L;
+            HashSet<long>? commonDots = null;
+
+            for (int i = 0; i < dvvList.Count; i++)
+            {
+                var dvv = dvvList[i];
+                var dvvContiguous = dvv.Versions != null && dvv.Versions.TryGetValue(replicaId, out var cv) ? cv : 0L;
+                ISet<long>? dvvReplicaDots = null;
+                dvv.Dots?.TryGetValue(replicaId, out dvvReplicaDots);
+
+                if (i == 0)
+                {
+                    commonDots = new HashSet<long>();
+                    if (dvvReplicaDots != null)
+                    {
+                        foreach (var dot in dvvReplicaDots)
+                        {
+                            if (dot > floorVersion)
+                            {
+                                commonDots.Add(dot);
+                            }
+                        }
+                    }
+
+                    for (long c = floorVersion + 1; c <= dvvContiguous; c++)
+                    {
+                        commonDots.Add(c);
+                    }
+                }
+                else if (commonDots != null && commonDots.Count > 0)
+                {
+                    commonDots.RemoveWhere(dot =>
+                        dot <= floorVersion ||
+                        (dot > dvvContiguous && (dvvReplicaDots == null || !dvvReplicaDots.Contains(dot))));
+                }
+            }
+
+            if (commonDots != null && commonDots.Count > 0)
+            {
+                result[stringPool.GetOrAdd(replicaId)] = commonDots;
+            }
+        }
+
+        return result;
     }
 }

@@ -1145,17 +1145,39 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             else
             {
                 snapshotData = await TryLoadStoredDocumentSnapshotBytesAsync(documentId, typeAlias, cancellationToken).ConfigureAwait(false);
+                var shardId = await TryGetShardIdAsync(documentId, typeAlias, cancellationToken).ConfigureAwait(false);
+
+                if (snapshotData.Length == 0 && !string.IsNullOrWhiteSpace(shardId) && await distributionManager.IsShardLocalAsync(shardId, cancellationToken).ConfigureAwait(false))
+                {
+                    targetDoc = await ResolveOrPromoteLocalDocumentAsync(documentId, typeAlias, cancellationToken).ConfigureAwait(false);
+                    if (targetDoc != null)
+                    {
+                        var snapshotResult = await targetDoc.GetSnapshotDataAsync(cancellationToken).ConfigureAwait(false);
+                        snapshotData = snapshotResult.SnapshotData;
+                        globalState = snapshotResult.GlobalState;
+                        if (string.IsNullOrWhiteSpace(documentTypeAlias))
+                        {
+                            documentTypeAlias = targetDoc.TypeAlias;
+                        }
+                    }
+                    else
+                    {
+                        globalState = new ShardVersionVectorMap();
+                    }
+                }
+                else
+                {
+                    var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
+                    globalState = !string.IsNullOrWhiteSpace(shardId)
+                        ? versionVectorManager.GetShardSnapshot(shardId)
+                        : new ShardVersionVectorMap();
+                }
+
                 if (snapshotData.Length == 0)
                 {
                     logger.LogWarning("Requested snapshot for unknown document {DocumentId} ({TypeAlias}).", documentId, typeAlias);
                     return;
                 }
-
-                var shardId = await TryGetShardIdAsync(documentId, typeAlias, cancellationToken).ConfigureAwait(false);
-                var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
-                globalState = !string.IsNullOrWhiteSpace(shardId)
-                    ? versionVectorManager.GetShardSnapshot(shardId)
-                    : new ShardVersionVectorMap();
             }
 
             var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
