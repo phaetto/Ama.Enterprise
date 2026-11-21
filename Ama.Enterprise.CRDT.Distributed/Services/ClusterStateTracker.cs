@@ -101,8 +101,24 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
                 }
                 topologyChanged = true;
             }
-            
-            peerStates[peerReplicaId] = new PeerStateEntry(globalState, DateTime.UtcNow);
+
+            var mergedState = CloneShardVersionVectorMap(globalState);
+            if (peerStates.TryGetValue(peerReplicaId, out var existingEntry))
+            {
+                foreach (var existingShardKvp in existingEntry.State)
+                {
+                    if (!mergedState.TryGetValue(existingShardKvp.Key, out var incomingDvv))
+                    {
+                        mergedState[existingShardKvp.Key] = CloneDvv(existingShardKvp.Value);
+                    }
+                    else
+                    {
+                        incomingDvv.Merge(existingShardKvp.Value);
+                    }
+                }
+            }
+
+            peerStates[peerReplicaId] = new PeerStateEntry(mergedState, DateTime.UtcNow);
             networkIdToReplicaId[peerId] = peerReplicaId;
         }
 
@@ -429,6 +445,29 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
                 logger.LogError(ex, "An error occurred executing cluster state topology observer explicitly mapped bounding limits cleanly.");
             }
         }
+    }
+
+    private ShardVersionVectorMap CloneShardVersionVectorMap(ShardVersionVectorMap source)
+    {
+        var map = new ShardVersionVectorMap();
+        foreach (var shardKvp in source)
+        {
+            map[stringPool.GetOrAdd(shardKvp.Key)] = CloneDvv(shardKvp.Value);
+        }
+
+        return map;
+    }
+
+    private DottedVersionVector CloneDvv(DottedVersionVector dvv)
+    {
+        var safeVersions = dvv.Versions != null
+            ? dvv.Versions.ToDictionary(v => stringPool.GetOrAdd(v.Key), v => v.Value, StringComparer.Ordinal)
+            : new Dictionary<string, long>(StringComparer.Ordinal);
+        var safeDots = dvv.Dots != null
+            ? dvv.Dots.ToDictionary(d => stringPool.GetOrAdd(d.Key), d => (ISet<long>)new HashSet<long>(d.Value), StringComparer.Ordinal)
+            : new Dictionary<string, ISet<long>>(StringComparer.Ordinal);
+
+        return new DottedVersionVector(safeVersions, safeDots);
     }
 
     private readonly record struct PeerStateEntry : IEquatable<PeerStateEntry>

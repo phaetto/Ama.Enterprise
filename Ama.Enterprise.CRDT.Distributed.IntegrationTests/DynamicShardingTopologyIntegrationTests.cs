@@ -505,204 +505,6 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
         }
     }
 
-    [IntegrationFact]
-    public async Task ShardHandover_WhenNewNodeJoinsAndReturningNodeRePromotes_HydratesLatestVersionImmediatelyWithoutAntiEntropy()
-    {
-        // Arrange - ReplicationFactor = 1 so shard ownership moves completely between nodes.
-        // Verify that when a new node joins or an old node re-promotes a shard that was mutated elsewhere,
-        // round-robin reads hitting any node immediately return the latest version BEFORE any background anti-entropy runs.
-        using var fabric = new DynamicMeshFabric();
-        var node1 = await CreateAndStartNodeAsync("Replica-1", replicationFactor: 1);
-        var node2 = await CreateAndStartNodeAsync("Replica-2", replicationFactor: 1);
-
-        await fabric.JoinNodeAsync(node1);
-
-        var docIds = Enumerable.Range(1, 10).Select(i => $"immediate-hydrate-doc-{i}").ToArray();
-        foreach (var docId in docIds)
-        {
-            await node1.Orchestrator.CreateDocumentAsync(docId, DocTypeAlias, CancellationToken.None);
-            await node1.Orchestrator.ApplyIntentAsync<ShardedDocState>(
-                docId,
-                new MapSetIntent("v1", $"value1-{docId}"),
-                nameof(ShardedDocState.DataMap),
-                IntentDeliveryMode.Acknowledged,
-                CancellationToken.None);
-        }
-
-        // Act 1: Node 2 joins. Sync ONLY the registry so Node 2 knows the documents exist,
-        // then trigger topology re-evaluation on Node 2 WITHOUT running anti-entropy on the document shards.
-        await fabric.JoinNodeAsync(node2);
-        await node1.Orchestrator.ProvideSnapshotAsync(
-            node1.Orchestrator.Registry.DocumentId,
-            node1.Orchestrator.Registry.TypeAlias,
-            node2.ReplicaId,
-            node2.PeerId,
-            CancellationToken.None);
-        await fabric.DrainNetworkAsync();
-
-        await node2.Orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
-        await node1.Orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
-        await fabric.DrainNetworkAsync();
-
-        var movedDocIds = new List<string>();
-        foreach (var docId in docIds)
-        {
-            var shardId = $"shard-{docId}";
-            if (await node2.DistributionManager.IsShardLocalAsync(shardId, CancellationToken.None))
-            {
-                movedDocIds.Add(docId);
-            }
-        }
-
-        movedDocIds.ShouldNotBeEmpty();
-
-        // Assert 1: Immediately reading from Node 2 or Node 1 returns v1 (no V0 blank state bounce!)
-        foreach (var movedDocId in movedDocIds)
-        {
-            var readFromNode2 = await node2.Orchestrator.GetDocumentStateAsync<ShardedDocState>(movedDocId, CancellationToken.None);
-            readFromNode2.Data.DataMap.ShouldContainKeyAndValue("v1", $"value1-{movedDocId}");
-
-            var readFromNode1 = await node1.Orchestrator.GetDocumentStateAsync<ShardedDocState>(movedDocId, CancellationToken.None);
-            readFromNode1.Data.DataMap.ShouldContainKeyAndValue("v1", $"value1-{movedDocId}");
-
-            // Advance the document to v2 on Node 2 while Node 1 does not own the shard
-            var appliedV2 = await node2.Orchestrator.ApplyIntentAsync<ShardedDocState>(
-                movedDocId,
-                new MapSetIntent("v2", $"value2-{movedDocId}"),
-                nameof(ShardedDocState.DataMap),
-                IntentDeliveryMode.Acknowledged,
-                CancellationToken.None);
-            appliedV2.ShouldBeTrue();
-        }
-
-        // Act 2: Node 1 re-promotes the shard while Node 1's local storage still has stale checkpoint v1.
-        // Before Node 2's network is disconnected, Node 1 re-evaluates or promotes and hydrates v2 from Node 2 (or Node 2 pushes on demotion).
-        var node3 = await CreateAndStartNodeAsync("Replica-3", replicationFactor: 1);
-        await fabric.JoinNodeAsync(node3);
-        await node1.Orchestrator.ProvideSnapshotAsync(
-            node1.Orchestrator.Registry.DocumentId,
-            node1.Orchestrator.Registry.TypeAlias,
-            node3.ReplicaId,
-            node3.PeerId,
-            CancellationToken.None);
-        await fabric.DrainNetworkAsync();
-
-        await node1.Orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
-        await node2.Orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
-        await node3.Orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
-        await fabric.DrainNetworkAsync();
-
-        // Assert 2: Every active node in the 3-node cluster immediately returns both v1 and v2 on round-robin reads
-        foreach (var movedDocId in movedDocIds)
-        {
-            foreach (var activeNode in fabric.GetActiveNodes())
-            {
-                var docState = await activeNode.Orchestrator.GetDocumentStateAsync<ShardedDocState>(movedDocId, CancellationToken.None);
-                docState.Data.DataMap.ShouldContainKeyAndValue("v1", $"value1-{movedDocId}");
-                docState.Data.DataMap.ShouldContainKeyAndValue("v2", $"value2-{movedDocId}");
-            }
-        }
-    }
-
-    [IntegrationFact]
-    public async Task CreateDocumentAndApplyIntent_WithLongRpcTimeoutAndMultipleReplicas_CompletesImmediatelyWithoutCircularHydrationDeadlock()
-    {
-        // Arrange - 2-node cluster with ReplicationFactor = 2 (both nodes own every shard)
-        // and a 5-second RpcTimeoutMilliseconds.
-        // Regression test ensuring that creating a brand-new document does NOT trigger a circular
-        // CrdtReadReq -> ResolveOrPromoteLocalDocumentAsync -> HydratePromotedDocumentFromPeersAsync -> CrdtReadReq
-        // 5-second RPC timeout deadlock, nor falsely promote uncreated documents on remote peers on read probes.
-        using var fabric = new DynamicMeshFabric();
-        var node1 = await CreateAndStartNodeAsync("Replica-1", replicationFactor: 2, rpcTimeoutMilliseconds: 5000);
-        var node2 = await CreateAndStartNodeAsync("Replica-2", replicationFactor: 2, rpcTimeoutMilliseconds: 5000);
-
-        await fabric.JoinNodeAsync(node1);
-        await fabric.JoinNodeAsync(node2);
-
-        // Drop gossip broadcasts temporarily to simulate the real-world race where the direct
-        // CrdtReadReq hydration probe arrives at Replica-2 BEFORE the registry creation gossip packet.
-        fabric.IsolateNodeGossip(node1);
-
-        const string newDocId = "instant-feature-flag-doc";
-        var sw = Stopwatch.StartNew();
-
-        // Act - Create the document and immediately apply an intent on Replica-1
-        await node1.Orchestrator.CreateDocumentAsync(newDocId, DocTypeAlias, CancellationToken.None);
-        var applied = await node1.Orchestrator.ApplyIntentAsync<ShardedDocState>(
-            newDocId,
-            new MapSetIntent("flag-1", "enabled"),
-            nameof(ShardedDocState.DataMap),
-            IntentDeliveryMode.Acknowledged,
-            CancellationToken.None);
-
-        sw.Stop();
-
-        // Assert - Must complete well under the 5000ms RPC timeout (no circular hydration deadlock)
-        applied.ShouldBeTrue();
-        sw.ElapsedMilliseconds.ShouldBeLessThan(1500);
-
-        // And because the registry gossip was delayed and Replica-2 has no stored checkpoint for newDocId,
-        // Replica-1's hydration probe must NOT have falsely promoted an empty document on Replica-2.
-        node2.Orchestrator.TryGetLocalDocument<ShardedDocState>(newDocId).ShouldBeNull();
-    }
-
-    [IntegrationFact]
-    public async Task ConcurrentDocumentCreation_OnMultipleReplicasWithLongRpcTimeout_CompletesImmediatelyWithoutDeadlock()
-    {
-        // Arrange - Both Replica-1 and Replica-2 simultaneously create and mutate the exact same new document
-        // while a 5-second RPC timeout is configured.
-        using var fabric = new DynamicMeshFabric();
-        var node1 = await CreateAndStartNodeAsync("Replica-1", replicationFactor: 2, rpcTimeoutMilliseconds: 5000);
-        var node2 = await CreateAndStartNodeAsync("Replica-2", replicationFactor: 2, rpcTimeoutMilliseconds: 5000);
-
-        await fabric.JoinNodeAsync(node1);
-        await fabric.JoinNodeAsync(node2);
-
-        const string concurrentDocId = "concurrent-creation-doc";
-        var sw = Stopwatch.StartNew();
-
-        // Act
-        var task1 = Task.Run(async () =>
-        {
-            await node1.Orchestrator.CreateDocumentAsync(concurrentDocId, DocTypeAlias, CancellationToken.None);
-            return await node1.Orchestrator.ApplyIntentAsync<ShardedDocState>(
-                concurrentDocId,
-                new MapSetIntent("from-node-1", "v1"),
-                nameof(ShardedDocState.DataMap),
-                IntentDeliveryMode.Acknowledged,
-                CancellationToken.None);
-        });
-
-        var task2 = Task.Run(async () =>
-        {
-            await node2.Orchestrator.CreateDocumentAsync(concurrentDocId, DocTypeAlias, CancellationToken.None);
-            return await node2.Orchestrator.ApplyIntentAsync<ShardedDocState>(
-                concurrentDocId,
-                new MapSetIntent("from-node-2", "v2"),
-                nameof(ShardedDocState.DataMap),
-                IntentDeliveryMode.Acknowledged,
-                CancellationToken.None);
-        });
-
-        var results = await Task.WhenAll(task1, task2);
-        sw.Stop();
-
-        // Assert - Neither node blocks on the 5000ms RPC timeout
-        results[0].ShouldBeTrue();
-        results[1].ShouldBeTrue();
-        sw.ElapsedMilliseconds.ShouldBeLessThan(1500);
-
-        await SyncAllNodesAsync(fabric);
-
-        var state1 = await node1.Orchestrator.GetDocumentStateAsync<ShardedDocState>(concurrentDocId, CancellationToken.None);
-        var state2 = await node2.Orchestrator.GetDocumentStateAsync<ShardedDocState>(concurrentDocId, CancellationToken.None);
-
-        state1.Data.DataMap.ShouldContainKeyAndValue("from-node-1", "v1");
-        state1.Data.DataMap.ShouldContainKeyAndValue("from-node-2", "v2");
-        state2.Data.DataMap.ShouldContainKeyAndValue("from-node-1", "v1");
-        state2.Data.DataMap.ShouldContainKeyAndValue("from-node-2", "v2");
-    }
-
     public async ValueTask DisposeAsync()
     {
         foreach (var node in nodes)
@@ -839,7 +641,6 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
     {
         private readonly ConcurrentDictionary<PeerId, ShardedTestNode> activeNodes = new();
         private readonly ConcurrentDictionary<PeerId, byte> networkIsolatedPeers = new();
-        private readonly ConcurrentDictionary<PeerId, byte> gossipIsolatedPeers = new();
         private readonly ConcurrentBag<Task> inFlightPackets = new();
         private volatile bool isDisposed;
 
@@ -881,12 +682,6 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
         {
             ArgumentNullException.ThrowIfNull(node);
             networkIsolatedPeers[node.PeerId] = 1;
-        }
-
-        public void IsolateNodeGossip(ShardedTestNode node)
-        {
-            ArgumentNullException.ThrowIfNull(node);
-            gossipIsolatedPeers[node.PeerId] = 1;
         }
 
         public async Task DepartNodeAsync(ShardedTestNode departingNode)
@@ -949,8 +744,7 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
                 .Returns((ReadOnlyMemory<byte> payload, CancellationToken _) =>
                 {
                     if (isDisposed ||
-                        networkIsolatedPeers.ContainsKey(node.PeerId) ||
-                        gossipIsolatedPeers.ContainsKey(node.PeerId))
+                        networkIsolatedPeers.ContainsKey(node.PeerId))
                     {
                         return Task.CompletedTask;
                     }

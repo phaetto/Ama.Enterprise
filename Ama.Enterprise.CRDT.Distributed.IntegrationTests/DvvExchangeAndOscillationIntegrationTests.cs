@@ -1023,6 +1023,471 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         dvvManagerA.GetShardSnapshot("default")["default"].Versions["ReplicaA"].ShouldBe(2);
     }
 
+    [IntegrationFact]
+    public async Task MultiServer_GossipItemCreation_FollowedByFullMeshSync_ShouldNotSendSnapshotsBackToCreatorOrBounce()
+    {
+        // Arrange - 5 servers with ActiveSync (gossip) enabled, simulating a cluster where Node A creates an item
+        // and gossips it to all peers, followed by anti-entropy sync rounds across all servers.
+        var clusterNodes = Enumerable.Range(1, 5)
+            .Select(i => BuildNode($"Replica-{i}", opt =>
+            {
+                opt.ActiveSyncEnabled = true;
+                opt.ActiveSyncDebounceMilliseconds = 0;
+            }, usePrefixShardProvider: true))
+            .ToArray();
+
+        var orchestrators = new ICrdtDocumentOrchestrator[clusterNodes.Length];
+        for (int i = 0; i < clusterNodes.Length; i++)
+        {
+            var scope = clusterNodes[i].Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(clusterNodes[i].ReplicaId);
+            orchestrators[i] = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+            await orchestrators[i].InitializeAsync(CancellationToken.None);
+        }
+
+        var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
+        using var network = WireMeshWithInspection(recordedMessages, clusterNodes);
+
+        // Act 1 - Server 1 creates a new document and adds an item, gossiping both to the other 4 servers
+        var creatorNode = clusterNodes[0];
+        var creatorOrch = orchestrators[0];
+
+        await creatorOrch.CreateDocumentAsync("alpha-gossip-item", "dvv-doc", CancellationToken.None);
+        await creatorOrch.ApplyIntentAsync<DvvTestState>(
+            "alpha-gossip-item",
+            new MapSetIntent("CreatedKey", "CreatedValue"),
+            nameof(DvvTestState.DataMap),
+            CancellationToken.None);
+
+        await network.DrainAsync();
+
+        // Ensure all 5 servers promoted the document and applied the gossiped item
+        for (int i = 0; i < orchestrators.Length; i++)
+        {
+            await orchestrators[i].ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
+        }
+        await network.DrainAsync();
+
+        await WaitForConvergenceAsync(async () =>
+        {
+            for (int i = 0; i < orchestrators.Length; i++)
+            {
+                var localDoc = orchestrators[i].TryGetLocalDocument<DvvTestState>("alpha-gossip-item");
+                if (localDoc == null)
+                {
+                    return false;
+                }
+
+                var doc = await localDoc.GetDocumentAsync(CancellationToken.None);
+                if (!doc.Data.DataMap.TryGetValue("CreatedKey", out var val) || val != "CreatedValue")
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }, TimeSpan.FromSeconds(5));
+
+        recordedMessages.Clear();
+
+        // Act 2 - All 5 servers exchange anti-entropy CrdtSync messages with each other across multiple rounds
+        for (int round = 0; round < 3; round++)
+        {
+            for (int i = 0; i < clusterNodes.Length; i++)
+            {
+                for (int j = 0; j < clusterNodes.Length; j++)
+                {
+                    if (i == j)
+                    {
+                        continue;
+                    }
+
+                    await orchestrators[i].DispatchAntiEntropyStateAsync(clusterNodes[j].PeerId, CancellationToken.None);
+                }
+            }
+
+            await network.DrainAsync();
+        }
+
+        // Assert - Because all peers already received the gossiped item and their DVVs / journals are aligned,
+        // no peer should send a CrdtSnapshot or CrdtPatch back to the creator (or to any other peer).
+        var messagesDuringSync = recordedMessages.ToList();
+        messagesDuringSync.ShouldNotBeEmpty();
+
+        var snapshotsSentToCreator = messagesDuringSync
+            .Where(m => m.Target == creatorNode.PeerId && m.MessageType == "CrdtSnapshot")
+            .ToList();
+        snapshotsSentToCreator.ShouldBeEmpty("No peer should send a CrdtSnapshot back to the node that created and gossiped the item.");
+
+        var anySnapshots = messagesDuringSync.Where(m => m.MessageType == "CrdtSnapshot").ToList();
+        anySnapshots.ShouldBeEmpty("No CrdtSnapshot messages should be triggered after gossip convergence.");
+
+        var anyPatches = messagesDuringSync.Where(m => m.MessageType == "CrdtPatch").ToList();
+        anyPatches.ShouldBeEmpty("No CrdtPatch messages should bounce between servers after gossip convergence.");
+    }
+
+    [IntegrationFact]
+    public async Task MultiServer_GossipDocumentCreationOutracingChildPatch_OrAggressivePeerTrim_ShouldNotCauseInfiniteSnapshotBouncing()
+    {
+        // Arrange - 5 servers with ActiveSync enabled AND aggressive journal trimming (JournalHardTrimThreshold = 1)
+        // on peers so that receiving a gossiped operation immediately checkpoints and trims the peer's journal.
+        // If a peer's DVV or journal evaluation falsely considers the creator (or another peer) behind,
+        // it will send a CrdtSnapshot back and cause an infinite snapshot bounce storm across the 5 servers.
+        var clusterNodes = Enumerable.Range(1, 5)
+            .Select(i => BuildNode($"Replica-{i}", opt =>
+            {
+                opt.ActiveSyncEnabled = true;
+                opt.ActiveSyncDebounceMilliseconds = 0;
+                opt.JournalHardTrimThreshold = 1;
+                opt.JournalSoftTrimThreshold = 1;
+            }, usePrefixShardProvider: true))
+            .ToArray();
+
+        var orchestrators = new ICrdtDocumentOrchestrator[clusterNodes.Length];
+        for (int i = 0; i < clusterNodes.Length; i++)
+        {
+            var scope = clusterNodes[i].Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(clusterNodes[i].ReplicaId);
+            orchestrators[i] = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+            await orchestrators[i].InitializeAsync(CancellationToken.None);
+        }
+
+        var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
+        using var network = WireMeshWithInspection(recordedMessages, clusterNodes);
+
+        // Pre-seed ClusterTracker on all nodes so GMVV calculation can trim journals as soon as DVVs advance
+        for (int i = 0; i < clusterNodes.Length; i++)
+        {
+            var scopeI = clusterNodes[i].Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(clusterNodes[i].ReplicaId);
+            for (int j = 0; j < clusterNodes.Length; j++)
+            {
+                if (i == j)
+                {
+                    continue;
+                }
+
+                scopeI.ClusterTracker.UpdatePeerState(
+                    clusterNodes[j].ReplicaId,
+                    clusterNodes[j].PeerId.Value.ToString(),
+                    new ShardVersionVectorMap());
+            }
+        }
+
+        // Act 1 - Each of the 5 servers creates an item in the shared shard "shard-alpha" and gossips it
+        await orchestrators[0].CreateDocumentAsync("alpha-shared", "dvv-doc", CancellationToken.None);
+        await network.DrainAsync();
+
+        for (int i = 0; i < clusterNodes.Length; i++)
+        {
+            await orchestrators[i].ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
+            await orchestrators[i].ApplyIntentAsync<DvvTestState>(
+                "alpha-shared",
+                new MapSetIntent($"KeyFromReplica_{i + 1}", $"Val_{i + 1}"),
+                nameof(DvvTestState.DataMap),
+                CancellationToken.None);
+        }
+
+        await WaitForConvergenceAsync(async () =>
+        {
+            for (int i = 0; i < orchestrators.Length; i++)
+            {
+                var localDoc = orchestrators[i].TryGetLocalDocument<DvvTestState>("alpha-shared");
+                if (localDoc == null)
+                {
+                    return false;
+                }
+
+                var doc = await localDoc.GetDocumentAsync(CancellationToken.None);
+                if (doc.Data.DataMap.Count < clusterNodes.Length)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }, TimeSpan.FromSeconds(5));
+
+        await network.DrainAsync();
+
+        // Allow one initial round of anti-entropy so all ClusterTrackers learn everyone's latest DVV and trim journals
+        for (int i = 0; i < clusterNodes.Length; i++)
+        {
+            for (int j = 0; j < clusterNodes.Length; j++)
+            {
+                if (i == j)
+                {
+                    continue;
+                }
+
+                await orchestrators[i].DispatchAntiEntropyStateAsync(clusterNodes[j].PeerId, CancellationToken.None);
+            }
+        }
+        await network.DrainAsync();
+
+        // Force journal trimming on all 5 servers to simulate trimmed journals in a long-running multi-server cluster
+        var trimVector = new Dictionary<string, long>(StringComparer.Ordinal);
+        for (int i = 0; i < clusterNodes.Length; i++)
+        {
+            trimVector[clusterNodes[i].ReplicaId] = 100;
+        }
+
+        for (int i = 0; i < clusterNodes.Length; i++)
+        {
+            var scope = clusterNodes[i].Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(clusterNodes[i].ReplicaId);
+            await scope.Storage.TrimAsync("shard-alpha", trimVector, CancellationToken.None);
+            await scope.Storage.TrimAsync(Constants.SystemRegistryDocumentId, trimVector, CancellationToken.None);
+        }
+
+        // Now Server 1 creates one more item and gossips it while all journals have historical operations trimmed
+        await orchestrators[0].ApplyIntentAsync<DvvTestState>(
+            "alpha-shared",
+            new MapSetIntent("PostTrimKey", "PostTrimVal"),
+            nameof(DvvTestState.DataMap),
+            CancellationToken.None);
+
+        await WaitForConvergenceAsync(async () =>
+        {
+            for (int i = 0; i < orchestrators.Length; i++)
+            {
+                var localDoc = orchestrators[i].TryGetLocalDocument<DvvTestState>("alpha-shared");
+                if (localDoc == null)
+                {
+                    return false;
+                }
+
+                var doc = await localDoc.GetDocumentAsync(CancellationToken.None);
+                if (!doc.Data.DataMap.TryGetValue("PostTrimKey", out var val) || val != "PostTrimVal")
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }, TimeSpan.FromSeconds(5));
+
+        await network.DrainAsync();
+        recordedMessages.Clear();
+
+        // Act 2 - Execute 4 full-mesh anti-entropy rounds across all 5 servers (4 * 20 = 80 CrdtSync exchanges)
+        for (int round = 0; round < 4; round++)
+        {
+            for (int i = 0; i < clusterNodes.Length; i++)
+            {
+                for (int j = 0; j < clusterNodes.Length; j++)
+                {
+                    if (i == j)
+                    {
+                        continue;
+                    }
+
+                    await orchestrators[i].DispatchAntiEntropyStateAsync(clusterNodes[j].PeerId, CancellationToken.None);
+                }
+            }
+
+            await network.DrainAsync();
+        }
+
+        // Assert - Zero CrdtSnapshot or CrdtPatch messages should bounce between the 5 servers
+        var steadyStateMessages = recordedMessages.ToList();
+        steadyStateMessages.Count.ShouldBe(80);
+        steadyStateMessages.ShouldAllBe(m => m.MessageType == "CrdtSync");
+    }
+
+    [IntegrationFact]
+    public async Task MultiServer_ShardedDemotionAndPromotion_ShouldNotCauseEndlessSnapshotPingPongBetweenNodes()
+    {
+        // Arrange - 6 servers with EnableSharding = true and ReplicationFactor = 2.
+        // Tests whether shard topology re-evaluations or demotion snapshot pushes cause nodes to endlessly
+        // bounce CrdtSnapshot messages back and forth across the cluster.
+        var peerIds = Enumerable.Range(0, 6).Select(_ => new PeerId(Guid.NewGuid())).ToArray();
+        var clusterNodes = new TestNode[6];
+        var orchestrators = new ICrdtDocumentOrchestrator[6];
+
+        for (int i = 0; i < 6; i++)
+        {
+            var replicaId = $"Replica-{i + 1}";
+            clusterNodes[i] = BuildNode(replicaId, opt =>
+            {
+                opt.EnableSharding = true;
+                opt.ShardReplicationFactor = 2;
+                opt.VirtualNodesPerReplica = 32;
+                opt.ActiveSyncEnabled = true;
+                opt.ActiveSyncDebounceMilliseconds = 0;
+            }, usePrefixShardProvider: true, explicitPeerId: peerIds[i]);
+
+            var scope = clusterNodes[i].Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(replicaId);
+            orchestrators[i] = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+            await orchestrators[i].InitializeAsync(CancellationToken.None);
+        }
+
+        // Register all 6 peers as Active in each node's IPeerRegistry and ClusterTracker
+        for (int i = 0; i < 6; i++)
+        {
+            var peerRegistry = clusterNodes[i].Sp.GetRequiredService<IPeerRegistry>();
+            var scope = clusterNodes[i].Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(clusterNodes[i].ReplicaId);
+
+            for (int j = 0; j < 6; j++)
+            {
+                if (i == j)
+                {
+                    continue;
+                }
+
+                var peerNode = new PeerNode(clusterNodes[j].PeerId, new P2p.Models.Transports.TcpPeerEndpoint("127.0.0.1", 8000 + j));
+                await peerRegistry.AddOrUpdatePeerAsync("TestMesh", peerNode, PeerStatus.Active, CancellationToken.None);
+                scope.ClusterTracker.UpdatePeerState(clusterNodes[j].ReplicaId, clusterNodes[j].PeerId.Value.ToString(), new ShardVersionVectorMap());
+            }
+        }
+
+        var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
+        using var network = WireMeshWithInspection(recordedMessages, clusterNodes);
+
+        // Act 1 - Node 1 creates a document and mutates it (Note: "shard-alpha" may or may not be owned by Node 1 on the 6-node ring)
+        await orchestrators[0].CreateDocumentAsync("alpha-sharded-item", "dvv-doc", CancellationToken.None);
+        await orchestrators[0].ApplyIntentAsync<DvvTestState>(
+            "alpha-sharded-item",
+            new MapSetIntent("Item1", "Value1"),
+            nameof(DvvTestState.DataMap),
+            CancellationToken.None);
+
+        await network.DrainAsync();
+
+        // Allow topology reevaluation and anti-entropy across all 6 nodes to settle initial shard placement
+        for (int round = 0; round < 2; round++)
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                await orchestrators[i].ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
+                for (int j = 0; j < 6; j++)
+                {
+                    if (i != j)
+                    {
+                        await orchestrators[i].DispatchAntiEntropyStateAsync(clusterNodes[j].PeerId, CancellationToken.None);
+                    }
+                }
+            }
+
+            await network.DrainAsync();
+        }
+
+        recordedMessages.Clear();
+
+        // Act 2 - Run 3 full-mesh anti-entropy and topology evaluation rounds across all 6 servers
+        for (int round = 0; round < 3; round++)
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                await orchestrators[i].ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
+                for (int j = 0; j < 6; j++)
+                {
+                    if (i != j)
+                    {
+                        await orchestrators[i].DispatchAntiEntropyStateAsync(clusterNodes[j].PeerId, CancellationToken.None);
+                    }
+                }
+            }
+
+            await network.DrainAsync();
+        }
+
+        // Assert - Once converged, zero CrdtSnapshot or CrdtPatch messages should bounce between the 6 servers
+        var postSettleMessages = recordedMessages.ToList();
+        postSettleMessages.ShouldNotBeEmpty();
+
+        var bouncingSnapshots = postSettleMessages.Where(m => m.MessageType == "CrdtSnapshot").ToList();
+        bouncingSnapshots.ShouldBeEmpty("Snapshots should not bounce between servers after initial shard placement settles.");
+
+        var bouncingPatches = postSettleMessages.Where(m => m.MessageType == "CrdtPatch").ToList();
+        bouncingPatches.ShouldBeEmpty("Patches should not bounce between servers after initial shard placement settles.");
+    }
+
+    [IntegrationFact]
+    public async Task MultiServer_GossipItemCreation_WhenThirdPeerSendsStaleSyncToRecipientBeforeCreatorSyncs_ShouldNotSendSnapshotOrBounce()
+    {
+        // Arrange - 5 servers with ActiveSync (gossip) enabled.
+        // Reproduces the exact multi-server race condition:
+        // 1. Server 1 creates an item (Replica-1 clock = 1) and gossips CrdtPatch to Servers 2..5.
+        // 2. Server 2 applies the gossiped patch (so Server 2's DVV has { Replica-1: 1 }).
+        // 3. Before Server 1 or Server 3 has processed the latest state, Server 3 (or even Server 1 with a pre-mutation CrdtSync in flight)
+        //    sends a CrdtSync to Server 2 where Replica-1 is missing or 0.
+        // 4. Previously, because apply of remote gossip patches bypassed JournalingPatcherDecorator (so Server 2's journal didn't have Replica-1's op),
+        //    Server 2's EvaluateJournalCompletionAsync saw 0 journal ops for Replica-1 (1..1), declared SnapshotRequired = true,
+        //    and sent a full CrdtSnapshot! In a N-server cluster, every recipient sent snapshots to every other server and saved checkpoints endlessly.
+        var clusterNodes = Enumerable.Range(1, 5)
+            .Select(i => BuildNode($"Replica-{i}", opt =>
+            {
+                opt.ActiveSyncEnabled = true;
+                opt.ActiveSyncDebounceMilliseconds = 0;
+            }, usePrefixShardProvider: true))
+            .ToArray();
+
+        var orchestrators = new ICrdtDocumentOrchestrator[clusterNodes.Length];
+        for (int i = 0; i < clusterNodes.Length; i++)
+        {
+            var scope = clusterNodes[i].Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(clusterNodes[i].ReplicaId);
+            orchestrators[i] = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+            await orchestrators[i].InitializeAsync(CancellationToken.None);
+        }
+
+        var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
+        using var network = WireMeshWithInspection(recordedMessages, clusterNodes);
+
+        // Server 1 creates the document and gossips it
+        var creatorOrch = orchestrators[0];
+        await creatorOrch.CreateDocumentAsync("alpha-race-doc", "dvv-doc", CancellationToken.None);
+        await network.DrainAsync();
+
+        for (int i = 0; i < orchestrators.Length; i++)
+        {
+            await orchestrators[i].ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
+        }
+
+        // Capture a "pre-item-creation" CrdtSync snapshot from Server 3 (where Replica-1 is still at 0 on shard-alpha)
+        var staleSyncFromServer3 = new CrdtStateSyncMessage(
+            clusterNodes[2].ReplicaId,
+            new ShardVersionVectorMap
+            {
+                ["shard-alpha"] = new DottedVersionVector(),
+                [Constants.SystemRegistryDocumentId] = (await clusterNodes[2].Sp.GetRequiredService<DistributedCrdtScopeManager>()
+                    .GetOrCreateScope(clusterNodes[2].ReplicaId).ServiceProvider
+                    .GetRequiredService<IShardVersionVectorManager>().GetFullSnapshotAsync(CancellationToken.None))[Constants.SystemRegistryDocumentId]
+            });
+
+        // Now Server 1 creates an item and gossips CrdtPatch to all servers
+        await creatorOrch.ApplyIntentAsync<DvvTestState>(
+            "alpha-race-doc",
+            new MapSetIntent("GossipKey", "GossipVal"),
+            nameof(DvvTestState.DataMap),
+            CancellationToken.None);
+
+        await network.DrainAsync();
+
+        await WaitForConvergenceAsync(async () =>
+        {
+            for (int i = 0; i < orchestrators.Length; i++)
+            {
+                var doc = orchestrators[i].TryGetLocalDocument<DvvTestState>("alpha-race-doc");
+                if (doc == null) return false;
+                var state = await doc.GetDocumentAsync(CancellationToken.None);
+                if (!state.Data.DataMap.ContainsKey("GossipKey")) return false;
+            }
+            return true;
+        }, TimeSpan.FromSeconds(5));
+
+        recordedMessages.Clear();
+
+        // Act - Deliver the in-flight stale CrdtSync from Server 3 to Server 2 (a gossip recipient, NOT the creator!)
+        var serializer = clusterNodes[1].Sp.GetRequiredService<ICrdtSerializer>();
+        var syncWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(staleSyncFromServer3));
+        var handlerServer2 = clusterNodes[1].Sp.GetRequiredKeyedService<IApplicationPayloadHandler>("TestMesh");
+
+        await handlerServer2.HandlePayloadAsync("TestMesh", clusterNodes[2].PeerId, serializer.SerializeToBytes(syncWrapper), CancellationToken.None);
+        await network.DrainAsync();
+
+        // Assert - Server 2 has the gossiped operation in its local journal, so it NEVER falls back to sending a CrdtSnapshot!
+        var messagesTriggered = recordedMessages.ToList();
+        messagesTriggered.Where(m => m.MessageType == "CrdtSnapshot").ShouldBeEmpty(
+            "A gossip recipient must journal applied remote patches so it never falls back to sending false CrdtSnapshots when a peer sends an older CrdtSync.");
+    }
+
     public async ValueTask DisposeAsync()
     {
         foreach (var node in nodes)
@@ -1087,11 +1552,15 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         string ReplicaId,
         IReadOnlyList<IHostedService> HostedServices);
 
-    private TestNode BuildNode(string replicaId, Action<DistributedCrdtOptions>? configureOptions = null, bool usePrefixShardProvider = false)
+    private TestNode BuildNode(
+        string replicaId,
+        Action<DistributedCrdtOptions>? configureOptions = null,
+        bool usePrefixShardProvider = false,
+        PeerId? explicitPeerId = null)
     {
         var senderMock = new Mock<IDirectMessageSender>();
         var gossipMock = new Mock<IP2pAlgorithm>();
-        var peerId = new PeerId(Guid.NewGuid());
+        var peerId = explicitPeerId ?? new PeerId(Guid.NewGuid());
 
         var services = new ServiceCollection();
         services.AddLogging();
@@ -1124,9 +1593,9 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         services.AddSingleton(senderMock.Object);
         services.AddSingleton(gossipMock.Object);
 
-        var mockP2pRpcCorrelator = new Mock<IP2pRpcCorrelator>();
-        mockP2pRpcCorrelator.SetReturnsDefault(Task.CompletedTask);
-        services.AddSingleton(mockP2pRpcCorrelator.Object);
+        services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
+        services.AddSingleton<IP2pRpcCorrelator, P2pRpcCorrelator>();
+        services.AddSingleton(new P2pMeshMetadata("TestMesh"));
 
         var sp = services.BuildServiceProvider();
 

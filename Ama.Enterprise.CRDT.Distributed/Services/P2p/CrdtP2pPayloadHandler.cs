@@ -171,9 +171,20 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                 IDistributedCrdtDocument? targetDoc = null;
 
                 if (!string.IsNullOrWhiteSpace(req.DocumentId) &&
-                    await scope.Orchestrator.DocumentExistsAsync(req.DocumentId, typeAlias, cancellationToken).ConfigureAwait(false))
+                    scope.Orchestrator.InitializationStage == OrchestratorInitializationStage.Initialized)
                 {
-                    targetDoc = await ResolveLocalDocumentAsync(scope, req.DocumentId, typeAlias, cancellationToken).ConfigureAwait(false);
+                    // Fast path: check if the document is already active in local memory without invoking a remote promotion or hydration loop
+                    var activeDocs = scope.Orchestrator.GetActiveDocuments();
+                    for (int i = 0; i < activeDocs.Count; i++)
+                    {
+                        var doc = activeDocs[i];
+                        if (string.Equals(doc.DocumentId, req.DocumentId, StringComparison.Ordinal) &&
+                            (string.IsNullOrWhiteSpace(typeAlias) || string.Equals(doc.TypeAlias, typeAlias, StringComparison.Ordinal)))
+                        {
+                            targetDoc = doc;
+                            break;
+                        }
+                    }
                 }
 
                 byte[] statePayload = [];
@@ -612,6 +623,37 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             
             patchesProcessedCounter.Add(1, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
             await targetDoc.ApplyRemotePatchAsync(patchMsg.Patch, cancellationToken).ConfigureAwait(false);
+
+            if (!string.IsNullOrWhiteSpace(patchMsg.ReplicaId) && senderId.Value != Guid.Empty)
+            {
+                var updatedShardState = targetDoc.GetLocalState();
+                if (updatedShardState.TryGetValue(targetDoc.ShardId, out var localShardDvv))
+                {
+                    var peerKnownDvv = new DottedVersionVector();
+                    if (localShardDvv.Versions != null &&
+                        localShardDvv.Versions.TryGetValue(patchMsg.ReplicaId, out var contiguousVer) &&
+                        contiguousVer > 0)
+                    {
+                        peerKnownDvv.Versions[patchMsg.ReplicaId] = contiguousVer;
+                    }
+
+                    if (localShardDvv.Dots != null &&
+                        localShardDvv.Dots.TryGetValue(patchMsg.ReplicaId, out var dots) &&
+                        dots.Count > 0)
+                    {
+                        peerKnownDvv.Dots[patchMsg.ReplicaId] = new HashSet<long>(dots);
+                    }
+
+                    if (peerKnownDvv.Versions.Count > 0 || peerKnownDvv.Dots.Count > 0)
+                    {
+                        scope.ClusterTracker.UpdatePeerState(
+                            patchMsg.ReplicaId,
+                            senderId.Value.ToString(),
+                            new ShardVersionVectorMap { [targetDoc.ShardId] = peerKnownDvv });
+                    }
+                }
+            }
+
             operationsReceivedCounter.Add(patchMsg.Patch.Operations.Count, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
         }
         catch (Exception ex)

@@ -993,30 +993,33 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                         return;
                     }
 
-                    patchToApply = new CrdtPatch(filteredOps);
-                }
-            }
-
-            await versionVectorManager.ExecuteShardLockedAsync(ShardId, async () =>
-            {
-                CrdtDocument<TState> currentDoc;
-                lock (syncRoot) { currentDoc = currentDocument; }
-
-                var result = await applicator.ApplyPatchAsync(currentDoc, patchToApply).ConfigureAwait(false);
-
-                lock (syncRoot)
-                {
-                    currentDocument = result.Document;
-                    isDirty = true;
-                }
-            }, cmd.CancellationToken).ConfigureAwait(false);
-
-            telemetry.RecordDocumentPatchApplied(DocumentId);
-            await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
+            patchToApply = new CrdtPatch(filteredOps);
         }
-        catch (Exception ex)
+    }
+
+    await versionVectorManager.ExecuteShardLockedAsync(ShardId, async () =>
+    {
+        CrdtDocument<TState> currentDoc;
+        lock (syncRoot) { currentDoc = currentDocument; }
+
+        var result = await applicator.ApplyPatchAsync(currentDoc, patchToApply).ConfigureAwait(false);
+
+        lock (syncRoot)
         {
-            logger.LogError(ex, "Failed to apply remote patch to document {DocumentId}.", DocumentId);
+            currentDocument = result.Document;
+            isDirty = true;
+        }
+    }, cmd.CancellationToken).ConfigureAwait(false);
+
+    var storageDocKey = GetStorageDocumentKey();
+    await storage.AppendAsync(storageDocKey, patchToApply.Operations!, cmd.CancellationToken).ConfigureAwait(false);
+
+    telemetry.RecordDocumentPatchApplied(DocumentId);
+    await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
+}
+catch (Exception ex)
+{
+    logger.LogError(ex, "Failed to apply remote patch to document {DocumentId}.", DocumentId);
             throw;
         }
     }
