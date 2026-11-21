@@ -46,8 +46,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly ICrdtStringPool stringPool;
     private readonly ILogger<DistributedCrdtDocument<TState>> logger;
     
-    private readonly IEnumerable<IDocumentStateObserver<TState>> stateObservers;
-    private readonly IEnumerable<IDocumentPatchObserver> patchObservers;
+    private readonly IDocumentStateObserver<TState>[] stateObservers;
+    private readonly IDocumentPatchObserver[] patchObservers;
 
     private readonly bool activeSyncEnabled;
     private readonly int activeSyncDebounceMs;
@@ -117,8 +117,11 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         this.stringPool = stringPool ?? CrdtStringPool.Shared;
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
         
-        this.stateObservers = stateObservers ?? throw new ArgumentNullException(nameof(stateObservers));
-        this.patchObservers = patchObservers ?? throw new ArgumentNullException(nameof(patchObservers));
+        ArgumentNullException.ThrowIfNull(stateObservers);
+        ArgumentNullException.ThrowIfNull(patchObservers);
+
+        this.stateObservers = stateObservers as IDocumentStateObserver<TState>[] ?? new List<IDocumentStateObserver<TState>>(stateObservers).ToArray();
+        this.patchObservers = patchObservers as IDocumentPatchObserver[] ?? new List<IDocumentPatchObserver>(patchObservers).ToArray();
 
         this.activeSyncEnabled = options.Value.ActiveSyncEnabled;
         this.activeSyncDebounceMs = options.Value.ActiveSyncDebounceMilliseconds;
@@ -154,6 +157,12 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         if (isDisposed) return;
+
+        if (commandPipeline.IsCurrentThreadPipelineProcessor)
+        {
+            await ProcessInitializeInternalAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
 
         var cmd = commandPipeline.RentCommand();
         cmd.Target = this;
@@ -663,11 +672,11 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
     private async Task NotifyStateChangedAsync(CancellationToken cancellationToken)
     {
-        foreach (var observer in stateObservers)
+        for (int i = 0; i < stateObservers.Length; i++)
         {
             try
             {
-                await observer.OnStateChangedAsync(DocumentId, cancellationToken).ConfigureAwait(false);
+                await stateObservers[i].OnStateChangedAsync(DocumentId, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -678,11 +687,11 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
     private async Task NotifyPatchGeneratedAsync(CrdtPatch patch, CancellationToken cancellationToken)
     {
-        foreach (var observer in patchObservers)
+        for (int i = 0; i < patchObservers.Length; i++)
         {
             try
             {
-                await observer.OnPatchGeneratedAsync(DocumentId, TypeAlias, patch, cancellationToken).ConfigureAwait(false);
+                await patchObservers[i].OnPatchGeneratedAsync(DocumentId, TypeAlias, patch, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -701,6 +710,9 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 logger.LogWarning("Document initialized for a remote shard {ShardId}. The Orchestrator should handle remote requests.", this.ShardId);
             }
 
+            var isMemoryStorage = storage is MemoryCrdtStorage
+                || (storage is BufferedDistributedCrdtStorageDecorator decorator && decorator.InnerStorage is MemoryCrdtStorage);
+
             var storageDocKey = GetStorageDocumentKey();
             var localStoredDoc = await storage.LoadDocumentAsync<TState>(ShardId, storageDocKey, cancellationToken).ConfigureAwait(false);
             if (localStoredDoc == null && !string.Equals(storageDocKey, DocumentId, StringComparison.Ordinal))
@@ -708,10 +720,14 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 localStoredDoc = await storage.LoadDocumentAsync<TState>(ShardId, DocumentId, cancellationToken).ConfigureAwait(false);
             }
 
-            var orphanedDoc = await storage.LoadOrphanedDocumentAsync<TState>(ShardId, storageDocKey, cancellationToken).ConfigureAwait(false);
-            if (orphanedDoc == null && !string.Equals(storageDocKey, DocumentId, StringComparison.Ordinal))
+            CrdtDocument<TState>? orphanedDoc = null;
+            if (!isMemoryStorage)
             {
-                orphanedDoc = await storage.LoadOrphanedDocumentAsync<TState>(ShardId, DocumentId, cancellationToken).ConfigureAwait(false);
+                orphanedDoc = await storage.LoadOrphanedDocumentAsync<TState>(ShardId, storageDocKey, cancellationToken).ConfigureAwait(false);
+                if (orphanedDoc == null && !string.Equals(storageDocKey, DocumentId, StringComparison.Ordinal))
+                {
+                    orphanedDoc = await storage.LoadOrphanedDocumentAsync<TState>(ShardId, DocumentId, cancellationToken).ConfigureAwait(false);
+                }
             }
 
             CrdtDocument<TState>? storedDoc = null;
@@ -753,31 +769,24 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
                 if (!hasUnpersistedLocalMutations)
                 {
-                    await versionVectorManager.ExecuteShardLockedAsync(ShardId, () =>
-                    {
-                        MergeDocumentMetadataIntoShardVersionVector(storedDoc.Value);
-                        return Task.CompletedTask;
-                    }, cancellationToken).ConfigureAwait(false);
+                    MergeDocumentMetadataIntoShardVersionVector(storedDoc.Value);
                 }
                 else
                 {
-                    await versionVectorManager.ExecuteShardLockedAsync(ShardId, async () =>
+                    CrdtDocument<TState> currentDoc;
+                    lock (syncRoot)
                     {
-                        CrdtDocument<TState> currentDoc;
-                        lock (syncRoot)
-                        {
-                            currentDoc = currentDocument;
-                        }
+                        currentDoc = currentDocument;
+                    }
 
-                        await merger.MergeStateAsync(currentDoc, storedDoc.Value, cancellationToken).ConfigureAwait(false);
-                        MergeDocumentMetadataIntoShardVersionVector(currentDoc);
+                    await merger.MergeStateAsync(currentDoc, storedDoc.Value, cancellationToken).ConfigureAwait(false);
+                    MergeDocumentMetadataIntoShardVersionVector(currentDoc);
 
-                        lock (syncRoot)
-                        {
-                            currentDocument = currentDoc;
-                            isDirty = true;
-                        }
-                    }, cancellationToken).ConfigureAwait(false);
+                    lock (syncRoot)
+                    {
+                        currentDocument = currentDoc;
+                        isDirty = true;
+                    }
                 }
 
                 await NotifyStateChangedAsync(cancellationToken).ConfigureAwait(false);
@@ -846,7 +855,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 generatedPatch = new CrdtPatch([operation]);
                 cmd.Patch = generatedPatch;
 
-                var result = await applicator.ApplyPatchAsync(docState, generatedPatch).ConfigureAwait(false);
+                var result = syncApplicator.ApplyPatch(docState, generatedPatch);
 
                 lock (syncRoot)
                 {
@@ -854,6 +863,9 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                     isDirty = true;
                 }
             }, cmd.CancellationToken).ConfigureAwait(false);
+
+            var storageDocKey = GetStorageDocumentKey();
+            await storage.AppendAsync(storageDocKey, generatedPatch.Operations!, cmd.CancellationToken).ConfigureAwait(false);
 
             telemetry.RecordDocumentPatchApplied(DocumentId);
             telemetry.RecordDocumentIntentApplied(DocumentId);
@@ -873,23 +885,33 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     {
         try
         {
-            await versionVectorManager.ExecuteShardLockedAsync(ShardId, async () =>
+            var patchToApply = cmd.Patch!.Value;
+
+            await versionVectorManager.ExecuteShardLockedAsync(ShardId, () =>
             {
                 CrdtDocument<TState> currentDoc;
                 lock (syncRoot) { currentDoc = currentDocument; }
 
-                var result = await applicator.ApplyPatchAsync(currentDoc, cmd.Patch!.Value).ConfigureAwait(false);
+                var result = syncApplicator.ApplyPatch(currentDoc, patchToApply);
 
                 lock (syncRoot)
                 {
                     currentDocument = result.Document;
                     isDirty = true;
                 }
+
+                return Task.CompletedTask;
             }, cmd.CancellationToken).ConfigureAwait(false);
+
+            if (patchToApply.Operations != null && patchToApply.Operations.Count > 0)
+            {
+                var storageDocKey = GetStorageDocumentKey();
+                await storage.AppendAsync(storageDocKey, patchToApply.Operations, cmd.CancellationToken).ConfigureAwait(false);
+            }
 
             telemetry.RecordDocumentPatchApplied(DocumentId);
             await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
-            await TriggerActiveSyncBroadcastAsync(cmd.Patch!.Value, cmd.CancellationToken).ConfigureAwait(false);
+            await TriggerActiveSyncBroadcastAsync(patchToApply, cmd.CancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -993,33 +1015,35 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                         return;
                     }
 
-            patchToApply = new CrdtPatch(filteredOps);
+                    patchToApply = new CrdtPatch(filteredOps);
+                }
+            }
+
+            await versionVectorManager.ExecuteShardLockedAsync(ShardId, () =>
+            {
+                CrdtDocument<TState> currentDoc;
+                lock (syncRoot) { currentDoc = currentDocument; }
+
+                var result = syncApplicator.ApplyPatch(currentDoc, patchToApply);
+
+                lock (syncRoot)
+                {
+                    currentDocument = result.Document;
+                    isDirty = true;
+                }
+
+                return Task.CompletedTask;
+            }, cmd.CancellationToken).ConfigureAwait(false);
+
+            var storageDocKey = GetStorageDocumentKey();
+            await storage.AppendAsync(storageDocKey, patchToApply.Operations!, cmd.CancellationToken).ConfigureAwait(false);
+
+            telemetry.RecordDocumentPatchApplied(DocumentId);
+            await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
         }
-    }
-
-    await versionVectorManager.ExecuteShardLockedAsync(ShardId, async () =>
-    {
-        CrdtDocument<TState> currentDoc;
-        lock (syncRoot) { currentDoc = currentDocument; }
-
-        var result = await applicator.ApplyPatchAsync(currentDoc, patchToApply).ConfigureAwait(false);
-
-        lock (syncRoot)
+        catch (Exception ex)
         {
-            currentDocument = result.Document;
-            isDirty = true;
-        }
-    }, cmd.CancellationToken).ConfigureAwait(false);
-
-    var storageDocKey = GetStorageDocumentKey();
-    await storage.AppendAsync(storageDocKey, patchToApply.Operations!, cmd.CancellationToken).ConfigureAwait(false);
-
-    telemetry.RecordDocumentPatchApplied(DocumentId);
-    await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
-}
-catch (Exception ex)
-{
-    logger.LogError(ex, "Failed to apply remote patch to document {DocumentId}.", DocumentId);
+            logger.LogError(ex, "Failed to apply remote patch to document {DocumentId}.", DocumentId);
             throw;
         }
     }
@@ -1054,21 +1078,18 @@ catch (Exception ex)
         }
     }
 
-    private async Task ProcessGetSnapshotDataInternalAsync(PooledDocumentCommand cmd)
+    private Task ProcessGetSnapshotDataInternalAsync(PooledDocumentCommand cmd)
     {
         try
         {
-            await versionVectorManager.ExecuteShardLockedAsync(ShardId, () =>
-            {
-                CrdtDocument<TState> currentDoc;
-                lock (syncRoot) { currentDoc = currentDocument; }
-                
-                var globalState = GetLocalState(); 
+            CrdtDocument<TState> currentDoc;
+            lock (syncRoot) { currentDoc = currentDocument; }
 
-                cmd.ResultSnapshotData = serializer.SerializeToBytes(currentDoc);
-                cmd.ResultGlobalState = globalState;
-                return Task.CompletedTask;
-            }, cmd.CancellationToken).ConfigureAwait(false);
+            var globalState = GetLocalState();
+
+            cmd.ResultSnapshotData = serializer.SerializeToBytes(currentDoc);
+            cmd.ResultGlobalState = globalState;
+            return Task.CompletedTask;
         }
         catch (Exception ex)
         {
@@ -1083,30 +1104,27 @@ catch (Exception ex)
         {
             var snapshotDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(cmd.SnapshotData!);
 
-            await versionVectorManager.ExecuteShardLockedAsync(ShardId, async () =>
+            CrdtDocument<TState> currentDoc;
+            lock (syncRoot) { currentDoc = currentDocument; }
+
+            await merger.MergeStateAsync(currentDoc, snapshotDoc, cmd.CancellationToken).ConfigureAwait(false);
+
+            lock (syncRoot)
             {
-                CrdtDocument<TState> currentDoc;
-                lock (syncRoot) { currentDoc = currentDocument; }
+                currentDocument = currentDoc;
+                isDirty = true;
+            }
 
-                await merger.MergeStateAsync(currentDoc, snapshotDoc, cmd.CancellationToken).ConfigureAwait(false);
-
-                lock (syncRoot)
-                {
-                    currentDocument = currentDoc;
-                    isDirty = true;
-                }
-
-                if (cmd.GlobalState != null && cmd.GlobalState.Count > 0)
-                {
-                    var activeShardDocIds = GetActiveDocumentIdsForShard();
-                    var compositeDocId = GetStorageDocumentKey();
-                    versionVectorManager.RecordDocumentSnapshotMerge(ShardId, compositeDocId, cmd.GlobalState, activeShardDocIds);
-                }
-                else
-                {
-                    MergeDocumentMetadataIntoShardVersionVector(currentDoc);
-                }
-            }, cmd.CancellationToken).ConfigureAwait(false);
+            if (cmd.GlobalState != null && cmd.GlobalState.Count > 0)
+            {
+                var activeShardDocIds = GetActiveDocumentIdsForShard();
+                var compositeDocId = GetStorageDocumentKey();
+                versionVectorManager.RecordDocumentSnapshotMerge(ShardId, compositeDocId, cmd.GlobalState, activeShardDocIds);
+            }
+            else
+            {
+                MergeDocumentMetadataIntoShardVersionVector(currentDoc);
+            }
 
             telemetry.RecordDocumentSnapshotMerged(DocumentId);
             await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
@@ -1170,32 +1188,27 @@ catch (Exception ex)
 
         try
         {
-            await versionVectorManager.ExecuteShardLockedAsync(ShardId, () =>
+            lock (syncRoot)
             {
-                lock (syncRoot)
+                if (avoidBlindWrites && !isDirty)
                 {
-                    if (avoidBlindWrites && !isDirty)
-                    {
-                        return Task.CompletedTask;
-                    }
-
-                    if (isMemoryStorage)
-                    {
-                        currentDoc = currentDocument;
-                    }
-                    else
-                    {
-                        // Serialize once inside the shard and document locks so storage backends
-                        // can persist the exact byte array without re-serializing or hitting concurrent mutations.
-                        snapshotBytes = serializer.SerializeToBytes(currentDocument);
-                    }
-
-                    isDirty = false;
-                    shouldSave = true;
+                    return;
                 }
 
-                return Task.CompletedTask;
-            }, cancellationToken).ConfigureAwait(false);
+                if (isMemoryStorage)
+                {
+                    currentDoc = currentDocument;
+                }
+                else
+                {
+                    // Serialize once inside the document lock so storage backends
+                    // can persist the exact byte array without re-serializing or hitting concurrent mutations.
+                    snapshotBytes = serializer.SerializeToBytes(currentDocument);
+                }
+
+                isDirty = false;
+                shouldSave = true;
+            }
 
             if (!shouldSave)
             {
@@ -1215,7 +1228,7 @@ catch (Exception ex)
             telemetry.RecordDocumentCheckpointSaved(DocumentId);
             logger.LogDebug("Saved checkpoint to storage for document {DocumentId}.", DocumentId);
         }
-        catch (TaskCanceledException ex)
+        catch (TaskCanceledException)
         {
             if (shouldSave)
             {
@@ -1238,17 +1251,12 @@ catch (Exception ex)
     {
         try
         {
-            await versionVectorManager.ExecuteShardLockedAsync(ShardId, () =>
+            lock (syncRoot)
             {
-                lock (syncRoot)
-                {
-                    metadataManager.EvictReplica(currentDocument, cmd.ReplicaIdToEvict!);
-                    isDirty = true;
-                }
+                metadataManager.EvictReplica(currentDocument, cmd.ReplicaIdToEvict!);
+                isDirty = true;
+            }
 
-                return Task.CompletedTask;
-            }, cmd.CancellationToken).ConfigureAwait(false);
-            
             telemetry.RecordDocumentReplicaEviction(DocumentId);
             await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
         }
@@ -1263,18 +1271,13 @@ catch (Exception ex)
     {
         try
         {
-            await versionVectorManager.ExecuteShardLockedAsync(ShardId, () =>
+            lock (syncRoot)
             {
-                lock (syncRoot)
-                {
-                    var metadata = metadataManager.Initialize(initialState);
-                    currentDocument = new CrdtDocument<TState>(initialState, metadata);
-                    isDirty = true;
-                }
+                var metadata = metadataManager.Initialize(initialState);
+                currentDocument = new CrdtDocument<TState>(initialState, metadata);
+                isDirty = true;
+            }
 
-                return Task.CompletedTask;
-            }, cancellationToken).ConfigureAwait(false);
-            
             telemetry.RecordDocumentStateReset(DocumentId);
             await NotifyStateChangedAsync(cancellationToken).ConfigureAwait(false);
             logger.LogInformation("Performed a hard reset for document {DocumentId}.", DocumentId);
@@ -1286,35 +1289,31 @@ catch (Exception ex)
         }
     }
 
-    private async Task ProcessCompactMetadataInternalAsync(CancellationToken cancellationToken)
+    private Task ProcessCompactMetadataInternalAsync(CancellationToken cancellationToken)
     {
         try
         {
             var policyFactories = serviceProvider.GetServices<ICompactionPolicyFactory>();
 
-            await versionVectorManager.ExecuteShardLockedAsync(ShardId, () =>
+            lock (syncRoot)
             {
-                lock (syncRoot)
+                var compactedAny = false;
+                foreach (var factory in policyFactories)
                 {
-                    var compactedAny = false;
-                    foreach (var factory in policyFactories)
-                    {
-                        var policy = factory.CreatePolicy();
-                        metadataManager.Compact(currentDocument, policy);
-                        compactedAny = true;
-                    }
-
-                    if (compactedAny)
-                    {
-                        isDirty = true;
-                    }
+                    var policy = factory.CreatePolicy();
+                    metadataManager.Compact(currentDocument, policy);
+                    compactedAny = true;
                 }
 
-                return Task.CompletedTask;
-            }, cancellationToken).ConfigureAwait(false);
+                if (compactedAny)
+                {
+                    isDirty = true;
+                }
+            }
 
             telemetry.RecordDocumentMetadataCompacted(DocumentId);
             logger.LogTrace("Compacted CRDT metadata for document {DocumentId}.", DocumentId);
+            return Task.CompletedTask;
         }
         catch (Exception ex)
         {

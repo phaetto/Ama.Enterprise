@@ -30,7 +30,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     private readonly IDistributedCrdtStorage storage;
     private readonly IAsyncCrdtPatcher patcher;
     private readonly IShardDistributionManager distributionManager;
-    private readonly IEnumerable<ICrdtOrchestratorObserver> orchestratorObservers;
+    private readonly ICrdtOrchestratorObserver[] orchestratorObservers;
     private readonly ILogger<CrdtDocumentOrchestrator> logger;
     private readonly IDistributedCrdtTelemetry telemetry;
     private readonly ICrdtStringPool stringPool;
@@ -72,7 +72,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
         this.patcher = patcher ?? throw new ArgumentNullException(nameof(patcher));
         this.distributionManager = distributionManager ?? throw new ArgumentNullException(nameof(distributionManager));
-        this.orchestratorObservers = orchestratorObservers ?? throw new ArgumentNullException(nameof(orchestratorObservers));
+        ArgumentNullException.ThrowIfNull(orchestratorObservers);
+        this.orchestratorObservers = orchestratorObservers as ICrdtOrchestratorObserver[] ?? new List<ICrdtOrchestratorObserver>(orchestratorObservers).ToArray();
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
         this.telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         this.stringPool = stringPool ?? CrdtStringPool.Shared;
@@ -999,11 +1000,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             var applied = await registryTyped.ApplyRemoteIntentAsync(intent, nameof(CrdtRegistryState.Documents), patcher, deliveryMode, cancellationToken).ConfigureAwait(false);
             if (applied)
             {
-                if (deliveryMode == IntentDeliveryMode.Acknowledged)
-                {
-                    await PromoteSingleDocumentAsync(documentId, typeAlias, cancellationToken).ConfigureAwait(false);
-                }
-
+                await PromoteSingleDocumentAsync(documentId, typeAlias, deliveryMode, cancellationToken).ConfigureAwait(false);
                 logger.LogDebug("Forwarded creation intent for document {DocumentId} ({TypeAlias}).", documentId, typeAlias);
             }
             else
@@ -1260,6 +1257,12 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     /// <inheritdoc />
     public async Task FlushAsync(CancellationToken cancellationToken = default)
     {
+        var pipeline = serviceProvider.GetService<IDocumentCommandPipeline>();
+        if (pipeline != null)
+        {
+            await pipeline.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         if (!disposeCts.IsCancellationRequested)
         {
             var cmd = GetCommand();
@@ -1284,7 +1287,6 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             }
         }
 
-        var pipeline = serviceProvider.GetService<IDocumentCommandPipeline>();
         if (pipeline != null)
         {
             await pipeline.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -1891,11 +1893,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
     private async Task NotifyTopologyChangedAsync(CancellationToken cancellationToken)
     {
-        foreach (var observer in orchestratorObservers)
+        for (int i = 0; i < orchestratorObservers.Length; i++)
         {
             try
             {
-                await observer.OnTopologyChangedAsync(cancellationToken).ConfigureAwait(false);
+                await orchestratorObservers[i].OnTopologyChangedAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -2036,7 +2038,10 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         var registry = Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
         var registryDoc = await registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-        if (TryFindRegistryEntry(registryDoc.Data.Documents, documentId, typeAlias, out var existingEntry) && existingEntry != null && existingEntry.IsDeleted)
+        var registryMap = registryDoc.Data.Documents;
+        if ((registryMap.TryGetValue(compositeKey, out var existingEntry) || registryMap.TryGetValue(documentId, out existingEntry))
+            && existingEntry != null
+            && existingEntry.IsDeleted)
         {
             return;
         }
@@ -2082,7 +2087,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
     }
 
-    private async Task PromoteSingleDocumentAsync(string documentId, string typeAlias, CancellationToken cancellationToken)
+    private async Task PromoteSingleDocumentAsync(string documentId, string typeAlias, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken)
     {
         documentId = stringPool.GetOrAdd(documentId);
         typeAlias = stringPool.GetOrAdd(typeAlias);
@@ -2107,6 +2112,26 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         if (!await distributionManager.IsShardLocalAsync(shardId, cancellationToken).ConfigureAwait(false))
         {
+            return;
+        }
+
+        if (deliveryMode == IntentDeliveryMode.FireAndForget)
+        {
+            var ffCmd = GetCommand();
+            ffCmd.Type = OrchestratorCommandType.CreateDocument;
+            ffCmd.DocumentId = documentId;
+            ffCmd.TypeAlias = typeAlias;
+            ffCmd.IsFireAndForget = true;
+            ffCmd.CancellationToken = CancellationToken.None;
+
+            if (commandChannel.Writer.TryWrite(ffCmd))
+            {
+                telemetry.RecordOrchestratorCommandEnqueued();
+                return;
+            }
+
+            await commandChannel.Writer.WriteAsync(ffCmd, cancellationToken).ConfigureAwait(false);
+            telemetry.RecordOrchestratorCommandEnqueued();
             return;
         }
 

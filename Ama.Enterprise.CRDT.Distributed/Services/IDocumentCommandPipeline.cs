@@ -5,13 +5,13 @@ using System.Threading.Tasks;
 using Ama.Enterprise.CRDT.Distributed.Models;
 
 /// <summary>
-/// Defines a centralized state machine channel pipeline that multiplexes and executes commands for all active CRDT documents in a scope.
+/// Defines a shared scoped pipeline that processes CRDT document commands through a single channel and object pool.
 /// </summary>
 /// <example>
 /// <code>
 /// var cmd = pipeline.RentCommand();
-/// cmd.Target = document;
-/// cmd.Type = DocumentCommandType.Checkpoint;
+/// cmd.Target = documentTarget;
+/// cmd.Type = DocumentCommandType.Initialize;
 /// try
 /// {
 ///     await pipeline.EnqueueAndWaitAsync(cmd, cancellationToken);
@@ -25,9 +25,14 @@ using Ama.Enterprise.CRDT.Distributed.Models;
 public interface IDocumentCommandPipeline
 {
     /// <summary>
-    /// Rents a pooled document command instance from the shared object pool.
+    /// Gets a value indicating whether the current execution context is already running inside this pipeline's processing loop.
     /// </summary>
-    /// <returns>A reset <see cref="PooledDocumentCommand"/> ready for configuration.</returns>
+    bool IsCurrentThreadPipelineProcessor { get; }
+
+    /// <summary>
+    /// Rents a pooled command instance from the shared object pool.
+    /// </summary>
+    /// <returns>A pooled command ready to be configured.</returns>
     PooledDocumentCommand RentCommand();
 
     /// <summary>
@@ -37,26 +42,26 @@ public interface IDocumentCommandPipeline
     void ReturnCommand(PooledDocumentCommand command);
 
     /// <summary>
-    /// Enqueues a command into the shared channel pipeline and awaits its execution completion.
+    /// Enqueues a command to the shared processing channel and awaits its completion.
     /// </summary>
-    /// <param name="command">The command to enqueue and execute.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    /// <returns>A <see cref="ValueTask"/> that completes when the command has been processed.</returns>
+    /// <param name="command">The configured command to execute.</param>
+    /// <param name="cancellationToken">A cancellation token to cancel the operation.</param>
+    /// <returns>A value task that completes when the command has been processed.</returns>
     ValueTask EnqueueAndWaitAsync(PooledDocumentCommand command, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Enqueues a fire-and-forget command into the shared channel pipeline without waiting for execution completion.
-    /// The pipeline automatically returns the command to the pool once processed.
+    /// Enqueues a fire-and-forget command to the shared processing channel without awaiting its execution.
+    /// The pipeline automatically returns the command to the pool after processing.
     /// </summary>
-    /// <param name="command">The fire-and-forget command to enqueue.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests while enqueuing.</param>
-    /// <returns>A <see cref="ValueTask"/> that completes once the command is written to the channel.</returns>
+    /// <param name="command">The configured command to enqueue.</param>
+    /// <param name="cancellationToken">A cancellation token to cancel the write operation if the channel is full.</param>
+    /// <returns>A value task that completes once the command is written to the channel.</returns>
     ValueTask EnqueueFireAndForgetAsync(PooledDocumentCommand command, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Completes the command channel writer and waits for all queued document commands to finish executing.
+    /// Drains all currently queued commands in the shared document pipeline without closing the channel.
     /// </summary>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    /// <returns>A task that completes when all queued commands have been processed.</returns>
+    /// <param name="cancellationToken">A cancellation token to cancel the flush wait.</param>
+    /// <returns>A task that completes when all commands queued prior to this call have been processed.</returns>
     Task FlushAsync(CancellationToken cancellationToken = default);
 }

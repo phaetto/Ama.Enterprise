@@ -43,6 +43,7 @@ public static class Program
     private static int currentPort;
     private static int currentAdminPort;
     private static volatile bool needsRedraw;
+    private static int isBulkGenerating;
 
     // DTO for representing the state output instead of using tuples
     private readonly record struct DocumentStateDto<T>(string Id, IReadOnlyDictionary<string, T> Items);
@@ -94,16 +95,16 @@ public static class Program
             options.ActiveSyncEnabled = true;
             options.PeerEvictionTtlSeconds = 0;
             options.AntiEntropyInitialDelaySeconds = 0;
-            options.AntiEntropyIntervalSeconds = 5;
+            options.AntiEntropyIntervalSeconds = 15;
             options.CheckpointIntervalSeconds = 3;
             options.MaintenanceIntervalSeconds = 5 * 60;
             options.CompactionTtlSeconds = 5 * 60;
             options.ShardReplicationFactor = 2;
-            options.EnableSharding = true;
-            options.JournalMode = CrdtJournalMode.InMemoryBuffer;
-            options.WalChannelCapacity = 100000;
-            options.WalMaxBatchSize = 10000;
-            options.WalDirectoryPath = AppContext.BaseDirectory;
+            //options.EnableSharding = true;
+            //options.JournalMode = CrdtJournalMode.InMemoryBuffer;
+            //options.WalChannelCapacity = 100000;
+            //options.WalMaxBatchSize = 10000;
+            //options.WalDirectoryPath = AppContext.BaseDirectory;
         });
 
         // Register the showcase JSON AOT and CRDT AOT contexts directly into the generic CRDT pipeline
@@ -113,7 +114,7 @@ public static class Program
                 .AddCrdtSerializableType<TaskItem>("task-item")
                 .AddCrdtSerializableType<DeviceStatus>("device-status")
                 .AddCrdtSystemTextJson(useBrotliCompression: true)
-                .AddCrdtShardIdProvider<ShowCaseShardIdProvider>();
+                ; //.AddCrdtShardIdProvider<ShowCaseShardIdProvider>();
 
         services.AddCrdtMessagePack(
             MessagePack.Resolvers.Ama_Enterprise_CRDT_MessagePack_MessagePackResolver.Instance,
@@ -131,7 +132,7 @@ public static class Program
         services.AddDistributedCrdtQuery<FleetState, PurgeOfflineDevicesCommand, PurgeOfflineDevicesSummaryDto, PurgeOfflineDevicesMapReduce>("fleet-purge-offline");
 
         // Register Showcase file-based CRDT storage overriding memory fallbacks for all documents
-        services.AddDistributedCrdtStorage<ShowCaseCrdtStorage>();
+        //services.AddDistributedCrdtStorage<ShowCaseCrdtStorage>();
 
         // Register the background multi-document orchestration and route inbound intents from the network
         services.AddDistributedCrdtReplica(replicaId, "internal");
@@ -150,6 +151,7 @@ public static class Program
             {
                 options.ListenPort = currentPort;
                 options.ListenHost = "127.0.0.1";
+                options.MaxMessageSize = int.MaxValue;
             })
             .AddUdpPeerDiscovery(options =>
             {
@@ -167,39 +169,39 @@ public static class Program
                 options.HeartbeatInterval = TimeSpan.FromSeconds(30);
             });
 
-        services
-            .AddP2pTelemetryForwarder(options =>
-            {
-                options.TargetMeshId = "admin";
-                options.FlushInterval = TimeSpan.FromSeconds(1);
-                options.IncludedMeterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    string.Empty // Get ALL
-                };
-            })
-#pragma warning disable DCRDT0003 // "admin" mesh is dedicated to P2P telemetry forwarding and does not host CRDT replicas
-            .AddP2pMesh("admin")
-#pragma warning restore DCRDT0003
-            .AddTcpTransport(options =>
-            {
-                options.ListenPort = currentAdminPort;
-                options.ListenHost = "127.0.0.1";
-            })
-            .AddUdpPeerDiscovery(options =>
-            {
-                options.MulticastAddress = "239.255.0.3";
-                options.MulticastPort = 8036;
-                options.DiscoveryInterval = TimeSpan.FromSeconds(1);
-                options.DiscoveryTimeout = TimeSpan.FromSeconds(1);
-            })
-            .AddUdpPeerHandshake(options =>
-            {
-                options.ListenPort = currentAdminHandshakePort;
-            })
-            .ConfigureFailureDetector(options =>
-            {
-                options.HeartbeatInterval = TimeSpan.FromSeconds(30);
-            });
+//        services
+//            .AddP2pTelemetryForwarder(options =>
+//            {
+//                options.TargetMeshId = "admin";
+//                options.FlushInterval = TimeSpan.FromSeconds(1);
+//                options.IncludedMeterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+//                {
+//                    string.Empty // Get ALL
+//                };
+//            })
+//#pragma warning disable DCRDT0003 // "admin" mesh is dedicated to P2P telemetry forwarding and does not host CRDT replicas
+//            .AddP2pMesh("admin")
+//#pragma warning restore DCRDT0003
+//            .AddTcpTransport(options =>
+//            {
+//                options.ListenPort = currentAdminPort;
+//                options.ListenHost = "127.0.0.1";
+//            })
+//            .AddUdpPeerDiscovery(options =>
+//            {
+//                options.MulticastAddress = "239.255.0.3";
+//                options.MulticastPort = 8036;
+//                options.DiscoveryInterval = TimeSpan.FromSeconds(1);
+//                options.DiscoveryTimeout = TimeSpan.FromSeconds(1);
+//            })
+//            .AddUdpPeerHandshake(options =>
+//            {
+//                options.ListenPort = currentAdminHandshakePort;
+//            })
+//            .ConfigureFailureDetector(options =>
+//            {
+//                options.HeartbeatInterval = TimeSpan.FromSeconds(30);
+//            });
 
         await using var provider = services.BuildServiceProvider();
         var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("ShowCase");
@@ -230,6 +232,7 @@ public static class Program
             var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
             var taskManager = scope.ServiceProvider.GetRequiredService<ITaskManager>();
             var fleetManager = scope.ServiceProvider.GetRequiredService<IFleetManager>();
+            var patchObservers = scope.ServiceProvider.GetServices<IDocumentPatchObserver>().ToList();
 
             // Background UI rendering task to decouple Console I/O from hot CRDT operations
             _ = Task.Run(async () =>
@@ -391,52 +394,70 @@ public static class Program
                                 WriteLineLocked($"[INFO] ShowCase: Generating {fleetCount} fleets with {devicesPerFleet} devices each...");
                                 var genSw = Stopwatch.StartNew();
 
-                                var createTasks = new List<Task>(Math.Min(fleetCount, 512));
-                                for (int i = 1; i <= fleetCount; i++)
+                                Interlocked.Exchange(ref isBulkGenerating, 1);
+                                try
                                 {
-                                    if (cts.Token.IsCancellationRequested) break;
-                                    var docId = $"auto-fleet-{i}";
-                                    createTasks.Add(orchestrator.CreateDocumentAsync(docId, "fleet-list", IntentDeliveryMode.Acknowledged, cts.Token));
+                                    var createTasks = new List<Task>(Math.Min(fleetCount, 2048));
+                                    for (int i = 1; i <= fleetCount; i++)
+                                    {
+                                        if (cts.Token.IsCancellationRequested) break;
+                                        var docId = $"auto-fleet-{i}";
+                                        createTasks.Add(orchestrator.CreateDocumentAsync(docId, "fleet-list", IntentDeliveryMode.FireAndForget, cts.Token));
 
-                                    if (createTasks.Count >= 512)
+                                        if (createTasks.Count >= 2048)
+                                        {
+                                            await Task.WhenAll(createTasks).ConfigureAwait(false);
+                                            createTasks.Clear();
+                                        }
+                                    }
+
+                                    if (createTasks.Count > 0)
                                     {
                                         await Task.WhenAll(createTasks).ConfigureAwait(false);
                                         createTasks.Clear();
                                     }
-                                }
 
-                                if (createTasks.Count > 0)
-                                {
-                                    await Task.WhenAll(createTasks).ConfigureAwait(false);
-                                    createTasks.Clear();
-                                }
+                                    // Drain local registry and document creation commands so all local documents are promoted
+                                    // into activeDocuments before pumping device intents, avoiding lazy promotion on every device call.
+                                    await orchestrator.FlushAsync(cts.Token).ConfigureAwait(false);
 
-                                var deviceTasks = new List<Task>(Math.Min(fleetCount * Math.Max(1, devicesPerFleet), 2048));
-                                for (int i = 1; i <= fleetCount; i++)
-                                {
-                                    if (cts.Token.IsCancellationRequested) break;
-                                    var docId = $"auto-fleet-{i}";
-                                    
-                                    for (int j = 1; j <= devicesPerFleet; j++)
+                                    var deviceTasks = new List<Task>(Math.Min(fleetCount * Math.Max(1, devicesPerFleet), 4096));
+                                    for (int i = 1; i <= fleetCount; i++)
                                     {
                                         if (cts.Token.IsCancellationRequested) break;
-                                        var deviceId = $"dev-{j}";
-                                        var isDevOnline = Random.Shared.NextDouble() > 0.5;
-                                        var deviceBattery = Random.Shared.Next(0, 101);
-                                        deviceTasks.Add(fleetManager.SetDeviceAsync(docId, deviceId, isDevOnline, deviceBattery, IntentDeliveryMode.FireAndForget, cts.Token));
-
-                                        if (deviceTasks.Count >= 2048)
+                                        var docId = $"auto-fleet-{i}";
+                                        
+                                        for (int j = 1; j <= devicesPerFleet; j++)
                                         {
-                                            await Task.WhenAll(deviceTasks).ConfigureAwait(false);
-                                            deviceTasks.Clear();
+                                            if (cts.Token.IsCancellationRequested) break;
+                                            var deviceId = $"dev-{j}";
+                                            var isDevOnline = Random.Shared.NextDouble() > 0.5;
+                                            var deviceBattery = Random.Shared.Next(0, 101);
+                                            deviceTasks.Add(fleetManager.SetDeviceAsync(docId, deviceId, isDevOnline, deviceBattery, IntentDeliveryMode.FireAndForget, cts.Token));
+
+                                            if (deviceTasks.Count >= 4096)
+                                            {
+                                                await Task.WhenAll(deviceTasks).ConfigureAwait(false);
+                                                deviceTasks.Clear();
+                                            }
                                         }
                                     }
-                                }
 
-                                if (deviceTasks.Count > 0)
+                                    if (deviceTasks.Count > 0)
+                                    {
+                                        await Task.WhenAll(deviceTasks).ConfigureAwait(false);
+                                        deviceTasks.Clear();
+                                    }
+
+                                    await orchestrator.FlushAsync(cts.Token).ConfigureAwait(false);
+                                    foreach (var patchObserver in patchObservers)
+                                    {
+                                        await patchObserver.FlushAsync(cts.Token).ConfigureAwait(false);
+                                    }
+                                }
+                                finally
                                 {
-                                    await Task.WhenAll(deviceTasks).ConfigureAwait(false);
-                                    deviceTasks.Clear();
+                                    Interlocked.Exchange(ref isBulkGenerating, 0);
                                 }
 
                                 genSw.Stop();
@@ -960,6 +981,11 @@ public static class Program
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
             if (!IsEnabled(logLevel))
+            {
+                return;
+            }
+
+            if (logLevel < LogLevel.Warning && Volatile.Read(ref isBulkGenerating) == 1 && !string.Equals(shortCategory, "ShowCase", StringComparison.Ordinal))
             {
                 return;
             }

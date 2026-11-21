@@ -14,6 +14,8 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed class DocumentCommandPipeline : IDocumentCommandPipeline, IDisposable
 {
+    private static readonly AsyncLocal<DocumentCommandPipeline?> CurrentProcessingPipeline = new();
+
     private readonly IDistributedCrdtTelemetry telemetry;
     private readonly ILogger<DocumentCommandPipeline> logger;
     private readonly Channel<PooledDocumentCommand> commandChannel;
@@ -21,6 +23,11 @@ public sealed class DocumentCommandPipeline : IDocumentCommandPipeline, IDisposa
     private readonly CancellationTokenSource disposeCts = new();
     private readonly IDisposable telemetryRegistration;
     private readonly Task processingTask;
+
+    /// <summary>
+    /// Gets a value indicating whether the current execution context is already running inside this pipeline's processing loop.
+    /// </summary>
+    public bool IsCurrentThreadPipelineProcessor => ReferenceEquals(CurrentProcessingPipeline.Value, this);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DocumentCommandPipeline"/> class.
@@ -86,6 +93,34 @@ public sealed class DocumentCommandPipeline : IDocumentCommandPipeline, IDisposa
             throw new InvalidOperationException("Command Target must be assigned before enqueuing.");
         }
 
+        if (IsCurrentThreadPipelineProcessor)
+        {
+            var inlineDocId = command.Target.DocumentId;
+            telemetry.RecordDocumentCommandEnqueued(inlineDocId);
+            var previousPipeline = CurrentProcessingPipeline.Value;
+            try
+            {
+                command.CancellationToken.ThrowIfCancellationRequested();
+                await command.Target.ExecuteCommandInternalAsync(command).ConfigureAwait(false);
+                telemetry.RecordDocumentCommandProcessed(inlineDocId);
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                telemetry.RecordDocumentCommandFailure(inlineDocId);
+                logger.LogError(ex, "Error executing inline document command {CommandType} for document {DocumentId}.", command.Type, inlineDocId);
+                throw;
+            }
+            finally
+            {
+                CurrentProcessingPipeline.Value = previousPipeline;
+            }
+        }
+
         var documentId = command.Target.DocumentId;
         await commandChannel.Writer.WriteAsync(command, cancellationToken).ConfigureAwait(false);
         telemetry.RecordDocumentCommandEnqueued(documentId);
@@ -118,7 +153,7 @@ public sealed class DocumentCommandPipeline : IDocumentCommandPipeline, IDisposa
     /// <inheritdoc />
     public async Task FlushAsync(CancellationToken cancellationToken = default)
     {
-        if (disposeCts.IsCancellationRequested)
+        if (disposeCts.IsCancellationRequested || IsCurrentThreadPipelineProcessor)
         {
             return;
         }
@@ -169,7 +204,15 @@ public sealed class DocumentCommandPipeline : IDocumentCommandPipeline, IDisposa
 
                     if (target is not null)
                     {
-                        await target.ExecuteCommandInternalAsync(cmd).ConfigureAwait(false);
+                        CurrentProcessingPipeline.Value = this;
+                        try
+                        {
+                            await target.ExecuteCommandInternalAsync(cmd).ConfigureAwait(false);
+                        }
+                        finally
+                        {
+                            CurrentProcessingPipeline.Value = null;
+                        }
                     }
 
                     telemetry.RecordDocumentCommandProcessed(documentId);

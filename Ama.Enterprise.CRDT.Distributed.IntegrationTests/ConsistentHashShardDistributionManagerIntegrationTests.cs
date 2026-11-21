@@ -125,6 +125,7 @@ public sealed class ConsistentHashShardDistributionManagerIntegrationTests
         // Act - Simulate a node crash/eviction by removing the last remote peer
         var removedReplicaId = context.ReplicaIds.Last();
         context.ActivePeers.RemoveAt(context.ActivePeers.Count - 1);
+        await Task.Delay(60);
         
         int changedAssignments = 0;
 
@@ -239,6 +240,7 @@ public sealed class ConsistentHashShardDistributionManagerIntegrationTests
 
         // Act 2 - Map the peer in ClusterTracker and query again
         context.PeerToReplicaMap[unmappedPeerId.Value.ToString()] = "replica-newly-mapped";
+        await Task.Delay(60);
         var targetsAfterMapping = await context.Manager.GetTargetNodesForShardAsync("shard-unmapped-test");
 
         // Assert 2 - The ring rebuilds and now includes the newly mapped replica
@@ -265,6 +267,7 @@ public sealed class ConsistentHashShardDistributionManagerIntegrationTests
             context.ActivePeers.Add(new PeerNode { Id = newPeerId });
             context.PeerToReplicaMap[newPeerId.Value.ToString()] = $"replica-{i}";
         }
+        await Task.Delay(60);
 
         int localCountAfterScaleOut = 0;
         for (int i = 0; i < TotalShards; i++)

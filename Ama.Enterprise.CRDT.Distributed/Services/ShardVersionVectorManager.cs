@@ -107,43 +107,20 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
     }
 
     /// <inheritdoc />
-    public async ValueTask<ShardVersionVectorMap> GetShardsSnapshotAsync(IEnumerable<string> shardIds, CancellationToken cancellationToken = default)
+    public ValueTask<ShardVersionVectorMap> GetShardsSnapshotAsync(IEnumerable<string> shardIds, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(shardIds);
+        cancellationToken.ThrowIfCancellationRequested();
 
-        var sortedShards = shardIds
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .Select(s => stringPool.GetOrAdd(s))
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(s => s, StringComparer.Ordinal)
-            .ToList();
-
-        var acquiredLocks = new List<SemaphoreSlim>(sortedShards.Count);
-        try
-        {
-            foreach (var shardId in sortedShards)
-            {
-                var sem = GetShardSemaphore(shardId);
-                await sem.WaitAsync(cancellationToken).ConfigureAwait(false);
-                acquiredLocks.Add(sem);
-            }
-
-            return GetShardsSnapshot(sortedShards);
-        }
-        finally
-        {
-            for (var i = acquiredLocks.Count - 1; i >= 0; i--)
-            {
-                acquiredLocks[i].Release();
-            }
-        }
+        return new ValueTask<ShardVersionVectorMap>(GetShardsSnapshot(shardIds));
     }
 
     /// <inheritdoc />
-    public async ValueTask<ShardVersionVectorMap> GetFullSnapshotAsync(CancellationToken cancellationToken = default)
+    public ValueTask<ShardVersionVectorMap> GetFullSnapshotAsync(CancellationToken cancellationToken = default)
     {
-        var shardIds = GetShardIds();
-        return await GetShardsSnapshotAsync(shardIds, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return new ValueTask<ShardVersionVectorMap>(GetFullSnapshot());
     }
 
     /// <inheritdoc />
