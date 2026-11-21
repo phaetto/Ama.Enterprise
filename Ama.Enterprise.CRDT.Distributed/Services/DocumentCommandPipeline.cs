@@ -136,6 +136,33 @@ public sealed class DocumentCommandPipeline : IDocumentCommandPipeline, IDisposa
             throw new InvalidOperationException("Command Target must be assigned before enqueuing.");
         }
 
+        if (IsCurrentThreadPipelineProcessor)
+        {
+            var inlineDocId = command.Target.DocumentId;
+            telemetry.RecordDocumentCommandEnqueued(inlineDocId);
+            var previousPipeline = CurrentProcessingPipeline.Value;
+            try
+            {
+                await command.Target.ExecuteCommandInternalAsync(command).ConfigureAwait(false);
+                telemetry.RecordDocumentCommandProcessed(inlineDocId);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                telemetry.RecordDocumentCommandFailure(inlineDocId);
+                logger.LogError(ex, "Error executing inline fire-and-forget document command {CommandType} for document {DocumentId}.", command.Type, inlineDocId);
+            }
+            finally
+            {
+                CurrentProcessingPipeline.Value = previousPipeline;
+                ReturnCommand(command);
+            }
+
+            return;
+        }
+
         var documentId = command.Target.DocumentId;
         command.IsFireAndForget = true;
         command.CancellationToken = CancellationToken.None;

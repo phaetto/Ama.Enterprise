@@ -573,4 +573,57 @@ public sealed class ConcurrencyIntegrationTests
         }
         orchestrator.TryGetLocalDocument<ConcurrencyTestState>("coalesce-doc-final").ShouldNotBeNull();
     }
+
+    [IntegrationFact]
+    public async Task CrdtDocumentOrchestrator_CreateDocumentAsyncBurstExceedingChannelCapacity_DoesNotDeadlockAndPromotesAllDocuments()
+    {
+        // Arrange - Set a small ChannelCapacity (16) and fire a concurrent burst (100 > 16) of CreateDocumentAsync
+        // to exercise cross-channel saturation between DocumentCommandPipeline and CrdtDocumentOrchestrator.
+        const int ChannelCapacity = 16;
+        const int DocumentBurstCount = 100;
+
+        var serviceProvider = BuildNode("Replica1", services =>
+        {
+            services.Configure<Models.DistributedCrdtOptions>(opt =>
+            {
+                opt.ChannelCapacity = ChannelCapacity;
+            });
+        });
+
+        var scopeManager = serviceProvider.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        // Act - Enqueue all FireAndForget document creations in a single batch exceeding ChannelCapacity
+        var createTasks = new List<Task>(DocumentBurstCount);
+        for (int i = 1; i <= DocumentBurstCount; i++)
+        {
+            var docId = $"burst-doc-{i}";
+            createTasks.Add(orchestrator.CreateDocumentAsync(
+                docId,
+                "concurrent-doc",
+                Models.IntentDeliveryMode.FireAndForget,
+                timeoutCts.Token));
+        }
+
+        await Task.WhenAll(createTasks).WaitAsync(timeoutCts.Token);
+        await orchestrator.FlushAsync(timeoutCts.Token);
+
+        // Assert - All documents were registered and promoted into active memory without deadlocking
+        for (int i = 1; i <= DocumentBurstCount; i++)
+        {
+            var docId = $"burst-doc-{i}";
+            var exists = await orchestrator.DocumentExistsAsync(docId, "concurrent-doc", timeoutCts.Token);
+            exists.ShouldBeTrue();
+
+            var localDoc = orchestrator.TryGetLocalDocument<ConcurrencyTestState>(docId);
+            localDoc.ShouldNotBeNull();
+        }
+
+        // Total active documents = DocumentBurstCount + 1 (for system-document-registry)
+        orchestrator.GetActiveDocuments().Count.ShouldBe(DocumentBurstCount + 1);
+    }
 }

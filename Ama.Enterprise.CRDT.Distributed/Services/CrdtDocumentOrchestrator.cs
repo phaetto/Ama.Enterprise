@@ -26,6 +26,8 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDisposable
 {
+    private static readonly AsyncLocal<CrdtDocumentOrchestrator?> CurrentProcessingOrchestrator = new();
+
     private readonly IServiceProvider serviceProvider;
     private readonly IDistributedCrdtStorage storage;
     private readonly IAsyncCrdtPatcher patcher;
@@ -47,6 +49,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     private readonly Task processingTask;
     private int syncPending;
     private int initializationStage = (int)OrchestratorInitializationStage.NotStarted;
+
+    /// <summary>
+    /// Gets a value indicating whether the current execution context is already running inside this orchestrator's command processing loop.
+    /// </summary>
+    public bool IsCurrentThreadOrchestratorProcessor => ReferenceEquals(CurrentProcessingOrchestrator.Value, this);
 
     /// <inheritdoc />
     public OrchestratorInitializationStage InitializationStage => (OrchestratorInitializationStage)Volatile.Read(ref initializationStage);
@@ -112,6 +119,12 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
+        if (IsCurrentThreadOrchestratorProcessor)
+        {
+            await ProcessInitializeInternalAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         var cmd = GetCommand();
         cmd.Type = OrchestratorCommandType.Initialize;
         cmd.CancellationToken = cancellationToken;
@@ -135,6 +148,13 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
     public async Task ReevaluateTopologyAsync(IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default)
     {
+        if (IsCurrentThreadOrchestratorProcessor && deliveryMode != IntentDeliveryMode.FireAndForget)
+        {
+            Interlocked.Exchange(ref syncPending, 0);
+            await ProcessSyncDocumentsInternalAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (deliveryMode == IntentDeliveryMode.FireAndForget)
         {
             if (Interlocked.Exchange(ref syncPending, 1) == 1)
@@ -150,6 +170,14 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             if (commandChannel.Writer.TryWrite(ffCmd))
             {
                 telemetry.RecordOrchestratorCommandEnqueued();
+                return;
+            }
+
+            if (IsCurrentThreadOrchestratorProcessor)
+            {
+                Interlocked.Exchange(ref syncPending, 0);
+                ReturnCommand(ffCmd);
+                await ProcessSyncDocumentsInternalAsync(cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -455,6 +483,13 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         if (!await distributionManager.IsShardLocalAsync(shardId, cancellationToken).ConfigureAwait(false))
         {
             return null;
+        }
+
+        if (IsCurrentThreadOrchestratorProcessor)
+        {
+            await ProcessPromoteDocumentInternalAsync(documentId, resolvedAlias, cancellationToken).ConfigureAwait(false);
+            activeDocuments.TryGetValue(resolvedKey, out var inlinePromotedDoc);
+            return inlinePromotedDoc;
         }
 
         var cmd = GetCommand();
@@ -1257,13 +1292,14 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     /// <inheritdoc />
     public async Task FlushAsync(CancellationToken cancellationToken = default)
     {
-        var pipeline = serviceProvider.GetService<IDocumentCommandPipeline>();
-        if (pipeline != null)
-        {
-            await pipeline.FlushAsync(cancellationToken).ConfigureAwait(false);
-        }
+        // 1. Drain the document command pipeline first so any queued FireAndForget registry intents
+        // (such as MapSetIntent from CreateDocumentAsync) have applied and triggered registry state observers.
+        var commandPipeline = serviceProvider.GetRequiredService<IDocumentCommandPipeline>();
+        await commandPipeline.FlushAsync(cancellationToken).ConfigureAwait(false);
 
-        if (!disposeCts.IsCancellationRequested)
+        // 2. Drain any pending commands in the orchestrator channel, then run a final synchronous topology
+        // evaluation if any FireAndForget promotions fell back to coalesced topology sync.
+        if (!IsCurrentThreadOrchestratorProcessor)
         {
             var cmd = GetCommand();
             cmd.Type = OrchestratorCommandType.FlushBarrier;
@@ -1271,15 +1307,9 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
             try
             {
-                if (!commandChannel.Writer.TryWrite(cmd))
-                {
-                    await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
-                }
-
+                await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+                telemetry.RecordOrchestratorCommandEnqueued();
                 await cmd.ExecuteAsync().ConfigureAwait(false);
-            }
-            catch (ChannelClosedException)
-            {
             }
             finally
             {
@@ -1287,15 +1317,10 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             }
         }
 
-        if (pipeline != null)
-        {
-            await pipeline.FlushAsync(cancellationToken).ConfigureAwait(false);
-        }
+        await ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, cancellationToken).ConfigureAwait(false);
 
-        if (Registry != null)
-        {
-            await Registry.FlushAsync(cancellationToken).ConfigureAwait(false);
-        }
+        // 3. Flush any remaining document commands and debounced active-sync patches across all active documents.
+        await commandPipeline.FlushAsync(cancellationToken).ConfigureAwait(false);
 
         foreach (var doc in activeDocuments.Values)
         {
@@ -1924,20 +1949,28 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 {
                     cmd.CancellationToken.ThrowIfCancellationRequested();
 
-                    switch (cmd.Type)
+                    CurrentProcessingOrchestrator.Value = this;
+                    try
                     {
-                        case OrchestratorCommandType.Initialize:
-                            await ProcessInitializeInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
-                            break;
-                        case OrchestratorCommandType.CreateDocument:
-                            await ProcessPromoteDocumentInternalAsync(cmd.DocumentId!, cmd.TypeAlias!, cmd.CancellationToken).ConfigureAwait(false);
-                            break;
-                        case OrchestratorCommandType.ReevaluateTopology:
-                            Interlocked.Exchange(ref syncPending, 0);
-                            await ProcessSyncDocumentsInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
-                            break;
-                        case OrchestratorCommandType.FlushBarrier:
-                            break;
+                        switch (cmd.Type)
+                        {
+                            case OrchestratorCommandType.Initialize:
+                                await ProcessInitializeInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
+                                break;
+                            case OrchestratorCommandType.CreateDocument:
+                                await ProcessPromoteDocumentInternalAsync(cmd.DocumentId!, cmd.TypeAlias!, cmd.CancellationToken).ConfigureAwait(false);
+                                break;
+                            case OrchestratorCommandType.ReevaluateTopology:
+                                Interlocked.Exchange(ref syncPending, 0);
+                                await ProcessSyncDocumentsInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
+                                break;
+                            case OrchestratorCommandType.FlushBarrier:
+                                break;
+                        }
+                    }
+                    finally
+                    {
+                        CurrentProcessingOrchestrator.Value = null;
                     }
 
                     telemetry.RecordOrchestratorCommandProcessed();
@@ -2069,11 +2102,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         if (activeDocuments.TryAdd(compositeKey, doc))
         {
+            telemetry.RecordOrchestratorDocumentCreated(documentId);
+            logger.LogDebug("Mapped new active CRDT document: {DocumentId} ({TypeAlias})", documentId, typeAlias);
+
             var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
             versionVectorManager.EnsureShardRegistered(doc.ShardId);
-
-            telemetry.RecordOrchestratorDocumentCreated(documentId);
-            logger.LogDebug("Lazily promoted active CRDT document: {DocumentId} ({TypeAlias})", documentId, typeAlias);
 
             await NotifyTopologyChangedAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -2089,9 +2122,6 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
     private async Task PromoteSingleDocumentAsync(string documentId, string typeAlias, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken)
     {
-        documentId = stringPool.GetOrAdd(documentId);
-        typeAlias = stringPool.GetOrAdd(typeAlias);
-
         var compositeKey = CrdtRegistryEntry.GetRegistryKey(typeAlias, documentId);
         if (activeDocuments.ContainsKey(compositeKey))
         {
@@ -2115,6 +2145,12 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             return;
         }
 
+        if (IsCurrentThreadOrchestratorProcessor)
+        {
+            await ProcessPromoteDocumentInternalAsync(documentId, typeAlias, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (deliveryMode == IntentDeliveryMode.FireAndForget)
         {
             var ffCmd = GetCommand();
@@ -2127,6 +2163,14 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             if (commandChannel.Writer.TryWrite(ffCmd))
             {
                 telemetry.RecordOrchestratorCommandEnqueued();
+                return;
+            }
+
+            var pipeline = serviceProvider.GetService<IDocumentCommandPipeline>();
+            if (pipeline != null && pipeline.IsCurrentThreadPipelineProcessor)
+            {
+                ReturnCommand(ffCmd);
+                _ = ReevaluateTopologyAsync(IntentDeliveryMode.FireAndForget, CancellationToken.None);
                 return;
             }
 
