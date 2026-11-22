@@ -36,7 +36,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/ShowCaseJsonContext.cs` | Registered Map/Reduce and cluster query DTOs in the showcase AOT JSON context. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskItem.cs` | Data structure representing an individual task item. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskListState.cs` | Root CRDT document model representing a task list. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Registered Map/Reduce handlers and added `fsearch`, `fstats`, and `fpurge` CLI commands to the showcase. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Added `read <docId>` CLI command to inspect and print a specific local or remote document. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetBatteryAnalyticsMapReduce.cs` | Multi-stage Map/Reduce handler calculating global mean, standard deviation, min, and max battery levels across sharded fleet documents. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetManager.cs` | Implemented `ICrdtClusterQuery` for low-battery device search and added orchestrator invocations for statistical aggregation and in-place offline device purging. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/IFleetManager.cs` | Added `SearchLowBatteryDevicesAsync`, `GetClusterBatteryStatsAsync`, and `PurgeOfflineDevicesAsync` to `IFleetManager`. |

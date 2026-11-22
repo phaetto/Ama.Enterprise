@@ -610,6 +610,13 @@ public static class Program
                                 WriteLineLocked("Usage: hammer <changes_per_second> (use 0 to stop)");
                             }
                             break;
+
+                        case "read":
+                            if (parts.Length >= 2)
+                                await ReadDocumentAsync(parts[1], orchestrator, taskManager, fleetManager, cts.Token).ConfigureAwait(false);
+                            else
+                                WriteLineLocked("Usage: read <docId>");
+                            break;
                             
                         case "print":
                             await DrawStateAsync(replicaId, orchestrator, taskManager, fleetManager, cts.Token).ConfigureAwait(false);
@@ -704,12 +711,106 @@ public static class Program
             Console.WriteLine(" fpurge <maxBatt>                               - In-place distributed purge of offline low-battery devices");
             Console.WriteLine(" gen-fleets <count> <devices>                   - Generates <count> fleets with <devices> devices each");
             Console.WriteLine(" hammer <cps>                                   - Pumps <cps> changes/sec into 5 sharded documents (0 to stop)");
+            Console.WriteLine(" read <docId>                                   - Reads and prints a specific document (local or remote shard)");
             Console.WriteLine(" print                                          - Prints the current state of documents hosted on this node");
             Console.WriteLine(" mem                                            - Prints the serialized memory footprint of active and registry documents");
             Console.WriteLine(" clone [count]                                  - Spawns new node process(es) (default 1)");
             Console.WriteLine(" exit                                           - Shuts down the node");
             Console.WriteLine("=================================================\n");
         }
+    }
+
+    private static async Task ReadDocumentAsync(string documentId, ICrdtDocumentOrchestrator orchestrator, ITaskManager taskManager, IFleetManager fleetManager, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
+        ArgumentNullException.ThrowIfNull(orchestrator);
+        ArgumentNullException.ThrowIfNull(taskManager);
+        ArgumentNullException.ThrowIfNull(fleetManager);
+
+        var sw = Stopwatch.StartNew();
+
+        if (string.Equals(documentId, orchestrator.Registry.DocumentId, StringComparison.Ordinal))
+        {
+            var regDoc = await orchestrator.Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            var regState = regDoc.Data ?? new CrdtRegistryState();
+            sw.Stop();
+
+            lock (ConsoleLock)
+            {
+                Console.WriteLine($"\n--- [Document: {documentId} (Registry)] ({sw.ElapsedMilliseconds} ms) ---");
+                if (regState.Documents.Count == 0)
+                {
+                    Console.WriteLine("   (Empty)");
+                }
+                else
+                {
+                    foreach (var kvp in regState.Documents.OrderBy(d => d.Key, StringComparer.Ordinal))
+                    {
+                        Console.WriteLine($"   [{kvp.Value.DocumentId}]: Type={kvp.Value.TypeAlias}, Deleted={kvp.Value.IsDeleted}");
+                    }
+                }
+
+                Console.WriteLine("------------------------------------\n> ");
+            }
+
+            return;
+        }
+
+        if (await orchestrator.DocumentExistsAsync<TaskListState>(documentId, cancellationToken).ConfigureAwait(false))
+        {
+            var tasks = await taskManager.GetTasksAsync(documentId, cancellationToken).ConfigureAwait(false);
+            var isLocal = orchestrator.GetActiveDocuments().Any(d => string.Equals(d.DocumentId, documentId, StringComparison.Ordinal));
+            sw.Stop();
+
+            lock (ConsoleLock)
+            {
+                Console.WriteLine($"\n--- [Document: {documentId} (TaskList | {(isLocal ? "Local Shard" : "Remote Shard")})] ({sw.ElapsedMilliseconds} ms) ---");
+                if (tasks.Count == 0)
+                {
+                    Console.WriteLine("   (Empty)");
+                }
+                else
+                {
+                    foreach (var task in tasks.OrderBy(t => t.Key, StringComparer.Ordinal))
+                    {
+                        Console.WriteLine($"   [{task.Key}]: {task.Value.Description} (Done: {task.Value.IsDone})");
+                    }
+                }
+
+                Console.WriteLine("------------------------------------\n> ");
+            }
+
+            return;
+        }
+
+        if (await orchestrator.DocumentExistsAsync<FleetState>(documentId, cancellationToken).ConfigureAwait(false))
+        {
+            var devices = await fleetManager.GetDevicesAsync(documentId, cancellationToken).ConfigureAwait(false);
+            var isLocal = orchestrator.GetActiveDocuments().Any(d => string.Equals(d.DocumentId, documentId, StringComparison.Ordinal));
+            sw.Stop();
+
+            lock (ConsoleLock)
+            {
+                Console.WriteLine($"\n--- [Document: {documentId} (FleetList | {(isLocal ? "Local Shard" : "Remote Shard")})] ({sw.ElapsedMilliseconds} ms) ---");
+                if (devices.Count == 0)
+                {
+                    Console.WriteLine("   (Empty)");
+                }
+                else
+                {
+                    foreach (var device in devices.OrderBy(d => d.Key, StringComparer.Ordinal))
+                    {
+                        Console.WriteLine($"   [{device.Key}]: Online: {device.Value.IsOnline}, Battery: {device.Value.BatteryLevel}%");
+                    }
+                }
+
+                Console.WriteLine("------------------------------------\n> ");
+            }
+
+            return;
+        }
+
+        WriteLineLocked($"[WARN] ShowCase: Document '{documentId}' was not found.");
     }
 
     private static async Task DrawMemoryStatsAsync(string replicaId, ICrdtDocumentOrchestrator orchestrator, CancellationToken cancellationToken)
