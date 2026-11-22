@@ -624,7 +624,12 @@ public static class Program
                             break;
 
                         case "mem":
-                            await DrawMemoryStatsAsync(replicaId, orchestrator, cts.Token).ConfigureAwait(false);
+                            {
+                                var showDetails = parts.Length >= 2 &&
+                                    (string.Equals(parts[1], "details", StringComparison.OrdinalIgnoreCase) ||
+                                     (bool.TryParse(parts[1], out var parsedDetails) && parsedDetails));
+                                await DrawMemoryStatsAsync(replicaId, orchestrator, showDetails, cts.Token).ConfigureAwait(false);
+                            }
                             break;
 
                         case "clone":
@@ -714,7 +719,7 @@ public static class Program
             Console.WriteLine(" hammer <cps>                                   - Pumps <cps> changes/sec into 5 sharded documents (0 to stop)");
             Console.WriteLine(" read <docId>                                   - Reads and prints a specific document (local or remote shard)");
             Console.WriteLine(" print                                          - Prints the current state of documents hosted on this node");
-            Console.WriteLine(" mem                                            - Prints the serialized memory footprint of active and registry documents");
+            Console.WriteLine(" mem [details]                                  - Prints memory overview (add 'details' to list each document)");
             Console.WriteLine(" clone [count]                                  - Spawns new node process(es) (default 1)");
             Console.WriteLine(" exit                                           - Shuts down the node");
             Console.WriteLine("=================================================\n");
@@ -814,7 +819,7 @@ public static class Program
         WriteLineLocked($"[WARN] ShowCase: Document '{documentId}' was not found.");
     }
 
-    private static async Task DrawMemoryStatsAsync(string replicaId, ICrdtDocumentOrchestrator orchestrator, CancellationToken cancellationToken)
+    private static async Task DrawMemoryStatsAsync(string replicaId, ICrdtDocumentOrchestrator orchestrator, bool showDetails, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(replicaId);
         ArgumentNullException.ThrowIfNull(orchestrator);
@@ -869,21 +874,28 @@ public static class Program
             ReusableMemoryStatsList.Add(new DocumentMemoryStatsDto(doc.DocumentId, doc.ShardId, docType, dataBytes, metadataBytes, stateBytes, wholeObjectBytes, globalStateBytes));
         }
 
-        ReusableMemoryStatsList.Sort(MemoryStatsComparison);
+        if (showDetails)
+        {
+            ReusableMemoryStatsList.Sort(MemoryStatsComparison);
+        }
 
         lock (ConsoleLock)
         {
             Console.WriteLine($"\n--- [Document Memory Footprint: {replicaId}] ---");
-            Console.WriteLine($" {"Document ID",-25} | {"Type",-10} | {"Shard ID",-26} | {"Data Est.",14} | {"CRDT Meta Est.",14} | {"Data + Meta",14} | {"Whole Doc Est.",15} | {"Shard DVV Est.",14}");
-            Console.WriteLine(TableSeparatorLine);
-
-            for (int i = 0; i < ReusableMemoryStatsList.Count; i++)
+            if (showDetails)
             {
-                var stat = ReusableMemoryStatsList[i];
-                Console.WriteLine($" {stat.Id,-25} | {stat.DocumentType,-10} | {stat.ShardId,-26} | {FormatBytes(stat.DataSizeBytes),14} | {FormatBytes(stat.MetadataSizeBytes),14} | {FormatBytes(stat.StateSizeBytes),14} | {FormatBytes(stat.WholeObjectSizeBytes),15} | {FormatBytes(stat.GlobalStateSizeBytes),14}");
+                Console.WriteLine($" {"Document ID",-25} | {"Type",-10} | {"Shard ID",-26} | {"Data Est.",14} | {"CRDT Meta Est.",14} | {"Data + Meta",14} | {"Whole Doc Est.",15} | {"Shard DVV Est.",14}");
+                Console.WriteLine(TableSeparatorLine);
+
+                for (int i = 0; i < ReusableMemoryStatsList.Count; i++)
+                {
+                    var stat = ReusableMemoryStatsList[i];
+                    Console.WriteLine($" {stat.Id,-25} | {stat.DocumentType,-10} | {stat.ShardId,-26} | {FormatBytes(stat.DataSizeBytes),14} | {FormatBytes(stat.MetadataSizeBytes),14} | {FormatBytes(stat.StateSizeBytes),14} | {FormatBytes(stat.WholeObjectSizeBytes),15} | {FormatBytes(stat.GlobalStateSizeBytes),14}");
+                }
+
+                Console.WriteLine(TableSeparatorLine);
             }
 
-            Console.WriteLine(TableSeparatorLine);
             Console.WriteLine($" Total Active Documents : {ReusableMemoryStatsList.Count} (1 Registry + {Math.Max(0, ReusableMemoryStatsList.Count - 1)} Active)");
             Console.WriteLine($" Total Actual Data Est. : {FormatBytes(totalDataBytes)} ({totalDataBytes:N0} B)");
             Console.WriteLine($" Total CRDT Meta Est.   : {FormatBytes(totalMetadataBytes)} ({totalMetadataBytes:N0} B)");
