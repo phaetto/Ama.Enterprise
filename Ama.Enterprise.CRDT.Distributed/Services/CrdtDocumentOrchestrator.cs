@@ -42,6 +42,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     private readonly ConcurrentDictionary<string, IDistributedCrdtDocument> activeDocuments = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> shardIdCache = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<Type, string> stateTypeAliases = new();
+    private readonly ConcurrentDictionary<string, byte> activeAntiEntropyShards = new(StringComparer.Ordinal);
     
     private readonly Channel<PooledOrchestratorCommand> commandChannel;
     private readonly ConcurrentQueue<PooledOrchestratorCommand> commandPool = new();
@@ -67,7 +68,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     /// <summary>
     /// Gets a value indicating whether an anti-entropy dispatch or incoming state sync response is currently active.
     /// </summary>
-    public bool IsAntiEntropyBusy => Volatile.Read(ref activeAntiEntropyCount) > 0;
+    public bool IsAntiEntropyBusy => Volatile.Read(ref activeAntiEntropyCount) > 0 || !activeAntiEntropyShards.IsEmpty;
 
     /// <inheritdoc />
     public OrchestratorInitializationStage InitializationStage => (OrchestratorInitializationStage)Volatile.Read(ref initializationStage);
@@ -1249,50 +1250,91 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         var busyThreshold = options.AntiEntropyBusyQueueThreshold;
         var isPipelineOverloaded = busyThreshold > 0 && queueDepth >= busyThreshold;
 
-        var remainingSnapshotDocs = 0;
+        var localShards = await GetLocalAntiEntropyShardsAsync(versionVectorManager, cancellationToken).ConfigureAwait(false);
         var snapshotActivityWindowMs = Math.Max(2000L, options.AntiEntropyStartupIntervalSeconds * 1500L);
-        var isReceivingSnapshots = versionVectorManager != null &&
-            versionVectorManager.TryGetActiveSnapshotReceptionState(snapshotActivityWindowMs, out remainingSnapshotDocs);
+        var totalRemainingSnapshotDocs = 0;
+        var availableShards = new HashSet<string>(StringComparer.Ordinal);
 
-        var isAlreadyWorking = Volatile.Read(ref activeAntiEntropyCount) > 0 || isPipelineOverloaded || isReceivingSnapshots;
+        foreach (var shardId in localShards)
+        {
+            var isShardReceivingSnapshots = false;
+            if (versionVectorManager != null &&
+                versionVectorManager.TryGetShardSnapshotReceptionState(shardId, snapshotActivityWindowMs, out var shardRemainingDocs))
+            {
+                isShardReceivingSnapshots = true;
+                totalRemainingSnapshotDocs += shardRemainingDocs;
+            }
+
+            if (!isShardReceivingSnapshots && !activeAntiEntropyShards.ContainsKey(shardId))
+            {
+                availableShards.Add(shardId);
+            }
+        }
+
+        if (versionVectorManager != null &&
+            versionVectorManager.TryGetActiveSnapshotReceptionState(snapshotActivityWindowMs, out var globalRemainingDocs) &&
+            globalRemainingDocs > totalRemainingSnapshotDocs)
+        {
+            totalRemainingSnapshotDocs = globalRemainingDocs;
+        }
+
+        var isGlobalLockHeld = Volatile.Read(ref activeAntiEntropyCount) > 0;
+        var hasAvailableShards = localShards.Count == 0
+            ? (!isGlobalLockHeld && totalRemainingSnapshotDocs == 0)
+            : (availableShards.Count > 0 && !isGlobalLockHeld);
+
+        var isAlreadyWorking = isPipelineOverloaded || !hasAvailableShards;
 
         var estimatedDelta = await EstimatePendingAntiEntropyItemsAsync(cancellationToken).ConfigureAwait(false);
-        if (isReceivingSnapshots && remainingSnapshotDocs > estimatedDelta)
+        if (totalRemainingSnapshotDocs > estimatedDelta)
         {
-            estimatedDelta = remainingSnapshotDocs;
+            estimatedDelta = totalRemainingSnapshotDocs;
         }
 
         if (isAlreadyWorking)
         {
             logger.LogDebug(
-                "Skipping anti-entropy state dispatch because the node is currently busy (QueueDepth: {QueueDepth}, ActiveAntiEntropy: {ActiveAntiEntropy}, ReceivingSnapshots: {IsReceivingSnapshots}, RemainingSnapshotDocs: {RemainingSnapshotDocs}, EstimatedPendingItems: {EstimatedItems}).",
+                "Skipping anti-entropy state dispatch because all local shards or queues are currently busy (QueueDepth: {QueueDepth}, BusyShards: {BusyShardCount}/{TotalShardCount}, RemainingSnapshotDocs: {RemainingSnapshotDocs}, EstimatedPendingItems: {EstimatedItems}).",
                 queueDepth,
-                Volatile.Read(ref activeAntiEntropyCount),
-                isReceivingSnapshots,
-                remainingSnapshotDocs,
+                localShards.Count - availableShards.Count,
+                localShards.Count,
+                totalRemainingSnapshotDocs,
                 estimatedDelta);
 
             return new CrdtAntiEntropyWorkLoadDto(
                 isBusy: true,
-                pendingQueueDepth: Math.Max(queueDepth, remainingSnapshotDocs),
+                pendingQueueDepth: Math.Max(queueDepth, totalRemainingSnapshotDocs),
                 estimatedPendingSyncItems: estimatedDelta);
         }
 
-        if (Interlocked.CompareExchange(ref activeAntiEntropyCount, 1, 0) != 0)
+        var acquiredShards = new List<string>(availableShards.Count);
+        foreach (var shardId in availableShards)
+        {
+            if (activeAntiEntropyShards.TryAdd(shardId, 1))
+            {
+                acquiredShards.Add(shardId);
+            }
+        }
+
+        if (localShards.Count > 0 && acquiredShards.Count == 0)
         {
             return new CrdtAntiEntropyWorkLoadDto(
                 isBusy: true,
-                pendingQueueDepth: queueDepth,
+                pendingQueueDepth: Math.Max(queueDepth, totalRemainingSnapshotDocs),
                 estimatedPendingSyncItems: estimatedDelta);
         }
 
         try
         {
-            await DispatchAntiEntropyStateCoreAsync(cancellationToken).ConfigureAwait(false);
+            var shardsFilter = acquiredShards.Count > 0 ? new HashSet<string>(acquiredShards, StringComparer.Ordinal) : null;
+            await DispatchAntiEntropyStateCoreAsync(shardsFilter, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            Interlocked.Decrement(ref activeAntiEntropyCount);
+            for (int i = 0; i < acquiredShards.Count; i++)
+            {
+                activeAntiEntropyShards.TryRemove(acquiredShards[i], out _);
+            }
         }
 
         var postQueueDepth = PendingCommandCount + (commandPipeline?.PendingCommandCount ?? 0);
@@ -1304,10 +1346,10 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
     public Task DispatchAntiEntropyStateAsync(CancellationToken cancellationToken = default)
     {
-        return DispatchAntiEntropyStateCoreAsync(cancellationToken);
+        return DispatchAntiEntropyStateCoreAsync(null, cancellationToken);
     }
 
-    private async Task DispatchAntiEntropyStateCoreAsync(CancellationToken cancellationToken = default)
+    private async Task DispatchAntiEntropyStateCoreAsync(IReadOnlySet<string>? allowedShards, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -1336,7 +1378,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             }
 
             var targetPeerId = validPeers[Random.Shared.Next(validPeers.Count)];
-            await DispatchAntiEntropyStateAsync(targetPeerId, cancellationToken).ConfigureAwait(false);
+            await DispatchAntiEntropyStateAsync(targetPeerId, allowedShards, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -1344,7 +1386,12 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
     }
 
-    public async Task DispatchAntiEntropyStateAsync(PeerId targetPeerId, CancellationToken cancellationToken = default)
+    public Task DispatchAntiEntropyStateAsync(PeerId targetPeerId, CancellationToken cancellationToken = default)
+    {
+        return DispatchAntiEntropyStateAsync(targetPeerId, null, cancellationToken);
+    }
+
+    private async Task DispatchAntiEntropyStateAsync(PeerId targetPeerId, IReadOnlySet<string>? allowedShards, CancellationToken cancellationToken = default)
     {
         if (targetPeerId.Value == Guid.Empty) return;
 
@@ -1362,36 +1409,19 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
             var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
 
-            var activeShardIds = new HashSet<string>(StringComparer.Ordinal);
-            if (Registry != null)
+            HashSet<string> localShards;
+            if (allowedShards != null)
             {
-                activeShardIds.Add(Registry.ShardId);
+                localShards = new HashSet<string>(allowedShards, StringComparer.Ordinal);
             }
-
-            foreach (var doc in activeDocuments.Values)
+            else
             {
-                activeShardIds.Add(doc.ShardId);
-            }
-
-            var knownShardIds = versionVectorManager.EnsureShardsRegisteredAndGetAll(activeShardIds);
-
-            var localShards = new HashSet<string>(StringComparer.Ordinal);
-            if (Registry != null)
-            {
-                localShards.Add(Registry.ShardId);
-            }
-
-            foreach (var shardId in knownShardIds)
-            {
-                if (await distributionManager.IsShardLocalAsync(shardId, cancellationToken).ConfigureAwait(false))
-                {
-                    localShards.Add(shardId);
-                }
+                localShards = await GetLocalAntiEntropyShardsAsync(versionVectorManager, cancellationToken).ConfigureAwait(false);
             }
 
             var globalState = await versionVectorManager.GetShardsSnapshotAsync(localShards, cancellationToken).ConfigureAwait(false);
 
-            var syncMsg = new CrdtStateSyncMessage(replicaContext.ReplicaId, globalState);
+            var syncMsg = new CrdtStateSyncMessage(replicaContext.ReplicaId, globalState, IsTopologyAnnouncementOnly: false);
             var payload = serializer.SerializeToBytes(syncMsg);
             
             var wrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", payload);
@@ -1408,6 +1438,53 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
     }
 
+    /// <inheritdoc />
+    public async Task DispatchTopologyAnnouncementAsync(PeerId targetPeerId, CancellationToken cancellationToken = default)
+    {
+        if (targetPeerId.Value == Guid.Empty) return;
+
+        try
+        {
+            var topologyProvider = serviceProvider.GetRequiredService<IScopeTopologyProvider>();
+            var isExpected = await topologyProvider.IsPeerExpectedAsync(targetPeerId.Value.ToString(), cancellationToken).ConfigureAwait(false);
+            if (!isExpected)
+            {
+                return;
+            }
+
+            var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
+            var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
+            var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
+            var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
+
+            var announcementShards = new HashSet<string>(StringComparer.Ordinal);
+            if (Registry != null)
+            {
+                versionVectorManager.EnsureShardRegistered(Registry.ShardId);
+                announcementShards.Add(Registry.ShardId);
+            }
+
+            var registryState = announcementShards.Count > 0
+                ? await versionVectorManager.GetShardsSnapshotAsync(announcementShards, cancellationToken).ConfigureAwait(false)
+                : new ShardVersionVectorMap();
+
+            var syncMsg = new CrdtStateSyncMessage(replicaContext.ReplicaId, registryState, IsTopologyAnnouncementOnly: true);
+            var payload = serializer.SerializeToBytes(syncMsg);
+
+            var wrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", payload);
+            var finalBytes = serializer.SerializeToBytes(wrapper);
+
+            await directSender.SendDirectAsync(targetPeerId, finalBytes, cancellationToken).ConfigureAwait(false);
+
+            telemetry.RecordOrchestratorAntiEntropySync(replicaContext.ReplicaId);
+            logger.LogTrace("Sent topology announcement and registry state sync to peer {PeerId}.", targetPeerId.Value);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to dispatch topology announcement to peer {PeerId}.", targetPeerId.Value);
+        }
+    }
+
     public IDisposable? TryAcquireAntiEntropyWorkScope()
     {
         var commandPipeline = serviceProvider.GetService<IDocumentCommandPipeline>();
@@ -1418,12 +1495,81 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             return null;
         }
 
-        if (Interlocked.CompareExchange(ref activeAntiEntropyCount, 1, 0) != 0)
+        if (Interlocked.CompareExchange(ref activeAntiEntropyCount, 1, 0) != 0 || !activeAntiEntropyShards.IsEmpty)
         {
             return null;
         }
 
         return new AntiEntropyWorkScope(this);
+    }
+
+    public IDisposable? TryAcquireAntiEntropyWorkScope(string shardId)
+    {
+        if (string.IsNullOrWhiteSpace(shardId))
+        {
+            return TryAcquireAntiEntropyWorkScope();
+        }
+
+        var commandPipeline = serviceProvider.GetService<IDocumentCommandPipeline>();
+        var queueDepth = PendingCommandCount + (commandPipeline?.PendingCommandCount ?? 0);
+        var busyThreshold = options.AntiEntropyBusyQueueThreshold;
+        if (busyThreshold > 0 && queueDepth >= busyThreshold)
+        {
+            return null;
+        }
+
+        if (Volatile.Read(ref activeAntiEntropyCount) > 0)
+        {
+            return null;
+        }
+
+        shardId = stringPool.GetOrAdd(shardId);
+        if (!activeAntiEntropyShards.TryAdd(shardId, 1))
+        {
+            return null;
+        }
+
+        if (Volatile.Read(ref activeAntiEntropyCount) > 0)
+        {
+            activeAntiEntropyShards.TryRemove(shardId, out _);
+            return null;
+        }
+
+        return new ShardAntiEntropyWorkScope(this, shardId);
+    }
+
+    private async ValueTask<HashSet<string>> GetLocalAntiEntropyShardsAsync(IShardVersionVectorManager? versionVectorManager, CancellationToken cancellationToken)
+    {
+        var activeShardIds = new HashSet<string>(StringComparer.Ordinal);
+        if (Registry != null)
+        {
+            activeShardIds.Add(Registry.ShardId);
+        }
+
+        foreach (var doc in activeDocuments.Values)
+        {
+            activeShardIds.Add(doc.ShardId);
+        }
+
+        IReadOnlySet<string> knownShardIds = versionVectorManager != null
+            ? versionVectorManager.EnsureShardsRegisteredAndGetAll(activeShardIds)
+            : activeShardIds;
+
+        var localShards = new HashSet<string>(StringComparer.Ordinal);
+        if (Registry != null)
+        {
+            localShards.Add(Registry.ShardId);
+        }
+
+        foreach (var shardId in knownShardIds)
+        {
+            if (await distributionManager.IsShardLocalAsync(shardId, cancellationToken).ConfigureAwait(false))
+            {
+                localShards.Add(shardId);
+            }
+        }
+
+        return localShards;
     }
 
     private async ValueTask<long> EstimatePendingAntiEntropyItemsAsync(CancellationToken cancellationToken)
@@ -1509,6 +1655,19 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             if (Interlocked.Exchange(ref disposed, 1) == 0)
             {
                 Interlocked.Decrement(ref owner.activeAntiEntropyCount);
+            }
+        }
+    }
+
+    private sealed class ShardAntiEntropyWorkScope(CrdtDocumentOrchestrator owner, string shardId) : IDisposable
+    {
+        private int disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref disposed, 1) == 0)
+            {
+                owner.activeAntiEntropyShards.TryRemove(shardId, out _);
             }
         }
     }
@@ -1987,6 +2146,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
                 var pendingTasks = new List<Task<RemoteBatchAttemptOutcome>>(batchTasks);
                 var failedOrMissingDocs = new List<string>();
+                var successDocsThisRound = new HashSet<string>(StringComparer.Ordinal);
 
                 while (pendingTasks.Count > 0)
                 {
@@ -1997,6 +2157,23 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                     if (outcome.IsSuccess)
                     {
                         remoteDocsEvaluated += outcome.EvaluatedDocumentCount;
+
+                        HashSet<string>? missingSet = null;
+                        if (outcome.MissingDocumentIds is { Count: > 0 })
+                        {
+                            missingSet = new HashSet<string>(outcome.MissingDocumentIds, StringComparer.Ordinal);
+                            failedOrMissingDocs.AddRange(outcome.MissingDocumentIds);
+                        }
+
+                        for (var r = 0; r < outcome.RequestedDocumentIds.Count; r++)
+                        {
+                            var reqDocId = outcome.RequestedDocumentIds[r];
+                            if (missingSet is null || !missingSet.Contains(reqDocId))
+                            {
+                                successDocsThisRound.Add(reqDocId);
+                            }
+                        }
+
                         if (outcome.HasAccumulator)
                         {
                             var peerAcc = serializer.DeserializeFromBytes<TAccumulate>(outcome.SerializedAccumulator);
@@ -2010,11 +2187,6 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                                     break;
                                 }
                             }
-                        }
-
-                        if (outcome.MissingDocumentIds is { Count: > 0 })
-                        {
-                            failedOrMissingDocs.AddRange(outcome.MissingDocumentIds);
                         }
                     }
                     else
@@ -2033,6 +2205,12 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                             failedOrMissingDocs.AddRange(outcome.RequestedDocumentIds);
                         }
                     }
+                }
+
+                // Clear retry tracking for documents that succeeded on an earlier retry attempt
+                foreach (var succeededDocId in successDocsThisRound)
+                {
+                    unreachableDocumentIds.Remove(succeededDocId);
                 }
 
                 currentBatches.Clear();
@@ -2059,6 +2237,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 for (var i = 0; i < failedOrMissingDocs.Count; i++)
                 {
                     var failedDocId = failedOrMissingDocs[i];
+                    if (successDocsThisRound.Contains(failedDocId))
+                    {
+                        continue;
+                    }
+
                     if (!triedReplicasPerDoc.TryGetValue(failedDocId, out var triedSet))
                     {
                         triedSet = new HashSet<string>(StringComparer.Ordinal);
@@ -2074,7 +2257,33 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                             currentBatches[nextReplica!] = list;
                         }
 
-                        list.Add(failedDocId);
+                        if (!list.Contains(failedDocId))
+                        {
+                            list.Add(failedDocId);
+                        }
+                    }
+                    else if (attempt < maxRetries - 1)
+                    {
+                        // All known candidate replicas have been tried once (e.g., transient RPC timeout on a large batch).
+                        // Reset tried replicas and retry against the primary target replica on the next attempt.
+                        triedSet.Clear();
+                        if (TryAssignFallbackReplica(failedDocId, replicaContext.ReplicaId, docCandidateReplicas, triedSet, clusterStateTracker, out var retryReplica))
+                        {
+                            if (!currentBatches.TryGetValue(retryReplica!, out var list))
+                            {
+                                list = new List<string>();
+                                currentBatches[retryReplica!] = list;
+                            }
+
+                            if (!list.Contains(failedDocId))
+                            {
+                                list.Add(failedDocId);
+                            }
+                        }
+                        else if (!unreachableDocumentIds.Contains(failedDocId))
+                        {
+                            unreachableDocumentIds.Add(failedDocId);
+                        }
                     }
                     else
                     {

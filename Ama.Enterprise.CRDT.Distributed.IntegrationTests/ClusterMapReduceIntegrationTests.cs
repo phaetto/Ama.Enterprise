@@ -666,6 +666,78 @@ public sealed class ClusterMapReduceIntegrationTests : IAsyncDisposable
         failoverOutcome.Result.MatchedDeviceKeys.Count.ShouldBe(8);
     }
 
+    [IntegrationFact]
+    public async Task MultiStageStatisticalMapReduce_WhenClusterExpandsAndRebalances_ReturnsIdenticalResultsFromEveryNode()
+    {
+        // Arrange - Start with Node 1 only, generate 12 fleets with varied battery levels (simulating gen-fleets on Node 1 before cloning)
+        using var fabric = new TestMeshFabric();
+        var node1 = await CreateAndStartNodeAsync("Replica-1", replicationFactor: 2);
+        await fabric.JoinNodeAsync(node1);
+
+        var docIds = Enumerable.Range(1, 12).Select(i => $"auto-fleet-{i}").ToArray();
+        for (var i = 0; i < docIds.Length; i++)
+        {
+            await node1.Orchestrator.CreateDocumentAsync(docIds[i], DocTypeAlias, CancellationToken.None);
+            await node1.Orchestrator.ApplyIntentAsync<FleetTestState>(
+                docIds[i],
+                new MapSetIntent("dev-1", new DeviceTestItem("dev-1", true, 10 + i)),
+                nameof(FleetTestState.Devices),
+                IntentDeliveryMode.Acknowledged,
+                CancellationToken.None);
+            await node1.Orchestrator.ApplyIntentAsync<FleetTestState>(
+                docIds[i],
+                new MapSetIntent("dev-2", new DeviceTestItem("dev-2", false, 80 + i)),
+                nameof(FleetTestState.Devices),
+                IntentDeliveryMode.Acknowledged,
+                CancellationToken.None);
+        }
+
+        // Now Node 2, Node 3, and Node 4 join the cluster (causing shards to rebalance and demote on Node 1)
+        var node2 = await CreateAndStartNodeAsync("Replica-2", replicationFactor: 2);
+        var node3 = await CreateAndStartNodeAsync("Replica-3", replicationFactor: 2);
+        var node4 = await CreateAndStartNodeAsync("Replica-4", replicationFactor: 2);
+
+        await fabric.JoinNodeAsync(node2);
+        await fabric.JoinNodeAsync(node3);
+        await fabric.JoinNodeAsync(node4);
+
+        await SyncAllNodesAsync(fabric);
+
+        // Act - Execute fstats equivalent from all 4 nodes
+        var stats1 = await node1.Orchestrator.ExecuteMapReduceAsync<FleetTestState, BatteryStatsInputDto, BatteryStatsAccumulatorDto, BatteryStatsReportDto>(
+            new BatteryStatsInputDto(OnlineOnly: false),
+            default,
+            CancellationToken.None);
+
+        var stats2 = await node2.Orchestrator.ExecuteMapReduceAsync<FleetTestState, BatteryStatsInputDto, BatteryStatsAccumulatorDto, BatteryStatsReportDto>(
+            new BatteryStatsInputDto(OnlineOnly: false),
+            default,
+            CancellationToken.None);
+
+        var stats3 = await node3.Orchestrator.ExecuteMapReduceAsync<FleetTestState, BatteryStatsInputDto, BatteryStatsAccumulatorDto, BatteryStatsReportDto>(
+            new BatteryStatsInputDto(OnlineOnly: false),
+            default,
+            CancellationToken.None);
+
+        var stats4 = await node4.Orchestrator.ExecuteMapReduceAsync<FleetTestState, BatteryStatsInputDto, BatteryStatsAccumulatorDto, BatteryStatsReportDto>(
+            new BatteryStatsInputDto(OnlineOnly: false),
+            default,
+            CancellationToken.None);
+
+        // Assert - Every node must evaluate all 12 fleets (24 devices) and produce identical statistics
+        stats1.TotalDocumentsTargeted.ShouldBe(12);
+        stats1.Result.TotalCount.ShouldBe(24);
+
+        stats2.TotalDocumentsTargeted.ShouldBe(12);
+        stats2.Result.ShouldBe(stats1.Result);
+
+        stats3.TotalDocumentsTargeted.ShouldBe(12);
+        stats3.Result.ShouldBe(stats1.Result);
+
+        stats4.TotalDocumentsTargeted.ShouldBe(12);
+        stats4.Result.ShouldBe(stats1.Result);
+    }
+
     public async ValueTask DisposeAsync()
     {
         foreach (var node in nodes)

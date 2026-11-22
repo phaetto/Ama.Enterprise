@@ -54,6 +54,7 @@ internal sealed class CrdtMapReduceExecutor<TState, TInput, TAccumulate, TResult
         var handler = scopedProvider.GetRequiredService<ICrdtMapReduce<TState, TInput, TAccumulate, TResult>>();
         var replicaContext = scopedProvider.GetRequiredService<ReplicaContext>();
         var shardIdProvider = scopedProvider.GetRequiredService<IShardIdProvider>();
+        var distributionManager = scopedProvider.GetRequiredService<IShardDistributionManager>();
 
         var input = serializer.DeserializeFromBytes<TInput>(serializedInput);
         if (input is null)
@@ -113,33 +114,39 @@ internal sealed class CrdtMapReduceExecutor<TState, TInput, TAccumulate, TResult
                 continue;
             }
 
-            // 2. Fallback to stored snapshot if the shard was recently demoted during rebalancing
-            var storedBytes = await orchestrator
-                .TryLoadStoredDocumentSnapshotBytesAsync(docId, resolvedTypeAlias, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (storedBytes is { Length: > 0 })
+            // 2. Fallback to stored snapshot ONLY if this replica still owns the shard according to its local ring.
+            // If this replica demoted the shard during rebalancing, we must NOT evaluate a stale or shared-storage
+            // checkpoint with an outdated local replica view; report it as missing so the coordinator fails over
+            // to the current shard owner.
+            var shardId = shardIdProvider.GetShardId<TState>(docId) ?? docId;
+            if (await distributionManager.IsShardLocalAsync(shardId, cancellationToken).ConfigureAwait(false))
             {
-                var storedDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(storedBytes);
-                if (storedDoc.Data is not null)
+                var storedBytes = await orchestrator
+                    .TryLoadStoredDocumentSnapshotBytesAsync(docId, resolvedTypeAlias, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (storedBytes is { Length: > 0 })
                 {
-                    var shardId = shardIdProvider.GetShardId<TState>(docId) ?? docId;
-                    var demotedContext = new CrdtMapContext<TState>(
-                        docId,
-                        shardId,
-                        replicaContext.ReplicaId,
-                        storedDoc,
-                        LiveDocumentHandle: null);
-
-                    var acc = await handler.MapDocumentAsync(demotedContext, input, cancellationToken).ConfigureAwait(false);
-                    localAccumulators.Add(acc);
-
-                    if (handler.CanShortCircuit(input, acc))
+                    var storedDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(storedBytes);
+                    if (storedDoc.Data is not null)
                     {
-                        break;
-                    }
+                        var demotedContext = new CrdtMapContext<TState>(
+                            docId,
+                            shardId,
+                            replicaContext.ReplicaId,
+                            storedDoc,
+                            LiveDocumentHandle: null);
 
-                    continue;
+                        var acc = await handler.MapDocumentAsync(demotedContext, input, cancellationToken).ConfigureAwait(false);
+                        localAccumulators.Add(acc);
+
+                        if (handler.CanShortCircuit(input, acc))
+                        {
+                            break;
+                        }
+
+                        continue;
+                    }
                 }
             }
 

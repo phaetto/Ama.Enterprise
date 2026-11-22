@@ -11,6 +11,7 @@ using Ama.CRDT.Extensions;
 using Ama.CRDT.Models;
 using Ama.CRDT.Models.Aot;
 using Ama.CRDT.Models.Intents;
+using Ama.CRDT.Services.Providers;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
@@ -203,27 +204,97 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         await orchestrator.InitializeAsync(CancellationToken.None);
         await orchestrator.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
 
-        var observers = sp.GetServices<IPeerTopologyObserver>();
-        var observer = observers.OfType<CrdtTopologyObserver>().Single();
         var peerNode = new PeerNode(new PeerId(Guid.NewGuid()), new TcpPeerEndpoint("http://localhost", 5000));
         
-        // Map explicitly into registry natively 
+        // Act - Adding peer to InMemoryPeerRegistry automatically triggers CrdtTopologyObserver.OnPeerJoinedAsync
         var registry = sp.GetRequiredService<IPeerRegistry>();
         await registry.AddOrUpdatePeerAsync(TestMeshId, peerNode, PeerStatus.Active, CancellationToken.None);
-
-        // Act
-        await observer.OnPeerJoinedAsync(TestMeshId, peerNode, CancellationToken.None);
         
         // Assert - Should trigger point-to-point direct message for anti-entropy right away
         mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
         
-        // Act - Trigger again to test thread-safe connection check constraints
+        // Act - Add second peer to test thread-safe connection check constraints
         var peerNode2 = new PeerNode(new PeerId(Guid.NewGuid()), new TcpPeerEndpoint("http://localhost2", 5001));
         await registry.AddOrUpdatePeerAsync(TestMeshId, peerNode2, PeerStatus.Active, CancellationToken.None);
-        await observer.OnPeerJoinedAsync(TestMeshId, peerNode2, CancellationToken.None);
 
         // Assert - Still averting overlapping broadcasts
         mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    [IntegrationFact]
+    public async Task CrdtTopologyObserver_WhenShardingEnabled_SendsImmediateTopologyAnnouncementsAndDebouncesFullShardSync()
+    {
+        // Arrange
+        var capturedSends = new List<(PeerId Peer, ReadOnlyMemory<byte> Payload)>();
+        var mockSender = new Mock<IDirectMessageSender>();
+        mockSender
+            .Setup(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()))
+            .Callback<PeerId, ReadOnlyMemory<byte>, CancellationToken>((peer, payload, _) =>
+            {
+                lock (capturedSends)
+                {
+                    capturedSends.Add((peer, payload));
+                }
+            })
+            .Returns(Task.CompletedTask);
+
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.Configure<DistributedCrdtOptions>(opt =>
+            {
+                opt.EnableSharding = true;
+                opt.TopologyStabilizationDelayMilliseconds = 250;
+            });
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var serializer = sp.GetRequiredService<ICrdtSerializer>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+
+        var registry = sp.GetRequiredService<IPeerRegistry>();
+        var peer1 = new PeerNode(new PeerId(Guid.NewGuid()), new TcpPeerEndpoint("127.0.0.1", 5001));
+        var peer2 = new PeerNode(new PeerId(Guid.NewGuid()), new TcpPeerEndpoint("127.0.0.1", 5002));
+
+        // Act 1 - Two peers join in rapid succession within the 250ms stabilization window
+        await registry.AddOrUpdatePeerAsync(TestMeshId, peer1, PeerStatus.Active, CancellationToken.None);
+        await registry.AddOrUpdatePeerAsync(TestMeshId, peer2, PeerStatus.Active, CancellationToken.None);
+
+        // Assert 1 - Immediately after joining, only lightweight topology announcements (IsTopologyAnnouncementOnly = true) are sent
+        List<(PeerId Peer, CrdtStateSyncMessage Msg)> phase1Messages;
+        lock (capturedSends)
+        {
+            phase1Messages = capturedSends
+                .Select(x => (x.Peer, serializer.DeserializeFromBytes<CrdtStateSyncMessage>(
+                    serializer.DeserializeFromBytes<CrdtMessageWrapper>(x.Payload.ToArray()).Payload!)))
+                .ToList();
+        }
+
+        phase1Messages.Count.ShouldBe(2);
+        phase1Messages.ShouldAllBe(x => x.Msg.IsTopologyAnnouncementOnly);
+        phase1Messages.ShouldAllBe(x => x.Msg.State != null && !x.Msg.State.ContainsKey("default"));
+
+        // Act 2 - Wait for the 250ms stabilization window to elapse
+        await Task.Delay(450);
+
+        // Assert 2 - Full data shard state syncs (IsTopologyAnnouncementOnly = false) are now dispatched to both peers
+        List<(PeerId Peer, CrdtStateSyncMessage Msg)> phase2Messages;
+        lock (capturedSends)
+        {
+            phase2Messages = capturedSends
+                .Skip(2)
+                .Select(x => (x.Peer, serializer.DeserializeFromBytes<CrdtStateSyncMessage>(
+                    serializer.DeserializeFromBytes<CrdtMessageWrapper>(x.Payload.ToArray()).Payload!)))
+                .ToList();
+        }
+
+        phase2Messages.Count.ShouldBe(2);
+        phase2Messages.ShouldAllBe(x => !x.Msg.IsTopologyAnnouncementOnly);
+        phase2Messages.Select(x => x.Peer).ShouldContain(peer1.Id);
+        phase2Messages.Select(x => x.Peer).ShouldContain(peer2.Id);
     }
 
     [IntegrationFact]
@@ -1440,9 +1511,14 @@ public sealed class AntiEntropyStateSyncIntegrationTests
             .Where(x => x.Wrapper.MessageType == "CrdtSnapshot" && x.Wrapper.DocumentId != node1Orch.Registry.DocumentId)
             .ToList();
 
+        var regSnapshot = node1ToNode2Payloads
+            .Select(p => (Raw: p, Wrapper: serializer.DeserializeFromBytes<CrdtMessageWrapper>(p.ToArray())))
+            .First(x => x.Wrapper.MessageType == "CrdtSnapshot" && x.Wrapper.DocumentId == node1Orch.Registry.DocumentId);
+
         docSnapshots.Count.ShouldBe(2);
 
-        // Act 2: Deliver the first document snapshot and verify Node 2 suppresses periodic anti-entropy while batch reception is active
+        // Act 2: Deliver the registry snapshot and first document snapshot, then verify Node 2 suppresses periodic anti-entropy while all shards are receiving snapshots
+        await node2Handler.HandlePayloadAsync(TestMeshId, node1PeerId, regSnapshot.Raw, CancellationToken.None);
         await node2Handler.HandlePayloadAsync(TestMeshId, node1PeerId, docSnapshots[0].Raw, CancellationToken.None);
 
         node2ToNode1Payloads.Clear();
@@ -1699,5 +1775,92 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         var snapMsg = serializer.DeserializeFromBytes<CrdtSnapshotMessage>(wrapper.Payload!);
         var deserializedDoc = serializer.DeserializeFromBytes<CrdtDocument<SyncTestState>>(snapMsg.SnapshotData);
         deserializedDoc.Data.DataMap.ShouldContainKeyAndValue("DiskKey", "DiskVal");
+    }
+
+    private sealed class DocumentIdAsShardIdProvider : IShardIdProvider
+    {
+        public string GetShardId<T>(CrdtDocument<T> document) where T : class => document.Data is SyncTestState s ? s.Id : "default";
+        public string GetShardId<T>(IComparable documentId) where T : class => documentId?.ToString() ?? "default";
+        public string GetShardId(IComparable documentId, Type documentType) => documentId?.ToString() ?? "default";
+    }
+
+    [IntegrationFact]
+    public async Task EvaluateAndDispatchAntiEntropyStateAsync_WhenOneShardIsBusy_StillAllowsIndependentShardsToSyncAndStreamSnapshots()
+    {
+        // Arrange: Configure a shard-per-document provider so sync-doc-1 and sync-doc-2 live on distinct shards ("sync-doc-1" and "sync-doc-2").
+        var capturedSends = new List<ReadOnlyMemory<byte>>();
+        var mockSender = new Mock<IDirectMessageSender>();
+        mockSender.Setup(p => p.SendDirectAsync(It.IsAny<PeerId>(), Capture.In(capturedSends), It.IsAny<CancellationToken>()))
+               .Returns(Task.CompletedTask);
+
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+            services.AddSingleton<IShardIdProvider, DocumentIdAsShardIdProvider>();
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var concreteOrch = (CrdtDocumentOrchestrator)orchestrator;
+        var serializer = sp.GetRequiredService<ICrdtSerializer>();
+
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("sync-doc-2", "sync-doc-2", CancellationToken.None);
+
+        await orchestrator.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("K1", "V1"), nameof(SyncTestState.DataMap), CancellationToken.None);
+        await orchestrator.ApplyIntentAsync<SyncTestState>("sync-doc-2", new MapSetIntent("K2", "V2"), nameof(SyncTestState.DataMap), CancellationToken.None);
+
+        var peerRegistry = sp.GetRequiredService<IPeerRegistry>();
+        var peerId = new PeerId(Guid.NewGuid());
+        await peerRegistry.AddOrUpdatePeerAsync(TestMeshId, new PeerNode(peerId, new TcpPeerEndpoint("127.0.0.1", 5000)), PeerStatus.Active, CancellationToken.None);
+        await orchestrator.FlushAsync(CancellationToken.None);
+        capturedSends.Clear();
+
+        // Hold an active anti-entropy work scope ONLY on shard "sync-doc-1"
+        using var heldShard1Scope = concreteOrch.TryAcquireAntiEntropyWorkScope("sync-doc-1");
+        heldShard1Scope.ShouldNotBeNull();
+
+        // Attempting to acquire the same shard "sync-doc-1" again should return null
+        concreteOrch.TryAcquireAntiEntropyWorkScope("sync-doc-1").ShouldBeNull();
+
+        // Act 1: Trigger EvaluateAndDispatchAntiEntropyStateAsync while shard "sync-doc-1" is busy
+        var workload = await orchestrator.EvaluateAndDispatchAntiEntropyStateAsync(CancellationToken.None);
+
+        // Assert 1: Anti-entropy was NOT globally blocked; it dispatched CrdtSync for the remaining available shards ("sync-doc-2" and registry)
+        workload.IsBusy.ShouldBeFalse();
+        capturedSends.Count.ShouldBe(1);
+        var syncWrapper = serializer.DeserializeFromBytes<CrdtMessageWrapper>(capturedSends[0].ToArray());
+        syncWrapper.MessageType.ShouldBe("CrdtSync");
+        var syncMsg = serializer.DeserializeFromBytes<CrdtStateSyncMessage>(syncWrapper.Payload!);
+        syncMsg.State.ShouldContainKey("sync-doc-2");
+        syncMsg.State.ShouldNotContainKey("sync-doc-1");
+
+        // Act 2: Trim journals for both shards and send an incoming CrdtSync from a remote peer requesting both shards while "sync-doc-1" is still locked
+        await scope.Storage.TrimAsync("sync-doc-1", new Dictionary<string, long> { ["Replica1"] = 1 }, CancellationToken.None);
+        await scope.Storage.TrimAsync("sync-doc-2", new Dictionary<string, long> { ["Replica1"] = 1 }, CancellationToken.None);
+        capturedSends.Clear();
+
+        var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var remoteState = new ShardVersionVectorMap
+        {
+            ["sync-doc-1"] = new DottedVersionVector(),
+            ["sync-doc-2"] = new DottedVersionVector(),
+            [orchestrator.Registry.ShardId] = new DottedVersionVector()
+        };
+        var incomingSync = new CrdtStateSyncMessage("Replica2", remoteState);
+        var incomingWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(incomingSync));
+        await handler.HandlePayloadAsync(TestMeshId, peerId, serializer.SerializeToBytes(incomingWrapper), CancellationToken.None);
+
+        // Assert 2: Snapshot for "sync-doc-2" was immediately dispatched even though "sync-doc-1" was busy
+        var sentDocIds = capturedSends
+            .Select(p => serializer.DeserializeFromBytes<CrdtMessageWrapper>(p.ToArray()))
+            .Where(w => w.MessageType == "CrdtSnapshot")
+            .Select(w => w.DocumentId)
+            .ToList();
+
+        sentDocIds.ShouldContain("sync-doc-2");
+        sentDocIds.ShouldNotContain("sync-doc-1");
     }
 }

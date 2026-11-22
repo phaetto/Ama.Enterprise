@@ -116,6 +116,15 @@ public interface IShardVersionVectorManager
     bool TryGetActiveSnapshotReceptionState(long activityWindowMilliseconds, out int remainingExpectedDocuments);
 
     /// <summary>
+    /// Gets the active snapshot reception state for a specific shard, indicating whether that shard is currently receiving a snapshot batch.
+    /// </summary>
+    /// <param name="shardId">The identifier of the shard to inspect.</param>
+    /// <param name="activityWindowMilliseconds">The time window in milliseconds to consider an in-flight snapshot batch active.</param>
+    /// <param name="remainingExpectedDocuments">When this method returns, contains the estimated number of remaining documents for the shard's active snapshot batch.</param>
+    /// <returns><c>true</c> if the specified shard has received a snapshot within the activity window or has an active incomplete batch; otherwise, <c>false</c>.</returns>
+    bool TryGetShardSnapshotReceptionState(string shardId, long activityWindowMilliseconds, out int remainingExpectedDocuments);
+
+    /// <summary>
     /// Restores the entire shard version vector map from a persisted snapshot.
     /// Replaces the entire local shard version vector map with a deep copy of the provided map.
     /// </summary>

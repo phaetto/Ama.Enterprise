@@ -57,6 +57,8 @@ public static class ServiceCollectionExtensions
                 "AntiEntropyStartupDurationSeconds cannot be negative.")
             .Validate(options => options.AntiEntropyStartupIntervalSeconds > 0, 
                 "AntiEntropyStartupIntervalSeconds must be greater than zero.")
+            .Validate(options => options.TopologyStabilizationDelayMilliseconds >= 0,
+                "TopologyStabilizationDelayMilliseconds cannot be negative.")
             .Validate(options => options.AntiEntropyBusyQueueThreshold >= 0,
                 "AntiEntropyBusyQueueThreshold cannot be negative.")
             .Validate(options => options.AntiEntropyAdaptiveDelayPerThousandItemsMilliseconds >= 0,

@@ -23,6 +23,7 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, DottedVersionVector>> pendingDocumentSnapshots = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> pendingShardExpectedCounts = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, long> pendingShardLastActivityTicks = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, long> lastShardSnapshotMergeTicks = new(StringComparer.Ordinal);
     private long lastSnapshotMergeTicks;
 
     public ShardVersionVectorManager(
@@ -222,6 +223,7 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         }
         var nowTicks = Environment.TickCount64;
         Volatile.Write(ref lastSnapshotMergeTicks, nowTicks);
+        lastShardSnapshotMergeTicks[shardId] = nowTicks;
 
         if (activeShardDocumentIds.Count <= 1)
         {
@@ -319,6 +321,50 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
     }
 
     /// <inheritdoc />
+    public bool TryGetShardSnapshotReceptionState(string shardId, long activityWindowMilliseconds, out int remainingExpectedDocuments)
+    {
+        if (string.IsNullOrWhiteSpace(shardId))
+        {
+            throw new ArgumentException("Shard ID cannot be null or empty.", nameof(shardId));
+        }
+
+        shardId = stringPool.GetOrAdd(shardId);
+        var windowMs = Math.Max(500L, activityWindowMilliseconds);
+        var nowTicks = Environment.TickCount64;
+        var isActive = lastShardSnapshotMergeTicks.TryGetValue(shardId, out var lastShardTicks) &&
+                       lastShardTicks > 0 &&
+                       (nowTicks - lastShardTicks) < windowMs;
+        var remaining = 0;
+
+        if (pendingDocumentSnapshots.TryGetValue(shardId, out var docMap))
+        {
+            if (!pendingShardLastActivityTicks.TryGetValue(shardId, out var shardLastTicks) ||
+                (nowTicks - shardLastTicks) >= windowMs)
+            {
+                pendingDocumentSnapshots.TryRemove(shardId, out _);
+                pendingShardExpectedCounts.TryRemove(shardId, out _);
+                pendingShardLastActivityTicks.TryRemove(shardId, out _);
+            }
+            else
+            {
+                isActive = true;
+                var receivedCount = docMap.Count;
+                if (pendingShardExpectedCounts.TryGetValue(shardId, out var expectedCount) && expectedCount > receivedCount)
+                {
+                    remaining = expectedCount - receivedCount;
+                }
+                else
+                {
+                    remaining = 1;
+                }
+            }
+        }
+
+        remainingExpectedDocuments = remaining;
+        return isActive;
+    }
+
+    /// <inheritdoc />
     public void RestoreFullState(ShardVersionVectorMap savedMap)
     {
         ArgumentNullException.ThrowIfNull(savedMap);
@@ -348,6 +394,7 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         pendingDocumentSnapshots.TryRemove(shardId, out _);
         pendingShardExpectedCounts.TryRemove(shardId, out _);
         pendingShardLastActivityTicks.TryRemove(shardId, out _);
+        lastShardSnapshotMergeTicks.TryRemove(shardId, out _);
 
         var sourceMap = replicaContext.ShardVersionVectors;
         lock (sourceMap)
@@ -363,6 +410,11 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         {
             return;
         }
+
+        pendingDocumentSnapshots.Clear();
+        pendingShardExpectedCounts.Clear();
+        pendingShardLastActivityTicks.Clear();
+        lastShardSnapshotMergeTicks.Clear();
 
         var sourceMap = replicaContext.ShardVersionVectors;
         lock (sourceMap)
@@ -399,6 +451,7 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         pendingDocumentSnapshots.Clear();
         pendingShardExpectedCounts.Clear();
         pendingShardLastActivityTicks.Clear();
+        lastShardSnapshotMergeTicks.Clear();
 
         var sourceMap = replicaContext.ShardVersionVectors;
         lock (sourceMap)

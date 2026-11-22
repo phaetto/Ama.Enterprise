@@ -214,6 +214,20 @@ public interface ICrdtDocumentOrchestrator
     Task DispatchAntiEntropyStateAsync(PeerId targetPeerId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Dispatches a lightweight topology and system registry state announcement to a newly connected peer
+    /// so both peers can register each other's replica identity on the consistent hash ring before evaluating data shard snapshots.
+    /// </summary>
+    /// <param name="targetPeerId">The target network peer identifier.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous dispatch operation.</returns>
+    /// <example>
+    /// <code>
+    /// await orchestrator.DispatchTopologyAnnouncementAsync(peerNode.Id, cancellationToken);
+    /// </code>
+    /// </example>
+    Task DispatchTopologyAnnouncementAsync(PeerId targetPeerId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Evaluates the current synchronization workload (channel queue depths and estimated version vector delta)
     /// and dispatches a targeted anti-entropy state sync only if the local node is not already busy or overwhelmed.
     /// </summary>

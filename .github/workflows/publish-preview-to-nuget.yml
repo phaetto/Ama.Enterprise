@@ -11,7 +11,7 @@ permissions:
 
 env:
   MAJOR_VERSION: 0
-  MINOR_VERSION: 1
+  MINOR_VERSION: 2
   SOLUTION_FILE: 'Ama.Enterprise.slnx'
   PACKAGE_OUTPUT_DIRECTORY: '${{ github.workspace }}/nuget'
 

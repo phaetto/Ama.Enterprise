@@ -65,6 +65,14 @@ public sealed class DistributedCrdtOptions
     public int AntiEntropyStartupIntervalSeconds { get; set; } = 2;
 
     /// <summary>
+    /// Gets or sets the debounce window in milliseconds after a peer joins a sharded cluster before triggering an anti-entropy data shard sync.
+    /// During this window, joining peers immediately exchange replica identity announcements and the system registry shard to populate the consistent hash ring,
+    /// while deferring user data shard evaluations and snapshots until peer discovery stabilizes.
+    /// Defaults to 500 milliseconds. Set to 0 to disable stabilization debouncing.
+    /// </summary>
+    public int TopologyStabilizationDelayMilliseconds { get; set; } = 500;
+
+    /// <summary>
     /// Gets or sets the pending command queue depth threshold (across the document and orchestrator channels)
     /// above which the anti-entropy service skips dispatching a new state sync cycle to avoid overwhelming the node.
     /// Defaults to 100. Set to 0 to disable queue depth throttling.

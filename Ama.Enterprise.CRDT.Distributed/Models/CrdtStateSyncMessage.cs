@@ -10,7 +10,10 @@ using Ama.Enterprise.P2p.Models.Core;
 /// <summary>
 /// Message containing the local state vector of a CRDT document (partitioned by shards) to synchronize with remote peers.
 /// </summary>
-public sealed record CrdtStateSyncMessage(string? ReplicaId, ShardVersionVectorMap? State) : IExtensibleDistributedPayload
+public sealed record CrdtStateSyncMessage(
+    string? ReplicaId,
+    ShardVersionVectorMap? State,
+    bool IsTopologyAnnouncementOnly = false) : IExtensibleDistributedPayload
 {
     /// <inheritdoc />
     [JsonExtensionData]

@@ -117,7 +117,7 @@ public static class Program
             options.CompactionTtlSeconds = 5 * 60;
             options.ShardReplicationFactor = 2;
             options.EnableSharding = true;
-            options.JournalMode = CrdtJournalMode.InMemoryBuffer;
+            options.JournalMode = CrdtJournalMode.DiskWal;
             options.WalChannelCapacity = 100000;
             options.WalMaxBatchSize = 10000;
             options.WalDirectoryPath = AppContext.BaseDirectory;
