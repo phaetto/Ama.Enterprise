@@ -262,6 +262,26 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver, IDisposable
             var scope = scopeManager.GetOrCreateScope(replicaId);
             await scope.Orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, currentCts.Token).ConfigureAwait(false);
 
+            var inboundQueue = serviceProvider.GetKeyedService<IInboundMessageQueue<IMeshMessage>>(meshId);
+            var commandPipeline = scope.ServiceProvider.GetService<IDocumentCommandPipeline>();
+            var versionVectorManager = scope.ServiceProvider.GetService<IShardVersionVectorManager>();
+            var options = scope.ServiceProvider.GetService<IOptions<DistributedCrdtOptions>>()?.Value;
+            var snapshotActivityWindowMs = Math.Max(2000L, (options?.AntiEntropyStartupIntervalSeconds ?? 2) * 1500L);
+
+            var hasInFlightBacklog =
+                (inboundQueue is { PendingCount: > 0 }) ||
+                (commandPipeline is { PendingCommandCount: > 0 }) ||
+                (versionVectorManager != null && versionVectorManager.TryGetActiveSnapshotReceptionState(snapshotActivityWindowMs, out _));
+
+            if (hasInFlightBacklog)
+            {
+                logger.LogDebug(
+                    "[{MeshId}] Deferring stabilized shard DVV state sync for replica {ReplicaId} because inbound queues or snapshot reception are currently active. Periodic anti-entropy will resume once queues drain.",
+                    meshId,
+                    replicaId);
+                return;
+            }
+
             logger.LogInformation(
                 "[{MeshId}] Topology stabilization window ({DelayMs}ms) elapsed with {PeerCount} joined peer(s). Triggering full shard DVV state sync for replica {ReplicaId}.",
                 meshId,

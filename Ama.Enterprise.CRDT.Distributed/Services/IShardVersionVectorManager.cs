@@ -125,6 +125,15 @@ public interface IShardVersionVectorManager
     bool TryGetShardSnapshotReceptionState(string shardId, long activityWindowMilliseconds, out int remainingExpectedDocuments);
 
     /// <summary>
+    /// Records that a patch operation was received for the specified shard, extending the active reception window for adaptive anti-entropy throttling.
+    /// </summary>
+    /// <param name="shardId">The identifier of the shard that received the patch.</param>
+    /// <param name="operationCount">The number of operations contained in the patch.</param>
+    void RecordShardPatchActivity(string shardId, int operationCount = 1)
+    {
+    }
+
+    /// <summary>
     /// Restores the entire shard version vector map from a persisted snapshot.
     /// Replaces the entire local shard version vector map with a deep copy of the provided map.
     /// </summary>

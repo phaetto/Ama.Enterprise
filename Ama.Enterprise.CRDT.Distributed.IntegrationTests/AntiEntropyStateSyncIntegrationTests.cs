@@ -1863,4 +1863,82 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         sentDocIds.ShouldContain("sync-doc-2");
         sentDocIds.ShouldNotContain("sync-doc-1");
     }
+
+    [IntegrationFact]
+    public async Task EvaluateAndDispatchAntiEntropyStateAsync_WhenInboundNetworkQueueHasUnprocessedMessages_SkipsSyncAndPreventsRedundantResends()
+    {
+        // Arrange: Node 1 has operations in its journal. Node 2 has thousands of unprocessed messages sitting in IInboundMessageQueue<IMeshMessage>.
+        var node1ToNode2Payloads = new List<ReadOnlyMemory<byte>>();
+        var mockNode1Sender = new Mock<IDirectMessageSender>();
+        mockNode1Sender.Setup(p => p.SendDirectAsync(It.IsAny<PeerId>(), Capture.In(node1ToNode2Payloads), It.IsAny<CancellationToken>()))
+               .Returns(Task.CompletedTask);
+
+        var node1Sp = BuildNode("Replica1", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockNode1Sender.Object));
+        });
+        var node1Scope = node1Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica1");
+        var node1Orch = node1Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await node1Orch.InitializeAsync(CancellationToken.None);
+        await node1Orch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+        await node1Orch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("BurstKey", "BurstVal"), nameof(SyncTestState.DataMap), CancellationToken.None);
+
+        var inboundQueue = new InboundMessageQueue<IMeshMessage>();
+        var mockNode2Sender = new Mock<IDirectMessageSender>();
+        var node2Sp = BuildNode("Replica2", services =>
+        {
+            services.AddKeyedSingleton<IInboundMessageQueue<IMeshMessage>>(TestMeshId, inboundQueue);
+            services.Replace(ServiceDescriptor.Singleton(mockNode2Sender.Object));
+        });
+        var node2Scope = node2Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica2");
+        var node2Orch = node2Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await node2Orch.InitializeAsync(CancellationToken.None);
+
+        var peerRegistry = node2Sp.GetRequiredService<IPeerRegistry>();
+        var node1PeerId = new PeerId(Guid.NewGuid());
+        await peerRegistry.AddOrUpdatePeerAsync(TestMeshId, new PeerNode(node1PeerId, new TcpPeerEndpoint("127.0.0.1", 5001)), PeerStatus.Active, CancellationToken.None);
+        await node2Orch.FlushAsync(CancellationToken.None);
+        mockNode2Sender.Invocations.Clear();
+
+        // Enqueue an unprocessed message in the P2P inbound queue (simulating 10k items still being unpacked from TCP)
+        var dummyMessage = new Ama.Enterprise.P2p.Models.Algorithms.GossipMessage(
+            TestMeshId,
+            "1.0.0",
+            Guid.NewGuid(),
+            node1PeerId,
+            1,
+            new byte[] { 1, 2, 3 });
+        await inboundQueue.WriteAsync(dummyMessage, CancellationToken.None);
+        inboundQueue.PendingCount.ShouldBe(1);
+
+        // Act 1: Node 2 runs periodic anti-entropy while its inbound network queue still has unprocessed messages
+        var workload = await node2Orch.EvaluateAndDispatchAntiEntropyStateAsync(CancellationToken.None);
+
+        // Assert 1: Node 2 detects the inbound network queue backlog, reports IsBusy = true, and does NOT send a stale empty CrdtSync!
+        workload.IsBusy.ShouldBeTrue();
+        workload.PendingQueueDepth.ShouldBeGreaterThanOrEqualTo(1);
+        mockNode2Sender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never());
+
+        // Act 2: Even if two duplicate CrdtSync requests arrive at Node 1 back-to-back while Node 2 is still processing journaled patches,
+        // Node 1's per-peer/per-shard dispatch cooldown suppresses resending the exact same journaled patch batch a second time.
+        var node1Handler = node1Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var serializer = node1Sp.GetRequiredService<ICrdtSerializer>();
+        var node2EmptyState = new ShardVersionVectorMap
+        {
+            ["default"] = new DottedVersionVector(),
+            [node1Orch.Registry.ShardId] = new DottedVersionVector()
+        };
+        var staleSyncMsg = new CrdtStateSyncMessage("Replica2", node2EmptyState);
+        var staleSyncWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(staleSyncMsg));
+        var node2PeerId = new PeerId(Guid.NewGuid());
+
+        await node1Handler.HandlePayloadAsync(TestMeshId, node2PeerId, serializer.SerializeToBytes(staleSyncWrapper), CancellationToken.None);
+        node1ToNode2Payloads.ShouldNotBeEmpty();
+
+        node1ToNode2Payloads.Clear();
+        await node1Handler.HandlePayloadAsync(TestMeshId, node2PeerId, serializer.SerializeToBytes(staleSyncWrapper), CancellationToken.None);
+
+        // Assert 2: Second duplicate CrdtSync within the cooldown window did not re-push the same operations again
+        node1ToNode2Payloads.ShouldBeEmpty();
+    }
 }

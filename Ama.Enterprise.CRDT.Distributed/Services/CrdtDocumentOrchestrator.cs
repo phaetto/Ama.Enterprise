@@ -1266,9 +1266,10 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     {
         var commandPipeline = serviceProvider.GetService<IDocumentCommandPipeline>();
         var versionVectorManager = serviceProvider.GetService<IShardVersionVectorManager>();
-        var queueDepth = PendingCommandCount + (commandPipeline?.PendingCommandCount ?? 0);
+        var inboundNetworkDepth = GetPendingInboundNetworkQueueDepth();
+        var queueDepth = PendingCommandCount + (commandPipeline?.PendingCommandCount ?? 0) + inboundNetworkDepth;
         var busyThreshold = options.AntiEntropyBusyQueueThreshold;
-        var isPipelineOverloaded = busyThreshold > 0 && queueDepth >= busyThreshold;
+        var isPipelineOverloaded = (busyThreshold > 0 && queueDepth >= busyThreshold) || inboundNetworkDepth > 0;
 
         var localShards = await GetLocalAntiEntropyShardsAsync(versionVectorManager, cancellationToken).ConfigureAwait(false);
         var snapshotActivityWindowMs = Math.Max(2000L, options.AntiEntropyStartupIntervalSeconds * 1500L);
@@ -1314,8 +1315,9 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         if (isAlreadyWorking)
         {
             logger.LogDebug(
-                "Skipping anti-entropy state dispatch because all local shards or queues are currently busy (QueueDepth: {QueueDepth}, BusyShards: {BusyShardCount}/{TotalShardCount}, RemainingSnapshotDocs: {RemainingSnapshotDocs}, EstimatedPendingItems: {EstimatedItems}).",
+                "Skipping anti-entropy state dispatch because all local shards or queues are currently busy (QueueDepth: {QueueDepth}, InboundNetworkDepth: {InboundNetworkDepth}, BusyShards: {BusyShardCount}/{TotalShardCount}, RemainingSnapshotDocs: {RemainingSnapshotDocs}, EstimatedPendingItems: {EstimatedItems}).",
                 queueDepth,
+                inboundNetworkDepth,
                 localShards.Count - availableShards.Count,
                 localShards.Count,
                 totalRemainingSnapshotDocs,
@@ -1357,7 +1359,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             }
         }
 
-        var postQueueDepth = PendingCommandCount + (commandPipeline?.PendingCommandCount ?? 0);
+        var postQueueDepth = PendingCommandCount + (commandPipeline?.PendingCommandCount ?? 0) + GetPendingInboundNetworkQueueDepth();
         return new CrdtAntiEntropyWorkLoadDto(
             isBusy: false,
             pendingQueueDepth: Math.Max(queueDepth, postQueueDepth),
@@ -1508,7 +1510,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     public IDisposable? TryAcquireAntiEntropyWorkScope()
     {
         var commandPipeline = serviceProvider.GetService<IDocumentCommandPipeline>();
-        var queueDepth = PendingCommandCount + (commandPipeline?.PendingCommandCount ?? 0);
+        var queueDepth = PendingCommandCount + (commandPipeline?.PendingCommandCount ?? 0) + GetPendingInboundNetworkQueueDepth();
         var busyThreshold = options.AntiEntropyBusyQueueThreshold;
         if (busyThreshold > 0 && queueDepth >= busyThreshold)
         {
@@ -1531,7 +1533,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
 
         var commandPipeline = serviceProvider.GetService<IDocumentCommandPipeline>();
-        var queueDepth = PendingCommandCount + (commandPipeline?.PendingCommandCount ?? 0);
+        var queueDepth = PendingCommandCount + (commandPipeline?.PendingCommandCount ?? 0) + GetPendingInboundNetworkQueueDepth();
         var busyThreshold = options.AntiEntropyBusyQueueThreshold;
         if (busyThreshold > 0 && queueDepth >= busyThreshold)
         {
@@ -1556,6 +1558,29 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
 
         return new ShardAntiEntropyWorkScope(this, shardId);
+    }
+
+    private int GetPendingInboundNetworkQueueDepth()
+    {
+        try
+        {
+            var total = 0;
+            var meshes = serviceProvider.GetServices<P2pMeshMetadata>();
+            foreach (var mesh in meshes)
+            {
+                var inboundQueue = serviceProvider.GetKeyedService<IInboundMessageQueue<IMeshMessage>>(mesh.MeshId);
+                if (inboundQueue != null)
+                {
+                    total += inboundQueue.PendingCount;
+                }
+            }
+
+            return total;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private async ValueTask<HashSet<string>> GetLocalAntiEntropyShardsAsync(IShardVersionVectorManager? versionVectorManager, CancellationToken cancellationToken)

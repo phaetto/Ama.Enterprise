@@ -9,8 +9,27 @@ using Ama.Enterprise.P2p.Models.Core;
 /// Defines an internal queue for decoupling inbound network listeners from the protocol logic.
 /// </summary>
 /// <typeparam name="TMessage">The type of the message being queued.</typeparam>
+/// <example>
+/// <code>
+/// public async Task CheckBacklogAsync(IInboundMessageQueue&lt;IMeshMessage&gt; queue, CancellationToken ct)
+/// {
+///     if (queue.PendingCount &gt; 100)
+///     {
+///         await foreach (var msg in queue.ReadAllAsync(ct))
+///         {
+///             // Process message
+///         }
+///     }
+/// }
+/// </code>
+/// </example>
 public interface IInboundMessageQueue<TMessage> where TMessage : IMeshMessage
 {
+    /// <summary>
+    /// Gets the current number of messages waiting to be read from the internal queue.
+    /// </summary>
+    int PendingCount => 0;
+
     /// <summary>
     /// Writes a message to the internal queue.
     /// </summary>

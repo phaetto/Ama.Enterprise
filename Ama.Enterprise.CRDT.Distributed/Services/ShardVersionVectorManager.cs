@@ -234,7 +234,10 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
             return;
         }
 
-        pendingShardExpectedCounts[shardId] = activeShardDocumentIds.Count;
+        var existingExpected = pendingShardExpectedCounts.AddOrUpdate(
+            shardId,
+            activeShardDocumentIds.Count,
+            (_, prev) => Math.Max(prev, activeShardDocumentIds.Count));
         pendingShardLastActivityTicks[shardId] = nowTicks;
 
         var docMap = pendingDocumentSnapshots.GetOrAdd(shardId, _ => new ConcurrentDictionary<string, DottedVersionVector>(StringComparer.Ordinal));
@@ -259,16 +262,18 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
             }
         }
 
-        var dvvList = new List<DottedVersionVector>(activeShardDocumentIds.Count);
-        foreach (var activeDocId in activeShardDocumentIds)
+        if (docMap.Count < existingExpected)
         {
-            if (docMap.TryGetValue(activeDocId, out var docDvv))
-            {
-                dvvList.Add(docDvv);
-            }
+            return;
         }
 
-        if (dvvList.Count == activeShardDocumentIds.Count)
+        var dvvList = new List<DottedVersionVector>(docMap.Count);
+        foreach (var docDvv in docMap.Values)
+        {
+            dvvList.Add(docDvv);
+        }
+
+        if (dvvList.Count >= activeShardDocumentIds.Count)
         {
             var gmvv = CalculateSnapshotBatchMinimumVersions(dvvList, stringPool);
             var mergedDots = IntersectSnapshotDots(dvvList, gmvv.AsReadOnly(), stringPool);
@@ -279,6 +284,20 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
             pendingShardExpectedCounts.TryRemove(shardId, out _);
             pendingShardLastActivityTicks.TryRemove(shardId, out _);
         }
+    }
+
+    /// <inheritdoc />
+    public void RecordShardPatchActivity(string shardId, int operationCount = 1)
+    {
+        if (string.IsNullOrWhiteSpace(shardId) || operationCount <= 0)
+        {
+            return;
+        }
+
+        shardId = stringPool.GetOrAdd(shardId);
+        var nowTicks = Environment.TickCount64;
+        Volatile.Write(ref lastSnapshotMergeTicks, nowTicks);
+        lastShardSnapshotMergeTicks[shardId] = nowTicks;
     }
 
     /// <inheritdoc />

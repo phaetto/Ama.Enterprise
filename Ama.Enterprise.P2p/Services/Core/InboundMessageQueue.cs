@@ -15,6 +15,9 @@ public sealed class InboundMessageQueue<TMessage> : IInboundMessageQueue<TMessag
     private readonly Channel<TMessage> channel = Channel.CreateUnbounded<TMessage>();
 
     /// <inheritdoc />
+    public int PendingCount => channel.Reader.CanCount ? channel.Reader.Count : 0;
+
+    /// <inheritdoc />
     public ValueTask WriteAsync(TMessage message, CancellationToken cancellationToken)
     {
         return channel.Writer.WriteAsync(message, cancellationToken);

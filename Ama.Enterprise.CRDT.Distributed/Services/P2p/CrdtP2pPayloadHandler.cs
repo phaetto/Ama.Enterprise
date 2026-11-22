@@ -40,6 +40,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
     private readonly Counter<long> patchesProcessedCounter;
 
     private readonly ConcurrentDictionary<(string PeerReplicaId, string ShardId), SnapshotDispatchState> recentSnapshotDispatches = new();
+    private readonly record struct SnapshotDispatchState(long DispatchedAtTicks, long CooldownMs, DottedVersionVector DispatchedDvv);
 
     public CrdtP2pPayloadHandler(
         string replicaId,
@@ -135,7 +136,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
         {
             if (wrapper.MessageType == "CrdtSnapshot")
             {
-                RecordSkippedSnapshotProgress(scope, wrapper, senderId);
+                await RecordSkippedOrBufferedSnapshotAsync(scope, wrapper, senderId, cancellationToken).ConfigureAwait(false);
             }
             return;
         }
@@ -706,7 +707,50 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
 
                 if (allOps.Count > 0 && directSender != null)
                 {
+                    var nowTicks = Environment.TickCount64;
+                    var options = scope.ServiceProvider.GetService<Microsoft.Extensions.Options.IOptions<DistributedCrdtOptions>>()?.Value;
+                    var startupSec = options?.AntiEntropyStartupIntervalSeconds ?? 2;
+                    var basePatchCooldownMs = startupSec <= 1 ? 500L : Math.Max(1500L, startupSec * 1000L);
+
+                    var opsByShard = allOps
+                        .Where(x => !string.IsNullOrEmpty(x.Operation.ShardId) && !shardsRequiringSnapshot.Contains(x.Operation.ShardId!))
+                        .GroupBy(x => x.Operation.ShardId!, StringComparer.Ordinal)
+                        .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+
+                    var throttledPatchShards = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var shardOpKvp in opsByShard)
+                    {
+                        var shardId = shardOpKvp.Key;
+                        var key = (syncMsg.ReplicaId, shardId);
+                        if (recentSnapshotDispatches.TryGetValue(key, out var prevDispatch) &&
+                            nowTicks - prevDispatch.DispatchedAtTicks < prevDispatch.CooldownMs &&
+                            safeLocalState.TryGetValue(shardId, out var currentLocalDvv))
+                        {
+                            var deltaReq = syncService.CalculateRequirement(
+                                syncMsg.ReplicaId,
+                                prevDispatch.DispatchedDvv,
+                                replicaContext.ReplicaId,
+                                currentLocalDvv,
+                                shardId);
+
+                            if (!deltaReq.IsBehind)
+                            {
+                                throttledPatchShards.Add(shardId);
+                                continue;
+                            }
+                        }
+
+                        if (safeLocalState.TryGetValue(shardId, out var dispatchedDvv))
+                        {
+                            var dynamicPatchCooldownMs = startupSec <= 1
+                                ? basePatchCooldownMs
+                                : Math.Clamp(basePatchCooldownMs + (shardOpKvp.Value * 5L), basePatchCooldownMs, 300_000L);
+                            recentSnapshotDispatches[key] = new SnapshotDispatchState(nowTicks, dynamicPatchCooldownMs, dispatchedDvv);
+                        }
+                    }
+
                     var opsByDoc = allOps
+                        .Where(x => string.IsNullOrEmpty(x.Operation.ShardId) || !throttledPatchShards.Contains(x.Operation.ShardId))
                         .GroupBy(x => (Key: x.DocumentId?.ToString() ?? string.Empty, ShardId: x.Operation.ShardId ?? string.Empty))
                         .ToDictionary(g => g.Key, g => g.Select(x => x.Operation).ToArray());
 
@@ -714,7 +758,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
 
                     foreach (var targetDoc in documents)
                     {
-                        if (shardsRequiringSnapshot.Contains(targetDoc.ShardId))
+                        if (shardsRequiringSnapshot.Contains(targetDoc.ShardId) || throttledPatchShards.Contains(targetDoc.ShardId))
                         {
                             continue;
                         }
@@ -762,7 +806,8 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                             continue;
                         }
 
-                        if (!string.IsNullOrEmpty(kvp.Key.ShardId) && shardsRequiringSnapshot.Contains(kvp.Key.ShardId))
+                        if (!string.IsNullOrEmpty(kvp.Key.ShardId) &&
+                            (shardsRequiringSnapshot.Contains(kvp.Key.ShardId) || throttledPatchShards.Contains(kvp.Key.ShardId)))
                         {
                             continue;
                         }
@@ -853,6 +898,9 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             }
             
             patchesProcessedCounter.Add(1, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
+            var versionVectorManager = scope.ServiceProvider.GetService<IShardVersionVectorManager>();
+            versionVectorManager?.RecordShardPatchActivity(targetDoc.ShardId, patchMsg.Patch.Operations.Count);
+
             await targetDoc.ApplyRemotePatchAsync(patchMsg.Patch, cancellationToken).ConfigureAwait(false);
 
             if (!string.IsNullOrWhiteSpace(patchMsg.ReplicaId) && senderId.Value != Guid.Empty)
@@ -930,6 +978,11 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
 
             await targetDoc.MergeSnapshotAsync(resMsg.SnapshotData, resMsg.GlobalState, expectedShardDocIds, IntentDeliveryMode.Acknowledged, cancellationToken).ConfigureAwait(false);
             snapshotsMergedCounter.Add(1, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
+
+            if (string.Equals(targetDoc.DocumentId, Constants.SystemRegistryDocumentId, StringComparison.Ordinal))
+            {
+                await scope.Orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (Exception ex)
         {
@@ -1036,7 +1089,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
         return true;
     }
 
-    private void RecordSkippedSnapshotProgress(IDistributedCrdtScope scope, CrdtMessageWrapper wrapper, PeerId senderId)
+    private async Task RecordSkippedOrBufferedSnapshotAsync(IDistributedCrdtScope scope, CrdtMessageWrapper wrapper, PeerId senderId, CancellationToken cancellationToken)
     {
         try
         {
@@ -1067,6 +1120,23 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                 ? wrapper.DocumentId
                 : CrdtRegistryEntry.GetRegistryKey(wrapper.DocumentTypeAlias, wrapper.DocumentId);
 
+            // If the snapshot arrived before the cluster topology stabilized (so IsShardLocalAsync returned false temporarily),
+            // persist the serialized snapshot bytes in local storage so that when the topology re-evaluates and promotes the document,
+            // it immediately loads this snapshot from storage rather than starting empty with an already-advanced shard DVV.
+            if (resMsg.SnapshotData is { Length: > 0 } && !string.IsNullOrWhiteSpace(wrapper.DocumentTypeAlias))
+            {
+                var factory = scope.ServiceProvider.GetKeyedService<IDocumentFactory>(wrapper.DocumentTypeAlias);
+                if (factory != null)
+                {
+                    var shardId = await scope.Orchestrator.TryGetShardIdAsync(wrapper.DocumentId, wrapper.DocumentTypeAlias, cancellationToken).ConfigureAwait(false)
+                                  ?? factory.GetShardId(scope.ServiceProvider, wrapper.DocumentId);
+                    if (!string.IsNullOrWhiteSpace(shardId))
+                    {
+                        await scope.Storage.SaveSerializedDocumentAsync<object>(shardId, compositeDocId, resMsg.SnapshotData, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
+
             var expectedShardDocIds = resMsg.ShardDocumentIds as IReadOnlyList<string>
                 ?? (resMsg.ShardDocumentIds is { Count: > 0 } ? new List<string>(resMsg.ShardDocumentIds) : [compositeDocId]);
 
@@ -1081,6 +1151,4 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             logger.LogDebug(ex, "[{ReplicaId}] Failed to record barrier progress for skipped snapshot {DocumentId}.", scope.ReplicaId, wrapper.DocumentId);
         }
     }
-
-    private readonly record struct SnapshotDispatchState(long DispatchedAtTicks, long CooldownMs, DottedVersionVector DispatchedDvv);
 }
