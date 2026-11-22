@@ -188,6 +188,11 @@ public interface IDistributedCrdtDocument
 public interface IDistributedCrdtDocument<TState> : IDistributedCrdtDocument where TState : class, new()
 {
     /// <summary>
+    /// Gets a thread-safe snapshot of the strictly typed underlying CRDT document directly from memory without channel or asynchronous overhead.
+    /// </summary>
+    CrdtDocument<TState> CurrentDocument { get; }
+
+    /// <summary>
     /// Exposes the strictly typed underlying CRDT document containing the application state.
     /// </summary>
     ValueTask<CrdtDocument<TState>> GetDocumentAsync(CancellationToken cancellationToken = default);

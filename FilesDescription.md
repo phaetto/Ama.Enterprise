@@ -41,7 +41,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetManager.cs` | Implemented `ICrdtClusterQuery` for low-battery device search and added orchestrator invocations for statistical aggregation and in-place offline device purging. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/IFleetManager.cs` | Added `SearchLowBatteryDevicesAsync`, `GetClusterBatteryStatsAsync`, and `PurgeOfflineDevicesAsync` to `IFleetManager`. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ITaskManager.cs` | Added overloads accepting `IntentDeliveryMode` for setting and removing tasks. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/PurgeOfflineDevicesMapReduce.cs` | Read-write Map/Reduce handler purging offline low-battery devices in-place across primary fleet shards. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/PurgeOfflineDevicesMapReduce.cs` | Pipelined `ApplyIntentAsync` removal operations per document using `Task.WhenAll` instead of awaiting each key removal sequentially. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseCrdtStorage.cs` | Implemented `AppendBatchAsync` wrapping cross-document operations in a single SQLite transaction. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseShardIdProvider.cs` | Custom shard ID provider decoupling overarching multi-document structures into isolated causal tracking domains. Implemented lightweight `GetShardId` overloads avoiding document allocations. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/TaskManager.cs` | Added `DocumentExistsAsync` check and input validation to `GetTasksAsync`. |
@@ -113,12 +113,12 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ConsistentHashShardDistributionManager.cs` | Injected scoped `ReplicaContext` instead of singleton `DistributedCrdtReplicaRegistration` so multi-replica hosts resolve the correct local replica ID per scope. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtCheckpointService.cs` | Delegated shard version vector snapshot creation to `IShardVersionVectorManager`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtCompactionService.cs` | Background hosted service that periodically runs CRDT metadata compaction across active documents in all replica scopes. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Updated `EvaluateAndDispatchAntiEntropyStateAsync` and `TryAcquireAntiEntropyWorkScope` to track anti-entropy work and snapshot reception per shard so busy shards do not block independent shards. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtDocumentOrchestrator.cs` | Optimized Map/Reduce routing and local execution by caching shard ring lookups per unique shard ID and reading `CurrentDocument` directly without `GetDocumentAsync` or channel hops. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtEvictionService.cs` | Implemented `EvictPeersAsync` overload accepting `IntentDeliveryMode` and forwarding it to `IDistributedCrdtDocument.EvictReplicaAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtInitializationService.cs` | Added retry loop with configurable backoff during replica initialization and fatal failure handling that stops the application and rethrows if all retries fail. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtJournalFlushService.cs` | Background hosted service that drains `BufferedDistributedCrdtStorageDecorator` queues in batches and flushes remaining operations on graceful shutdown. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtMaintenanceService.cs` | Delegated version vector replica eviction and snapshot extraction to `IShardVersionVectorManager`. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtMapReduceExecutor.cs` | Guarded stored-snapshot fallback with `IsShardLocalAsync` so demoted replicas do not evaluate stale or shared-storage checkpoints instead of failing over to the active shard owner. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtMapReduceExecutor.cs` | Updated remote Map/Reduce batch execution to read `CurrentDocument` directly without channel hops, cache shard locality per shard ID, and fast-path synchronous `MapDocumentAsync` completions. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtMigrationBridgeService.cs` | Filtered `CrdtRegistryState.Documents` by `CrdtRegistryEntry.IsDeleted` and used `CrdtRegistryEntry.GetRegistryKey` to detect tombstoned source documents. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtMigrationManager.cs` | Default implementation of `ICrdtMigrationManager` aggregating status and drain operations across all registered migration bridges. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtShutdownCoordinator.cs` | Implemented `ShutdownToken` and `IDisposable` to signal cancellation immediately upon shutdown initiation. |
@@ -126,7 +126,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/CrdtTrimCoordinator.cs` | Coordinates trimming operations across the entire node to ensure only one aggressive or maintenance trim runs at a time, preventing IO and memory saturation. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DefaultScopeTopologyProvider.cs` | Updated to implement the asynchronous `IsPeerExpectedAsync` method returning synchronous wrappers. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DiskWriteAheadBuffer.cs` | Local append-only segment file implementation of `ICrdtWriteAheadBuffer` providing crash durability and startup recovery. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Avoided marking documents dirty on redundant snapshots whose causal metadata does not advance local state. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtDocument.cs` | Implemented `CurrentDocument` on `DistributedCrdtDocument<TState>` returning the current document snapshot directly under lock without going through channels. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeFactory.cs` | Delegated scope creation metrics to the centralized `IDistributedCrdtTelemetry` service. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtScopeManager.cs` | Centralized singleton tracker managing long-lived background scopes per instantiated replica. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/DistributedCrdtTelemetry.cs` | Added counters for distributed Map/Reduce job executions and remote peer batch dispatches. |
@@ -142,7 +142,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ICrdtMigrationManager.cs` | Coordinator interface for checking cluster-wide migration convergence and draining all active migration bridges before cutover. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ICrdtShutdownCoordinator.cs` | Added `ShutdownToken` to expose a cancellation token triggered as soon as a shutdown or scope flush begins. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/ICrdtWriteAheadBuffer.cs` | Interface for staging, batching, acknowledging, and recovering journaled operations in write-behind and disk WAL modes. |
-| `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtDocument.cs` | Added `MergeSnapshotAsync` overload accepting `expectedShardDocumentIds`. |
+| `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtDocument.cs` | Added `CurrentDocument` property to `IDistributedCrdtDocument<TState>` for direct, channel-free in-memory access to the materialized `CrdtDocument<TState>`. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtScope.cs` | Encapsulates the long-lived structural boundaries for a strictly identified generic localized CRDT replica. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtScopeFactory.cs` | Factory interface tracking CRDT scope instantiations and resolving bounds. |
 | `$/Ama.Enterprise.CRDT.Distributed/Services/IDistributedCrdtStorage.cs` | Added `AppendBatchAsync` to support cross-document and cross-shard batch persistence of journaled operations. |

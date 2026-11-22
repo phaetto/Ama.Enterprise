@@ -284,9 +284,9 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     }
 
     /// <inheritdoc />
-    public async ValueTask<bool> DocumentExistsAsync(string documentId, string? typeAlias, CancellationToken cancellationToken = default)
+    public ValueTask<bool> DocumentExistsAsync(string documentId, string? typeAlias, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(documentId)) return false;
+        if (string.IsNullOrWhiteSpace(documentId)) return new ValueTask<bool>(false);
 
         documentId = stringPool.GetOrAdd(documentId);
         if (!string.IsNullOrWhiteSpace(typeAlias))
@@ -296,17 +296,18 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         if (Registry != null && string.Equals(Registry.DocumentId, documentId, StringComparison.Ordinal))
         {
-            return string.IsNullOrWhiteSpace(typeAlias) ||
+            var matchesRegistry = string.IsNullOrWhiteSpace(typeAlias) ||
                    string.Equals(typeAlias, Registry.TypeAlias, StringComparison.Ordinal) ||
                    string.Equals(typeAlias, Constants.SystemRegistryDocumentId, StringComparison.Ordinal);
+            return new ValueTask<bool>(matchesRegistry);
         }
 
         if (Registry != null)
         {
-            var registryDoc = await Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            var registryDoc = Registry.CurrentDocument;
             if (TryFindRegistryEntry(registryDoc.Data.Documents, documentId, typeAlias, out var entry) && entry != null)
             {
-                return !entry.IsDeleted;
+                return new ValueTask<bool>(!entry.IsDeleted);
             }
         }
 
@@ -315,26 +316,40 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             var compositeKey = CrdtRegistryEntry.GetRegistryKey(typeAlias, documentId);
             if (activeDocuments.ContainsKey(compositeKey))
             {
-                return true;
+                return new ValueTask<bool>(true);
             }
-        }
-        else
-        {
-            if (activeDocuments.ContainsKey(documentId))
+
+            if (activeDocuments.TryGetValue(documentId, out var docById) && string.Equals(docById.TypeAlias, typeAlias, StringComparison.Ordinal))
             {
-                return true;
+                return new ValueTask<bool>(true);
             }
 
             foreach (var doc in activeDocuments.Values)
             {
-                if (string.Equals(doc.DocumentId, documentId, StringComparison.Ordinal))
+                if (string.Equals(doc.DocumentId, documentId, StringComparison.Ordinal) &&
+                    string.Equals(doc.TypeAlias, typeAlias, StringComparison.Ordinal))
                 {
-                    return true;
+                    return new ValueTask<bool>(true);
                 }
+            }
+
+            return new ValueTask<bool>(false);
+        }
+
+        if (activeDocuments.ContainsKey(documentId))
+        {
+            return new ValueTask<bool>(true);
+        }
+
+        foreach (var doc in activeDocuments.Values)
+        {
+            if (string.Equals(doc.DocumentId, documentId, StringComparison.Ordinal))
+            {
+                return new ValueTask<bool>(true);
             }
         }
 
-        return false;
+        return new ValueTask<bool>(false);
     }
 
     /// <inheritdoc />
@@ -344,9 +359,9 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     }
 
     /// <inheritdoc />
-    public async ValueTask<string?> TryGetShardIdAsync(string documentId, string? typeAlias, CancellationToken cancellationToken = default)
+    public ValueTask<string?> TryGetShardIdAsync(string documentId, string? typeAlias, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(documentId)) return null;
+        if (string.IsNullOrWhiteSpace(documentId)) return new ValueTask<string?>((string?)null);
 
         documentId = stringPool.GetOrAdd(documentId);
         if (!string.IsNullOrWhiteSpace(typeAlias))
@@ -354,39 +369,44 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             typeAlias = stringPool.GetOrAdd(typeAlias);
         }
 
+        if (Registry != null && string.Equals(Registry.DocumentId, documentId, StringComparison.Ordinal))
+        {
+            return new ValueTask<string?>(Registry.ShardId);
+        }
+
         var cacheKey = CrdtRegistryEntry.GetRegistryKey(typeAlias, documentId);
         if (shardIdCache.TryGetValue(cacheKey, out var cachedShardId))
         {
-            return cachedShardId;
+            return new ValueTask<string?>(cachedShardId);
         }
 
-        if (Registry != null && string.Equals(Registry.DocumentId, documentId, StringComparison.Ordinal))
+        if (!string.IsNullOrWhiteSpace(typeAlias))
         {
-            shardIdCache.TryAdd(cacheKey, Registry.ShardId);
-            return Registry.ShardId;
+            if (activeDocuments.TryGetValue(cacheKey, out var typedActiveDoc))
+            {
+                shardIdCache.TryAdd(cacheKey, typedActiveDoc.ShardId);
+                return new ValueTask<string?>(typedActiveDoc.ShardId);
+            }
         }
-
-        if (activeDocuments.TryGetValue(cacheKey, out var activeDoc))
+        else if (activeDocuments.TryGetValue(documentId, out var activeDoc))
         {
             shardIdCache.TryAdd(cacheKey, activeDoc.ShardId);
-            return activeDoc.ShardId;
+            return new ValueTask<string?>(activeDoc.ShardId);
         }
 
-        if (string.IsNullOrWhiteSpace(typeAlias))
+        foreach (var doc in activeDocuments.Values)
         {
-            foreach (var doc in activeDocuments.Values)
+            if (string.Equals(doc.DocumentId, documentId, StringComparison.Ordinal) &&
+                (string.IsNullOrWhiteSpace(typeAlias) || string.Equals(doc.TypeAlias, typeAlias, StringComparison.Ordinal)))
             {
-                if (string.Equals(doc.DocumentId, documentId, StringComparison.Ordinal))
-                {
-                    shardIdCache.TryAdd(cacheKey, doc.ShardId);
-                    return doc.ShardId;
-                }
+                shardIdCache.TryAdd(cacheKey, doc.ShardId);
+                return new ValueTask<string?>(doc.ShardId);
             }
         }
 
         if (Registry != null)
         {
-            var registryDoc = await Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            var registryDoc = Registry.CurrentDocument;
             if (!TryFindRegistryEntry(registryDoc.Data.Documents, documentId, typeAlias, out var entry) && !string.IsNullOrWhiteSpace(typeAlias))
             {
                 var factory = serviceProvider.GetKeyedService<IDocumentFactory>(typeAlias);
@@ -394,7 +414,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 {
                     var resolvedShardId = stringPool.GetOrAdd(factory.GetShardId(serviceProvider, documentId));
                     shardIdCache.TryAdd(cacheKey, resolvedShardId);
-                    return resolvedShardId;
+                    return new ValueTask<string?>(resolvedShardId);
                 }
             }
             else if (entry != null && !entry.IsDeleted)
@@ -405,12 +425,12 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                     var resolvedShardId = stringPool.GetOrAdd(factory.GetShardId(serviceProvider, entry.DocumentId));
                     shardIdCache.TryAdd(CrdtRegistryEntry.GetRegistryKey(entry.TypeAlias, entry.DocumentId), resolvedShardId);
                     shardIdCache.TryAdd(cacheKey, resolvedShardId);
-                    return resolvedShardId;
+                    return new ValueTask<string?>(resolvedShardId);
                 }
             }
         }
 
-        return null;
+        return new ValueTask<string?>((string?)null);
     }
 
     /// <inheritdoc />
@@ -456,7 +476,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         var resolvedAlias = typeAlias;
         if (Registry != null)
         {
-            var registryDoc = await Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            var registryDoc = Registry.CurrentDocument;
             if (TryFindRegistryEntry(registryDoc.Data.Documents, documentId, resolvedAlias, out var entry) && entry != null)
             {
                 if (entry.IsDeleted)
@@ -551,7 +571,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         var resolvedAlias = typeAlias;
         if (Registry != null)
         {
-            var registryDoc = await Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            var registryDoc = Registry.CurrentDocument;
             if (TryFindRegistryEntry(registryDoc.Data.Documents, documentId, resolvedAlias, out var entry) && entry != null)
             {
                 if (entry.IsDeleted)
@@ -597,7 +617,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         var localTypedDoc = TryGetLocalDocument<TState>(documentId);
         if (localTypedDoc != null)
         {
-            return await localTypedDoc.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            return localTypedDoc.CurrentDocument;
         }
 
         var documentTypeAlias = GetTypeAlias<TState>();
@@ -609,7 +629,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             var promotedDoc = await ResolveOrPromoteLocalDocumentAsync(documentId, documentTypeAlias, cancellationToken).ConfigureAwait(false);
             if (promotedDoc is IDistributedCrdtDocument<TState> promotedTypedDoc)
             {
-                return await promotedTypedDoc.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+                return promotedTypedDoc.CurrentDocument;
             }
         }
         
@@ -1783,29 +1803,61 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 UnreachableDocumentIds: Array.Empty<string>());
         }
 
-        // Plan local vs remote batches based on the requested routing mode
+        // Plan local vs remote batches based on the requested routing mode, caching ring lookups per unique shardId
         var localDocumentBatch = new List<string>();
         var remoteBatchesByReplicaId = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-        var docCandidateReplicas = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var docCandidateReplicas = new Dictionary<string, List<string>>(candidateDocuments.Count, StringComparer.Ordinal);
+        var shardTargetNodesCache = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var shardFallbackRemotesCache = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var replicaPeerIdCache = new Dictionary<string, string?>(StringComparer.Ordinal);
         var unreachableDocumentIds = new List<string>();
+
+        string? GetCachedPeerId(string replicaId)
+        {
+            if (!replicaPeerIdCache.TryGetValue(replicaId, out var cachedPeerId))
+            {
+                cachedPeerId = clusterStateTracker.GetPeerIdByReplicaId(replicaId);
+                replicaPeerIdCache[replicaId] = cachedPeerId;
+            }
+
+            return cachedPeerId;
+        }
+
+        async ValueTask<List<string>> GetCachedFallbackRemotesAsync(string shardId)
+        {
+            if (!shardFallbackRemotesCache.TryGetValue(shardId, out var cachedFallbacks))
+            {
+                cachedFallbacks = await GetCandidateRemoteReplicasForShardAsync(shardId, replicaContext.ReplicaId, clusterStateTracker, cancellationToken).ConfigureAwait(false);
+                shardFallbackRemotesCache[shardId] = cachedFallbacks;
+            }
+
+            return cachedFallbacks;
+        }
 
         foreach (var item in candidateDocuments)
         {
             var docId = item.DocumentId;
             var shardId = item.ShardId;
-            var targetNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
-            var orderedReplicas = new List<string>();
-            if (targetNodes != null)
+
+            if (!shardTargetNodesCache.TryGetValue(shardId, out var cachedShardReplicas))
             {
-                for (var i = 0; i < targetNodes.Count; i++)
+                var targetNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
+                cachedShardReplicas = new List<string>(targetNodes?.Count ?? 0);
+                if (targetNodes != null)
                 {
-                    if (!orderedReplicas.Contains(targetNodes[i]))
+                    for (var i = 0; i < targetNodes.Count; i++)
                     {
-                        orderedReplicas.Add(targetNodes[i]);
+                        if (!cachedShardReplicas.Contains(targetNodes[i]))
+                        {
+                            cachedShardReplicas.Add(targetNodes[i]);
+                        }
                     }
                 }
+
+                shardTargetNodesCache[shardId] = cachedShardReplicas;
             }
 
+            var orderedReplicas = cachedShardReplicas;
             docCandidateReplicas[docId] = orderedReplicas;
 
             switch (scope.RoutingMode)
@@ -1828,7 +1880,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                         var candidate = orderedReplicas[i];
                         if (!string.Equals(candidate, replicaContext.ReplicaId, StringComparison.Ordinal) &&
                             remoteBatchesByReplicaId.ContainsKey(candidate) &&
-                            !string.IsNullOrWhiteSpace(clusterStateTracker.GetPeerIdByReplicaId(candidate)))
+                            !string.IsNullOrWhiteSpace(GetCachedPeerId(candidate)))
                         {
                             chosenRemote = candidate;
                             break;
@@ -1841,7 +1893,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                         {
                             var candidate = orderedReplicas[i];
                             if (!string.Equals(candidate, replicaContext.ReplicaId, StringComparison.Ordinal) &&
-                                !string.IsNullOrWhiteSpace(clusterStateTracker.GetPeerIdByReplicaId(candidate)))
+                                !string.IsNullOrWhiteSpace(GetCachedPeerId(candidate)))
                             {
                                 chosenRemote = candidate;
                                 break;
@@ -1851,7 +1903,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
                     if (chosenRemote is null)
                     {
-                        var fallbackRemotes = await GetCandidateRemoteReplicasForShardAsync(shardId, replicaContext.ReplicaId, clusterStateTracker, cancellationToken).ConfigureAwait(false);
+                        var fallbackRemotes = await GetCachedFallbackRemotesAsync(shardId).ConfigureAwait(false);
                         for (var i = 0; i < fallbackRemotes.Count; i++)
                         {
                             var candidate = fallbackRemotes[i];
@@ -1860,7 +1912,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                                 orderedReplicas.Add(candidate);
                             }
 
-                            if (chosenRemote is null && !string.IsNullOrWhiteSpace(clusterStateTracker.GetPeerIdByReplicaId(candidate)))
+                            if (chosenRemote is null && !string.IsNullOrWhiteSpace(GetCachedPeerId(candidate)))
                             {
                                 chosenRemote = candidate;
                             }
@@ -1897,7 +1949,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                             break;
                         }
 
-                        if (!string.IsNullOrWhiteSpace(clusterStateTracker.GetPeerIdByReplicaId(candidate)))
+                        if (!string.IsNullOrWhiteSpace(GetCachedPeerId(candidate)))
                         {
                             chosenPrimary = candidate;
                             break;
@@ -1906,7 +1958,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
                     if (chosenPrimary is null)
                     {
-                        var fallbackRemotes = await GetCandidateRemoteReplicasForShardAsync(shardId, replicaContext.ReplicaId, clusterStateTracker, cancellationToken).ConfigureAwait(false);
+                        var fallbackRemotes = await GetCachedFallbackRemotesAsync(shardId).ConfigureAwait(false);
                         for (var i = 0; i < fallbackRemotes.Count; i++)
                         {
                             var candidate = fallbackRemotes[i];
@@ -1915,7 +1967,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                                 orderedReplicas.Add(candidate);
                             }
 
-                            if (chosenPrimary is null && !string.IsNullOrWhiteSpace(clusterStateTracker.GetPeerIdByReplicaId(candidate)))
+                            if (chosenPrimary is null && !string.IsNullOrWhiteSpace(GetCachedPeerId(candidate)))
                             {
                                 chosenPrimary = candidate;
                             }
@@ -1955,7 +2007,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                             localDocumentBatch.Add(docId);
                             assignedAny = true;
                         }
-                        else if (!string.IsNullOrWhiteSpace(clusterStateTracker.GetPeerIdByReplicaId(replica)))
+                        else if (!string.IsNullOrWhiteSpace(GetCachedPeerId(replica)))
                         {
                             if (!remoteBatchesByReplicaId.TryGetValue(replica, out var list))
                             {
@@ -1990,7 +2042,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         var remotePeersContacted = 0;
         var wasShortCircuited = false;
 
-        // Step 3: Local Execution + Early Short-Circuit Check
+        // Step 3: Local Execution directly against CurrentDocument without channel round-trips
         if (localDocumentBatch.Count > 0)
         {
             var localAccumulators = new List<TAccumulate>(localDocumentBatch.Count);
@@ -2008,7 +2060,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
                 if (liveDoc is not null)
                 {
-                    var crdtDoc = await liveDoc.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+                    var crdtDoc = liveDoc.CurrentDocument;
                     var context = new CrdtMapContext<TState>(
                         docId,
                         liveDoc.ShardId,
@@ -2016,7 +2068,10 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                         crdtDoc,
                         liveDoc);
 
-                    var acc = await handler.MapDocumentAsync(context, input, cancellationToken).ConfigureAwait(false);
+                    var mapValueTask = handler.MapDocumentAsync(context, input, cancellationToken);
+                    var acc = mapValueTask.IsCompletedSuccessfully
+                        ? mapValueTask.Result
+                        : await mapValueTask.ConfigureAwait(false);
                     localAccumulators.Add(acc);
                     localDocsEvaluated++;
 
@@ -2043,7 +2098,10 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                             storedDoc,
                             LiveDocumentHandle: null);
 
-                        var acc = await handler.MapDocumentAsync(demotedContext, input, cancellationToken).ConfigureAwait(false);
+                        var mapValueTask = handler.MapDocumentAsync(demotedContext, input, cancellationToken);
+                        var acc = mapValueTask.IsCompletedSuccessfully
+                            ? mapValueTask.Result
+                            : await mapValueTask.ConfigureAwait(false);
                         localAccumulators.Add(acc);
                         localDocsEvaluated++;
 
@@ -3120,7 +3178,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
 
         var registry = Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
-        var registryDoc = await registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+        var registryDoc = registry.CurrentDocument;
         var registryMap = registryDoc.Data.Documents;
 
         if (scope.TargetDocumentIds is { Count: > 0 })

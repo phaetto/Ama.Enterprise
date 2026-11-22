@@ -80,12 +80,13 @@ internal sealed class CrdtMapReduceExecutor<TState, TInput, TAccumulate, TResult
 
         var localAccumulators = new List<TAccumulate>(targetDocumentIds.Count);
         List<string>? missingDocumentIds = null;
+        Dictionary<string, bool>? shardLocalityCache = null;
 
         for (var i = 0; i < targetDocumentIds.Count; i++)
         {
             var docId = targetDocumentIds[i];
 
-            // 1. Check active in-memory documents or promote if this replica is a local owner
+            // 1. Check active in-memory documents directly without channel hops, or promote if this replica is a local owner
             var liveDoc = orchestrator.TryGetLocalDocument<TState>(docId);
             if (liveDoc is null)
             {
@@ -95,7 +96,7 @@ internal sealed class CrdtMapReduceExecutor<TState, TInput, TAccumulate, TResult
 
             if (liveDoc is not null)
             {
-                var crdtDoc = await liveDoc.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+                var crdtDoc = liveDoc.CurrentDocument;
                 var context = new CrdtMapContext<TState>(
                     docId,
                     liveDoc.ShardId,
@@ -103,7 +104,10 @@ internal sealed class CrdtMapReduceExecutor<TState, TInput, TAccumulate, TResult
                     crdtDoc,
                     liveDoc);
 
-                var acc = await handler.MapDocumentAsync(context, input, cancellationToken).ConfigureAwait(false);
+                var mapValueTask = handler.MapDocumentAsync(context, input, cancellationToken);
+                var acc = mapValueTask.IsCompletedSuccessfully
+                    ? mapValueTask.Result
+                    : await mapValueTask.ConfigureAwait(false);
                 localAccumulators.Add(acc);
 
                 if (handler.CanShortCircuit(input, acc))
@@ -119,7 +123,14 @@ internal sealed class CrdtMapReduceExecutor<TState, TInput, TAccumulate, TResult
             // checkpoint with an outdated local replica view; report it as missing so the coordinator fails over
             // to the current shard owner.
             var shardId = shardIdProvider.GetShardId<TState>(docId) ?? docId;
-            if (await distributionManager.IsShardLocalAsync(shardId, cancellationToken).ConfigureAwait(false))
+            shardLocalityCache ??= new Dictionary<string, bool>(StringComparer.Ordinal);
+            if (!shardLocalityCache.TryGetValue(shardId, out var isShardLocal))
+            {
+                isShardLocal = await distributionManager.IsShardLocalAsync(shardId, cancellationToken).ConfigureAwait(false);
+                shardLocalityCache[shardId] = isShardLocal;
+            }
+
+            if (isShardLocal)
             {
                 var storedBytes = await orchestrator
                     .TryLoadStoredDocumentSnapshotBytesAsync(docId, resolvedTypeAlias, cancellationToken)
@@ -137,7 +148,10 @@ internal sealed class CrdtMapReduceExecutor<TState, TInput, TAccumulate, TResult
                             storedDoc,
                             LiveDocumentHandle: null);
 
-                        var acc = await handler.MapDocumentAsync(demotedContext, input, cancellationToken).ConfigureAwait(false);
+                        var mapValueTask = handler.MapDocumentAsync(demotedContext, input, cancellationToken);
+                        var acc = mapValueTask.IsCompletedSuccessfully
+                            ? mapValueTask.Result
+                            : await mapValueTask.ConfigureAwait(false);
                         localAccumulators.Add(acc);
 
                         if (handler.CanShortCircuit(input, acc))

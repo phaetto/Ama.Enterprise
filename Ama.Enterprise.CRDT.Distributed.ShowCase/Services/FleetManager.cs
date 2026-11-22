@@ -94,9 +94,10 @@ public sealed class FleetManager :
         CancellationToken cancellationToken = default)
     {
         var input = new FleetBatteryStatsInput(onlineOnly);
+        var scope = new CrdtMapReduceScopeDto(RoutingMode: CrdtMapReduceRoutingMode.MinimalShardCover, AllowPartialResultsOnPeerFailure: true);
         return orchestrator.ExecuteMapReduceAsync<FleetState, FleetBatteryStatsInput, FleetBatteryStatsAccumulatorDto, FleetBatteryHealthReportDto>(
             input,
-            default,
+            scope,
             cancellationToken);
     }
 

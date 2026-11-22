@@ -47,15 +47,18 @@ public sealed class PurgeOfflineDevicesMapReduce
             return new PurgeOfflineDevicesSummaryDto(0, 0);
         }
 
+        var removeTasks = new Task[keysToRemove.Count];
         for (var i = 0; i < keysToRemove.Count; i++)
         {
             var key = keysToRemove[i];
-            await context.LiveDocumentHandle.ApplyIntentAsync(
+            removeTasks[i] = context.LiveDocumentHandle.ApplyIntentAsync(
                 new MapRemoveIntent(key),
                 nameof(FleetState.Devices),
                 IntentDeliveryMode.Acknowledged,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken);
         }
+
+        await Task.WhenAll(removeTasks).ConfigureAwait(false);
 
         return new PurgeOfflineDevicesSummaryDto(keysToRemove.Count, 1);
     }

@@ -113,6 +113,7 @@ public static class Program
             options.PeerEvictionTtlSeconds = 0;
             options.AntiEntropyInitialDelaySeconds = 0;
             options.CheckpointIntervalSeconds = 3;
+            options.AntiEntropyIntervalSeconds = 5;
             options.MaintenanceIntervalSeconds = 5 * 60;
             options.CompactionTtlSeconds = 5 * 60;
             options.ShardReplicationFactor = 2;

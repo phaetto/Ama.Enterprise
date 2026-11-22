@@ -75,6 +75,18 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// <inheritdoc />
     public string TypeAlias { get; }
 
+    /// <inheritdoc />
+    public CrdtDocument<TState> CurrentDocument
+    {
+        get
+        {
+            lock (syncRoot)
+            {
+                return currentDocument;
+            }
+        }
+    }
+
     public DistributedCrdtDocument(
         TState initialState,
         IServiceProvider serviceProvider,
@@ -147,10 +159,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// <inheritdoc />
     public ValueTask<CrdtDocument<TState>> GetDocumentAsync(CancellationToken cancellationToken = default)
     {
-        lock (syncRoot)
-        {
-            return new ValueTask<CrdtDocument<TState>>(currentDocument);
-        }
+        return new ValueTask<CrdtDocument<TState>>(CurrentDocument);
     }
 
     /// <inheritdoc />
