@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.CRDT.Distributed.ShowCase;
 
 using Ama.CRDT.Extensions;
+using Ama.CRDT.Services.Providers;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
@@ -10,6 +11,8 @@ using Ama.Enterprise.CRDT.Distributed.ShowCase.Services;
 using Ama.Enterprise.CRDT.MessagePack.Extensions;
 using Ama.Enterprise.Licensing.Extensions;
 using Ama.Enterprise.P2p.Extensions;
+using Ama.Enterprise.P2p.Models.Core;
+using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.P2p.Telemetry.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -58,16 +61,30 @@ public static class Program
         long WholeObjectSizeBytes,
         long GlobalStateSizeBytes);
 
+    private readonly record struct PeerHealthDisplayDto(
+        string MeshId,
+        string PeerId,
+        string ReplicaId,
+        PeerStatus Status,
+        string Endpoint,
+        int TrackedShards);
+
+    private readonly record struct ShardTopologyDisplayDto(
+        string ShardId,
+        int DocumentCount,
+        bool IsLocal,
+        IReadOnlyList<string> TargetReplicas);
+
     public static async Task Main(string[] args)
     {
         if (args.Length == 0 || !int.TryParse(args[0], out currentPort))
         {
-            currentPort = GetNextAvailablePort(8100);
+            currentPort = GetNextAvailablePortBlock(8100, 4);
         }
 
-        var currentHandshakePort = GetNextAvailablePort(8037);
-        var currentAdminHandshakePort = GetNextAvailablePort(currentHandshakePort + 1);
         currentAdminPort = GetNextAvailablePort(currentPort + 1);
+        var currentHandshakePort = GetNextAvailablePort(currentAdminPort + 1);
+        var currentAdminHandshakePort = GetNextAvailablePort(currentHandshakePort + 1);
         var replicaId = $"node-{currentPort}";
         var services = new ServiceCollection();
 
@@ -95,8 +112,6 @@ public static class Program
             options.ActiveSyncEnabled = true;
             options.PeerEvictionTtlSeconds = 0;
             options.AntiEntropyInitialDelaySeconds = 0;
-            //options.AntiEntropyIntervalSeconds = 15;
-            //options.AntiEntropyMaxAdaptiveIntervalSeconds = 60;
             options.CheckpointIntervalSeconds = 3;
             options.MaintenanceIntervalSeconds = 5 * 60;
             options.CompactionTtlSeconds = 5 * 60;
@@ -133,7 +148,7 @@ public static class Program
         services.AddDistributedCrdtQuery<FleetState, PurgeOfflineDevicesCommand, PurgeOfflineDevicesSummaryDto, PurgeOfflineDevicesMapReduce>("fleet-purge-offline");
 
         // Register Showcase file-based CRDT storage overriding memory fallbacks for all documents
-        //services.AddDistributedCrdtStorage<ShowCaseCrdtStorage>();
+        services.AddDistributedCrdtStorage<ShowCaseCrdtStorage>();
 
         // Register the background multi-document orchestration and route inbound intents from the network
         services.AddDistributedCrdtReplica(replicaId, "internal");
@@ -170,39 +185,39 @@ public static class Program
                 options.HeartbeatInterval = TimeSpan.FromSeconds(30);
             });
 
-//        services
-//            .AddP2pTelemetryForwarder(options =>
-//            {
-//                options.TargetMeshId = "admin";
-//                options.FlushInterval = TimeSpan.FromSeconds(1);
-//                options.IncludedMeterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-//                {
-//                    string.Empty // Get ALL
-//                };
-//            })
-//#pragma warning disable DCRDT0003 // "admin" mesh is dedicated to P2P telemetry forwarding and does not host CRDT replicas
-//            .AddP2pMesh("admin")
-//#pragma warning restore DCRDT0003
-//            .AddTcpTransport(options =>
-//            {
-//                options.ListenPort = currentAdminPort;
-//                options.ListenHost = "127.0.0.1";
-//            })
-//            .AddUdpPeerDiscovery(options =>
-//            {
-//                options.MulticastAddress = "239.255.0.3";
-//                options.MulticastPort = 8036;
-//                options.DiscoveryInterval = TimeSpan.FromSeconds(1);
-//                options.DiscoveryTimeout = TimeSpan.FromSeconds(1);
-//            })
-//            .AddUdpPeerHandshake(options =>
-//            {
-//                options.ListenPort = currentAdminHandshakePort;
-//            })
-//            .ConfigureFailureDetector(options =>
-//            {
-//                options.HeartbeatInterval = TimeSpan.FromSeconds(30);
-//            });
+        services
+            .AddP2pTelemetryForwarder(options =>
+            {
+                options.TargetMeshId = "admin";
+                options.FlushInterval = TimeSpan.FromSeconds(1);
+                options.IncludedMeterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    string.Empty // Get ALL
+                };
+            })
+#pragma warning disable DCRDT0003 // "admin" mesh is dedicated to P2P telemetry forwarding and does not host CRDT replicas
+            .AddP2pMesh("admin")
+#pragma warning restore DCRDT0003
+            .AddTcpTransport(options =>
+            {
+                options.ListenPort = currentAdminPort;
+                options.ListenHost = "127.0.0.1";
+            })
+            .AddUdpPeerDiscovery(options =>
+            {
+                options.MulticastAddress = "239.255.0.3";
+                options.MulticastPort = 8036;
+                options.DiscoveryInterval = TimeSpan.FromSeconds(1);
+                options.DiscoveryTimeout = TimeSpan.FromSeconds(1);
+            })
+            .AddUdpPeerHandshake(options =>
+            {
+                options.ListenPort = currentAdminHandshakePort;
+            })
+            .ConfigureFailureDetector(options =>
+            {
+                options.HeartbeatInterval = TimeSpan.FromSeconds(30);
+            });
 
         await using var provider = services.BuildServiceProvider();
         var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("ShowCase");
@@ -233,6 +248,10 @@ public static class Program
             var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
             var taskManager = scope.ServiceProvider.GetRequiredService<ITaskManager>();
             var fleetManager = scope.ServiceProvider.GetRequiredService<IFleetManager>();
+            var clusterTracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
+            var shardDistributionManager = scope.ServiceProvider.GetRequiredService<IShardDistributionManager>();
+            var shardIdProvider = scope.ServiceProvider.GetRequiredService<IShardIdProvider>();
+            var peerRegistry = provider.GetRequiredService<IPeerRegistry>();
             var patchObservers = scope.ServiceProvider.GetServices<IDocumentPatchObserver>().ToList();
 
             // Background UI rendering task to decouple Console I/O from hot CRDT operations
@@ -632,6 +651,16 @@ public static class Program
                             }
                             break;
 
+                        case "peers":
+                        case "topology":
+                            {
+                                var showDetails = parts.Length >= 2 &&
+                                    (string.Equals(parts[1], "details", StringComparison.OrdinalIgnoreCase) ||
+                                     (bool.TryParse(parts[1], out var parsedDetails) && parsedDetails));
+                                await DrawTopologyAndPeersAsync(replicaId, orchestrator, clusterTracker, shardDistributionManager, shardIdProvider, peerRegistry, showDetails, cts.Token).ConfigureAwait(false);
+                            }
+                            break;
+
                         case "clone":
                             int cloneCount = 1;
                             if (parts.Length >= 2 && int.TryParse(parts[1], out var parsedCount) && parsedCount > 0)
@@ -680,10 +709,10 @@ public static class Program
             return;
         }
 
-        var startPort = currentPort + 2;
+        var startPort = currentPort + 4;
         for (var i = 0; i < count; i++)
         {
-            var nextPort = GetNextAvailablePort(startPort);
+            var nextPort = GetNextAvailablePortBlock(startPort, 4);
 
             Process.Start(new ProcessStartInfo
             {
@@ -693,7 +722,7 @@ public static class Program
             });
 
             logger.LogInformation("Cloned new cluster node on port {NextPort}.", nextPort);
-            startPort = nextPort + 2;
+            startPort = nextPort + 4;
         }
     }
 
@@ -720,10 +749,182 @@ public static class Program
             Console.WriteLine(" read <docId>                                   - Reads and prints a specific document (local or remote shard)");
             Console.WriteLine(" print                                          - Prints the current state of documents hosted on this node");
             Console.WriteLine(" mem [details]                                  - Prints memory overview (add 'details' to list each document)");
+            Console.WriteLine(" topology [details] / peers [details]           - Prints connected peers health and shard topology");
             Console.WriteLine(" clone [count]                                  - Spawns new node process(es) (default 1)");
             Console.WriteLine(" exit                                           - Shuts down the node");
             Console.WriteLine("=================================================\n");
         }
+    }
+
+    private static async Task DrawTopologyAndPeersAsync(
+        string replicaId,
+        ICrdtDocumentOrchestrator orchestrator,
+        IClusterStateTracker clusterTracker,
+        IShardDistributionManager shardDistributionManager,
+        IShardIdProvider shardIdProvider,
+        IPeerRegistry peerRegistry,
+        bool showDetails,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(replicaId);
+        ArgumentNullException.ThrowIfNull(orchestrator);
+        ArgumentNullException.ThrowIfNull(clusterTracker);
+        ArgumentNullException.ThrowIfNull(shardDistributionManager);
+        ArgumentNullException.ThrowIfNull(shardIdProvider);
+        ArgumentNullException.ThrowIfNull(peerRegistry);
+
+        var peerList = new List<PeerHealthDisplayDto>();
+        var meshes = new[] { "internal", "admin" };
+        var statuses = new[] { PeerStatus.Active, PeerStatus.Suspect, PeerStatus.Dead };
+
+        foreach (var meshId in meshes)
+        {
+            foreach (var status in statuses)
+            {
+                var peers = await peerRegistry.GetPeersByStatusAsync(meshId, status, cancellationToken).ConfigureAwait(false);
+                foreach (var peer in peers)
+                {
+                    var peerIdStr = peer.Id.Value.ToString();
+                    var mappedReplicaId = clusterTracker.GetReplicaIdByPeerId(peerIdStr);
+                    var trackedShards = 0;
+
+                    if (!string.IsNullOrEmpty(mappedReplicaId))
+                    {
+                        var peerState = clusterTracker.TryGetPeerState(mappedReplicaId);
+                        trackedShards = peerState?.Keys.Count ?? 0;
+                    }
+
+                    peerList.Add(new PeerHealthDisplayDto(
+                        meshId,
+                        peerIdStr,
+                        mappedReplicaId ?? "(Unmapped)",
+                        status,
+                        peer.Endpoint.ToString() ?? "Unknown",
+                        trackedShards));
+                }
+            }
+        }
+
+        var activeReplicaIds = clusterTracker.GetActiveReplicaIds();
+        var exportedTrackerState = clusterTracker.ExportState();
+        var tombstonedReplicas = exportedTrackerState.TombstonedReplicas;
+
+        var regDoc = await orchestrator.Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+        var regState = regDoc.Data ?? new CrdtRegistryState();
+
+        var shardDocCounts = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            [orchestrator.Registry.ShardId] = 1
+        };
+
+        var activeDocumentCount = 0;
+        var deletedDocumentCount = 0;
+
+        foreach (var kvp in regState.Documents)
+        {
+            var entry = kvp.Value;
+            if (entry.IsDeleted)
+            {
+                deletedDocumentCount++;
+                continue;
+            }
+
+            activeDocumentCount++;
+            var shardId = ResolveShardIdForEntry(shardIdProvider, entry.DocumentId, entry.TypeAlias);
+            if (shardDocCounts.TryGetValue(shardId, out var currentCount))
+            {
+                shardDocCounts[shardId] = currentCount + 1;
+            }
+            else
+            {
+                shardDocCounts[shardId] = 1;
+            }
+        }
+
+        var shardTopologies = new List<ShardTopologyDisplayDto>(shardDocCounts.Count);
+        var localShardCount = 0;
+        var remoteShardCount = 0;
+
+        foreach (var kvp in shardDocCounts.OrderBy(s => s.Key, StringComparer.Ordinal))
+        {
+            var isLocal = await shardDistributionManager.IsShardLocalAsync(kvp.Key, cancellationToken).ConfigureAwait(false);
+            var targetReplicas = await shardDistributionManager.GetTargetNodesForShardAsync(kvp.Key, cancellationToken).ConfigureAwait(false);
+
+            if (isLocal)
+            {
+                localShardCount++;
+            }
+            else
+            {
+                remoteShardCount++;
+            }
+
+            shardTopologies.Add(new ShardTopologyDisplayDto(kvp.Key, kvp.Value, isLocal, targetReplicas));
+        }
+
+        var localActiveDocsCount = orchestrator.GetActiveDocuments().Count;
+
+        lock (ConsoleLock)
+        {
+            Console.WriteLine($"\n--- [Cluster Peers & Topology: {replicaId}] ---");
+            Console.WriteLine($" Local Replica ID       : {replicaId} (TCP Port: {currentPort}, Admin Port: {currentAdminPort})");
+            Console.WriteLine($" Active CRDT Replicas   : {activeReplicaIds.Count + 1} (Local: {replicaId}{(activeReplicaIds.Count > 0 ? ", Remote: " + string.Join(", ", activeReplicaIds.OrderBy(r => r, StringComparer.Ordinal)) : string.Empty)})");
+            Console.WriteLine($" Tombstoned Replicas    : {tombstonedReplicas.Count}{(tombstonedReplicas.Count > 0 ? " (" + string.Join(", ", tombstonedReplicas.Keys.OrderBy(k => k, StringComparer.Ordinal)) + ")" : string.Empty)}");
+
+            Console.WriteLine("\n [P2P Network Peers & Health]");
+            if (peerList.Count == 0)
+            {
+                Console.WriteLine("   (No peers discovered across meshes)");
+            }
+            else
+            {
+                var aliveCount = peerList.Count(p => p.Status == PeerStatus.Active);
+                var suspectedCount = peerList.Count(p => p.Status == PeerStatus.Suspect);
+                var deadCount = peerList.Count(p => p.Status == PeerStatus.Dead);
+                Console.WriteLine($"   Summary: Total={peerList.Count} | Alive={aliveCount} | Suspected={suspectedCount} | Dead={deadCount}");
+                Console.WriteLine($"   {"Mesh",-10} | {"Status",-10} | {"Replica ID",-16} | {"Tracked Shards",14} | {"Peer ID",-36} | {"Endpoint"}");
+                Console.WriteLine($"   {new string('-', 120)}");
+
+                foreach (var peer in peerList.OrderBy(p => p.MeshId, StringComparer.Ordinal).ThenBy(p => p.Status).ThenBy(p => p.ReplicaId, StringComparer.Ordinal))
+                {
+                    Console.WriteLine($"   {peer.MeshId,-10} | {peer.Status,-10} | {peer.ReplicaId,-16} | {peer.TrackedShards,14} | {peer.PeerId,-36} | {peer.Endpoint}");
+                }
+            }
+
+            Console.WriteLine("\n [CRDT Shard Topology Overview]");
+            Console.WriteLine($"   Cluster Registry Docs  : {activeDocumentCount} Active, {deletedDocumentCount} Tombstoned (+1 System Registry)");
+            Console.WriteLine($"   Local Hosted Documents : {localActiveDocsCount} in-memory");
+            Console.WriteLine($"   Total Cluster Shards   : {shardTopologies.Count} (Hosted Locally: {localShardCount}, Remote Only: {remoteShardCount})");
+
+            if (showDetails && shardTopologies.Count > 0)
+            {
+                Console.WriteLine($"\n   {"Shard ID",-28} | {"Docs",6} | {"Locality",-10} | {"Assigned Replicas"}");
+                Console.WriteLine($"   {new string('-', 95)}");
+
+                foreach (var shard in shardTopologies)
+                {
+                    var locality = shard.IsLocal ? "Local" : "Remote";
+                    var replicasText = shard.TargetReplicas.Count > 0 ? string.Join(", ", shard.TargetReplicas) : "(None)";
+                    Console.WriteLine($"   {shard.ShardId,-28} | {shard.DocumentCount,6} | {locality,-10} | {replicasText}");
+                }
+            }
+            else if (!showDetails && shardTopologies.Count > 0)
+            {
+                Console.WriteLine("   (Run 'topology details' or 'peers details' to list individual shard assignments)");
+            }
+
+            Console.WriteLine("------------------------------------\n> ");
+        }
+    }
+
+    private static string ResolveShardIdForEntry(IShardIdProvider shardIdProvider, string documentId, string typeAlias)
+    {
+        return typeAlias switch
+        {
+            "task-list" => shardIdProvider.GetShardId<TaskListState>(documentId),
+            "fleet-list" => shardIdProvider.GetShardId<FleetState>(documentId),
+            _ => documentId
+        };
     }
 
     private static async Task ReadDocumentAsync(string documentId, ICrdtDocumentOrchestrator orchestrator, ITaskManager taskManager, IFleetManager fleetManager, CancellationToken cancellationToken)
@@ -1049,6 +1250,36 @@ public static class Program
         }
 
         return port;
+    }
+
+    private static int GetNextAvailablePortBlock(int startingPort, int blockSize)
+    {
+        var ipGlobalProperties = IPGlobalProperties.GetIPGlobalProperties();
+
+        var activeTcpPorts = ipGlobalProperties.GetActiveTcpListeners().Select(l => l.Port);
+        var activeUdpPorts = ipGlobalProperties.GetActiveUdpListeners().Select(l => l.Port);
+
+        var activePorts = activeTcpPorts.Concat(activeUdpPorts).ToHashSet();
+
+        var port = startingPort;
+        while (true)
+        {
+            var blockAvailable = true;
+            for (var offset = 0; offset < blockSize; offset++)
+            {
+                if (activePorts.Contains(port + offset))
+                {
+                    port = port + offset + 1;
+                    blockAvailable = false;
+                    break;
+                }
+            }
+
+            if (blockAvailable)
+            {
+                return port;
+            }
+        }
     }
 
     private static async Task<string?> ReadConsoleLineAsync(CancellationToken cancellationToken)

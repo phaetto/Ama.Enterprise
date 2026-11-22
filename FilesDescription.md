@@ -36,7 +36,7 @@
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/ShowCaseJsonContext.cs` | Registered Map/Reduce and cluster query DTOs in the showcase AOT JSON context. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskItem.cs` | Data structure representing an individual task item. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskListState.cs` | Root CRDT document model representing a task list. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Updated `mem` CLI command to display only the memory summary by default and print individual document rows when `mem details` is specified. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Derived UDP handshake ports from the node's allocated 4-port block (`[TcpPort, AdminTcpPort, HandshakePort, AdminHandshakePort]`) so concurrent `clone` invocations do not collide on UDP handshake ports. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetBatteryAnalyticsMapReduce.cs` | Multi-stage Map/Reduce handler calculating global mean, standard deviation, min, and max battery levels across sharded fleet documents. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetManager.cs` | Implemented `ICrdtClusterQuery` for low-battery device search and added orchestrator invocations for statistical aggregation and in-place offline device purging. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/IFleetManager.cs` | Added `SearchLowBatteryDevicesAsync`, `GetClusterBatteryStatsAsync`, and `PurgeOfflineDevicesAsync` to `IFleetManager`. |
@@ -456,8 +456,8 @@
 | `$/Ama.Enterprise.P2p/Services/Core/TransportRouter.cs` | Composite transport router that delegates sending messages to the correct specific transport implementation. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/DnsPeerDiscovery.cs` | Encapsulated targeted structures reading arrays mapping dynamically. |
 | `$/Ama.Enterprise.P2p/Services/Discovery/IDnsSrvResolver.cs` | Interface defining the contract for resolving DNS SRV records, allowing abstraction over third-party DNS packages. |
-| `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerDiscovery.cs` | Integrated Phase 2 negotiations executing `GetLocalHandshakeDataAsync` routing encapsulated structures mapping. |
-| `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerHandshaker.cs` | Updated UDP handshaker injecting registry and failure detector bounds. Evaluates inbound handshake requests dynamically establishing explicit bidirectional peer registration mimicking outbound mappings without relying on disconnected Phase 1 multicast discovery loops. |
+| `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerDiscovery.cs` | Separated the multicast receive window timeout from individual Phase 2 handshake timeouts so expiring the multicast listen window does not cancel in-flight peer handshakes. |
+| `$/Ama.Enterprise.P2p/Services/Discovery/UdpPeerHandshaker.cs` | Enabled `ExclusiveAddressUse` instead of `ReuseAddress` on the unicast UDP handshaker listener to prevent multiple processes from binding to the same unicast handshake port. |
 | `$/Ama.Enterprise.P2p/Services/P2pHostedService.cs` | Implemented adaptive exponential backoff in the background discovery loop evaluating local peer counts against defined high/low watermarks, saving network resources while preventing isolated islands. |
 | `$/Ama.Enterprise.P2p/Services/Transports/QuicTransport.cs` | Used `ArrayPool<byte>.Shared` for the 4-byte length prefix buffer instead of allocating a new `byte[4]` per message. |
 | `$/Ama.Enterprise.P2p/Services/Transports/QuicTransportListener.cs` | Passed the rented buffer slice directly as `ReadOnlySpan<byte>` to `IMeshWireEncoder.Decode` and pooled the 4-byte length buffer. |

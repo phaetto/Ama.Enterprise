@@ -89,7 +89,7 @@ public sealed class UdpPeerHandshaker : IPeerHandshaker, IDisposable
 
         listener = new UdpClient(AddressFamily.InterNetworkV6);
         listener.Client.DualMode = true;
-        listener.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+        listener.Client.ExclusiveAddressUse = true;
         listener.Client.Bind(new IPEndPoint(IPAddress.IPv6Any, options.ListenPort));
 
         backgroundTaskCancellationSource = new CancellationTokenSource();

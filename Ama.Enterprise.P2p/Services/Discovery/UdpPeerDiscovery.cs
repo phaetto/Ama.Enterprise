@@ -154,17 +154,17 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IDisposable
         await client.SendAsync(requestBytes, requestBytes.Length, targetEndpoint).ConfigureAwait(false);
         multicastsSentCounter.Add(1, tags);
 
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(options.DiscoveryTimeout);
+        using var receiveTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        receiveTimeoutCts.CancelAfter(options.DiscoveryTimeout);
 
         var localNode = new PeerNode(new PeerId(nodeOptions.LocalPeerId), localEndpoint);
         var handshakeTasks = new List<Task>();
 
         try
         {
-            while (!timeoutCts.Token.IsCancellationRequested)
+            while (!receiveTimeoutCts.Token.IsCancellationRequested)
             {
-                var result = await client.ReceiveAsync(timeoutCts.Token).ConfigureAwait(false);
+                var result = await client.ReceiveAsync(receiveTimeoutCts.Token).ConfigureAwait(false);
 
                 try
                 {
@@ -175,31 +175,40 @@ public sealed class UdpPeerDiscovery : IPeerDiscovery, IDisposable
                         var remoteIp = result.RemoteEndPoint.Address;
                         var remotePort = pong.HandshakePort;
 
+                        if (remotePort == handshaker.LocalHandshakePort &&
+                            (IPAddress.IsLoopback(remoteIp) || remoteIp.Equals(IPAddress.Any) || remoteIp.Equals(IPAddress.IPv6Any)))
+                        {
+                            continue;
+                        }
+
                         handshakeTasks.Add(Task.Run(async () =>
                         {
+                            using var handshakeTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                            handshakeTimeoutCts.CancelAfter(options.DiscoveryTimeout);
+
                             var endpoint = new IPEndPoint(remoteIp, remotePort);
-                            var localHandshakeData = await authenticator.GetLocalHandshakeDataAsync(timeoutCts.Token).ConfigureAwait(false);
+                            var localHandshakeData = await authenticator.GetLocalHandshakeDataAsync(handshakeTimeoutCts.Token).ConfigureAwait(false);
                             var localPayload = new PeerHandshakePayload
                             {
                                 Node = localNode,
                                 HandshakeData = localHandshakeData.ToArray()
                             };
 
-                            var remotePayload = await handshaker.HandshakeAsync(localPayload, endpoint, timeoutCts.Token).ConfigureAwait(false);
+                            var remotePayload = await handshaker.HandshakeAsync(localPayload, endpoint, handshakeTimeoutCts.Token).ConfigureAwait(false);
 
                             if (!remotePayload.HasValue || remotePayload.Value.Node.Id.Value == nodeOptions.LocalPeerId || remotePayload.Value.Node.Id.Value == Guid.Empty)
                             {
                                 return;
                             }
 
-                            var isAuthenticated = await authenticator.AuthenticateAsync(remotePayload.Value.Node, remotePayload.Value.HandshakeData, timeoutCts.Token).ConfigureAwait(false);
+                            var isAuthenticated = await authenticator.AuthenticateAsync(remotePayload.Value.Node, remotePayload.Value.HandshakeData, handshakeTimeoutCts.Token).ConfigureAwait(false);
 
                             if (isAuthenticated)
                             {
-                                await failureDetector.RecordHeartbeatAsync(remotePayload.Value.Node.Id, timeoutCts.Token).ConfigureAwait(false);
+                                await failureDetector.RecordHeartbeatAsync(remotePayload.Value.Node.Id, handshakeTimeoutCts.Token).ConfigureAwait(false);
                                 discoveredPeers.Add(remotePayload.Value.Node);
                             }
-                        }, timeoutCts.Token));
+                        }, cancellationToken));
                     }
                 }
                 catch (Exception ex)
