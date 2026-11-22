@@ -1233,7 +1233,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         if (IsVersionVectorEmpty(incomingVector))
         {
-            return IsVersionVectorEmpty(localVector);
+            return !IsVersionVectorEmpty(localVector);
         }
 
         var syncService = serviceProvider.GetService<IVersionVectorSyncService>();

@@ -1488,6 +1488,301 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
             "A gossip recipient must journal applied remote patches so it never falls back to sending false CrdtSnapshots when a peer sends an older CrdtSync.");
     }
 
+    [IntegrationFact]
+    public async Task AllReplicas_ExplicitZeroVersionDvvEntries_ShouldNeverTriggerSnapshotsPatchesOrOscillate()
+    {
+        // Arrange - 3 nodes where all shard DVVs have explicit { ReplicaA: 0, ReplicaB: 0, ReplicaC: 0 } entries
+        var nodeA = BuildNode("ReplicaA", opt => opt.ActiveSyncEnabled = false);
+        var nodeB = BuildNode("ReplicaB", opt => opt.ActiveSyncEnabled = false);
+        var nodeC = BuildNode("ReplicaC", opt => opt.ActiveSyncEnabled = false);
+
+        var allNodes = new[] { nodeA, nodeB, nodeC };
+        var orchestrators = new ICrdtDocumentOrchestrator[allNodes.Length];
+        var dvvManagers = new IShardVersionVectorManager[allNodes.Length];
+
+        for (int i = 0; i < allNodes.Length; i++)
+        {
+            var scope = allNodes[i].Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(allNodes[i].ReplicaId);
+            orchestrators[i] = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+            dvvManagers[i] = scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+            await orchestrators[i].InitializeAsync(CancellationToken.None);
+
+            // Create the same document on all nodes so "default" shard is active and non-empty in the registry
+            await orchestrators[i].CreateDocumentAsync("doc-zero-dvv", "dvv-doc", CancellationToken.None);
+        }
+
+        var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
+        using var network = WireMeshWithInspection(recordedMessages, allNodes);
+
+        // Converge initial registry creation across all 3 nodes first
+        for (int round = 0; round < 2; round++)
+        {
+            for (int i = 0; i < allNodes.Length; i++)
+            {
+                for (int j = 0; j < allNodes.Length; j++)
+                {
+                    if (i != j)
+                    {
+                        await orchestrators[i].DispatchAntiEntropyStateAsync(allNodes[j].PeerId, CancellationToken.None);
+                    }
+                }
+            }
+
+            await network.DrainAsync();
+        }
+
+        // Explicitly seed { ReplicaA: 0, ReplicaB: 0, ReplicaC: 0 } into the "default" data shard on all 3 nodes
+        var explicitZeroDvv = new DottedVersionVector(
+            new Dictionary<string, long>(StringComparer.Ordinal)
+            {
+                ["ReplicaA"] = 0L,
+                ["ReplicaB"] = 0L,
+                ["ReplicaC"] = 0L
+            },
+            new Dictionary<string, ISet<long>>(StringComparer.Ordinal)
+            {
+                ["ReplicaA"] = new HashSet<long>(),
+                ["ReplicaB"] = new HashSet<long>(),
+                ["ReplicaC"] = new HashSet<long>()
+            });
+
+        var explicitZeroMap = new ShardVersionVectorMap
+        {
+            ["default"] = explicitZeroDvv
+        };
+
+        for (int i = 0; i < dvvManagers.Length; i++)
+        {
+            dvvManagers[i].RemoveShard("default");
+            dvvManagers[i].EnsureShardRegistered("default");
+            dvvManagers[i].MergeShardState("default", explicitZeroMap);
+        }
+
+        recordedMessages.Clear();
+
+        // Act - Execute 5 full-mesh bidirectional DVV exchange rounds (5 * 6 = 30 CrdtSync messages)
+        for (int round = 0; round < 5; round++)
+        {
+            for (int i = 0; i < allNodes.Length; i++)
+            {
+                for (int j = 0; j < allNodes.Length; j++)
+                {
+                    if (i != j)
+                    {
+                        await orchestrators[i].DispatchAntiEntropyStateAsync(allNodes[j].PeerId, CancellationToken.None);
+                    }
+                }
+            }
+
+            await network.DrainAsync();
+        }
+
+        // Assert - Zero CrdtSnapshot or CrdtPatch messages are triggered when all replicas are at 0
+        var messages = recordedMessages.ToList();
+        messages.Count.ShouldBe(30);
+        messages.ShouldAllBe(m => m.MessageType == "CrdtSync");
+
+        for (int i = 0; i < dvvManagers.Length; i++)
+        {
+            var snap = await dvvManagers[i].GetFullSnapshotAsync(CancellationToken.None);
+            snap.ShouldContainKey("default");
+            foreach (var v in snap["default"].Versions.Values)
+            {
+                v.ShouldBe(0L);
+            }
+        }
+    }
+
+    [IntegrationFact]
+    public async Task AllReplicas_ExplicitZeroVersionDvvEntries_VsEmptyDvvAndTopologyAnnouncements_ShouldNotOscillate()
+    {
+        // Arrange - Tests mixed representations of zero causal history:
+        // Node A has explicit { ReplicaA: 0, ReplicaB: 0, ReplicaC: 0 } in both its data shard and registry shard,
+        // Node B has an empty DottedVersionVector() (no keys in Versions),
+        // Node C sends both topology announcements (IsTopologyAnnouncementOnly: true) and full anti-entropy syncs with { ReplicaA: 0, ReplicaB: 0, ReplicaC: 0 }.
+        var nodeA = BuildNode("ReplicaA", opt => opt.ActiveSyncEnabled = false);
+        var nodeB = BuildNode("ReplicaB", opt => opt.ActiveSyncEnabled = false);
+        var nodeC = BuildNode("ReplicaC", opt => opt.ActiveSyncEnabled = false);
+
+        var allNodes = new[] { nodeA, nodeB, nodeC };
+        var orchestrators = new ICrdtDocumentOrchestrator[allNodes.Length];
+        var dvvManagers = new IShardVersionVectorManager[allNodes.Length];
+
+        for (int i = 0; i < allNodes.Length; i++)
+        {
+            var scope = allNodes[i].Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(allNodes[i].ReplicaId);
+            orchestrators[i] = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+            dvvManagers[i] = scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+            await orchestrators[i].InitializeAsync(CancellationToken.None);
+            dvvManagers[i].EnsureShardRegistered("default");
+        }
+
+        // Seed Node A and Node C with explicit 0 versions for all replicas on both "default" and the registry shard,
+        // while leaving Node B with empty version dictionaries.
+        var explicitZeroDvv = new DottedVersionVector(
+            new Dictionary<string, long>(StringComparer.Ordinal)
+            {
+                ["ReplicaA"] = 0L,
+                ["ReplicaB"] = 0L,
+                ["ReplicaC"] = 0L
+            },
+            new Dictionary<string, ISet<long>>(StringComparer.Ordinal));
+
+        var explicitZeroFullMap = new ShardVersionVectorMap
+        {
+            ["default"] = explicitZeroDvv,
+            [Constants.SystemRegistryDocumentId] = explicitZeroDvv
+        };
+
+        dvvManagers[0].MergeShardState("default", explicitZeroFullMap);
+        dvvManagers[0].MergeShardState(Constants.SystemRegistryDocumentId, explicitZeroFullMap);
+
+        dvvManagers[2].MergeShardState("default", explicitZeroFullMap);
+        dvvManagers[2].MergeShardState(Constants.SystemRegistryDocumentId, explicitZeroFullMap);
+
+        var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
+        using var network = WireMeshWithInspection(recordedMessages, allNodes);
+
+        // Act - Interleave topology announcements and full DVV anti-entropy exchanges across all 3 nodes for 5 rounds
+        for (int round = 0; round < 5; round++)
+        {
+            for (int i = 0; i < allNodes.Length; i++)
+            {
+                for (int j = 0; j < allNodes.Length; j++)
+                {
+                    if (i != j)
+                    {
+                        await orchestrators[i].DispatchTopologyAnnouncementAsync(allNodes[j].PeerId, CancellationToken.None);
+                        await orchestrators[i].DispatchAntiEntropyStateAsync(allNodes[j].PeerId, CancellationToken.None);
+                    }
+                }
+            }
+
+            await network.DrainAsync();
+        }
+
+        // Assert - Neither explicit { replica: 0 } nor empty DVV nor topology announcements trigger any snapshot or patch oscillation
+        var messages = recordedMessages.ToList();
+        messages.Count.ShouldBe(60);
+        messages.ShouldAllBe(m => m.MessageType == "CrdtSync");
+    }
+
+    [IntegrationFact]
+    public async Task AllReplicas_ExplicitZeroDvvForUnmutatedReplicas_WhenOneReplicaAdvances_ConvergesAndNeverOscillatesForZeroReplicas()
+    {
+        // Arrange - 3 nodes where ReplicaA, ReplicaB, and ReplicaC are all explicitly initialized to 0 in the shard DVV.
+        // Only ReplicaA performs a mutation (advancing ReplicaA to 1 while ReplicaB: 0 and ReplicaC: 0 remain in the DVV).
+        // Even if journals are trimmed afterwards, the presence of ReplicaB: 0 and ReplicaC: 0 must never trick nodes into thinking
+        // anyone is behind on ReplicaB or ReplicaC.
+        var nodeA = BuildNode("ReplicaA", opt => opt.ActiveSyncEnabled = false);
+        var nodeB = BuildNode("ReplicaB", opt => opt.ActiveSyncEnabled = false);
+        var nodeC = BuildNode("ReplicaC", opt => opt.ActiveSyncEnabled = false);
+
+        var allNodes = new[] { nodeA, nodeB, nodeC };
+        var orchestrators = new ICrdtDocumentOrchestrator[allNodes.Length];
+        var dvvManagers = new IShardVersionVectorManager[allNodes.Length];
+        var storages = new IDistributedCrdtStorage[allNodes.Length];
+
+        for (int i = 0; i < allNodes.Length; i++)
+        {
+            var scope = allNodes[i].Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(allNodes[i].ReplicaId);
+            orchestrators[i] = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+            dvvManagers[i] = scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+            storages[i] = scope.ServiceProvider.GetRequiredService<IDistributedCrdtStorage>();
+            await orchestrators[i].InitializeAsync(CancellationToken.None);
+            await orchestrators[i].CreateDocumentAsync("doc-partial-zero", "dvv-doc", CancellationToken.None);
+        }
+
+        var explicitZeroMap = new ShardVersionVectorMap
+        {
+            ["default"] = new DottedVersionVector(
+                new Dictionary<string, long>(StringComparer.Ordinal)
+                {
+                    ["ReplicaA"] = 0L,
+                    ["ReplicaB"] = 0L,
+                    ["ReplicaC"] = 0L
+                },
+                new Dictionary<string, ISet<long>>(StringComparer.Ordinal))
+        };
+
+        for (int i = 0; i < dvvManagers.Length; i++)
+        {
+            dvvManagers[i].MergeShardState("default", explicitZeroMap);
+        }
+
+        // ReplicaA mutates the document so its DVV becomes { ReplicaA: 1, ReplicaB: 0, ReplicaC: 0 }
+        await orchestrators[0].ApplyIntentAsync<DvvTestState>(
+            "doc-partial-zero",
+            new MapSetIntent("KeyA", "ValA"),
+            nameof(DvvTestState.DataMap),
+            CancellationToken.None);
+
+        var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
+        using var network = WireMeshWithInspection(recordedMessages, allNodes);
+
+        // Converge all 3 nodes
+        for (int round = 0; round < 2; round++)
+        {
+            for (int i = 0; i < allNodes.Length; i++)
+            {
+                for (int j = 0; j < allNodes.Length; j++)
+                {
+                    if (i != j)
+                    {
+                        await orchestrators[i].DispatchAntiEntropyStateAsync(allNodes[j].PeerId, CancellationToken.None);
+                    }
+                }
+            }
+
+            await network.DrainAsync();
+        }
+
+        await WaitForConvergenceAsync(async () =>
+        {
+            for (int i = 0; i < orchestrators.Length; i++)
+            {
+                var doc = await orchestrators[i].GetDocumentStateAsync<DvvTestState>("doc-partial-zero", CancellationToken.None);
+                if (!doc.Data.DataMap.ContainsKey("KeyA"))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }, TimeSpan.FromSeconds(5));
+
+        // Trim journals on all nodes while re-merging explicit ReplicaB: 0 and ReplicaC: 0 into all DVVs
+        for (int i = 0; i < allNodes.Length; i++)
+        {
+            await storages[i].TrimAsync("default", new Dictionary<string, long> { ["ReplicaA"] = 10, ["ReplicaB"] = 10, ["ReplicaC"] = 10 }, CancellationToken.None);
+            dvvManagers[i].MergeShardState("default", explicitZeroMap);
+        }
+
+        recordedMessages.Clear();
+
+        // Act - Execute 5 full-mesh anti-entropy rounds
+        for (int round = 0; round < 5; round++)
+        {
+            for (int i = 0; i < allNodes.Length; i++)
+            {
+                for (int j = 0; j < allNodes.Length; j++)
+                {
+                    if (i != j)
+                    {
+                        await orchestrators[i].DispatchAntiEntropyStateAsync(allNodes[j].PeerId, CancellationToken.None);
+                    }
+                }
+            }
+
+            await network.DrainAsync();
+        }
+
+        // Assert - Zero CrdtSnapshot or CrdtPatch messages are sent
+        var steadyMessages = recordedMessages.ToList();
+        steadyMessages.Count.ShouldBe(30);
+        steadyMessages.ShouldAllBe(m => m.MessageType == "CrdtSync");
+    }
+
     public async ValueTask DisposeAsync()
     {
         foreach (var node in nodes)

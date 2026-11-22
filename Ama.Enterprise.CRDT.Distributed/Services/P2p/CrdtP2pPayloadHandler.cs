@@ -493,7 +493,8 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                                 shardsWithNoCausalOverlap.Add(shardId);
                             }
                         }
-                        else if (!syncMsg.IsTopologyAnnouncementOnly)
+                        else if (!syncMsg.IsTopologyAnnouncementOnly
+                             && !(IsVersionVectorEmpty(sourceVector) && IsVersionVectorEmpty(targetVector)))
                         {
                             var targetNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
                             if (targetNodes.Contains(syncMsg.ReplicaId, StringComparer.Ordinal))
