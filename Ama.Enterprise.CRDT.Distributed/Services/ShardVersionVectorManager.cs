@@ -21,6 +21,9 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
     private readonly ICrdtStringPool stringPool;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> shardLocks = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, DottedVersionVector>> pendingDocumentSnapshots = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, int> pendingShardExpectedCounts = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, long> pendingShardLastActivityTicks = new(StringComparer.Ordinal);
+    private long lastSnapshotMergeTicks;
 
     public ShardVersionVectorManager(
         ReplicaContext replicaContext,
@@ -217,13 +220,20 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         {
             return;
         }
+        var nowTicks = Environment.TickCount64;
+        Volatile.Write(ref lastSnapshotMergeTicks, nowTicks);
 
         if (activeShardDocumentIds.Count <= 1)
         {
             pendingDocumentSnapshots.TryRemove(shardId, out _);
+            pendingShardExpectedCounts.TryRemove(shardId, out _);
+            pendingShardLastActivityTicks.TryRemove(shardId, out _);
             MergeDvvIntoShard(shardId, incomingDvv);
             return;
         }
+
+        pendingShardExpectedCounts[shardId] = activeShardDocumentIds.Count;
+        pendingShardLastActivityTicks[shardId] = nowTicks;
 
         var docMap = pendingDocumentSnapshots.GetOrAdd(shardId, _ => new ConcurrentDictionary<string, DottedVersionVector>(StringComparer.Ordinal));
         var clonedIncoming = CloneDvv(incomingDvv, stringPool);
@@ -243,9 +253,6 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         {
             if (!docMap.ContainsKey(activeDocId))
             {
-                // Always advance at least to the incoming DVV so partial or single-document snapshots
-                // within a multi-document shard never leave the receiver's shard DVV stalled at zero.
-                MergeDvvIntoShard(shardId, clonedIncoming);
                 return;
             }
         }
@@ -266,7 +273,49 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
             var safeFloorDvv = new DottedVersionVector(new Dictionary<string, long>(gmvv), mergedDots);
             MergeDvvIntoShard(shardId, safeFloorDvv);
             docMap.Clear();
+            pendingDocumentSnapshots.TryRemove(shardId, out _);
+            pendingShardExpectedCounts.TryRemove(shardId, out _);
+            pendingShardLastActivityTicks.TryRemove(shardId, out _);
         }
+    }
+
+    /// <inheritdoc />
+    public bool TryGetActiveSnapshotReceptionState(long activityWindowMilliseconds, out int remainingExpectedDocuments)
+    {
+        var windowMs = Math.Max(500L, activityWindowMilliseconds);
+        var nowTicks = Environment.TickCount64;
+        var lastGlobalTicks = Volatile.Read(ref lastSnapshotMergeTicks);
+        var isActive = lastGlobalTicks > 0 && (nowTicks - lastGlobalTicks) < windowMs;
+        var totalRemaining = 0;
+
+        foreach (var kvp in pendingDocumentSnapshots)
+        {
+            var shardId = kvp.Key;
+            var docMap = kvp.Value;
+            if (!pendingShardLastActivityTicks.TryGetValue(shardId, out var shardLastTicks) ||
+                (nowTicks - shardLastTicks) >= windowMs)
+            {
+                // Stale incomplete batch (e.g., sender disconnected mid-stream): clean up tracking so future batches aren't blocked.
+                pendingDocumentSnapshots.TryRemove(shardId, out _);
+                pendingShardExpectedCounts.TryRemove(shardId, out _);
+                pendingShardLastActivityTicks.TryRemove(shardId, out _);
+                continue;
+            }
+
+            isActive = true;
+            var receivedCount = docMap.Count;
+            if (pendingShardExpectedCounts.TryGetValue(shardId, out var expectedCount) && expectedCount > receivedCount)
+            {
+                totalRemaining += expectedCount - receivedCount;
+            }
+            else
+            {
+                totalRemaining += 1;
+            }
+        }
+
+        remainingExpectedDocuments = totalRemaining;
+        return isActive;
     }
 
     /// <inheritdoc />
@@ -297,6 +346,8 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
 
         shardId = stringPool.GetOrAdd(shardId);
         pendingDocumentSnapshots.TryRemove(shardId, out _);
+        pendingShardExpectedCounts.TryRemove(shardId, out _);
+        pendingShardLastActivityTicks.TryRemove(shardId, out _);
 
         var sourceMap = replicaContext.ShardVersionVectors;
         lock (sourceMap)
@@ -346,6 +397,8 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
     public void Clear()
     {
         pendingDocumentSnapshots.Clear();
+        pendingShardExpectedCounts.Clear();
+        pendingShardLastActivityTicks.Clear();
 
         var sourceMap = replicaContext.ShardVersionVectors;
         lock (sourceMap)
@@ -385,6 +438,8 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         }
         shardLocks.Clear();
         pendingDocumentSnapshots.Clear();
+        pendingShardExpectedCounts.Clear();
+        pendingShardLastActivityTicks.Clear();
     }
 
     private SemaphoreSlim GetShardSemaphore(string shardId)

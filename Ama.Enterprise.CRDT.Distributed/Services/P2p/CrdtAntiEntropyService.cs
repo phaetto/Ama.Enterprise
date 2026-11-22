@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services.P2p;
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Threading;
@@ -11,7 +12,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Background service responsible for repeatedly broadcasting the local synchronization state iterating globally natively.
+/// Background service responsible for repeatedly broadcasting the local synchronization state while adapting to queue depth and sync backlog.
 /// </summary>
 public sealed class CrdtAntiEntropyService : BackgroundService
 {
@@ -21,6 +22,7 @@ public sealed class CrdtAntiEntropyService : BackgroundService
 
     private readonly Meter meter;
     private readonly Counter<long> antiEntropyCyclesCounter;
+    private readonly Counter<long> antiEntropySkippedCyclesCounter;
 
     public CrdtAntiEntropyService(
         DistributedCrdtScopeManager scopeManager,
@@ -33,17 +35,21 @@ public sealed class CrdtAntiEntropyService : BackgroundService
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.CrdtAntiEntropyService") ?? new Meter("Ama.Enterprise.CRDT.Distributed.CrdtAntiEntropyService");
-        this.antiEntropyCyclesCounter = this.meter.CreateCounter<long>("crdt.anti_entropy.cycles_executed", "cycles", "Total localized periodic anti-entropy generic interactions dispatched natively");
+        this.antiEntropyCyclesCounter = this.meter.CreateCounter<long>("crdt.anti_entropy.cycles_executed", "cycles", "Total localized periodic anti-entropy interactions dispatched");
+        this.antiEntropySkippedCyclesCounter = this.meter.CreateCounter<long>("crdt.anti_entropy.cycles_skipped", "cycles", "Total periodic anti-entropy cycles skipped due to active sync or queue backlog");
     }
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var initialDelay = TimeSpan.FromSeconds(Math.Max(0, options.Value.AntiEntropyInitialDelaySeconds));
-        var jitterMs = Math.Max(0, options.Value.AntiEntropyInitialMaxJitterMilliseconds);
-        var normalInterval = TimeSpan.FromSeconds(Math.Max(1, options.Value.AntiEntropyIntervalSeconds));
-        var startupDuration = TimeSpan.FromSeconds(Math.Max(0, options.Value.AntiEntropyStartupDurationSeconds));
-        var startupInterval = TimeSpan.FromSeconds(Math.Max(1, options.Value.AntiEntropyStartupIntervalSeconds));
+        var opts = options.Value;
+        var initialDelay = TimeSpan.FromSeconds(Math.Max(0, opts.AntiEntropyInitialDelaySeconds));
+        var jitterMs = Math.Max(0, opts.AntiEntropyInitialMaxJitterMilliseconds);
+        var normalInterval = TimeSpan.FromSeconds(Math.Max(1, opts.AntiEntropyIntervalSeconds));
+        var startupDuration = TimeSpan.FromSeconds(Math.Max(0, opts.AntiEntropyStartupDurationSeconds));
+        var startupInterval = TimeSpan.FromSeconds(Math.Max(1, opts.AntiEntropyStartupIntervalSeconds));
+        var maxAdaptiveInterval = TimeSpan.FromSeconds(Math.Max(opts.AntiEntropyIntervalSeconds, opts.AntiEntropyMaxAdaptiveIntervalSeconds));
+        var delayPerThousandMs = Math.Max(0, opts.AntiEntropyAdaptiveDelayPerThousandItemsMilliseconds);
 
         if (initialDelay > TimeSpan.Zero || jitterMs > 0)
         {
@@ -60,13 +66,32 @@ public sealed class CrdtAntiEntropyService : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             var scopes = scopeManager.GetActiveScopes();
-            
+            long maxPendingItemsAcrossScopes = 0;
+            int maxQueueDepthAcrossScopes = 0;
+
             foreach (var scope in scopes)
             {
                 try
                 {
-                    await scope.Orchestrator.DispatchAntiEntropyStateAsync(stoppingToken).ConfigureAwait(false);
-                    antiEntropyCyclesCounter.Add(1, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
+                    var workload = await scope.Orchestrator.EvaluateAndDispatchAntiEntropyStateAsync(stoppingToken).ConfigureAwait(false);
+                    if (workload.EstimatedPendingSyncItems > maxPendingItemsAcrossScopes)
+                    {
+                        maxPendingItemsAcrossScopes = workload.EstimatedPendingSyncItems;
+                    }
+
+                    if (workload.PendingQueueDepth > maxQueueDepthAcrossScopes)
+                    {
+                        maxQueueDepthAcrossScopes = workload.PendingQueueDepth;
+                    }
+
+                    if (workload.IsBusy)
+                    {
+                        antiEntropySkippedCyclesCounter.Add(1, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
+                    }
+                    else
+                    {
+                        antiEntropyCyclesCounter.Add(1, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
+                    }
                 }
                 catch (OperationCanceledException)
                 {
@@ -81,7 +106,13 @@ public sealed class CrdtAntiEntropyService : BackgroundService
             try
             {
                 var elapsed = Stopwatch.GetElapsedTime(startTimestamp);
-                var currentInterval = elapsed < startupDuration ? startupInterval : normalInterval;
+                var baseInterval = elapsed < startupDuration ? startupInterval : normalInterval;
+                var currentInterval = ComputeAdaptiveInterval(
+                    baseInterval,
+                    maxAdaptiveInterval,
+                    delayPerThousandMs,
+                    maxPendingItemsAcrossScopes,
+                    maxQueueDepthAcrossScopes);
 
                 await Task.Delay(currentInterval, stoppingToken).ConfigureAwait(false);
             }
@@ -96,5 +127,38 @@ public sealed class CrdtAntiEntropyService : BackgroundService
     {
         meter.Dispose();
         base.Dispose();
+    }
+
+    private static TimeSpan ComputeAdaptiveInterval(
+        TimeSpan baseInterval,
+        TimeSpan maxInterval,
+        int delayPerThousandMs,
+        long estimatedPendingSyncItems,
+        int pendingQueueDepth)
+    {
+        if (delayPerThousandMs <= 0)
+        {
+            return baseInterval;
+        }
+
+        var totalPendingWork = Math.Max(estimatedPendingSyncItems, pendingQueueDepth);
+        if (totalPendingWork <= 0)
+        {
+            return baseInterval;
+        }
+
+        var extraMs = (totalPendingWork * delayPerThousandMs) / 1000.0;
+        if (extraMs <= 0)
+        {
+            return baseInterval;
+        }
+
+        var candidate = baseInterval.Add(TimeSpan.FromMilliseconds(extraMs));
+        if (maxInterval > baseInterval && candidate > maxInterval)
+        {
+            return maxInterval;
+        }
+
+        return candidate;
     }
 }

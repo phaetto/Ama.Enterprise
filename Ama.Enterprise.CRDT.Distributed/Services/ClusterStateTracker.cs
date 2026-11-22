@@ -140,6 +140,22 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
     }
 
     /// <inheritdoc />
+    public ShardVersionVectorMap? TryGetPeerState(string replicaId)
+    {
+        if (string.IsNullOrWhiteSpace(replicaId))
+        {
+            return null;
+        }
+
+        lock (syncRoot)
+        {
+            return peerStates.TryGetValue(replicaId, out var entry)
+                ? CloneShardVersionVectorMap(entry.State)
+                : null;
+        }
+    }
+
+    /// <inheritdoc />
     public IReadOnlyList<string> GetActiveReplicaIds()
     {
         lock (syncRoot)

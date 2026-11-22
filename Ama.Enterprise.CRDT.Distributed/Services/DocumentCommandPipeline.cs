@@ -23,11 +23,17 @@ public sealed class DocumentCommandPipeline : IDocumentCommandPipeline, IDisposa
     private readonly CancellationTokenSource disposeCts = new();
     private readonly IDisposable telemetryRegistration;
     private readonly Task processingTask;
+    private int activeCommandCount;
 
     /// <summary>
     /// Gets a value indicating whether the current execution context is already running inside this pipeline's processing loop.
     /// </summary>
     public bool IsCurrentThreadPipelineProcessor => ReferenceEquals(CurrentProcessingPipeline.Value, this);
+
+    /// <inheritdoc />
+    public int PendingCommandCount =>
+        (commandChannel.Reader.CanCount ? commandChannel.Reader.Count : 0) +
+        Volatile.Read(ref activeCommandCount);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DocumentCommandPipeline"/> class.
@@ -225,6 +231,7 @@ public sealed class DocumentCommandPipeline : IDocumentCommandPipeline, IDisposa
                 var target = cmd.Target;
                 var documentId = target?.DocumentId ?? string.Empty;
 
+                Interlocked.Increment(ref activeCommandCount);
                 try
                 {
                     cmd.CancellationToken.ThrowIfCancellationRequested();
@@ -276,6 +283,10 @@ public sealed class DocumentCommandPipeline : IDocumentCommandPipeline, IDisposa
                     {
                         cmd.SetException(ex);
                     }
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref activeCommandCount);
                 }
             }
         }

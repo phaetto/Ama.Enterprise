@@ -184,6 +184,26 @@ public interface ICrdtDocumentOrchestrator
     Task ProvideSnapshotAsync(string documentId, string? typeAlias, string targetReplicaId, PeerId targetPeerId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Serializes the current local state for a specific document type and dispatches it directly as a targeted snapshot with explicit shard batch metadata.
+    /// </summary>
+    /// <param name="documentId">The document identifier.</param>
+    /// <param name="typeAlias">The optional document type alias.</param>
+    /// <param name="targetReplicaId">The target replica identifier.</param>
+    /// <param name="targetPeerId">The target network peer identifier.</param>
+    /// <param name="shardDocumentIds">The optional list of document keys included in the sender's shard snapshot batch.</param>
+    /// <param name="consistentGlobalState">An optional consistent shard version vector map captured for the entire shard batch.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous snapshot dispatch operation.</returns>
+    Task ProvideSnapshotAsync(
+        string documentId,
+        string? typeAlias,
+        string targetReplicaId,
+        PeerId targetPeerId,
+        IReadOnlyList<string>? shardDocumentIds,
+        ShardVersionVectorMap? consistentGlobalState = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Dispatches a targeted point-to-point synchronization request mapping peer topologies extracting random active peers internally.
     /// </summary>
     Task DispatchAntiEntropyStateAsync(CancellationToken cancellationToken = default);
@@ -192,6 +212,19 @@ public interface ICrdtDocumentOrchestrator
     /// Dispatches a targeted point-to-point synchronization request directly to a specific peer.
     /// </summary>
     Task DispatchAntiEntropyStateAsync(PeerId targetPeerId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Evaluates the current synchronization workload (channel queue depths and estimated version vector delta)
+    /// and dispatches a targeted anti-entropy state sync only if the local node is not already busy or overwhelmed.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A workload summary containing the current queue depth and estimated pending sync items.</returns>
+    /// <example>
+    /// <code>
+    /// var workload = await orchestrator.EvaluateAndDispatchAntiEntropyStateAsync(cancellationToken);
+    /// </code>
+    /// </example>
+    Task<CrdtAntiEntropyWorkLoadDto> EvaluateAndDispatchAntiEntropyStateAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Completes the orchestrator command channel and waits for all queued orchestrator commands to finish processing.

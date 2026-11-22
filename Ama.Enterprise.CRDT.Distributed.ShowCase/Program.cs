@@ -95,7 +95,8 @@ public static class Program
             options.ActiveSyncEnabled = true;
             options.PeerEvictionTtlSeconds = 0;
             options.AntiEntropyInitialDelaySeconds = 0;
-            options.AntiEntropyIntervalSeconds = 15;
+            //options.AntiEntropyIntervalSeconds = 15;
+            //options.AntiEntropyMaxAdaptiveIntervalSeconds = 60;
             options.CheckpointIntervalSeconds = 3;
             options.MaintenanceIntervalSeconds = 5 * 60;
             options.CompactionTtlSeconds = 5 * 60;

@@ -25,6 +25,18 @@ public interface IClusterStateTracker
     IReadOnlyList<ShardVersionVectorMap> GetClusterStates();
 
     /// <summary>
+    /// Retrieves the last known shard version vector map for a specific remote replica identifier, or null if unknown.
+    /// </summary>
+    /// <param name="replicaId">The remote replica identifier.</param>
+    /// <returns>The tracked shard version vector map for the replica, or null if not tracked.</returns>
+    /// <example>
+    /// <code>
+    /// var peerState = tracker.TryGetPeerState("Replica-2");
+    /// </code>
+    /// </example>
+    ShardVersionVectorMap? TryGetPeerState(string replicaId);
+
+    /// <summary>
     /// Retrieves the list of currently active remote replica identifiers explicitly tracked by the cluster matrix.
     /// Enables dynamic discovery of topological shifts natively.
     /// </summary>

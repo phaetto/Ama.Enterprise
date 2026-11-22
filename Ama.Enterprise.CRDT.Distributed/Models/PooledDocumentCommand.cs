@@ -134,6 +134,11 @@ public sealed class PooledDocumentCommand : IValueTaskSource
     public ShardVersionVectorMap? GlobalState { get; set; }
 
     /// <summary>
+    /// Gets or sets the optional expected list of document keys in the shard snapshot batch as determined by the sender.
+    /// </summary>
+    public IReadOnlyList<string>? ExpectedShardDocumentIds { get; set; }
+
+    /// <summary>
     /// Gets or sets an optional explicit timestamp.
     /// </summary>
     public CrdtTimestamp? ExplicitTimestamp { get; set; }
@@ -182,6 +187,7 @@ public sealed class PooledDocumentCommand : IValueTaskSource
         Patch = null;
         SnapshotData = null;
         GlobalState = null;
+        ExpectedShardDocumentIds = null;
         ExplicitTimestamp = null;
         ReplicaIdToEvict = null;
         OldReplicaId = null;

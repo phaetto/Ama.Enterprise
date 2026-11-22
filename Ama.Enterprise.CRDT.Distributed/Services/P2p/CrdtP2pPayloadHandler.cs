@@ -41,8 +41,6 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
 
     private readonly ConcurrentDictionary<(string PeerReplicaId, string ShardId), SnapshotDispatchState> recentSnapshotDispatches = new();
 
-    private readonly record struct SnapshotDispatchState(long DispatchedAtTicks, DottedVersionVector DispatchedDvv);
-
     public CrdtP2pPayloadHandler(
         string replicaId,
         DistributedCrdtScopeManager scopeManager,
@@ -135,6 +133,10 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
 
         if (targetDoc == null)
         {
+            if (wrapper.MessageType == "CrdtSnapshot")
+            {
+                RecordSkippedSnapshotProgress(scope, wrapper, senderId);
+            }
             return;
         }
 
@@ -386,6 +388,17 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
 
             scope.ClusterTracker.UpdatePeerState(syncMsg.ReplicaId, senderId.Value.ToString(), syncMsg.State);
 
+            var concreteOrchestrator = scope.Orchestrator as CrdtDocumentOrchestrator;
+            using var workScope = concreteOrchestrator?.TryAcquireAntiEntropyWorkScope();
+            if (concreteOrchestrator != null && workScope == null)
+            {
+                logger.LogDebug(
+                    "[{ReplicaId}] Deferring incoming CrdtSync response to peer '{PeerReplicaId}' because local queues or anti-entropy sync are already busy.",
+                    replicaContext.ReplicaId,
+                    syncMsg.ReplicaId);
+                return;
+            }
+
             var safeLocalState = await versionVectorManager.GetFullSnapshotAsync(cancellationToken).ConfigureAwait(false);
 
             var allShardsToEvaluate = new HashSet<string>(syncMsg.State.Keys, StringComparer.Ordinal);
@@ -453,7 +466,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             {
                 var nowTicks = Environment.TickCount64;
                 var options = scope.ServiceProvider.GetService<Microsoft.Extensions.Options.IOptions<DistributedCrdtOptions>>()?.Value;
-                var cooldownMs = Math.Max(2000L, (options?.AntiEntropyStartupIntervalSeconds ?? 2) * 2000L);
+                var baseCooldownMs = Math.Max(5000L, (options?.AntiEntropyStartupIntervalSeconds ?? 2) * 2000L);
 
                 shardsRequiringSnapshot.RemoveWhere(shardId =>
                 {
@@ -463,7 +476,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                         return false;
                     }
 
-                    if (nowTicks - prevDispatch.DispatchedAtTicks >= cooldownMs)
+                    if (nowTicks - prevDispatch.DispatchedAtTicks >= prevDispatch.CooldownMs)
                     {
                         return false;
                     }
@@ -484,66 +497,140 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
 
                     return !deltaReq.IsBehind;
                 });
-            }
 
-            if (shardsRequiringSnapshot.Count > 0)
-            {
-                logger.LogWarning("[{ReplicaId}] Journal missing or trimmed for {ShardCount} shard(s). Sending full snapshots for affected shards.", replicaContext.ReplicaId, shardsRequiringSnapshot.Count);
-                var sentSnapshots = new HashSet<string>(StringComparer.Ordinal);
-                var dispatchedShardState = new ShardVersionVectorMap();
-                var dispatchTimestamp = Environment.TickCount64;
-
-                foreach (var shardId in shardsRequiringSnapshot)
+                if (shardsRequiringSnapshot.Count > 0)
                 {
-                    if (safeLocalState.TryGetValue(shardId, out var localShardDvv))
-                    {
-                        dispatchedShardState[shardId] = localShardDvv;
-                        recentSnapshotDispatches[(syncMsg.ReplicaId, shardId)] = new SnapshotDispatchState(dispatchTimestamp, localShardDvv);
-                    }
-                }
+                    logger.LogWarning("[{ReplicaId}] Journal missing or trimmed for {ShardCount} shard(s). Sending full snapshots for affected shards.", replicaContext.ReplicaId, shardsRequiringSnapshot.Count);
+                    var sentSnapshots = new HashSet<string>(StringComparer.Ordinal);
+                    var shardDocsToSend = new Dictionary<string, List<(string DocumentId, string? TypeAlias, string CompositeKey)>>(StringComparer.Ordinal);
+                    var shardDocumentKeyLists = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+                    var dispatchedShardState = new ShardVersionVectorMap();
 
-                foreach (var targetDoc in documents)
-                {
-                    if (shardsRequiringSnapshot.Contains(targetDoc.ShardId))
+                    // Always include the system registry document when sending full shard snapshots so the recipient
+                    // knows about all document entries and type aliases in the cluster.
+                    var registryDocument = scope.Orchestrator.Registry;
+                    if (registryDocument != null)
                     {
-                        var compositeKey = CrdtRegistryEntry.GetRegistryKey(targetDoc.TypeAlias, targetDoc.DocumentId);
-                        sentSnapshots.Add(compositeKey);
-                        await scope.Orchestrator.ProvideSnapshotAsync(targetDoc.DocumentId, targetDoc.TypeAlias, syncMsg.ReplicaId, senderId, cancellationToken).ConfigureAwait(false);
-                    }
-                }
-
-                var registryDoc = await scope.Orchestrator.Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-                foreach (var entry in registryDoc.Data.Documents.Values)
-                {
-                    if (entry.IsDeleted)
-                    {
-                        continue;
+                        shardsRequiringSnapshot.Add(registryDocument.ShardId);
                     }
 
-                    var compositeKey = CrdtRegistryEntry.GetRegistryKey(entry.TypeAlias, entry.DocumentId);
-                    if (sentSnapshots.Contains(compositeKey))
+                    foreach (var targetDoc in documents)
                     {
-                        continue;
+                        if (shardsRequiringSnapshot.Contains(targetDoc.ShardId))
+                        {
+                            var isRegistryDoc = string.Equals(targetDoc.DocumentId, scope.Orchestrator.Registry.DocumentId, StringComparison.Ordinal);
+                            var compositeKey = isRegistryDoc
+                                ? targetDoc.DocumentId
+                                : CrdtRegistryEntry.GetRegistryKey(targetDoc.TypeAlias, targetDoc.DocumentId);
+
+                            if (sentSnapshots.Add(compositeKey))
+                            {
+                                if (!shardDocsToSend.TryGetValue(targetDoc.ShardId, out var docList))
+                                {
+                                    docList = new List<(string DocumentId, string? TypeAlias, string CompositeKey)>();
+                                    shardDocsToSend[targetDoc.ShardId] = docList;
+                                }
+                                docList.Add((targetDoc.DocumentId, targetDoc.TypeAlias, compositeKey));
+
+                                if (!shardDocumentKeyLists.TryGetValue(targetDoc.ShardId, out var keyList))
+                                {
+                                    keyList = new List<string>();
+                                    shardDocumentKeyLists[targetDoc.ShardId] = keyList;
+                                }
+                                keyList.Add(compositeKey);
+                            }
+                        }
                     }
 
-                    var entryShardId = await scope.Orchestrator.TryGetShardIdAsync(entry.DocumentId, entry.TypeAlias, cancellationToken).ConfigureAwait(false);
-                    if (!string.IsNullOrWhiteSpace(entryShardId) && shardsRequiringSnapshot.Contains(entryShardId))
+                    var registryDoc = await scope.Orchestrator.Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+                    foreach (var entry in registryDoc.Data.Documents.Values)
                     {
-                        sentSnapshots.Add(compositeKey);
-                        await scope.Orchestrator.ProvideSnapshotAsync(entry.DocumentId, entry.TypeAlias, syncMsg.ReplicaId, senderId, cancellationToken).ConfigureAwait(false);
-                    }
-                }
+                        if (entry.IsDeleted)
+                        {
+                            continue;
+                        }
 
-                if (dispatchedShardState.Count > 0)
-                {
+                        var compositeKey = CrdtRegistryEntry.GetRegistryKey(entry.TypeAlias, entry.DocumentId);
+                        if (sentSnapshots.Contains(compositeKey))
+                        {
+                            continue;
+                        }
+
+                        var entryShardId = await scope.Orchestrator.TryGetShardIdAsync(entry.DocumentId, entry.TypeAlias, cancellationToken).ConfigureAwait(false);
+                        if (!string.IsNullOrWhiteSpace(entryShardId) && shardsRequiringSnapshot.Contains(entryShardId))
+                        {
+                            sentSnapshots.Add(compositeKey);
+
+                            if (!shardDocsToSend.TryGetValue(entryShardId, out var docList))
+                            {
+                                docList = new List<(string DocumentId, string? TypeAlias, string CompositeKey)>();
+                                shardDocsToSend[entryShardId] = docList;
+                            }
+                            docList.Add((entry.DocumentId, entry.TypeAlias, compositeKey));
+
+                            if (!shardDocumentKeyLists.TryGetValue(entryShardId, out var keyList))
+                            {
+                                keyList = new List<string>();
+                                shardDocumentKeyLists[entryShardId] = keyList;
+                            }
+                            keyList.Add(compositeKey);
+                        }
+                    }
+
+                    // Capture a consistent shard DVV once per shard right before sending that shard's batch of document snapshots.
+                    // Send the system registry shard first so the recipient has registry metadata before user documents arrive.
                     var latestSnapshotState = await versionVectorManager.GetShardsSnapshotAsync(shardsRequiringSnapshot, cancellationToken).ConfigureAwait(false);
-                    foreach (var kvp in latestSnapshotState)
+                    var orderedShards = shardDocsToSend
+                        .OrderByDescending(kvp => registryDocument != null && string.Equals(kvp.Key, registryDocument.ShardId, StringComparison.Ordinal))
+                        .ToList();
+
+                    foreach (var shardKvp in orderedShards)
                     {
-                        dispatchedShardState[kvp.Key] = kvp.Value;
-                        recentSnapshotDispatches[(syncMsg.ReplicaId, kvp.Key)] = new SnapshotDispatchState(Environment.TickCount64, kvp.Value);
+                        var shardId = shardKvp.Key;
+                        var docsInShard = shardKvp.Value;
+                        shardDocumentKeyLists.TryGetValue(shardId, out var batchKeys);
+
+                        // Scale cooldown proportionally to the number of documents in the batch (at least 25ms per doc, up to 5 minutes)
+                        // so large batches have enough time to transfer and merge on the recipient before another snapshot wave can trigger.
+                        var startupSec = options?.AntiEntropyStartupIntervalSeconds ?? 2;
+                        var baseDynamicCooldownMs = startupSec <= 1 ? 500L : Math.Max(500L, startupSec * 1000L);
+                        var dynamicCooldownMs = startupSec <= 1
+                            ? baseDynamicCooldownMs
+                            : Math.Clamp(baseDynamicCooldownMs + (docsInShard.Count * 25L), baseDynamicCooldownMs, 300_000L);
+
+                        ShardVersionVectorMap? consistentShardState = null;
+                        if (latestSnapshotState.TryGetValue(shardId, out var shardDvv) ||
+                            safeLocalState.TryGetValue(shardId, out shardDvv))
+                        {
+                            consistentShardState = new ShardVersionVectorMap { [shardId] = shardDvv };
+                            dispatchedShardState[shardId] = shardDvv;
+                            recentSnapshotDispatches[(syncMsg.ReplicaId, shardId)] = new SnapshotDispatchState(Environment.TickCount64, dynamicCooldownMs, shardDvv);
+                        }
+
+                        for (int i = 0; i < docsInShard.Count; i++)
+                        {
+                            var item = docsInShard[i];
+                            await scope.Orchestrator.ProvideSnapshotAsync(
+                                item.DocumentId,
+                                item.TypeAlias,
+                                syncMsg.ReplicaId,
+                                senderId,
+                                batchKeys,
+                                consistentShardState,
+                                cancellationToken).ConfigureAwait(false);
+
+                            // Refresh dispatch timestamp as we stream large batches so the cooldown starts after the stream completes.
+                            if (consistentShardState != null && (i + 1) % 25 == 0 && consistentShardState.TryGetValue(shardId, out var refreshedDvv))
+                            {
+                                recentSnapshotDispatches[(syncMsg.ReplicaId, shardId)] = new SnapshotDispatchState(Environment.TickCount64, dynamicCooldownMs, refreshedDvv);
+                            }
+                        }
                     }
 
-                    scope.ClusterTracker.UpdatePeerState(syncMsg.ReplicaId, senderId.Value.ToString(), dispatchedShardState);
+                    if (dispatchedShardState.Count > 0)
+                    {
+                        scope.ClusterTracker.UpdatePeerState(syncMsg.ReplicaId, senderId.Value.ToString(), dispatchedShardState);
+                    }
                 }
             }
 
@@ -760,7 +847,10 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             
             scope.ClusterTracker.UpdatePeerState(resMsg.ReplicaId, senderId.Value.ToString(), resMsg.GlobalState);
             
-            await targetDoc.MergeSnapshotAsync(resMsg.SnapshotData, resMsg.GlobalState, cancellationToken).ConfigureAwait(false);
+            var expectedShardDocIds = resMsg.ShardDocumentIds as IReadOnlyList<string>
+                ?? (resMsg.ShardDocumentIds is { Count: > 0 } ? new List<string>(resMsg.ShardDocumentIds) : null);
+
+            await targetDoc.MergeSnapshotAsync(resMsg.SnapshotData, resMsg.GlobalState, expectedShardDocIds, IntentDeliveryMode.Acknowledged, cancellationToken).ConfigureAwait(false);
             snapshotsMergedCounter.Add(1, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
         }
         catch (Exception ex)
@@ -833,4 +923,52 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
         var nodeOptions = scope.ServiceProvider.GetService<Microsoft.Extensions.Options.IOptions<P2pNodeOptions>>()?.Value;
         return nodeOptions != null && nodeOptions.LocalPeerId != Guid.Empty && nodeOptions.LocalPeerId == senderId.Value;
     }
+
+    private void RecordSkippedSnapshotProgress(IDistributedCrdtScope scope, CrdtMessageWrapper wrapper, PeerId senderId)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(wrapper.DocumentId) || wrapper.Payload == null)
+            {
+                return;
+            }
+
+            var resMsg = serializer.DeserializeFromBytes<CrdtSnapshotMessage>(wrapper.Payload);
+            if (resMsg.GlobalState == null || resMsg.GlobalState.Count == 0)
+            {
+                return;
+            }
+
+            var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+            if (string.Equals(resMsg.ReplicaId, replicaContext.ReplicaId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(resMsg.ReplicaId) && !scope.ClusterTracker.IsReplicaTombstoned(resMsg.ReplicaId))
+            {
+                scope.ClusterTracker.UpdatePeerState(resMsg.ReplicaId, senderId.Value.ToString(), resMsg.GlobalState);
+            }
+
+            var compositeDocId = string.IsNullOrWhiteSpace(wrapper.DocumentTypeAlias) ||
+                                 string.Equals(wrapper.DocumentId, Constants.SystemRegistryDocumentId, StringComparison.Ordinal)
+                ? wrapper.DocumentId
+                : CrdtRegistryEntry.GetRegistryKey(wrapper.DocumentTypeAlias, wrapper.DocumentId);
+
+            var expectedShardDocIds = resMsg.ShardDocumentIds as IReadOnlyList<string>
+                ?? (resMsg.ShardDocumentIds is { Count: > 0 } ? new List<string>(resMsg.ShardDocumentIds) : [compositeDocId]);
+
+            var versionVectorManager = scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+            foreach (var shardId in resMsg.GlobalState.Keys)
+            {
+                versionVectorManager.RecordDocumentSnapshotMerge(shardId, compositeDocId, resMsg.GlobalState, expectedShardDocIds);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "[{ReplicaId}] Failed to record barrier progress for skipped snapshot {DocumentId}.", scope.ReplicaId, wrapper.DocumentId);
+        }
+    }
+
+    private readonly record struct SnapshotDispatchState(long DispatchedAtTicks, long CooldownMs, DottedVersionVector DispatchedDvv);
 }

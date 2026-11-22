@@ -25,6 +25,7 @@ using Microsoft.Extensions.Hosting;
 using Moq;
 using Shouldly;
 using Ama.Enterprise.CRDT.Distributed.Services.P2p;
+using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 
 [CrdtAotType(typeof(AntiEntropyStateSyncIntegrationTests.SyncTestState))]
 [CrdtAotType(typeof(Dictionary<string, string>))]
@@ -992,6 +993,10 @@ public sealed class AntiEntropyStateSyncIntegrationTests
 
         var node1Sp = BuildNode("Replica1", services =>
         {
+            services.Configure<DistributedCrdtOptions>(o => {
+                o.AntiEntropyStartupIntervalSeconds = 1;
+                o.AntiEntropyMaxAdaptiveIntervalSeconds = 1;
+            });
             services.Replace(ServiceDescriptor.Singleton(mockNode1Sender.Object));
         });
         var node1Scope = node1Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica1");
@@ -1070,5 +1075,629 @@ public sealed class AntiEntropyStateSyncIntegrationTests
 
         // Assert 4: Node 1 sees Node 2 is completely caught up and sends zero snapshots or patches
         node1ToNode2Payloads.ShouldBeEmpty();
+    }
+
+    [IntegrationFact]
+    public async Task EvaluateAndDispatchAntiEntropyStateAsync_WhenPipelineQueueExceedsBusyThreshold_SkipsSyncAndReportsWorkload()
+    {
+        // Arrange
+        var mockSender = new Mock<IDirectMessageSender>();
+        var sp = BuildNode("Replica1", services =>
+        {
+            services.Configure<DistributedCrdtOptions>(opt =>
+            {
+                opt.AntiEntropyBusyQueueThreshold = 1;
+                opt.AntiEntropyAdaptiveDelayPerThousandItemsMilliseconds = 1000;
+            });
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+
+        var peerRegistry = sp.GetRequiredService<IPeerRegistry>();
+        var peerId = new PeerId(Guid.NewGuid());
+        var peerNode = new PeerNode(peerId, new TcpPeerEndpoint("127.0.0.1", 5000));
+        await peerRegistry.AddOrUpdatePeerAsync(TestMeshId, peerNode, PeerStatus.Active, CancellationToken.None);
+
+        // Simulate a lagging peer that is 2500 operations behind on "default" shard
+        var localVvm = scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+        localVvm.MergeShardState("default", new ShardVersionVectorMap
+        {
+            ["default"] = new DottedVersionVector(new Dictionary<string, long> { ["Replica1"] = 2500 }, new Dictionary<string, ISet<long>>())
+        });
+        scope.ClusterTracker.UpdatePeerState("Replica2", peerId.Value.ToString(), new ShardVersionVectorMap
+        {
+            ["default"] = new DottedVersionVector(new Dictionary<string, long> { ["Replica1"] = 0 }, new Dictionary<string, ISet<long>>())
+        });
+
+        // Wait for any fire-and-forget topology re-evaluation (and any demotion snapshot push) triggered by UpdatePeerState to drain
+        await orchestrator.FlushAsync(CancellationToken.None);
+        mockSender.Invocations.Clear();
+
+        // Acquire anti-entropy work scope to simulate an in-flight sync operation
+        var concreteOrch = (CrdtDocumentOrchestrator)orchestrator;
+        using var heldScope = concreteOrch.TryAcquireAntiEntropyWorkScope();
+        heldScope.ShouldNotBeNull();
+
+        // Act - Attempt to evaluate and dispatch while already working
+        var busyWorkload = await orchestrator.EvaluateAndDispatchAntiEntropyStateAsync(CancellationToken.None);
+
+        // Assert - Skipped network dispatch while busy and accurately reported the 2500 estimated items
+        busyWorkload.IsBusy.ShouldBeTrue();
+        busyWorkload.EstimatedPendingSyncItems.ShouldBeGreaterThanOrEqualTo(2500);
+        mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never());
+
+        // Release work scope
+        heldScope!.Dispose();
+        await orchestrator.FlushAsync(CancellationToken.None);
+
+        // Act 2 - Evaluate again now that the node is idle
+        var idleWorkload = await orchestrator.EvaluateAndDispatchAntiEntropyStateAsync(CancellationToken.None);
+
+        // Assert 2 - Dispatched anti-entropy sync now that the node is no longer busy
+        idleWorkload.IsBusy.ShouldBeFalse();
+        idleWorkload.EstimatedPendingSyncItems.ShouldBeGreaterThanOrEqualTo(2500);
+        mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    [IntegrationFact]
+    public async Task SnapshotBatchWithDroppedMessage_ShouldHoldShardDvvAdvanceUntilTimeout_AndRecoverMissingDocumentOnNextSyncCycle()
+    {
+        // Arrange: Node 1 has two documents in the "default" shard ("sync-doc-1" and "sync-doc-2") and a trimmed journal.
+        // Node 2 is behind and requests sync. Node 1 sends snapshots for both documents, but "sync-doc-2"'s snapshot is dropped in transit.
+        var node1ToNode2Payloads = new List<ReadOnlyMemory<byte>>();
+        var mockNode1Sender = new Mock<IDirectMessageSender>();
+        mockNode1Sender.Setup(p => p.SendDirectAsync(It.IsAny<PeerId>(), Capture.In(node1ToNode2Payloads), It.IsAny<CancellationToken>()))
+               .Returns(Task.CompletedTask);
+
+        var node1Sp = BuildNode("Replica1", services =>
+        {
+            services.Configure<DistributedCrdtOptions>(o =>
+            {
+                o.AntiEntropyStartupIntervalSeconds = 1;
+                o.AntiEntropyMaxAdaptiveIntervalSeconds = 1;
+            });
+            services.Replace(ServiceDescriptor.Singleton(mockNode1Sender.Object));
+        });
+        var node1Scope = node1Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica1");
+        var node1Orch = node1Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await node1Orch.InitializeAsync(CancellationToken.None);
+
+        await node1Orch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+        await node1Orch.CreateDocumentAsync("sync-doc-2", "sync-doc-2", CancellationToken.None);
+
+        await node1Orch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("Doc1Key", "Doc1Val"), nameof(SyncTestState.DataMap), CancellationToken.None);
+        await node1Orch.ApplyIntentAsync<SyncTestState>("sync-doc-2", new MapSetIntent("Doc2Key", "Doc2Val"), nameof(SyncTestState.DataMap), CancellationToken.None);
+
+        // Trim Node 1's journal completely up to version 2 so Node 2 must recover via snapshots
+        await node1Scope.Storage.TrimAsync("default", new Dictionary<string, long> { ["Replica1"] = 2 }, CancellationToken.None);
+        await node1Scope.Storage.TrimAsync(node1Orch.Registry.ShardId, new Dictionary<string, long> { ["Replica1"] = 10 }, CancellationToken.None);
+
+        var node2Sp = BuildNode("Replica2");
+        var node2Scope = node2Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica2");
+        var node2Orch = node2Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var node2Vvm = node2Scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+        await node2Orch.InitializeAsync(CancellationToken.None);
+        await node2Orch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+        await node2Orch.CreateDocumentAsync("sync-doc-2", "sync-doc-2", CancellationToken.None);
+
+        var node1Handler = node1Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var node2Handler = node2Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var serializer = node1Sp.GetRequiredService<ICrdtSerializer>();
+        var node1PeerId = new PeerId(Guid.NewGuid());
+        var node2PeerId = new PeerId(Guid.NewGuid());
+
+        // Act 1: Node 2 sends CrdtSync to Node 1. Node 1 dispatches snapshots for the registry, sync-doc-1, and sync-doc-2.
+        var node2InitialState = await node2Vvm.GetFullSnapshotAsync(CancellationToken.None);
+        var syncMsg1 = new CrdtStateSyncMessage("Replica2", node2InitialState);
+        var syncWrapper1 = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg1));
+        await node1Handler.HandlePayloadAsync(TestMeshId, node2PeerId, serializer.SerializeToBytes(syncWrapper1), CancellationToken.None);
+
+        var initialBatch = node1ToNode2Payloads.ToList();
+        initialBatch.ShouldNotBeEmpty();
+
+        // Simulate packet loss: Drop the CrdtSnapshot message for "sync-doc-2" and deliver everything else
+        var droppedDoc2Count = 0;
+        foreach (var payload in initialBatch)
+        {
+            var wrapper = serializer.DeserializeFromBytes<CrdtMessageWrapper>(payload.ToArray());
+            if (wrapper.DocumentId == "sync-doc-2" && wrapper.MessageType == "CrdtSnapshot")
+            {
+                droppedDoc2Count++;
+                continue;
+            }
+
+            await node2Handler.HandlePayloadAsync(TestMeshId, node1PeerId, payload, CancellationToken.None);
+        }
+
+        droppedDoc2Count.ShouldBe(1);
+
+        // Assert 1: Node 2 applied sync-doc-1's state, but because sync-doc-2's snapshot was missed:
+        // - The multi-document shard barrier did NOT prematurely advance Node 2's "default" shard DVV to Replica1 = 2.
+        // - TryGetActiveSnapshotReceptionState reports that 1 expected document is still missing.
+        var doc1OnNode2 = await node2Orch.GetDocumentStateAsync<SyncTestState>("sync-doc-1", CancellationToken.None);
+        doc1OnNode2.Data.DataMap.ShouldContainKeyAndValue("Doc1Key", "Doc1Val");
+
+        var doc2OnNode2BeforeRecovery = await node2Orch.GetDocumentStateAsync<SyncTestState>("sync-doc-2", CancellationToken.None);
+        doc2OnNode2BeforeRecovery.Data.DataMap.ShouldNotContainKey("Doc2Key");
+
+        var isReceiving = node2Vvm.TryGetActiveSnapshotReceptionState(5000, out var remainingDocs);
+        isReceiving.ShouldBeTrue();
+        remainingDocs.ShouldBe(1);
+
+        var node2MidState = await node2Vvm.GetFullSnapshotAsync(CancellationToken.None);
+        node2MidState["default"].Versions.ContainsKey("Replica1").ShouldBeFalse();
+
+        // Act 2: Wait for the stale snapshot reception window and sender cooldown to expire, then run the next anti-entropy cycle
+        await Task.Delay(750);
+        node2Vvm.TryGetActiveSnapshotReceptionState(500, out var remainingAfterTimeout).ShouldBeFalse();
+        remainingAfterTimeout.ShouldBe(0);
+
+        // Expire sender's per-peer snapshot cooldown by using a reconnected PeerId (or after cooldown expiry)
+        var node2ReconnectedPeerId = new PeerId(Guid.NewGuid());
+        node1ToNode2Payloads.Clear();
+
+        var node2RetryState = await node2Vvm.GetFullSnapshotAsync(CancellationToken.None);
+        var syncMsg2 = new CrdtStateSyncMessage("Replica2", node2RetryState);
+        var syncWrapper2 = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg2));
+        await node1Handler.HandlePayloadAsync(TestMeshId, node2ReconnectedPeerId, serializer.SerializeToBytes(syncWrapper2), CancellationToken.None);
+
+        // Assert 2: Because Node 2 never falsely advanced its "default" shard DVV, Node 1 detects the gap and resends the shard snapshots
+        var recoveryBatch = node1ToNode2Payloads.ToList();
+        recoveryBatch.ShouldNotBeEmpty();
+
+        foreach (var payload in recoveryBatch)
+        {
+            await node2Handler.HandlePayloadAsync(TestMeshId, node1PeerId, payload, CancellationToken.None);
+        }
+
+        // Assert 3: Node 2 now has the missed document ("sync-doc-2") AND its shard DVV has advanced to Replica1 = 2
+        var doc2OnNode2AfterRecovery = await node2Orch.GetDocumentStateAsync<SyncTestState>("sync-doc-2", CancellationToken.None);
+        doc2OnNode2AfterRecovery.Data.DataMap.ShouldContainKeyAndValue("Doc2Key", "Doc2Val");
+
+        var node2FinalState = await node2Vvm.GetFullSnapshotAsync(CancellationToken.None);
+        node2FinalState["default"].Versions.ShouldContainKeyAndValue("Replica1", 2);
+
+        // A subsequent sync results in zero messages because convergence is complete
+        node1ToNode2Payloads.Clear();
+        var syncMsg3 = new CrdtStateSyncMessage("Replica2", node2FinalState);
+        var syncWrapper3 = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg3));
+        await node1Handler.HandlePayloadAsync(TestMeshId, node2ReconnectedPeerId, serializer.SerializeToBytes(syncWrapper3), CancellationToken.None);
+        node1ToNode2Payloads.ShouldBeEmpty();
+    }
+
+    [IntegrationFact]
+    public async Task SnapshotMidFlightMutation_WhenSenderMutatesShardDuringSnapshotTransfer_RecipientRecoversMissedDeltaOperationsOnNextSync()
+    {
+        // Arrange: Node 1 has two documents in "default" shard at clock 1..2 (journal trimmed up to 2).
+        // Node 1 takes a snapshot of sync-doc-1 (at clock 2). While the snapshot transfer is happening,
+        // a new write (clock 3) is applied to sync-doc-1 on Node 1 (which remains in the live journal!).
+        // Then Node 1 takes a snapshot of sync-doc-2 (whose GlobalState now carries Replica1 = 3, even though sync-doc-1's snapshot only had up to clock 2).
+        var node1ToNode2Payloads = new List<ReadOnlyMemory<byte>>();
+        var mockNode1Sender = new Mock<IDirectMessageSender>();
+        mockNode1Sender.Setup(p => p.SendDirectAsync(It.IsAny<PeerId>(), Capture.In(node1ToNode2Payloads), It.IsAny<CancellationToken>()))
+               .Returns(Task.CompletedTask);
+
+        var node1Sp = BuildNode("Replica1", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockNode1Sender.Object));
+        });
+        var node1Scope = node1Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica1");
+        var node1Orch = node1Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await node1Orch.InitializeAsync(CancellationToken.None);
+
+        await node1Orch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+        await node1Orch.CreateDocumentAsync("sync-doc-2", "sync-doc-2", CancellationToken.None);
+
+        await node1Orch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("InitialKey1", "InitialVal1"), nameof(SyncTestState.DataMap), CancellationToken.None);
+        await node1Orch.ApplyIntentAsync<SyncTestState>("sync-doc-2", new MapSetIntent("InitialKey2", "InitialVal2"), nameof(SyncTestState.DataMap), CancellationToken.None);
+
+        // Trim operations 1 and 2 so snapshots are required for the baseline state
+        await node1Scope.Storage.TrimAsync("default", new Dictionary<string, long> { ["Replica1"] = 2 }, CancellationToken.None);
+
+        var node2Sp = BuildNode("Replica2");
+        var node2Scope = node2Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica2");
+        var node2Orch = node2Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var node2Vvm = node2Scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+        await node2Orch.InitializeAsync(CancellationToken.None);
+        await node2Orch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+        await node2Orch.CreateDocumentAsync("sync-doc-2", "sync-doc-2", CancellationToken.None);
+
+        var node1Doc1 = node1Orch.TryGetLocalDocument<SyncTestState>("sync-doc-1")!;
+        var node1Doc2 = node1Orch.TryGetLocalDocument<SyncTestState>("sync-doc-2")!;
+        var serializer = node1Sp.GetRequiredService<ICrdtSerializer>();
+        var node1Handler = node1Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var node2Handler = node2Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var node1PeerId = new PeerId(Guid.NewGuid());
+        var node2PeerId = new PeerId(Guid.NewGuid());
+
+        // Step 1: Capture snapshot of sync-doc-1 BEFORE the concurrent mutation (GlobalState has Replica1 = 2)
+        var snap1 = await node1Doc1.GetSnapshotDataAsync(CancellationToken.None);
+        snap1.GlobalState["default"].Versions["Replica1"].ShouldBe(2);
+
+        // Step 2: Concurrent mutation occurs on sync-doc-1 while snapshots are being generated (advances shard clock to 3, journaled at clock 3)
+        await node1Orch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("MidFlightKey", "MidFlightVal"), nameof(SyncTestState.DataMap), CancellationToken.None);
+
+        // Step 3: Capture snapshot of sync-doc-2 AFTER the concurrent mutation on sync-doc-1 (GlobalState now claims Replica1 = 3!)
+        var snap2 = await node1Doc2.GetSnapshotDataAsync(CancellationToken.None);
+        snap2.GlobalState["default"].Versions["Replica1"].ShouldBe(3);
+
+        var expectedShardDocs = new List<string>
+        {
+            CrdtRegistryEntry.GetRegistryKey("sync-doc-1", "sync-doc-1"),
+            CrdtRegistryEntry.GetRegistryKey("sync-doc-2", "sync-doc-2")
+        };
+        var snapMsg1 = new CrdtSnapshotMessage("Replica1", snap1.SnapshotData, snap1.GlobalState, expectedShardDocs);
+        var snapWrapper1 = new CrdtMessageWrapper("sync-doc-1", "CrdtSnapshot", serializer.SerializeToBytes(snapMsg1), "sync-doc-1");
+
+        var snapMsg2 = new CrdtSnapshotMessage("Replica1", snap2.SnapshotData, snap2.GlobalState, expectedShardDocs);
+        var snapWrapper2 = new CrdtMessageWrapper("sync-doc-2", "CrdtSnapshot", serializer.SerializeToBytes(snapMsg2), "sync-doc-2");
+
+        // Act 1: Deliver both skewed snapshots to Node 2
+        await node2Handler.HandlePayloadAsync(TestMeshId, node1PeerId, serializer.SerializeToBytes(snapWrapper1), CancellationToken.None);
+        await node2Handler.HandlePayloadAsync(TestMeshId, node1PeerId, serializer.SerializeToBytes(snapWrapper2), CancellationToken.None);
+
+        // Assert 1: ShardVersionVectorManager computed the safe floor (GMVV = min(2, 3) = 2) across the batch
+        // rather than adopting the optimistic 3 from snap2, which would have caused Node 2 to permanently miss clock 3 on sync-doc-1!
+        var node2StateAfterSnapshots = await node2Vvm.GetFullSnapshotAsync(CancellationToken.None);
+        node2StateAfterSnapshots["default"].Versions["Replica1"].ShouldBe(2);
+
+        var doc1BeforeDelta = await node2Orch.GetDocumentStateAsync<SyncTestState>("sync-doc-1", CancellationToken.None);
+        doc1BeforeDelta.Data.DataMap.ShouldContainKeyAndValue("InitialKey1", "InitialVal1");
+        doc1BeforeDelta.Data.DataMap.ShouldNotContainKey("MidFlightKey");
+
+        // Act 2: Node 2 sends a CrdtSync to Node 1 advertising its safe floor DVV (Replica1 = 2)
+        node1ToNode2Payloads.Clear();
+        // Align registry DVV in the sync payload so we only inspect the "default" shard delta
+        var node1FullState = await node1Scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>().GetFullSnapshotAsync(CancellationToken.None);
+        node2StateAfterSnapshots[node1Orch.Registry.ShardId] = node1FullState[node1Orch.Registry.ShardId];
+
+        var syncMsg = new CrdtStateSyncMessage("Replica2", node2StateAfterSnapshots);
+        var syncWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg));
+        await node1Handler.HandlePayloadAsync(TestMeshId, node2PeerId, serializer.SerializeToBytes(syncWrapper), CancellationToken.None);
+
+        // Assert 2: Node 1 sees Node 2 is at clock 2 and sends the missing clock 3 operation as a lightweight CrdtPatch (not a full snapshot!)
+        node1ToNode2Payloads.Count.ShouldBe(1);
+        var deltaWrapper = serializer.DeserializeFromBytes<CrdtMessageWrapper>(node1ToNode2Payloads[0].ToArray());
+        deltaWrapper.MessageType.ShouldBe("CrdtPatch");
+        deltaWrapper.DocumentId.ShouldBe("sync-doc-1");
+
+        // Deliver the delta patch to Node 2
+        await node2Handler.HandlePayloadAsync(TestMeshId, node1PeerId, node1ToNode2Payloads[0], CancellationToken.None);
+
+        // Assert 3: Node 2 now has the mid-flight item ("MidFlightKey") and its shard DVV has converged to 3
+        var doc1AfterDelta = await node2Orch.GetDocumentStateAsync<SyncTestState>("sync-doc-1", CancellationToken.None);
+        doc1AfterDelta.Data.DataMap.ShouldContainKeyAndValue("InitialKey1", "InitialVal1");
+        doc1AfterDelta.Data.DataMap.ShouldContainKeyAndValue("MidFlightKey", "MidFlightVal");
+
+        var node2FinalState = await node2Vvm.GetFullSnapshotAsync(CancellationToken.None);
+        node2FinalState["default"].Versions["Replica1"].ShouldBe(3);
+    }
+
+    [IntegrationFact]
+    public async Task SnapshotBatchHappyPath_ShouldSuppressRecipientAntiEntropyWhileInFlight_AndConvergeOnceAllDocumentsArrive()
+    {
+        // Arrange: Node 1 has two documents in the "default" shard and a trimmed journal.
+        var node1ToNode2Payloads = new List<ReadOnlyMemory<byte>>();
+        var mockNode1Sender = new Mock<IDirectMessageSender>();
+        mockNode1Sender.Setup(p => p.SendDirectAsync(It.IsAny<PeerId>(), Capture.In(node1ToNode2Payloads), It.IsAny<CancellationToken>()))
+               .Returns(Task.CompletedTask);
+
+        var node2ToNode1Payloads = new List<ReadOnlyMemory<byte>>();
+        var mockNode2Sender = new Mock<IDirectMessageSender>();
+        mockNode2Sender.Setup(p => p.SendDirectAsync(It.IsAny<PeerId>(), Capture.In(node2ToNode1Payloads), It.IsAny<CancellationToken>()))
+               .Returns(Task.CompletedTask);
+
+        var node1Sp = BuildNode("Replica1", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockNode1Sender.Object));
+        });
+        var node1Scope = node1Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica1");
+        var node1Orch = node1Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await node1Orch.InitializeAsync(CancellationToken.None);
+
+        await node1Orch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+        await node1Orch.CreateDocumentAsync("sync-doc-2", "sync-doc-2", CancellationToken.None);
+
+        await node1Orch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("HappyKey1", "HappyVal1"), nameof(SyncTestState.DataMap), CancellationToken.None);
+        await node1Orch.ApplyIntentAsync<SyncTestState>("sync-doc-2", new MapSetIntent("HappyKey2", "HappyVal2"), nameof(SyncTestState.DataMap), CancellationToken.None);
+
+        await node1Scope.Storage.TrimAsync("default", new Dictionary<string, long> { ["Replica1"] = 2 }, CancellationToken.None);
+        await node1Scope.Storage.TrimAsync(node1Orch.Registry.ShardId, new Dictionary<string, long> { ["Replica1"] = 10 }, CancellationToken.None);
+
+        var node2Sp = BuildNode("Replica2", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockNode2Sender.Object));
+        });
+        var node2Scope = node2Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica2");
+        var node2Orch = node2Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var node2Vvm = node2Scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+        await node2Orch.InitializeAsync(CancellationToken.None);
+        await node2Orch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+        await node2Orch.CreateDocumentAsync("sync-doc-2", "sync-doc-2", CancellationToken.None);
+
+        var node2PeerRegistry = node2Sp.GetRequiredService<IPeerRegistry>();
+        var node1PeerId = new PeerId(Guid.NewGuid());
+        var node2PeerId = new PeerId(Guid.NewGuid());
+        await node2PeerRegistry.AddOrUpdatePeerAsync(TestMeshId, new PeerNode(node1PeerId, new TcpPeerEndpoint("127.0.0.1", 5001)), PeerStatus.Active, CancellationToken.None);
+
+        var node1Handler = node1Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var node2Handler = node2Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var serializer = node1Sp.GetRequiredService<ICrdtSerializer>();
+
+        // Act 1: Request sync from Node 1
+        var node2InitialState = await node2Vvm.GetFullSnapshotAsync(CancellationToken.None);
+        var syncMsg = new CrdtStateSyncMessage("Replica2", node2InitialState);
+        var syncWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg));
+        await node1Handler.HandlePayloadAsync(TestMeshId, node2PeerId, serializer.SerializeToBytes(syncWrapper), CancellationToken.None);
+
+        var docSnapshots = node1ToNode2Payloads
+            .Select(p => (Raw: p, Wrapper: serializer.DeserializeFromBytes<CrdtMessageWrapper>(p.ToArray())))
+            .Where(x => x.Wrapper.MessageType == "CrdtSnapshot" && x.Wrapper.DocumentId != node1Orch.Registry.DocumentId)
+            .ToList();
+
+        docSnapshots.Count.ShouldBe(2);
+
+        // Act 2: Deliver the first document snapshot and verify Node 2 suppresses periodic anti-entropy while batch reception is active
+        await node2Handler.HandlePayloadAsync(TestMeshId, node1PeerId, docSnapshots[0].Raw, CancellationToken.None);
+
+        node2ToNode1Payloads.Clear();
+        var midBatchWorkload = await node2Orch.EvaluateAndDispatchAntiEntropyStateAsync(CancellationToken.None);
+        midBatchWorkload.IsBusy.ShouldBeTrue();
+        midBatchWorkload.PendingQueueDepth.ShouldBeGreaterThanOrEqualTo(1);
+        node2ToNode1Payloads.ShouldBeEmpty();
+
+        // Act 3: Deliver the second document snapshot to complete the shard batch
+        await node2Handler.HandlePayloadAsync(TestMeshId, node1PeerId, docSnapshots[1].Raw, CancellationToken.None);
+
+        // Assert: Both documents are materialized and the shard DVV advanced to Replica1 = 2
+        var doc1 = await node2Orch.GetDocumentStateAsync<SyncTestState>("sync-doc-1", CancellationToken.None);
+        var doc2 = await node2Orch.GetDocumentStateAsync<SyncTestState>("sync-doc-2", CancellationToken.None);
+        doc1.Data.DataMap.ShouldContainKeyAndValue("HappyKey1", "HappyVal1");
+        doc2.Data.DataMap.ShouldContainKeyAndValue("HappyKey2", "HappyVal2");
+
+        var convergedState = await node2Vvm.GetFullSnapshotAsync(CancellationToken.None);
+        convergedState["default"].Versions.ShouldContainKeyAndValue("Replica1", 2);
+    }
+
+    [IntegrationFact]
+    public async Task SnapshotBatchEdgeCase_WhenSnapshotsArriveOutOfOrderWithDuplicates_AndContainDisjointDots_AdvancesOnlyOnFullBatchWithIntersectedDots()
+    {
+        // Arrange: Node 2 expects 2 documents in "default" shard ("sync-doc-1" and "sync-doc-2").
+        // Snapshot 1 has versions { Replica1: 5 } and dots { Replica3: [7, 9] }.
+        // Snapshot 2 has versions { Replica1: 5 } and dots { Replica3: [7, 11] }.
+        // Only dot 7 is common to both snapshots; dot 9 and dot 11 must not be prematurely marked as covered for the whole shard.
+        var node1Sp = BuildNode("Replica1");
+        var node1Scope = node1Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica1");
+        var node1Orch = node1Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await node1Orch.InitializeAsync(CancellationToken.None);
+        await node1Orch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+        await node1Orch.CreateDocumentAsync("sync-doc-2", "sync-doc-2", CancellationToken.None);
+        await node1Orch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("K1", "V1"), nameof(SyncTestState.DataMap), CancellationToken.None);
+        await node1Orch.ApplyIntentAsync<SyncTestState>("sync-doc-2", new MapSetIntent("K2", "V2"), nameof(SyncTestState.DataMap), CancellationToken.None);
+
+        var node2Sp = BuildNode("Replica2");
+        var node2Scope = node2Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica2");
+        var node2Orch = node2Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var node2Vvm = node2Scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+        await node2Orch.InitializeAsync(CancellationToken.None);
+        await node2Orch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+        await node2Orch.CreateDocumentAsync("sync-doc-2", "sync-doc-2", CancellationToken.None);
+
+        var serializer = node1Sp.GetRequiredService<ICrdtSerializer>();
+        var node2Handler = node2Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var node1PeerId = new PeerId(Guid.NewGuid());
+
+        var snap1Data = await node1Orch.TryGetLocalDocument<SyncTestState>("sync-doc-1")!.GetSnapshotDataAsync(CancellationToken.None);
+        var snap2Data = await node1Orch.TryGetLocalDocument<SyncTestState>("sync-doc-2")!.GetSnapshotDataAsync(CancellationToken.None);
+
+        var state1 = new ShardVersionVectorMap
+        {
+            ["default"] = new DottedVersionVector(
+                new Dictionary<string, long> { ["Replica1"] = 5 },
+                new Dictionary<string, ISet<long>> { ["Replica3"] = new HashSet<long> { 7, 9 } })
+        };
+        var state2 = new ShardVersionVectorMap
+        {
+            ["default"] = new DottedVersionVector(
+                new Dictionary<string, long> { ["Replica1"] = 5 },
+                new Dictionary<string, ISet<long>> { ["Replica3"] = new HashSet<long> { 7, 11 } })
+        };
+
+        var expectedBatchDocs = new List<string>
+        {
+            CrdtRegistryEntry.GetRegistryKey("sync-doc-1", "sync-doc-1"),
+            CrdtRegistryEntry.GetRegistryKey("sync-doc-2", "sync-doc-2")
+        };
+
+        var msg2 = new CrdtSnapshotMessage("Replica1", snap2Data.SnapshotData, state2, expectedBatchDocs);
+        var wrap2 = new CrdtMessageWrapper("sync-doc-2", "CrdtSnapshot", serializer.SerializeToBytes(msg2), "sync-doc-2");
+
+        var msg1 = new CrdtSnapshotMessage("Replica1", snap1Data.SnapshotData, state1, expectedBatchDocs);
+        var wrap1 = new CrdtMessageWrapper("sync-doc-1", "CrdtSnapshot", serializer.SerializeToBytes(msg1), "sync-doc-1");
+
+        // Act 1: Deliver sync-doc-2 first, then a duplicate of sync-doc-2
+        await node2Handler.HandlePayloadAsync(TestMeshId, node1PeerId, serializer.SerializeToBytes(wrap2), CancellationToken.None);
+        await node2Handler.HandlePayloadAsync(TestMeshId, node1PeerId, serializer.SerializeToBytes(wrap2), CancellationToken.None);
+
+        // Assert 1: Duplicate delivery of sync-doc-2 must NOT satisfy the 2-document barrier
+        var midDvv = (await node2Vvm.GetFullSnapshotAsync(CancellationToken.None))["default"];
+        midDvv.Versions.ContainsKey("Replica1").ShouldBeFalse();
+        node2Vvm.TryGetActiveSnapshotReceptionState(5000, out var remaining).ShouldBeTrue();
+        remaining.ShouldBe(1);
+
+        // Act 2: Deliver sync-doc-1 to complete the batch
+        await node2Handler.HandlePayloadAsync(TestMeshId, node1PeerId, serializer.SerializeToBytes(wrap1), CancellationToken.None);
+
+        // Assert 2: Barrier completes, Replica1 advances to 5, and only the intersected dot (7) for Replica3 is committed to shard DVV
+        var finalDvv = (await node2Vvm.GetFullSnapshotAsync(CancellationToken.None))["default"];
+        finalDvv.Versions.ShouldContainKeyAndValue("Replica1", 5);
+        finalDvv.Dots.ShouldContainKey("Replica3");
+        finalDvv.Dots["Replica3"].ShouldContain(7);
+        finalDvv.Dots["Replica3"].ShouldNotContain(9);
+        finalDvv.Dots["Replica3"].ShouldNotContain(11);
+    }
+
+    [IntegrationFact]
+    public async Task SnapshotEdgeCase_WhenRecipientHasNotYetCreatedDocumentsLocally_LazilyPromotesDocumentsAndConvergesShardDvv()
+    {
+        // Arrange: Node 1 creates and mutates sync-doc-1 and sync-doc-2.
+        // Node 2 has just initialized and has NOT created sync-doc-1 or sync-doc-2 in its local registry or memory yet.
+        var node1Sp = BuildNode("Replica1");
+        var node1Scope = node1Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica1");
+        var node1Orch = node1Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await node1Orch.InitializeAsync(CancellationToken.None);
+        await node1Orch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+        await node1Orch.CreateDocumentAsync("sync-doc-2", "sync-doc-2", CancellationToken.None);
+        await node1Orch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("LazySnap1", "Val1"), nameof(SyncTestState.DataMap), CancellationToken.None);
+        await node1Orch.ApplyIntentAsync<SyncTestState>("sync-doc-2", new MapSetIntent("LazySnap2", "Val2"), nameof(SyncTestState.DataMap), CancellationToken.None);
+
+        var node2Sp = BuildNode("Replica2");
+        var node2Scope = node2Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica2");
+        var node2Orch = node2Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        var node2Vvm = node2Scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+        await node2Orch.InitializeAsync(CancellationToken.None);
+
+        // Verify Node 2 does not have either document promoted before snapshots arrive
+        node2Orch.TryGetLocalDocument<SyncTestState>("sync-doc-1").ShouldBeNull();
+        node2Orch.TryGetLocalDocument<SyncTestState>("sync-doc-2").ShouldBeNull();
+
+        var serializer = node1Sp.GetRequiredService<ICrdtSerializer>();
+        var node2Handler = node2Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var node1PeerId = new PeerId(Guid.NewGuid());
+
+        var snap1 = await node1Orch.TryGetLocalDocument<SyncTestState>("sync-doc-1")!.GetSnapshotDataAsync(CancellationToken.None);
+        var snap2 = await node1Orch.TryGetLocalDocument<SyncTestState>("sync-doc-2")!.GetSnapshotDataAsync(CancellationToken.None);
+
+        var expectedBatchDocs = new List<string>
+        {
+            CrdtRegistryEntry.GetRegistryKey("sync-doc-1", "sync-doc-1"),
+            CrdtRegistryEntry.GetRegistryKey("sync-doc-2", "sync-doc-2")
+        };
+
+        var msg1 = new CrdtSnapshotMessage("Replica1", snap1.SnapshotData, snap1.GlobalState, expectedBatchDocs);
+        var wrap1 = new CrdtMessageWrapper("sync-doc-1", "CrdtSnapshot", serializer.SerializeToBytes(msg1), "sync-doc-1");
+
+        var msg2 = new CrdtSnapshotMessage("Replica1", snap2.SnapshotData, snap2.GlobalState, expectedBatchDocs);
+        var wrap2 = new CrdtMessageWrapper("sync-doc-2", "CrdtSnapshot", serializer.SerializeToBytes(msg2), "sync-doc-2");
+
+        // Act: Deliver snapshots to Node 2 before registry gossip
+        await node2Handler.HandlePayloadAsync(TestMeshId, node1PeerId, serializer.SerializeToBytes(wrap1), CancellationToken.None);
+        await node2Handler.HandlePayloadAsync(TestMeshId, node1PeerId, serializer.SerializeToBytes(wrap2), CancellationToken.None);
+
+        // Assert: Both documents were lazily promoted, merged, and the shard DVV advanced to 2
+        var doc1 = node2Orch.TryGetLocalDocument<SyncTestState>("sync-doc-1");
+        var doc2 = node2Orch.TryGetLocalDocument<SyncTestState>("sync-doc-2");
+        doc1.ShouldNotBeNull();
+        doc2.ShouldNotBeNull();
+
+        (await doc1!.GetDocumentAsync(CancellationToken.None)).Data.DataMap.ShouldContainKeyAndValue("LazySnap1", "Val1");
+        (await doc2!.GetDocumentAsync(CancellationToken.None)).Data.DataMap.ShouldContainKeyAndValue("LazySnap2", "Val2");
+
+        var node2State = await node2Vvm.GetFullSnapshotAsync(CancellationToken.None);
+        node2State["default"].Versions.ShouldContainKeyAndValue("Replica1", 2);
+    }
+
+    [IntegrationFact]
+    public async Task SnapshotEdgeCase_WhenStaleSnapshotArrivesAfterNewerPatches_DoesNotRegressStateOrMarkDocumentDirty()
+    {
+        // Arrange: Node 1 creates sync-doc-1, applies V1, takes a snapshot at clock 1, and then applies V2 (removing or overwriting V1) at clock 2.
+        // Node 2 already received both V1 and V2 via live patches (so Node 2 is at clock 2), and then the delayed clock-1 snapshot arrives.
+        var node1Sp = BuildNode("Replica1");
+        var node1Scope = node1Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica1");
+        var node1Orch = node1Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await node1Orch.InitializeAsync(CancellationToken.None);
+        await node1Orch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+
+        await node1Orch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("Key", "OldValueFromSnapshot"), nameof(SyncTestState.DataMap), CancellationToken.None);
+        var node1Doc = node1Orch.TryGetLocalDocument<SyncTestState>("sync-doc-1")!;
+        var staleSnapshot = await node1Doc.GetSnapshotDataAsync(CancellationToken.None);
+
+        await node1Orch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("Key", "NewerValueFromPatch"), nameof(SyncTestState.DataMap), CancellationToken.None);
+        var allOps = await node1Scope.Storage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
+        var docOps = allOps.Where(o => (o.DocumentId?.ToString() ?? string.Empty).Contains("sync-doc-1", StringComparison.Ordinal)).Select(o => o.Operation).ToArray();
+
+        var stateChangedNotifications = 0;
+        var mockStateObserver = new Mock<IDocumentStateObserver<SyncTestState>>();
+        mockStateObserver
+            .Setup(o => o.OnStateChangedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback(() => Interlocked.Increment(ref stateChangedNotifications))
+            .Returns(Task.CompletedTask);
+
+        var node2Sp = BuildNode("Replica2", services =>
+        {
+            services.AddSingleton(mockStateObserver.Object);
+        });
+        var node2Scope = node2Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica2");
+        var node2Orch = node2Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await node2Orch.InitializeAsync(CancellationToken.None);
+        await node2Orch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+
+        await node2Orch.ApplyPatchAsync<SyncTestState>("sync-doc-1", new CrdtPatch(docOps), CancellationToken.None);
+        var node2Doc = node2Orch.TryGetLocalDocument<SyncTestState>("sync-doc-1")!;
+
+        // Checkpoint Node 2 so its internal dirty state becomes false, and reset observer notification counter
+        await node2Doc.CheckpointAsync(CancellationToken.None);
+        Volatile.Write(ref stateChangedNotifications, 0);
+
+        var serializer = node1Sp.GetRequiredService<ICrdtSerializer>();
+        var node2Handler = node2Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var staleMsg = new CrdtSnapshotMessage("Replica1", staleSnapshot.SnapshotData, staleSnapshot.GlobalState);
+        var staleWrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtSnapshot", serializer.SerializeToBytes(staleMsg), "sync-doc-1");
+
+        // Act: Deliver the stale clock-1 snapshot to Node 2 (which is already at clock 2)
+        await node2Handler.HandlePayloadAsync(TestMeshId, new PeerId(Guid.NewGuid()), serializer.SerializeToBytes(staleWrapper), CancellationToken.None);
+
+        // Assert: Document value did not regress, DVV remained at clock 2, and redundant snapshot did not trigger state-change notifications
+        var currentDoc = await node2Doc.GetDocumentAsync(CancellationToken.None);
+        currentDoc.Data.DataMap.ShouldContainKeyAndValue("Key", "NewerValueFromPatch");
+        node2Doc.GetLocalState()["default"].Versions["Replica1"].ShouldBe(2);
+        Volatile.Read(ref stateChangedNotifications).ShouldBe(0);
+    }
+
+    [IntegrationFact]
+    public async Task ProvideSnapshotAsync_WhenDocumentIsStoredOnDiskButNotPromotedInActiveMemory_LoadsAndDispatchesSnapshot()
+    {
+        // Arrange: Node 1 has a stored checkpoint for "stored-only-doc" in storage, but it is not currently in activeDocuments.
+        var capturedSends = new List<ReadOnlyMemory<byte>>();
+        var mockSender = new Mock<IDirectMessageSender>();
+        mockSender.Setup(p => p.SendDirectAsync(It.IsAny<PeerId>(), Capture.In(capturedSends), It.IsAny<CancellationToken>()))
+               .Returns(Task.CompletedTask);
+
+        var node1Sp = BuildNode("Replica1", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+        });
+        var node1Scope = node1Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica1");
+        var node1Orch = node1Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await node1Orch.InitializeAsync(CancellationToken.None);
+
+        var metadataManager = node1Scope.ServiceProvider.GetRequiredService<Ama.CRDT.Services.ICrdtMetadataManager>();
+        var storedState = new SyncTestState { Id = "stored-only-doc" };
+        storedState.DataMap["DiskKey"] = "DiskVal";
+        var storedCrdtDoc = new CrdtDocument<SyncTestState>(storedState, metadataManager.Initialize(storedState));
+        var compositeKey = CrdtRegistryEntry.GetRegistryKey("sync-doc-1", "stored-only-doc");
+        await node1Scope.Storage.SaveDocumentAsync("default", compositeKey, storedCrdtDoc, CancellationToken.None);
+
+        var targetPeerId = new PeerId(Guid.NewGuid());
+        var serializer = node1Sp.GetRequiredService<ICrdtSerializer>();
+
+        // Act: Request ProvideSnapshotAsync for the stored document
+        await node1Orch.ProvideSnapshotAsync("stored-only-doc", "sync-doc-1", "Replica2", targetPeerId, CancellationToken.None);
+
+        // Assert: Snapshot was loaded from storage and sent to the target peer
+        capturedSends.Count.ShouldBe(1);
+        var wrapper = serializer.DeserializeFromBytes<CrdtMessageWrapper>(capturedSends[0].ToArray());
+        wrapper.MessageType.ShouldBe("CrdtSnapshot");
+        wrapper.DocumentId.ShouldBe("stored-only-doc");
+        wrapper.DocumentTypeAlias.ShouldBe("sync-doc-1");
+
+        var snapMsg = serializer.DeserializeFromBytes<CrdtSnapshotMessage>(wrapper.Payload!);
+        var deserializedDoc = serializer.DeserializeFromBytes<CrdtDocument<SyncTestState>>(snapMsg.SnapshotData);
+        deserializedDoc.Data.DataMap.ShouldContainKeyAndValue("DiskKey", "DiskVal");
     }
 }

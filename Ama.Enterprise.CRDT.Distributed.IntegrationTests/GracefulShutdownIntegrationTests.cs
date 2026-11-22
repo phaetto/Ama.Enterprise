@@ -604,6 +604,7 @@ public sealed class GracefulShutdownIntegrationTests
             opt.CheckpointIntervalSeconds = 3600;
             opt.MaintenanceIntervalSeconds = 3600;
             opt.AntiEntropyIntervalSeconds = 3600;
+            opt.AntiEntropyMaxAdaptiveIntervalSeconds = 3600;
             opt.AntiEntropyInitialDelaySeconds = 3600;
             opt.CompactionIntervalSeconds = 3600;
             opt.WatchAzureWebJobsShutdownFile = false;

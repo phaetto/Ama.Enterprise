@@ -11,7 +11,11 @@ using Ama.Enterprise.P2p.Models.Core;
 /// <summary>
 /// Message payload containing a complete materialized CRDT document snapshot and its associated global bounds partitioned by shard, used as a fallback synchronization mechanism when log truncation gaps are detected.
 /// </summary>
-public sealed record CrdtSnapshotMessage(string ReplicaId, byte[] SnapshotData, ShardVersionVectorMap GlobalState) : IEquatable<CrdtSnapshotMessage>, IExtensibleDistributedPayload
+public sealed record CrdtSnapshotMessage(
+    string ReplicaId,
+    byte[] SnapshotData,
+    ShardVersionVectorMap GlobalState,
+    IList<string>? ShardDocumentIds = null) : IEquatable<CrdtSnapshotMessage>, IExtensibleDistributedPayload
 {
     /// <inheritdoc />
     [JsonExtensionData]
@@ -26,13 +30,17 @@ public sealed record CrdtSnapshotMessage(string ReplicaId, byte[] SnapshotData, 
         if (other is null) return false;
         if (ReferenceEquals(this, other)) return true;
         
+        var sameShardDocs = ShardDocumentIds == other.ShardDocumentIds ||
+            (ShardDocumentIds != null && other.ShardDocumentIds != null && Enumerable.SequenceEqual(ShardDocumentIds, other.ShardDocumentIds, StringComparer.Ordinal));
+
         return string.Equals(ReplicaId, other.ReplicaId, StringComparison.Ordinal) && 
                (SnapshotData == other.SnapshotData || (SnapshotData != null && other.SnapshotData != null && Enumerable.SequenceEqual(SnapshotData, other.SnapshotData))) &&
-               Equals(GlobalState, other.GlobalState);
+               Equals(GlobalState, other.GlobalState) &&
+               sameShardDocs;
     }
 
     public override int GetHashCode()
     {
-        return HashCode.Combine(ReplicaId, SnapshotData?.Length ?? 0, GlobalState);
+        return HashCode.Combine(ReplicaId, SnapshotData?.Length ?? 0, GlobalState, ShardDocumentIds?.Count ?? 0);
     }
 }

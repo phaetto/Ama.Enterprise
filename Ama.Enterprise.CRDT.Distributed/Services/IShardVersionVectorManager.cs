@@ -102,9 +102,21 @@ public interface IShardVersionVectorManager
     /// <param name="documentId">The identifier of the document that merged its snapshot.</param>
     /// <param name="incomingState">The incoming shard version vector map attached to the snapshot.</param>
     /// <param name="activeShardDocumentIds">The list of all active document identifiers currently belonging to this shard.</param>
+    /// <param name="incomingState">The incoming shard version vector map carried by the snapshot.</param>
+    /// <param name="activeShardDocumentIds">The list of active composite document keys currently belonging to the shard.</param>
     void RecordDocumentSnapshotMerge(string shardId, string documentId, ShardVersionVectorMap incomingState, IReadOnlyList<string> activeShardDocumentIds);
 
     /// <summary>
+    /// Gets the total number of expected documents remaining across all in-flight multi-document shard snapshot batches,
+    /// and indicates whether a snapshot merge was recorded recently.
+    /// </summary>
+    /// <param name="activityWindowMilliseconds">The time window in milliseconds to consider an in-flight snapshot batch active.</param>
+    /// <param name="remainingExpectedDocuments">When this method returns, contains the estimated number of remaining documents across active snapshot batches.</param>
+    /// <returns><c>true</c> if any shard has received a snapshot within the activity window or has an active incomplete batch; otherwise, <c>false</c>.</returns>
+    bool TryGetActiveSnapshotReceptionState(long activityWindowMilliseconds, out int remainingExpectedDocuments);
+
+    /// <summary>
+    /// Restores the entire shard version vector map from a persisted snapshot.
     /// Replaces the entire local shard version vector map with a deep copy of the provided map.
     /// </summary>
     /// <param name="savedMap">The persisted shard version vector map to restore.</param>

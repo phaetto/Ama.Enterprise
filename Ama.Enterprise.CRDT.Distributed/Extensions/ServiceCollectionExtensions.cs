@@ -57,6 +57,12 @@ public static class ServiceCollectionExtensions
                 "AntiEntropyStartupDurationSeconds cannot be negative.")
             .Validate(options => options.AntiEntropyStartupIntervalSeconds > 0, 
                 "AntiEntropyStartupIntervalSeconds must be greater than zero.")
+            .Validate(options => options.AntiEntropyBusyQueueThreshold >= 0,
+                "AntiEntropyBusyQueueThreshold cannot be negative.")
+            .Validate(options => options.AntiEntropyAdaptiveDelayPerThousandItemsMilliseconds >= 0,
+                "AntiEntropyAdaptiveDelayPerThousandItemsMilliseconds cannot be negative.")
+            .Validate(options => options.AntiEntropyMaxAdaptiveIntervalSeconds >= options.AntiEntropyIntervalSeconds,
+                "AntiEntropyMaxAdaptiveIntervalSeconds must be greater than or equal to AntiEntropyIntervalSeconds.")
             .Validate(options => options.PeerEvictionTtlSeconds == 0 || options.PeerEvictionTtlSeconds >= options.AntiEntropyIntervalSeconds * 3, 
                 "PeerEvictionTtlSeconds must be at least 3 times the AntiEntropyIntervalSeconds to prevent peer topology oscillation.")
             .Validate(options => options.PeerEvictionTtlSeconds == 0 || options.PeerEvictionTtlSeconds >= options.MaintenanceIntervalSeconds, 

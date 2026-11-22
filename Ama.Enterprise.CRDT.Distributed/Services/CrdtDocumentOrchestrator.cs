@@ -48,12 +48,26 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     private readonly CancellationTokenSource disposeCts = new();
     private readonly Task processingTask;
     private int syncPending;
+    private int activeOrchestratorCommandCount;
+    private int activeAntiEntropyCount;
     private int initializationStage = (int)OrchestratorInitializationStage.NotStarted;
 
     /// <summary>
     /// Gets a value indicating whether the current execution context is already running inside this orchestrator's command processing loop.
     /// </summary>
     public bool IsCurrentThreadOrchestratorProcessor => ReferenceEquals(CurrentProcessingOrchestrator.Value, this);
+
+    /// <summary>
+    /// Gets the number of commands currently queued or executing in the orchestrator channel.
+    /// </summary>
+    public int PendingCommandCount =>
+        (commandChannel.Reader.CanCount ? commandChannel.Reader.Count : 0) +
+        Volatile.Read(ref activeOrchestratorCommandCount);
+
+    /// <summary>
+    /// Gets a value indicating whether an anti-entropy dispatch or incoming state sync response is currently active.
+    /// </summary>
+    public bool IsAntiEntropyBusy => Volatile.Read(ref activeAntiEntropyCount) > 0;
 
     /// <inheritdoc />
     public OrchestratorInitializationStage InitializationStage => (OrchestratorInitializationStage)Volatile.Read(ref initializationStage);
@@ -1081,10 +1095,22 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
     public Task ProvideSnapshotAsync(string documentId, string targetReplicaId, PeerId targetPeerId, CancellationToken cancellationToken = default)
     {
-        return ProvideSnapshotAsync(documentId, null, targetReplicaId, targetPeerId, cancellationToken);
+        return ProvideSnapshotAsync(documentId, null, targetReplicaId, targetPeerId, null, null, cancellationToken);
     }
 
-    public async Task ProvideSnapshotAsync(string documentId, string? typeAlias, string targetReplicaId, PeerId targetPeerId, CancellationToken cancellationToken = default)
+    public Task ProvideSnapshotAsync(string documentId, string? typeAlias, string targetReplicaId, PeerId targetPeerId, CancellationToken cancellationToken = default)
+    {
+        return ProvideSnapshotAsync(documentId, typeAlias, targetReplicaId, targetPeerId, null, null, cancellationToken);
+    }
+
+    public async Task ProvideSnapshotAsync(
+        string documentId,
+        string? typeAlias,
+        string targetReplicaId,
+        PeerId targetPeerId,
+        IReadOnlyList<string>? shardDocumentIds,
+        ShardVersionVectorMap? consistentGlobalState = null,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
 
@@ -1136,7 +1162,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             {
                 var snapshotResult = await targetDoc.GetSnapshotDataAsync(cancellationToken).ConfigureAwait(false);
                 snapshotData = snapshotResult.SnapshotData;
-                globalState = snapshotResult.GlobalState;
+                globalState = consistentGlobalState ?? snapshotResult.GlobalState;
                 if (string.IsNullOrWhiteSpace(documentTypeAlias))
                 {
                     documentTypeAlias = targetDoc.TypeAlias;
@@ -1154,7 +1180,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                     {
                         var snapshotResult = await targetDoc.GetSnapshotDataAsync(cancellationToken).ConfigureAwait(false);
                         snapshotData = snapshotResult.SnapshotData;
-                        globalState = snapshotResult.GlobalState;
+                        globalState = consistentGlobalState ?? snapshotResult.GlobalState;
                         if (string.IsNullOrWhiteSpace(documentTypeAlias))
                         {
                             documentTypeAlias = targetDoc.TypeAlias;
@@ -1162,15 +1188,15 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                     }
                     else
                     {
-                        globalState = new ShardVersionVectorMap();
+                        globalState = consistentGlobalState ?? new ShardVersionVectorMap();
                     }
                 }
                 else
                 {
                     var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
-                    globalState = !string.IsNullOrWhiteSpace(shardId)
+                    globalState = consistentGlobalState ?? (!string.IsNullOrWhiteSpace(shardId)
                         ? versionVectorManager.GetShardSnapshot(shardId)
-                        : new ShardVersionVectorMap();
+                        : new ShardVersionVectorMap());
                 }
 
                 if (snapshotData.Length == 0)
@@ -1184,7 +1210,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
             var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
 
-            var resMsg = new CrdtSnapshotMessage(replicaContext.ReplicaId, snapshotData, globalState);
+            IList<string>? batchDocIds = shardDocumentIds != null
+                ? (shardDocumentIds as IList<string> ?? new List<string>(shardDocumentIds))
+                : null;
+
+            var resMsg = new CrdtSnapshotMessage(replicaContext.ReplicaId, snapshotData, globalState, batchDocIds);
             var payload = serializer.SerializeToBytes(resMsg);
 
             if (string.IsNullOrWhiteSpace(documentTypeAlias) && Registry != null && !string.Equals(documentId, Registry.DocumentId, StringComparison.Ordinal))
@@ -1210,7 +1240,74 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
     }
 
-    public async Task DispatchAntiEntropyStateAsync(CancellationToken cancellationToken = default)
+    /// <inheritdoc />
+    public async Task<CrdtAntiEntropyWorkLoadDto> EvaluateAndDispatchAntiEntropyStateAsync(CancellationToken cancellationToken = default)
+    {
+        var commandPipeline = serviceProvider.GetService<IDocumentCommandPipeline>();
+        var versionVectorManager = serviceProvider.GetService<IShardVersionVectorManager>();
+        var queueDepth = PendingCommandCount + (commandPipeline?.PendingCommandCount ?? 0);
+        var busyThreshold = options.AntiEntropyBusyQueueThreshold;
+        var isPipelineOverloaded = busyThreshold > 0 && queueDepth >= busyThreshold;
+
+        var remainingSnapshotDocs = 0;
+        var snapshotActivityWindowMs = Math.Max(2000L, options.AntiEntropyStartupIntervalSeconds * 1500L);
+        var isReceivingSnapshots = versionVectorManager != null &&
+            versionVectorManager.TryGetActiveSnapshotReceptionState(snapshotActivityWindowMs, out remainingSnapshotDocs);
+
+        var isAlreadyWorking = Volatile.Read(ref activeAntiEntropyCount) > 0 || isPipelineOverloaded || isReceivingSnapshots;
+
+        var estimatedDelta = await EstimatePendingAntiEntropyItemsAsync(cancellationToken).ConfigureAwait(false);
+        if (isReceivingSnapshots && remainingSnapshotDocs > estimatedDelta)
+        {
+            estimatedDelta = remainingSnapshotDocs;
+        }
+
+        if (isAlreadyWorking)
+        {
+            logger.LogDebug(
+                "Skipping anti-entropy state dispatch because the node is currently busy (QueueDepth: {QueueDepth}, ActiveAntiEntropy: {ActiveAntiEntropy}, ReceivingSnapshots: {IsReceivingSnapshots}, RemainingSnapshotDocs: {RemainingSnapshotDocs}, EstimatedPendingItems: {EstimatedItems}).",
+                queueDepth,
+                Volatile.Read(ref activeAntiEntropyCount),
+                isReceivingSnapshots,
+                remainingSnapshotDocs,
+                estimatedDelta);
+
+            return new CrdtAntiEntropyWorkLoadDto(
+                isBusy: true,
+                pendingQueueDepth: Math.Max(queueDepth, remainingSnapshotDocs),
+                estimatedPendingSyncItems: estimatedDelta);
+        }
+
+        if (Interlocked.CompareExchange(ref activeAntiEntropyCount, 1, 0) != 0)
+        {
+            return new CrdtAntiEntropyWorkLoadDto(
+                isBusy: true,
+                pendingQueueDepth: queueDepth,
+                estimatedPendingSyncItems: estimatedDelta);
+        }
+
+        try
+        {
+            await DispatchAntiEntropyStateCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref activeAntiEntropyCount);
+        }
+
+        var postQueueDepth = PendingCommandCount + (commandPipeline?.PendingCommandCount ?? 0);
+        return new CrdtAntiEntropyWorkLoadDto(
+            isBusy: false,
+            pendingQueueDepth: Math.Max(queueDepth, postQueueDepth),
+            estimatedPendingSyncItems: estimatedDelta);
+    }
+
+    public Task DispatchAntiEntropyStateAsync(CancellationToken cancellationToken = default)
+    {
+        return DispatchAntiEntropyStateCoreAsync(cancellationToken);
+    }
+
+    private async Task DispatchAntiEntropyStateCoreAsync(CancellationToken cancellationToken = default)
     {
         try
         {
@@ -1308,6 +1405,111 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to dispatch state sync to peer {PeerId}.", targetPeerId.Value);
+        }
+    }
+
+    public IDisposable? TryAcquireAntiEntropyWorkScope()
+    {
+        var commandPipeline = serviceProvider.GetService<IDocumentCommandPipeline>();
+        var queueDepth = PendingCommandCount + (commandPipeline?.PendingCommandCount ?? 0);
+        var busyThreshold = options.AntiEntropyBusyQueueThreshold;
+        if (busyThreshold > 0 && queueDepth >= busyThreshold)
+        {
+            return null;
+        }
+
+        if (Interlocked.CompareExchange(ref activeAntiEntropyCount, 1, 0) != 0)
+        {
+            return null;
+        }
+
+        return new AntiEntropyWorkScope(this);
+    }
+
+    private async ValueTask<long> EstimatePendingAntiEntropyItemsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var versionVectorManager = serviceProvider.GetService<IShardVersionVectorManager>();
+            var clusterTracker = serviceProvider.GetService<IClusterStateTracker>();
+            if (versionVectorManager == null || clusterTracker == null)
+            {
+                return 0;
+            }
+
+            var localState = await versionVectorManager.GetFullSnapshotAsync(cancellationToken).ConfigureAwait(false);
+            var peerStates = clusterTracker.GetClusterStates();
+            if (peerStates.Count == 0 || localState.Count == 0)
+            {
+                return 0;
+            }
+
+            long maxEstimatedGap = 0;
+
+            for (int i = 0; i < peerStates.Count; i++)
+            {
+                var peerState = peerStates[i];
+                long peerGap = 0;
+
+                foreach (var localShardKvp in localState)
+                {
+                    var shardId = localShardKvp.Key;
+                    var localDvv = localShardKvp.Value;
+                    peerState.TryGetValue(shardId, out var peerDvv);
+
+                    if (localDvv.Versions != null)
+                    {
+                        foreach (var verKvp in localDvv.Versions)
+                        {
+                            long peerVer = 0;
+                            if (peerDvv?.Versions != null)
+                            {
+                                peerDvv.Versions.TryGetValue(verKvp.Key, out peerVer);
+                            }
+
+                            if (verKvp.Value != peerVer)
+                            {
+                                peerGap += Math.Abs(verKvp.Value - peerVer);
+                            }
+                        }
+                    }
+
+                    if (peerDvv?.Versions != null)
+                    {
+                        foreach (var peerVerKvp in peerDvv.Versions)
+                        {
+                            if (localDvv.Versions == null || !localDvv.Versions.ContainsKey(peerVerKvp.Key))
+                            {
+                                peerGap += Math.Max(0, peerVerKvp.Value);
+                            }
+                        }
+                    }
+                }
+
+                if (peerGap > maxEstimatedGap)
+                {
+                    maxEstimatedGap = peerGap;
+                }
+            }
+
+            return maxEstimatedGap;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private sealed class AntiEntropyWorkScope(CrdtDocumentOrchestrator owner) : IDisposable
+    {
+        private int disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref disposed, 1) == 0)
+            {
+                Interlocked.Decrement(ref owner.activeAntiEntropyCount);
+            }
         }
     }
 
@@ -1967,6 +2169,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         {
             await foreach (var cmd in commandChannel.Reader.ReadAllAsync(disposeCts.Token).ConfigureAwait(false))
             {
+                Interlocked.Increment(ref activeOrchestratorCommandCount);
                 try
                 {
                     cmd.CancellationToken.ThrowIfCancellationRequested();
@@ -2029,6 +2232,10 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                     {
                         cmd.SetException(ex);
                     }
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref activeOrchestratorCommandCount);
                 }
             }
         }

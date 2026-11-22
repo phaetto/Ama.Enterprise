@@ -30,6 +30,19 @@ public interface IDocumentCommandPipeline
     bool IsCurrentThreadPipelineProcessor { get; }
 
     /// <summary>
+    /// Gets the number of commands currently queued or actively executing in the shared document pipeline.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// if (pipeline.PendingCommandCount &gt; 100)
+    /// {
+    ///     // Backoff background work
+    /// }
+    /// </code>
+    /// </example>
+    int PendingCommandCount { get; }
+
+    /// <summary>
     /// Rents a pooled command instance from the shared object pool.
     /// </summary>
     /// <returns>A pooled command ready to be configured.</returns>

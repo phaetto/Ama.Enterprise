@@ -92,6 +92,22 @@ public interface IDistributedCrdtDocument
     Task MergeSnapshotAsync(byte[] snapshotData, ShardVersionVectorMap globalState, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Applies a materialized snapshot payload with an explicit list of expected shard document keys from the sender's snapshot batch.
+    /// </summary>
+    /// <param name="snapshotData">The serialized CRDT document snapshot bytes.</param>
+    /// <param name="globalState">The shard version vector map attached to the snapshot.</param>
+    /// <param name="expectedShardDocumentIds">The optional list of document keys included in the sender's shard snapshot batch.</param>
+    /// <param name="deliveryMode">The delivery mode specifying whether to wait for completion or enqueue as fire-and-forget.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous merge operation.</returns>
+    Task MergeSnapshotAsync(
+        byte[] snapshotData,
+        ShardVersionVectorMap globalState,
+        IReadOnlyList<string>? expectedShardDocumentIds,
+        IntentDeliveryMode deliveryMode = IntentDeliveryMode.Acknowledged,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Asynchronously saves the current in-memory document state to persistent storage.
     /// Does not directly manage overarching DVV mapping updates avoiding structural write-ahead gaps.
     /// </summary>

@@ -65,6 +65,26 @@ public sealed class DistributedCrdtOptions
     public int AntiEntropyStartupIntervalSeconds { get; set; } = 2;
 
     /// <summary>
+    /// Gets or sets the pending command queue depth threshold (across the document and orchestrator channels)
+    /// above which the anti-entropy service skips dispatching a new state sync cycle to avoid overwhelming the node.
+    /// Defaults to 100. Set to 0 to disable queue depth throttling.
+    /// </summary>
+    public int AntiEntropyBusyQueueThreshold { get; set; } = 100;
+
+    /// <summary>
+    /// Gets or sets the adaptive delay in milliseconds added to the next anti-entropy cycle per 1,000 pending operations or queued commands.
+    /// When thousands of items are waiting to sync, this dynamically stretches the interval so in-flight batches can finish processing.
+    /// Defaults to 1000 milliseconds (1 second per 1,000 items). Set to 0 to disable adaptive backlog scaling.
+    /// </summary>
+    public int AntiEntropyAdaptiveDelayPerThousandItemsMilliseconds { get; set; } = 1000;
+
+    /// <summary>
+    /// Gets or sets the maximum adaptive interval in seconds between anti-entropy synchronization rounds when under heavy backlog load.
+    /// Defaults to 60 seconds. Must be greater than or equal to <see cref="AntiEntropyIntervalSeconds"/>.
+    /// </summary>
+    public int AntiEntropyMaxAdaptiveIntervalSeconds { get; set; } = 60;
+
+    /// <summary>
     /// Gets or sets the Time-To-Live (TTL) in seconds before a peer is considered dead and its state is evicted from the local cluster map and document metadata.
     /// Defaults to 0 (is disabled). Set to an int (something long like TimeSpan.FromDays(7).TotalSeconds) to enable peer eviction in volatile networks.
     /// If enabled (> 0), must be at least 3x the <see cref="AntiEntropyIntervalSeconds"/> and >= <see cref="MaintenanceIntervalSeconds"/> to prevent structural cluster oscillation.

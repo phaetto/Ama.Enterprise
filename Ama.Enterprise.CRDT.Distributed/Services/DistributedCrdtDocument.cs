@@ -370,11 +370,22 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// <inheritdoc />
     public Task MergeSnapshotAsync(byte[] snapshotData, ShardVersionVectorMap globalState, CancellationToken cancellationToken = default)
     {
-        return MergeSnapshotAsync(snapshotData, globalState, IntentDeliveryMode.Acknowledged, cancellationToken);
+        return MergeSnapshotAsync(snapshotData, globalState, null, IntentDeliveryMode.Acknowledged, cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task MergeSnapshotAsync(byte[] snapshotData, ShardVersionVectorMap globalState, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default)
+    public Task MergeSnapshotAsync(byte[] snapshotData, ShardVersionVectorMap globalState, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default)
+    {
+        return MergeSnapshotAsync(snapshotData, globalState, null, deliveryMode, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task MergeSnapshotAsync(
+        byte[] snapshotData,
+        ShardVersionVectorMap globalState,
+        IReadOnlyList<string>? expectedShardDocumentIds,
+        IntentDeliveryMode deliveryMode = IntentDeliveryMode.Acknowledged,
+        CancellationToken cancellationToken = default)
     {
         if (snapshotData == null || snapshotData.Length == 0 || isDisposed) return;
         ArgumentNullException.ThrowIfNull(globalState);
@@ -386,6 +397,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             ffCmd.Type = DocumentCommandType.MergeSnapshot;
             ffCmd.SnapshotData = snapshotData;
             ffCmd.GlobalState = globalState;
+            ffCmd.ExpectedShardDocumentIds = expectedShardDocumentIds;
 
             await commandPipeline.EnqueueFireAndForgetAsync(ffCmd, cancellationToken).ConfigureAwait(false);
             return;
@@ -396,6 +408,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         cmd.Type = DocumentCommandType.MergeSnapshot;
         cmd.SnapshotData = snapshotData;
         cmd.GlobalState = globalState;
+        cmd.ExpectedShardDocumentIds = expectedShardDocumentIds;
         cmd.CancellationToken = cancellationToken;
 
         try
@@ -1105,21 +1118,56 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             var snapshotDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(cmd.SnapshotData!);
 
             CrdtDocument<TState> currentDoc;
-            lock (syncRoot) { currentDoc = currentDocument; }
+            bool wasAlreadyDirty;
+            lock (syncRoot)
+            {
+                currentDoc = currentDocument;
+                wasAlreadyDirty = isDirty;
+            }
+
+            var stateChanged = !wasAlreadyDirty
+                ? HasIncomingSnapshotAdvance(currentDoc.Metadata, snapshotDoc.Metadata)
+                : true;
 
             await merger.MergeStateAsync(currentDoc, snapshotDoc, cmd.CancellationToken).ConfigureAwait(false);
 
             lock (syncRoot)
             {
                 currentDocument = currentDoc;
-                isDirty = true;
+                if (stateChanged)
+                {
+                    isDirty = true;
+                }
             }
 
             if (cmd.GlobalState != null && cmd.GlobalState.Count > 0)
             {
-                var activeShardDocIds = GetActiveDocumentIdsForShard();
                 var compositeDocId = GetStorageDocumentKey();
-                versionVectorManager.RecordDocumentSnapshotMerge(ShardId, compositeDocId, cmd.GlobalState, activeShardDocIds);
+                IReadOnlyList<string> requiredShardDocIds;
+
+                if (cmd.ExpectedShardDocumentIds is { Count: > 0 })
+                {
+                    if (ContainsOrdinal(cmd.ExpectedShardDocumentIds, compositeDocId))
+                    {
+                        requiredShardDocIds = cmd.ExpectedShardDocumentIds;
+                    }
+                    else
+                    {
+                        var copy = new List<string>(cmd.ExpectedShardDocumentIds.Count + 1);
+                        for (int i = 0; i < cmd.ExpectedShardDocumentIds.Count; i++)
+                        {
+                            copy.Add(cmd.ExpectedShardDocumentIds[i]);
+                        }
+                        copy.Add(compositeDocId);
+                        requiredShardDocIds = copy;
+                    }
+                }
+                else
+                {
+                    requiredShardDocIds = GetActiveDocumentIdsForShard();
+                }
+
+                versionVectorManager.RecordDocumentSnapshotMerge(ShardId, compositeDocId, cmd.GlobalState, requiredShardDocIds);
             }
             else
             {
@@ -1127,15 +1175,73 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             }
 
             telemetry.RecordDocumentSnapshotMerged(DocumentId);
-            await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
-
-            logger.LogInformation("Merged full state snapshot for document {DocumentId}.", DocumentId);
+            if (stateChanged)
+            {
+                await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
+                logger.LogInformation("Merged full state snapshot for document {DocumentId}.", DocumentId);
+            }
+            else
+            {
+                logger.LogDebug("Merged redundant state snapshot for document {DocumentId} without new causal state changes.", DocumentId);
+            }
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to merge snapshot for document {DocumentId}.", DocumentId);
             throw;
         }
+    }
+
+    private static bool HasIncomingSnapshotAdvance(CrdtMetadata? localMeta, CrdtMetadata? incomingMeta)
+    {
+        if (incomingMeta == null)
+        {
+            return false;
+        }
+
+        if (localMeta == null)
+        {
+            return true;
+        }
+
+        if (incomingMeta.VersionVector != null && incomingMeta.VersionVector.Count > 0)
+        {
+            if (localMeta.VersionVector == null)
+            {
+                return true;
+            }
+
+            foreach (var kvp in incomingMeta.VersionVector)
+            {
+                if (!localMeta.VersionVector.TryGetValue(kvp.Key, out var localVer) || kvp.Value > localVer)
+                {
+                    return true;
+                }
+            }
+        }
+        else if (localMeta.VersionVector == null || localMeta.VersionVector.Count == 0)
+        {
+            return true;
+        }
+
+        if (incomingMeta.SeenExceptions != null && incomingMeta.SeenExceptions.Count > 0)
+        {
+            foreach (var op in incomingMeta.SeenExceptions)
+            {
+                var localContiguous = localMeta.VersionVector != null &&
+                                      !string.IsNullOrEmpty(op.ReplicaId) &&
+                                      localMeta.VersionVector.TryGetValue(op.ReplicaId, out var lv)
+                    ? lv
+                    : 0L;
+
+                if (op.Clock > localContiguous && (localMeta.SeenExceptions == null || !localMeta.SeenExceptions.Contains(op)))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private IReadOnlyList<string> GetActiveDocumentIdsForShard()
@@ -1171,6 +1277,19 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         {
             return [compositeSelf];
         }
+    }
+
+    private static bool ContainsOrdinal(IReadOnlyList<string> list, string value)
+    {
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (string.Equals(list[i], value, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private Task ProcessCheckpointInternalAsync(PooledDocumentCommand cmd)
