@@ -84,17 +84,6 @@ public sealed class CrdtMaintenanceService : BackgroundService
                         {
                             evictedPeersCounter.Add(tombstonedPeers.Count, tag);
                             logger.LogInformation("[{ReplicaId}] Tombstoned {Count} dead peers based on TTL threshold ({TtlSeconds}s) preventing network log bound halts.", scope.ReplicaId, tombstonedPeers.Count, options.Value.PeerEvictionTtlSeconds);
-                            
-                            var documents = scope.Orchestrator.GetActiveDocuments();
-                            foreach (var document in documents)
-                            {
-                                foreach (var replicaId in tombstonedPeers)
-                                {
-                                    await document.EvictReplicaAsync(replicaId, IntentDeliveryMode.FireAndForget, stoppingToken).ConfigureAwait(false);
-                                }
-                            }
-
-                            versionVectorManager.EvictReplicas(tombstonedPeers);
                         }
                     }
 

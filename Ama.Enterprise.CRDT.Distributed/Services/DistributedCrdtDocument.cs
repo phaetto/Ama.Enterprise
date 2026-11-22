@@ -15,6 +15,7 @@ using Ama.CRDT.Services.GarbageCollection;
 using Ama.CRDT.Services.Pooling;
 using Ama.CRDT.Services.Providers;
 using Ama.CRDT.Services.Serialization;
+using Ama.CRDT.Services.Versioning;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 using Microsoft.Extensions.DependencyInjection;
@@ -830,6 +831,17 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             return;
         }
 
+        // Document-level metadata VersionVector tracks per-document clocks (CrdtOperation.Clock),
+        // whereas ShardVersionVectors track shard-wide clocks (CrdtOperation.ShardClock).
+        // Only the system registry document has a 1:1 document-to-shard mapping where DocumentClock == ShardClock.
+        // Merging a multi-document shard's per-document clock into the shard DVV corrupts or under-reports the shard clock.
+        if (typeof(TState) != typeof(CrdtRegistryState) &&
+            !string.Equals(DocumentId, Constants.SystemRegistryDocumentId, StringComparison.Ordinal))
+        {
+            versionVectorManager.EnsureShardRegistered(ShardId);
+            return;
+        }
+
         var versions = new Dictionary<string, long>(metadata.VersionVector, StringComparer.Ordinal);
         var dots = new Dictionary<string, ISet<long>>(StringComparer.Ordinal);
 
@@ -1138,13 +1150,13 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 ? HasIncomingSnapshotAdvance(currentDoc.Metadata, snapshotDoc.Metadata)
                 : true;
 
-            await merger.MergeStateAsync(currentDoc, snapshotDoc, cmd.CancellationToken).ConfigureAwait(false);
-
-            lock (syncRoot)
+            if (stateChanged)
             {
-                currentDocument = currentDoc;
-                if (stateChanged)
+                await merger.MergeStateAsync(currentDoc, snapshotDoc, cmd.CancellationToken).ConfigureAwait(false);
+
+                lock (syncRoot)
                 {
+                    currentDocument = currentDoc;
                     isDirty = true;
                 }
             }
@@ -1173,7 +1185,10 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 }
                 else
                 {
-                    requiredShardDocIds = GetActiveDocumentIdsForShard();
+                    // When a snapshot is received without an explicit multi-document batch list (e.g., single-document
+                    // ProvideSnapshotAsync or demotion push), advance the shard DVV immediately for this document
+                    // rather than blocking indefinitely waiting for other active documents in the shard.
+                    requiredShardDocIds = [compositeDocId];
                 }
 
                 versionVectorManager.RecordDocumentSnapshotMerge(ShardId, compositeDocId, cmd.GlobalState, requiredShardDocIds);
@@ -1201,7 +1216,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
     }
 
-    private static bool HasIncomingSnapshotAdvance(CrdtMetadata? localMeta, CrdtMetadata? incomingMeta)
+    private bool HasIncomingSnapshotAdvance(CrdtMetadata? localMeta, CrdtMetadata? incomingMeta)
     {
         if (incomingMeta == null)
         {
@@ -1213,37 +1228,49 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             return true;
         }
 
-        if (incomingMeta.VersionVector != null && incomingMeta.VersionVector.Count > 0)
+        var localVector = CreateDottedVersionVectorFromMetadata(localMeta);
+        var incomingVector = CreateDottedVersionVectorFromMetadata(incomingMeta);
+
+        if (IsVersionVectorEmpty(incomingVector))
         {
-            if (localMeta.VersionVector == null)
+            return IsVersionVectorEmpty(localVector);
+        }
+
+        var syncService = serviceProvider.GetService<IVersionVectorSyncService>();
+        if (syncService != null)
+        {
+            var requirement = syncService.CalculateRequirement(
+                "local",
+                localVector,
+                "incoming",
+                incomingVector,
+                ShardId);
+
+            return requirement.IsBehind;
+        }
+
+        foreach (var kvp in incomingVector.Versions)
+        {
+            if (kvp.Value <= 0)
+            {
+                continue;
+            }
+
+            var localVer = localVector.Versions.TryGetValue(kvp.Key, out var lv) ? lv : 0L;
+            if (kvp.Value > localVer)
             {
                 return true;
             }
-
-            foreach (var kvp in incomingMeta.VersionVector)
-            {
-                if (!localMeta.VersionVector.TryGetValue(kvp.Key, out var localVer) || kvp.Value > localVer)
-                {
-                    return true;
-                }
-            }
-        }
-        else if (localMeta.VersionVector == null || localMeta.VersionVector.Count == 0)
-        {
-            return true;
         }
 
-        if (incomingMeta.SeenExceptions != null && incomingMeta.SeenExceptions.Count > 0)
+        foreach (var kvp in incomingVector.Dots)
         {
-            foreach (var op in incomingMeta.SeenExceptions)
-            {
-                var localContiguous = localMeta.VersionVector != null &&
-                                      !string.IsNullOrEmpty(op.ReplicaId) &&
-                                      localMeta.VersionVector.TryGetValue(op.ReplicaId, out var lv)
-                    ? lv
-                    : 0L;
+            var localVer = localVector.Versions.TryGetValue(kvp.Key, out var lv) ? lv : 0L;
+            localVector.Dots.TryGetValue(kvp.Key, out var localDots);
 
-                if (op.Clock > localContiguous && (localMeta.SeenExceptions == null || !localMeta.SeenExceptions.Contains(op)))
+            foreach (var dot in kvp.Value)
+            {
+                if (dot > localVer && (localDots == null || !localDots.Contains(dot)))
                 {
                     return true;
                 }
@@ -1251,6 +1278,60 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
 
         return false;
+    }
+
+    private static DottedVersionVector CreateDottedVersionVectorFromMetadata(CrdtMetadata metadata)
+    {
+        var versions = metadata.VersionVector != null && metadata.VersionVector.Count > 0
+            ? new Dictionary<string, long>(metadata.VersionVector, StringComparer.Ordinal)
+            : new Dictionary<string, long>(StringComparer.Ordinal);
+
+        var dots = new Dictionary<string, ISet<long>>(StringComparer.Ordinal);
+        if (metadata.SeenExceptions != null && metadata.SeenExceptions.Count > 0)
+        {
+            foreach (var op in metadata.SeenExceptions)
+            {
+                if (!string.IsNullOrEmpty(op.ReplicaId) && op.Clock > 0)
+                {
+                    if (!dots.TryGetValue(op.ReplicaId, out var dotSet))
+                    {
+                        dotSet = new HashSet<long>();
+                        dots[op.ReplicaId] = dotSet;
+                    }
+
+                    dotSet.Add(op.Clock);
+                }
+            }
+        }
+
+        return new DottedVersionVector(versions, dots);
+    }
+
+    private static bool IsVersionVectorEmpty(DottedVersionVector vector)
+    {
+        if (vector.Versions != null)
+        {
+            foreach (var v in vector.Versions.Values)
+            {
+                if (v > 0)
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (vector.Dots != null)
+        {
+            foreach (var dots in vector.Dots.Values)
+            {
+                if (dots != null && dots.Count > 0)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     private IReadOnlyList<string> GetActiveDocumentIdsForShard()

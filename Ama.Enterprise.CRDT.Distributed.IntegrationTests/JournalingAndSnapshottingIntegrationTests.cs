@@ -2,6 +2,7 @@ namespace Ama.Enterprise.CRDT.Distributed.IntegrationTests;
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -13,6 +14,7 @@ using Ama.CRDT.Models.Aot;
 using Ama.CRDT.Models.Intents;
 using Ama.CRDT.Services;
 using Ama.CRDT.Services.Journaling;
+using Ama.CRDT.Services.Providers;
 using Ama.CRDT.Services.Serialization;
 using Ama.CRDT.Services.Versioning;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
@@ -962,5 +964,97 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         docsSavedCountBeforeTrim.ShouldBeGreaterThanOrEqualTo(2);
         savedDocumentKeys.ShouldContain(CrdtRegistryEntry.GetRegistryKey("journal-doc", "shared-shard-doc-1"));
         savedDocumentKeys.ShouldContain(CrdtRegistryEntry.GetRegistryKey("journal-doc", "shared-shard-doc-2"));
+    }
+
+    [IntegrationFact]
+    public async Task RestartAfterFullClusterSync_WithMultipleDocumentsInSameShard_DoesNotCorruptDocumentClocksOrRetriggerSync()
+    {
+        // Arrange: Shared persistent storage across reboot for two documents that map to the SAME shard ("default")
+        const string replicaId = "reboot-node-1";
+        const string sharedShardId = "default";
+
+        var serializerSp = BuildNode(replicaId);
+        var sharedStorage = new MemoryCrdtStorage(Mock.Of<IMeterFactory>(), serializerSp.GetRequiredService<ICrdtSerializer>());
+
+        // Phase 1: Boot node, create 2 documents in the same shard, apply 3 intents to each (ShardClock 1..6, DocA Clock 1..3, DocB Clock 1..3),
+        // and gracefully shut down (persisting checkpoints and GlobalDvv while leaving journal operations intact).
+        {
+            using var sp1 = (ServiceProvider)BuildNode(replicaId, services =>
+            {
+                services.Configure<DistributedCrdtOptions>(o =>
+                {
+                    o.EnableSharding = false;
+                    o.FlushModeOnShutdown = CrdtShutdownFlushMode.JournalAndCheckpoints;
+                });
+                services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(sharedStorage));
+            });
+
+            var init1 = sp1.GetServices<IHostedService>().OfType<CrdtInitializationService>().Single();
+            var shutdown1 = sp1.GetRequiredService<ICrdtShutdownCoordinator>();
+
+            await init1.StartAsync(CancellationToken.None);
+
+            var scope1 = sp1.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(replicaId);
+            await scope1.Orchestrator.CreateDocumentAsync("doc-a", "journal-doc", CancellationToken.None);
+            await scope1.Orchestrator.CreateDocumentAsync("doc-b", "journal-doc", CancellationToken.None);
+
+            for (int i = 0; i < 3; i++)
+            {
+                await scope1.Orchestrator.ApplyIntentAsync<JournalTestState>("doc-a", new MapSetIntent($"k{i}", $"va{i}"), nameof(JournalTestState.DataMap), CancellationToken.None);
+                await scope1.Orchestrator.ApplyIntentAsync<JournalTestState>("doc-b", new MapSetIntent($"k{i}", $"vb{i}"), nameof(JournalTestState.DataMap), CancellationToken.None);
+            }
+
+            await shutdown1.FlushAllScopesAsync("Phase1Shutdown", CancellationToken.None);
+            await init1.StopAsync(CancellationToken.None);
+        }
+
+        var dvvBeforeReboot = await sharedStorage.LoadShardVersionVectorMapAsync(replicaId, CancellationToken.None);
+        dvvBeforeReboot.ShouldNotBeNull();
+        dvvBeforeReboot[sharedShardId].Versions[replicaId].ShouldBe(6L);
+
+        // Phase 2: Reboot node from the same storage. CrdtInitializationService loads checkpoints and replays the journal.
+        {
+            using var sp2 = (ServiceProvider)BuildNode(replicaId, services =>
+            {
+                services.Configure<DistributedCrdtOptions>(o =>
+                {
+                    o.EnableSharding = false;
+                });
+                services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(sharedStorage));
+            });
+
+            var init2 = sp2.GetServices<IHostedService>().OfType<CrdtInitializationService>().Single();
+            await init2.StartAsync(CancellationToken.None);
+
+            var scope2 = sp2.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(replicaId);
+            var vvm2 = scope2.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+
+            var docA = await scope2.Orchestrator.GetDocumentStateAsync<JournalTestState>("doc-a", CancellationToken.None);
+            var docB = await scope2.Orchestrator.GetDocumentStateAsync<JournalTestState>("doc-b", CancellationToken.None);
+
+            // Document values and document-level clocks must NOT be corrupted by ShardClock vs DocumentClock mismatch
+            docA.Data.DataMap.Count.ShouldBe(3);
+            docB.Data.DataMap.Count.ShouldBe(3);
+            docA.Metadata.VersionVector[replicaId].ShouldBe(3L);
+            docB.Metadata.VersionVector[replicaId].ShouldBe(3L);
+
+            // Shard DVV must remain at 6 (not inflated to 9 or reset to 3) so a synced peer at 6 needs 0 operations
+            var dvvAfterReboot = vvm2.GetFullSnapshot();
+            dvvAfterReboot[sharedShardId].Versions[replicaId].ShouldBe(6L);
+            (dvvAfterReboot[sharedShardId].Dots == null ||
+             !dvvAfterReboot[sharedShardId].Dots.TryGetValue(replicaId, out var dots) ||
+             dots.Count == 0).ShouldBeTrue();
+
+            var syncService = scope2.ServiceProvider.GetRequiredService<IVersionVectorSyncService>();
+            var requirement = syncService.CalculateRequirement(
+                "peer-node-2",
+                dvvBeforeReboot[sharedShardId],
+                replicaId,
+                dvvAfterReboot[sharedShardId],
+                sharedShardId);
+            requirement.IsBehind.ShouldBeFalse();
+
+            await init2.StopAsync(CancellationToken.None);
+        }
     }
 }

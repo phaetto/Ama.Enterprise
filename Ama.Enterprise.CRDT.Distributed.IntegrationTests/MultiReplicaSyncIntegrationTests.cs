@@ -310,6 +310,61 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
     }
 
     [IntegrationFact]
+    public async Task TwoReplicas_TtlExpiration_ShouldPreserveOriginReplicaDvvHistory_AndNotCauseBounceBack()
+    {
+        // Arrange - Node A creates data and syncs it to Node B.
+        // Node B has a short PeerEvictionTtlSeconds (1s). When Node A goes quiet for 2s, Node B expires A from ClusterTracker
+        // so A no longer blocks GMVV journal trimming, but Node B MUST NOT wipe "ReplicaA" from its ShardVersionVectors!
+        var nodeA = BuildNode("ReplicaA");
+        var nodeB = BuildNode("ReplicaB", opt =>
+        {
+            opt.MaintenanceIntervalSeconds = 1;
+            opt.PeerEvictionTtlSeconds = 1;
+            opt.PeerTombstoneCooldownSeconds = 1;
+        });
+
+        WireMesh(nodeA, nodeB);
+
+        var scopeA = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeA.ReplicaId);
+        var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchA.InitializeAsync(CancellationToken.None);
+
+        var scopeB = nodeB.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeB.ReplicaId);
+        var orchB = scopeB.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchB.InitializeAsync(CancellationToken.None);
+
+        // Node A creates 2 documents in the same shard and applies operations
+        await orchA.CreateDocumentAsync("doc-ttl-1", "shared-doc", CancellationToken.None);
+        await orchA.CreateDocumentAsync("doc-ttl-2", "shared-doc", CancellationToken.None);
+        await orchA.ApplyIntentAsync<SharedTestState>("doc-ttl-1", new MapSetIntent("K1", "V1"), nameof(SharedTestState.DataMap), CancellationToken.None);
+        await orchA.ApplyIntentAsync<SharedTestState>("doc-ttl-2", new MapSetIntent("K2", "V2"), nameof(SharedTestState.DataMap), CancellationToken.None);
+
+        await Task.Delay(1000);
+
+        // Register Node A in Node B's cluster tracker, then wait for TTL expiration + maintenance cycle
+        var vvmA = scopeA.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+        var vvmB = scopeB.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+        scopeB.ClusterTracker.UpdatePeerState("ReplicaA", nodeA.PeerId.Value.ToString(), vvmA.GetFullSnapshot());
+
+        // Wait 3.5s for Node B's CrdtMaintenanceService to expire ReplicaA and clean up the tombstone cooldown
+        await Task.Delay(3500);
+
+        // Assert - Node B's shard DVV MUST still remember ReplicaA's version (2)
+        var snapshotB = vvmB.GetFullSnapshot();
+        snapshotB.ShouldContainKey("default");
+        snapshotB["default"].Versions.ShouldContainKey("ReplicaA");
+        snapshotB["default"].Versions["ReplicaA"].ShouldBe(2L);
+
+        // And when Node B sends its DVV to Node A, neither node considers the other behind
+        var syncService = scopeA.ServiceProvider.GetRequiredService<Ama.CRDT.Services.Versioning.IVersionVectorSyncService>();
+        var reqAtA = syncService.CalculateRequirement("ReplicaB", snapshotB["default"], "ReplicaA", vvmA.GetFullSnapshot()["default"], "default");
+        var reqAtB = syncService.CalculateRequirement("ReplicaA", vvmA.GetFullSnapshot()["default"], "ReplicaB", snapshotB["default"], "default");
+
+        reqAtA.IsBehind.ShouldBeFalse();
+        reqAtB.IsBehind.ShouldBeFalse();
+    }
+
+    [IntegrationFact]
     public async Task NodeRestart_ShouldImmediatelyPurgeExpiredTombstones_DuringStateImport()
     {
         // Arrange

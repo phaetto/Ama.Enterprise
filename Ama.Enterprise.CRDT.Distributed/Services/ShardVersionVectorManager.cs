@@ -270,9 +270,9 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
 
         if (dvvList.Count == activeShardDocumentIds.Count)
         {
-            var gmvv = syncService.CalculateGlobalMinimumVersionVector(dvvList);
-            var mergedDots = IntersectSnapshotDots(dvvList, gmvv, stringPool);
-            var safeFloorDvv = new DottedVersionVector(new Dictionary<string, long>(gmvv), mergedDots);
+            var gmvv = CalculateSnapshotBatchMinimumVersions(dvvList, stringPool);
+            var mergedDots = IntersectSnapshotDots(dvvList, gmvv.AsReadOnly(), stringPool);
+            var safeFloorDvv = new DottedVersionVector(gmvv, mergedDots);
             MergeDvvIntoShard(shardId, safeFloorDvv);
             docMap.Clear();
             pendingDocumentSnapshots.TryRemove(shardId, out _);
@@ -548,7 +548,7 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
                 copiedVersions[stringPool.GetOrAdd(kvp.Key)] = kvp.Value;
             }
 
-            if (dvv.Dots != null)
+            if ( dvv.Dots != null)
             {
                 foreach (var kvp in dvv.Dots)
                 {
@@ -558,6 +558,56 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         }
 
         return new DottedVersionVector(copiedVersions, copiedDots);
+    }
+
+    private static IDictionary<string, long> CalculateSnapshotBatchMinimumVersions(
+        IReadOnlyList<DottedVersionVector> dvvList,
+        ICrdtStringPool stringPool)
+    {
+        var result = new Dictionary<string, long>(StringComparer.Ordinal);
+        if (dvvList.Count == 0)
+        {
+            return result;
+        }
+
+        var firstVersions = dvvList[0].Versions;
+        if (firstVersions == null || firstVersions.Count == 0)
+        {
+            return result;
+        }
+
+        foreach (var kvp in firstVersions)
+        {
+            var replicaId = kvp.Key;
+            var minVersion = kvp.Value;
+            if (minVersion <= 0)
+            {
+                continue;
+            }
+
+            var presentInAll = true;
+            for (int i = 1; i < dvvList.Count; i++)
+            {
+                var otherVersions = dvvList[i].Versions;
+                if (otherVersions == null || !otherVersions.TryGetValue(replicaId, out var otherVersion) || otherVersion <= 0)
+                {
+                    presentInAll = false;
+                    break;
+                }
+
+                if (otherVersion < minVersion)
+                {
+                    minVersion = otherVersion;
+                }
+            }
+
+            if (presentInAll && minVersion > 0)
+            {
+                result[stringPool.GetOrAdd(replicaId)] = minVersion;
+            }
+        }
+
+        return result;
     }
 
     private static IDictionary<string, ISet<long>> IntersectSnapshotDots(
