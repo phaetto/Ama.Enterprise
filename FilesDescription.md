@@ -277,7 +277,7 @@
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/Models/TestNode.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/P2pAdvancedIntegrationTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/P2pNetworkIntegrationTests.cs` | Contains complex integration tests validating TCP binding, deduplications, and payload distributions. Removed obsolete direct `HttpClient` testing replacing it with `ITransportRouter`. |
-| `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/P2pVersioningIntegrationTests.cs` | Integration tests verifying backwards compatibility and protocol versioning constraints. Upgraded to utilize TCP transports dropping obsolete HTTP bindings. |
+| `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/P2pVersioningIntegrationTests.cs` | Updated `Network_ShouldAcceptMessages_WithCurrentYamlProtocolVersion_0_1_to_0_2` to exchange a mix of `0.1.0` and `0.2.0` protocol version messages between two nodes. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/PushPullGossipIntegrationTests.cs` | No description provided. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/QuicNetworkIntegrationTests.cs` | Added integration testing evaluating multiplexed encrypted QUIC TLS 1.3 behaviors validating standard networking flows. |
 | `$/Ama.Enterprise.P2p.IntegrationTests/Algorithms/SessionRoutingIntegrationTests.cs` | Integration tests verifying end-to-end multi-mesh Zero-Trust routing policies tracking token validations, outbound drops, and inbound structural rejections implicitly. |

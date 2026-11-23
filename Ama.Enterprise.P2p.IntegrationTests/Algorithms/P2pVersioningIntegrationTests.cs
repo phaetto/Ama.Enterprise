@@ -80,25 +80,38 @@ public sealed class P2pVersioningIntegrationTests(ITestOutputHelper testOutputHe
 
     [IntegrationFact]
     [TestedProtocolVersion(0, 1)]
-    public async Task Network_ShouldAcceptMessages_WithCurrentYamlProtocolVersion_0_1()
+    [TestedProtocolVersion(0, 2)]
+    public async Task Network_ShouldAcceptMessages_WithCurrentYamlProtocolVersion_0_1_to_0_2()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var node = CreateTestNode(resourceManager.GetNextPort());
-        await node.HostedService.StartAsync(cts.Token);
+        await using var nodeA = CreateTestNode(resourceManager.GetNextPort());
+        await using var nodeB = CreateTestNode(resourceManager.GetNextPort());
 
-        // This explicit test directly maps to the deployed YAML version natively covering explicit bound regressions gracefully.
-        var deployedVersion = new Version(0, 1, 0);
+        await nodeA.HostedService.StartAsync(cts.Token);
+        await nodeB.HostedService.StartAsync(cts.Token);
 
-        var router = node.Provider.GetRequiredKeyedService<ITransportRouter>(TestMeshId);
-        
-        var dummyMessage = new GossipMessage(TestMeshId, deployedVersion.ToString(), Guid.NewGuid(), new PeerId(Guid.NewGuid()), 5, ReadOnlyMemory<byte>.Empty);
-        
-        await router.SendAsync(node.Endpoint, dummyMessage, cts.Token);
+        var version0_1 = new Version(0, 1, 0);
+        var version0_2 = new Version(0, 2, 0);
+
+        var routerA = nodeA.Provider.GetRequiredKeyedService<ITransportRouter>(TestMeshId);
+        var routerB = nodeB.Provider.GetRequiredKeyedService<ITransportRouter>(TestMeshId);
+
+        var message0_1ToB = new GossipMessage(TestMeshId, version0_1.ToString(), Guid.NewGuid(), nodeA.Id, 5, ReadOnlyMemory<byte>.Empty);
+        var message0_2ToA = new GossipMessage(TestMeshId, version0_2.ToString(), Guid.NewGuid(), nodeB.Id, 5, ReadOnlyMemory<byte>.Empty);
+        var message0_2ToB = new GossipMessage(TestMeshId, version0_2.ToString(), Guid.NewGuid(), nodeA.Id, 5, ReadOnlyMemory<byte>.Empty);
+        var message0_1ToA = new GossipMessage(TestMeshId, version0_1.ToString(), Guid.NewGuid(), nodeB.Id, 5, ReadOnlyMemory<byte>.Empty);
+
+        // Exchange a mix of 0.1.0 and 0.2.0 messages across both nodes
+        await routerA.SendAsync(nodeB.Endpoint, message0_1ToB, cts.Token);
+        await routerB.SendAsync(nodeA.Endpoint, message0_2ToA, cts.Token);
+        await routerA.SendAsync(nodeB.Endpoint, message0_2ToB, cts.Token);
+        await routerB.SendAsync(nodeA.Endpoint, message0_1ToA, cts.Token);
 
         await Task.Delay(TimeSpan.FromSeconds(2), cts.Token);
 
-        // Verify it passed the protocol verification and was accepted seamlessly
-        node.Handler.ReceivedMessages.Count.ShouldBe(1);
+        // Verify both nodes accepted the mixed 0.1.0 and 0.2.0 messages
+        nodeA.Handler.ReceivedMessages.Count.ShouldBe(2);
+        nodeB.Handler.ReceivedMessages.Count.ShouldBe(2);
     }
 
     private TestNode CreateTestNode(int port)
