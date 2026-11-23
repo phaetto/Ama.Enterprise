@@ -8,6 +8,7 @@ using Ama.CRDT.Models.Intents;
 using Ama.CRDT.Services;
 using Ama.CRDT.Services.Versioning;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
+using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Transports;
@@ -51,9 +52,14 @@ public sealed class ScopeTopologyProviderIntegrationTests
     {
         public HashSet<string> ExpectedPeers { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        public ValueTask<bool> IsPeerExpectedAsync(string peerNetworkId, CancellationToken cancellationToken = default)
+        public ValueTask<bool> CanAcceptScopeFromPeerAsync(ScopeAccessContext context, CancellationToken cancellationToken = default)
         {
-            return new ValueTask<bool>(ExpectedPeers.Contains(peerNetworkId));
+            return new ValueTask<bool>(!string.IsNullOrWhiteSpace(context.PeerNetworkId) && ExpectedPeers.Contains(context.PeerNetworkId));
+        }
+
+        public ValueTask<bool> CanReplicateScopeToPeerAsync(ScopeAccessContext context, CancellationToken cancellationToken = default)
+        {
+            return new ValueTask<bool>(!string.IsNullOrWhiteSpace(context.PeerNetworkId) && ExpectedPeers.Contains(context.PeerNetworkId));
         }
     }
 
@@ -462,7 +468,7 @@ public sealed class ScopeTopologyProviderIntegrationTests
         // 1. CrdtSync from unexpected peer
         var remoteGlobalState = await remoteScope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>().GetFullSnapshotAsync(CancellationToken.None);
         var syncMsg = new Models.CrdtStateSyncMessage("UnauthorizedReplica", remoteGlobalState);
-        var syncWrapper = new Models.CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg));
+        var syncWrapper = new Models.CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg), "UnauthorizedReplica");
 
         // 2. CrdtPatch from unexpected peer
         var remoteOps = (await remoteScope.Storage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync())
@@ -470,13 +476,13 @@ public sealed class ScopeTopologyProviderIntegrationTests
             .Select(o => o.Operation)
             .ToArray();
         var patchMsg = new Models.CrdtPatchMessage("UnauthorizedReplica", new CrdtPatch(remoteOps));
-        var patchWrapper = new Models.CrdtMessageWrapper("topo-doc", "CrdtPatch", serializer.SerializeToBytes(patchMsg), "topo-doc");
+        var patchWrapper = new Models.CrdtMessageWrapper("topo-doc", "CrdtPatch", serializer.SerializeToBytes(patchMsg), "UnauthorizedReplica", "topo-doc");
 
         // 3. CrdtSnapshot from unexpected peer
         var remoteDoc = remoteScope.Orchestrator.TryGetLocalDocument<TopologyTestState>("topo-doc")!;
         var snapDto = await remoteDoc.GetSnapshotDataAsync(CancellationToken.None);
         var snapMsg = new Models.CrdtSnapshotMessage("UnauthorizedReplica", snapDto.SnapshotData, snapDto.GlobalState);
-        var snapWrapper = new Models.CrdtMessageWrapper("topo-doc", "CrdtSnapshot", serializer.SerializeToBytes(snapMsg), "topo-doc");
+        var snapWrapper = new Models.CrdtMessageWrapper("topo-doc", "CrdtSnapshot", serializer.SerializeToBytes(snapMsg), "UnauthorizedReplica", "topo-doc");
 
         // Act
         await handler.HandlePayloadAsync(TestMeshId, unexpectedPeerId, serializer.SerializeToBytes(syncWrapper), CancellationToken.None);
@@ -567,7 +573,237 @@ public sealed class ScopeTopologyProviderIntegrationTests
         var targets = await distributionManager.GetTargetNodesForShardAsync("user-shard-1", CancellationToken.None);
 
         // Assert 2 - RevokedReplica must not be included in the hash ring even though its network peer is Active in IPeerRegistry
+        // Assert - RevokedReplica must not be included in the hash ring even though its network peer is Active in IPeerRegistry
         targets.ShouldNotContain("RevokedReplica");
         targets.ShouldContain("Replica1");
+    }
+
+    public sealed class RoleAndRegionScopeAccessPolicy : IScopeTopologyProvider
+    {
+        private readonly string localRole;
+        private readonly string localRegion;
+        private readonly IReadOnlyDictionary<string, (string Role, string Region)> peerSessions;
+
+        public RoleAndRegionScopeAccessPolicy(
+            string localRole,
+            string localRegion,
+            IReadOnlyDictionary<string, (string Role, string Region)> peerSessions)
+        {
+            this.localRole = localRole;
+            this.localRegion = localRegion;
+            this.peerSessions = peerSessions;
+        }
+
+        public ValueTask<bool> CanAcceptScopeFromPeerAsync(ScopeAccessContext context, CancellationToken cancellationToken = default)
+        {
+            if (!peerSessions.TryGetValue(context.PeerNetworkId, out var remote))
+            {
+                return new ValueTask<bool>(false);
+            }
+
+            return new ValueTask<bool>(
+                IsNodeAuthorizedForScope(localRole, localRegion, context.ScopeId) &&
+                IsNodeAuthorizedForScope(remote.Role, remote.Region, context.ScopeId));
+        }
+
+        public ValueTask<bool> CanReplicateScopeToPeerAsync(ScopeAccessContext context, CancellationToken cancellationToken = default)
+        {
+            if (!peerSessions.TryGetValue(context.PeerNetworkId, out var remote))
+            {
+                return new ValueTask<bool>(false);
+            }
+
+            return new ValueTask<bool>(
+                IsNodeAuthorizedForScope(localRole, localRegion, context.ScopeId) &&
+                IsNodeAuthorizedForScope(remote.Role, remote.Region, context.ScopeId));
+        }
+
+        private static bool IsNodeAuthorizedForScope(string role, string region, string scopeId)
+        {
+            var dash = scopeId.IndexOf('-', StringComparison.Ordinal);
+            if (dash <= 0) return true;
+
+            var scopeRegion = scopeId[..dash];
+            var remainder = scopeId[(dash + 1)..];
+            var secondDash = remainder.IndexOf('-', StringComparison.Ordinal);
+            var scopeRole = secondDash > 0 ? remainder[..secondDash] : remainder;
+
+            var isServer = string.IsNullOrEmpty(role);
+            if (!isServer &&
+                !string.Equals(scopeRole, "shared", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(role, scopeRole, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (string.Equals(scopeRegion, "eu", StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Equals(region, "EU", StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (string.Equals(scopeRegion, "us", StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Equals(region, "US", StringComparison.OrdinalIgnoreCase) ||
+                       string.Equals(region, "EU", StringComparison.OrdinalIgnoreCase);
+            }
+
+            return false;
+        }
+    }
+
+    [IntegrationFact]
+    public async Task DynamicReplicaScopes_ShouldIsolateUserAndAdminOnSameServer_AndReplicateUsToEuAcrossMeshesWhileBlockingEuToUs()
+    {
+        // Arrange: 5 physical nodes across 2 meshes ("server" and "user"):
+        // - UserUS   (Role="user",  Region="US", Mesh="user")
+        // - ServerUS (Role="",      Region="US", Mesh="server", "user")
+        // - ServerEU (Role="",      Region="EU", Mesh="server", "user")
+        // - UserEU   (Role="user",  Region="EU", Mesh="user")
+        // - AdminEU  (Role="admin", Region="EU", Mesh="user")
+        var peerUserUs = new PeerId(Guid.NewGuid());
+        var peerServerUs = new PeerId(Guid.NewGuid());
+        var peerServerEu = new PeerId(Guid.NewGuid());
+        var peerUserEu = new PeerId(Guid.NewGuid());
+        var peerAdminEu = new PeerId(Guid.NewGuid());
+
+        var peerDirectory = new Dictionary<string, (string Role, string Region)>(StringComparer.OrdinalIgnoreCase)
+        {
+            [peerUserUs.Value.ToString()] = ("user", "US"),
+            [peerServerUs.Value.ToString()] = (string.Empty, "US"),
+            [peerServerEu.Value.ToString()] = (string.Empty, "EU"),
+            [peerUserEu.Value.ToString()] = ("user", "EU"),
+            [peerAdminEu.Value.ToString()] = ("admin", "EU")
+        };
+
+        var nodesByPeerId = new Dictionary<Guid, IServiceProvider>();
+
+        IServiceProvider CreateMultiScopeNode(string hostReplicaId, PeerId localPeerId, string role, string region, string[] meshes)
+        {
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddDistributedCrdtCore(opt =>
+            {
+                opt.ActiveSyncEnabled = true;
+                opt.ActiveSyncDebounceMilliseconds = 0;
+            });
+            services.AddCrdt()
+                .AddCrdtAotContext(new TopologyTestAotContext())
+                .AddCrdtJsonTypeInfoResolver(TopologyTestJsonContext.Default);
+            services.AddDistributedDocumentType<TopologyTestState>("topo-doc");
+            services.AddDistributedCrdtReplica(hostReplicaId, meshes);
+
+            var policy = new RoleAndRegionScopeAccessPolicy(role, region, peerDirectory);
+            services.Replace(ServiceDescriptor.Scoped<IScopeTopologyProvider>(_ => policy));
+
+            services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
+            foreach (var m in meshes)
+            {
+                services.AddSingleton(new P2pMeshMetadata(m));
+            }
+
+            var mockSender = new Mock<IDirectMessageSender>();
+            mockSender
+                .Setup(s => s.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()))
+                .Returns<PeerId, ReadOnlyMemory<byte>, CancellationToken>(async (targetId, payload, ct) =>
+                {
+                    if (nodesByPeerId.TryGetValue(targetId.Value, out var targetSp))
+                    {
+                        var handler = targetSp.GetKeyedService<IApplicationPayloadHandler>("user")
+                                      ?? targetSp.GetRequiredKeyedService<IApplicationPayloadHandler>("server");
+                        await handler.HandlePayloadAsync("user", localPeerId, payload, ct);
+                    }
+                });
+
+            mockSender
+                .Setup(s => s.SendDirectAsync(It.IsAny<string>(), It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()))
+                .Returns<string, PeerId, ReadOnlyMemory<byte>, CancellationToken>(async (mesh, targetId, payload, ct) =>
+                {
+                    if (nodesByPeerId.TryGetValue(targetId.Value, out var targetSp))
+                    {
+                        var handler = targetSp.GetKeyedService<IApplicationPayloadHandler>(mesh)
+                                      ?? targetSp.GetKeyedService<IApplicationPayloadHandler>("user")
+                                      ?? targetSp.GetRequiredKeyedService<IApplicationPayloadHandler>("server");
+                        await handler.HandlePayloadAsync(mesh, localPeerId, payload, ct);
+                    }
+                });
+
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+            services.Replace(ServiceDescriptor.Singleton(Mock.Of<IP2pAlgorithm>()));
+
+            var sp = services.BuildServiceProvider();
+            nodesByPeerId[localPeerId.Value] = sp;
+            return sp;
+        }
+
+        var spUserUs = CreateMultiScopeNode("node-user-us", peerUserUs, "user", "US", ["user"]);
+        var spServerUs = CreateMultiScopeNode("node-server-us", peerServerUs, string.Empty, "US", ["server", "user"]);
+        var spServerEu = CreateMultiScopeNode("node-server-eu", peerServerEu, string.Empty, "EU", ["server", "user"]);
+        var spUserEu = CreateMultiScopeNode("node-user-eu", peerUserEu, "user", "EU", ["user"]);
+        var spAdminEu = CreateMultiScopeNode("node-admin-eu", peerAdminEu, "admin", "EU", ["user"]);
+
+        // Wire physical mesh connections:
+        // UserUS <-> ServerUS ("user" mesh)
+        await spUserUs.GetRequiredService<IPeerRegistry>().AddOrUpdatePeerAsync("user", new PeerNode(peerServerUs, new TcpPeerEndpoint("127.0.0.1", 7001)), PeerStatus.Active, CancellationToken.None);
+        await spServerUs.GetRequiredService<IPeerRegistry>().AddOrUpdatePeerAsync("user", new PeerNode(peerUserUs, new TcpPeerEndpoint("127.0.0.1", 7002)), PeerStatus.Active, CancellationToken.None);
+
+        // ServerUS <-> ServerEU ("server" mesh)
+        await spServerUs.GetRequiredService<IPeerRegistry>().AddOrUpdatePeerAsync("server", new PeerNode(peerServerEu, new TcpPeerEndpoint("127.0.0.1", 7003)), PeerStatus.Active, CancellationToken.None);
+        await spServerEu.GetRequiredService<IPeerRegistry>().AddOrUpdatePeerAsync("server", new PeerNode(peerServerUs, new TcpPeerEndpoint("127.0.0.1", 7004)), PeerStatus.Active, CancellationToken.None);
+
+        // ServerEU <-> UserEU and AdminEU ("user" mesh)
+        await spServerEu.GetRequiredService<IPeerRegistry>().AddOrUpdatePeerAsync("user", new PeerNode(peerUserEu, new TcpPeerEndpoint("127.0.0.1", 7005)), PeerStatus.Active, CancellationToken.None);
+        await spUserEu.GetRequiredService<IPeerRegistry>().AddOrUpdatePeerAsync("user", new PeerNode(peerServerEu, new TcpPeerEndpoint("127.0.0.1", 7006)), PeerStatus.Active, CancellationToken.None);
+        await spServerEu.GetRequiredService<IPeerRegistry>().AddOrUpdatePeerAsync("user", new PeerNode(peerAdminEu, new TcpPeerEndpoint("127.0.0.1", 7007)), PeerStatus.Active, CancellationToken.None);
+        await spAdminEu.GetRequiredService<IPeerRegistry>().AddOrUpdatePeerAsync("user", new PeerNode(peerServerEu, new TcpPeerEndpoint("127.0.0.1", 7008)), PeerStatus.Active, CancellationToken.None);
+
+        // Act 1: User (EU) creates "eu-user-list" in scope "eu-user"
+        var userEuScope = await spUserEu.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScopeAsync("eu-user", "node-user-eu", CancellationToken.None);
+        await userEuScope.Orchestrator.CreateDocumentAsync("eu-user-list", "topo-doc", CancellationToken.None);
+        await userEuScope.Orchestrator.ApplyIntentAsync<TopologyTestState>("eu-user-list", new MapSetIntent("task1", "from-eu-user"), nameof(TopologyTestState.DataMap), CancellationToken.None);
+        await userEuScope.Orchestrator.FlushAsync(CancellationToken.None);
+        foreach (var obs in userEuScope.ServiceProvider.GetServices<Services.Observers.IDocumentPatchObserver>())
+        {
+            await obs.FlushAsync(CancellationToken.None);
+        }
+
+        // Assert 1:
+        // - Server (EU) receives "eu-user-list" inside its isolated "eu-user" scope
+        // - Admin (EU) does NOT receive the "eu-user" scope or "eu-user-list"
+        // - Server (US) and User (US) do NOT receive "eu-user" (EU data stays in EU)
+        var serverEuScopeManager = spServerEu.GetRequiredService<DistributedCrdtScopeManager>();
+        serverEuScopeManager.TryGetScope("eu-user", out var serverEuUserScope).ShouldBeTrue();
+        (await serverEuUserScope!.Orchestrator.DocumentExistsAsync("eu-user-list", CancellationToken.None)).ShouldBeTrue();
+
+        var adminEuScopeManager = spAdminEu.GetRequiredService<DistributedCrdtScopeManager>();
+        adminEuScopeManager.TryGetScope("eu-user", out _).ShouldBeFalse();
+
+        var serverUsScopeManager = spServerUs.GetRequiredService<DistributedCrdtScopeManager>();
+        serverUsScopeManager.TryGetScope("eu-user", out _).ShouldBeFalse();
+
+        // Act 2: User (US) creates "us-user-list" in scope "us-user"
+        var userUsScope = await spUserUs.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScopeAsync("us-user", "node-user-us", CancellationToken.None);
+        await userUsScope.Orchestrator.CreateDocumentAsync("us-user-list", "topo-doc", CancellationToken.None);
+        await userUsScope.Orchestrator.ApplyIntentAsync<TopologyTestState>("us-user-list", new MapSetIntent("us-task", "from-us-user"), nameof(TopologyTestState.DataMap), CancellationToken.None);
+        await userUsScope.Orchestrator.FlushAsync(CancellationToken.None);
+        foreach (var obs in userUsScope.ServiceProvider.GetServices<Services.Observers.IDocumentPatchObserver>())
+        {
+            await obs.FlushAsync(CancellationToken.None);
+        }
+
+        // Assert 2: "us-user-list" bridges across User (US) ->["user" mesh]-> Server (US) ->["server" mesh]-> Server (EU) ->["user" mesh]-> User (EU),
+        // while Admin (EU) never receives "us-user"!
+        serverUsScopeManager.TryGetScope("us-user", out var serverUsUserScope).ShouldBeTrue();
+        (await serverUsUserScope!.Orchestrator.DocumentExistsAsync("us-user-list", CancellationToken.None)).ShouldBeTrue();
+
+        serverEuScopeManager.TryGetScope("us-user", out var serverEuUsUserScope).ShouldBeTrue();
+        (await serverEuUsUserScope!.Orchestrator.DocumentExistsAsync("us-user-list", CancellationToken.None)).ShouldBeTrue();
+
+        var userEuScopeManager = spUserEu.GetRequiredService<DistributedCrdtScopeManager>();
+        userEuScopeManager.TryGetScope("us-user", out var userEuUsScope).ShouldBeTrue();
+        (await userEuUsScope!.Orchestrator.DocumentExistsAsync("us-user-list", CancellationToken.None)).ShouldBeTrue();
+        var userEuUsDoc = await userEuUsScope.Orchestrator.GetDocumentStateAsync<TopologyTestState>("us-user-list", CancellationToken.None);
+        userEuUsDoc.Data.DataMap.ShouldContainKeyAndValue("us-task", "from-us-user");
+
+        adminEuScopeManager.TryGetScope("us-user", out _).ShouldBeFalse();
     }
 }

@@ -257,7 +257,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         
         var snapshotMsg = new CrdtSnapshotMessage("RemoteA", snapshotBytes, globalMap);
         var payloadBytes = serializer.SerializeToBytes(snapshotMsg);
-        var wrapper = new CrdtMessageWrapper("journal-doc", "CrdtSnapshot", payloadBytes);
+        var wrapper = new CrdtMessageWrapper("journal-doc", "CrdtSnapshot", payloadBytes, "RemoteA");
         var wrapperBytes = serializer.SerializeToBytes(wrapper);
         
         var gossipMsg = new GossipMessage("TestMesh", Guid.NewGuid(), new PeerId(Guid.NewGuid()), 10, wrapperBytes);
@@ -638,7 +638,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var handlerB = spB.GetRequiredKeyedService<IApplicationPayloadHandler>("TestMesh");
 
         var snapshotMsg = new CrdtSnapshotMessage("ReplicaA", registrySnapshotDto.SnapshotData, registrySnapshotDto.GlobalState);
-        var wrapper = new CrdtMessageWrapper(orchB.Registry.DocumentId, "CrdtSnapshot", serializer.SerializeToBytes(snapshotMsg));
+        var wrapper = new CrdtMessageWrapper(orchB.Registry.DocumentId, "CrdtSnapshot", serializer.SerializeToBytes(snapshotMsg), "ReplicaA");
         var wrapperBytes = serializer.SerializeToBytes(wrapper);
 
         // Act - Deliver the registry CrdtSnapshot to Node B

@@ -1486,7 +1486,7 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
 
         // Act - Deliver the in-flight stale CrdtSync from Server 3 to Server 2 (a gossip recipient, NOT the creator!)
         var serializer = clusterNodes[1].Sp.GetRequiredService<ICrdtSerializer>();
-        var syncWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(staleSyncFromServer3));
+        var syncWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(staleSyncFromServer3), clusterNodes[2].ReplicaId);
         var handlerServer2 = clusterNodes[1].Sp.GetRequiredKeyedService<IApplicationPayloadHandler>("TestMesh");
 
         await handlerServer2.HandlePayloadAsync("TestMesh", clusterNodes[2].PeerId, serializer.SerializeToBytes(syncWrapper), CancellationToken.None);

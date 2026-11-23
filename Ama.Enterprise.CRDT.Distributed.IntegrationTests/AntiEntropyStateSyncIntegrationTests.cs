@@ -121,7 +121,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
 
         var syncMsg = new CrdtStateSyncMessage("RemoteReplica", remoteState);
         var syncBytes = serializer.SerializeToBytes(syncMsg);
-        var wrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytes);
+        var wrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytes, "RemoteReplica");
         var wrapperBytes = serializer.SerializeToBytes(wrapper);
 
         // Act
@@ -170,7 +170,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
 
         var syncMsg = new CrdtStateSyncMessage("RemoteReplica", remoteState);
         var syncBytes = serializer.SerializeToBytes(syncMsg);
-        var wrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytes);
+        var wrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytes, "RemoteReplica");
         var wrapperBytes = serializer.SerializeToBytes(wrapper);
 
         // Act
@@ -370,7 +370,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
 
         var syncMsg = new CrdtStateSyncMessage("RemoteReplica2", remoteState);
         var syncPayload = serializer.SerializeToBytes(syncMsg);
-        var wrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtSync", syncPayload);
+        var wrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtSync", syncPayload, "RemoteReplica2");
         var wrapperPayload = serializer.SerializeToBytes(wrapper);
 
         // Act
@@ -418,7 +418,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
 
         var syncMsg = new CrdtStateSyncMessage("RemoteReplica", remoteState);
         var syncBytes = serializer.SerializeToBytes(syncMsg);
-        var wrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytes);
+        var wrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytes, "RemoteReplica");
         var wrapperBytes = serializer.SerializeToBytes(wrapper);
 
         // Act
@@ -466,7 +466,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         };
 
         var reqBytes = serializer.SerializeToBytes(req);
-        var wrapper = new CrdtMessageWrapper("lazy-rpc-doc", "CrdtIntentReq", reqBytes, "sync-doc-1");
+        var wrapper = new CrdtMessageWrapper("lazy-rpc-doc", "CrdtIntentReq", reqBytes, "RemoteReplica", "sync-doc-1");
         var wrapperBytes = serializer.SerializeToBytes(wrapper);
 
         // Act - Send RPC intent before registry gossip arrives
@@ -513,7 +513,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         var serializer = sp.GetRequiredService<ICrdtSerializer>();
         var patchMsg = new CrdtPatchMessage("RemoteGossipReplica", new CrdtPatch(docOps));
         var patchBytes = serializer.SerializeToBytes(patchMsg);
-        var wrapper = new CrdtMessageWrapper("gossip-first-doc", "CrdtPatch", patchBytes, "sync-doc-1");
+        var wrapper = new CrdtMessageWrapper("gossip-first-doc", "CrdtPatch", patchBytes, "RemoteGossipReplica", "sync-doc-1");
         var wrapperBytes = serializer.SerializeToBytes(wrapper);
 
         var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
@@ -669,7 +669,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         };
 
         var reqBytes = serializer.SerializeToBytes(readReq);
-        var wrapper = new CrdtMessageWrapper("unknown-missing-doc", "CrdtReadReq", reqBytes, "unregistered-type-alias");
+        var wrapper = new CrdtMessageWrapper("unknown-missing-doc", "CrdtReadReq", reqBytes, "RemoteReplica", "unregistered-type-alias");
         var wrapperBytes = serializer.SerializeToBytes(wrapper);
 
         // Act
@@ -720,7 +720,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         };
 
         var reqBytes = serializer.SerializeToBytes(intentReq);
-        var wrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtIntentReq", reqBytes, "sync-doc-1");
+        var wrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtIntentReq", reqBytes, "RemoteReplica", "sync-doc-1");
         var wrapperBytes = serializer.SerializeToBytes(wrapper);
 
         // Act
@@ -771,7 +771,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         // 1. Colliding CrdtSync message from Node 2 claiming ReplicaId = "Replica1"
         var node2GlobalState = await node2Scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>().GetFullSnapshotAsync(CancellationToken.None);
         var syncMsg = new CrdtStateSyncMessage("Replica1", node2GlobalState);
-        var syncWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg));
+        var syncWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg), "Replica1");
         await handler.HandlePayloadAsync(TestMeshId, collidingPeerId, serializer.SerializeToBytes(syncWrapper), CancellationToken.None);
 
         // 2. Colliding CrdtPatch message from Node 2 claiming ReplicaId = "Replica1"
@@ -780,14 +780,14 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         collidingOps.ShouldNotBeEmpty();
 
         var patchMsg = new CrdtPatchMessage("Replica1", new CrdtPatch(collidingOps));
-        var patchWrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtPatch", serializer.SerializeToBytes(patchMsg), "sync-doc-1");
+        var patchWrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtPatch", serializer.SerializeToBytes(patchMsg), "Replica1", "sync-doc-1");
         await handler.HandlePayloadAsync(TestMeshId, collidingPeerId, serializer.SerializeToBytes(patchWrapper), CancellationToken.None);
 
         // 3. Colliding CrdtSnapshot message from Node 2 claiming ReplicaId = "Replica1"
         var node2Doc = node2Orch.TryGetLocalDocument<SyncTestState>("sync-doc-1")!;
         var node2Snapshot = await node2Doc.GetSnapshotDataAsync(CancellationToken.None);
         var snapshotMsg = new CrdtSnapshotMessage("Replica1", node2Snapshot.SnapshotData, node2Snapshot.GlobalState);
-        var snapshotWrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtSnapshot", serializer.SerializeToBytes(snapshotMsg), "sync-doc-1");
+        var snapshotWrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtSnapshot", serializer.SerializeToBytes(snapshotMsg), "Replica1", "sync-doc-1");
         await handler.HandlePayloadAsync(TestMeshId, collidingPeerId, serializer.SerializeToBytes(snapshotWrapper), CancellationToken.None);
 
         // Assert - Node 1's ClusterTracker rejected "Replica1" as a remote peer, and Node 1's own DVV for "Replica1" was never corrupted
@@ -837,13 +837,13 @@ public sealed class AntiEntropyStateSyncIntegrationTests
 
         // Act 1: GossipAlgorithm local loopback (BroadcastAsync dispatches to local state.Dispatcher with localPeerGuid)
         var loopbackPatchMsg = new CrdtPatchMessage("Replica1", new CrdtPatch(ownDocOps));
-        var loopbackWrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtPatch", serializer.SerializeToBytes(loopbackPatchMsg), "sync-doc-1");
+        var loopbackWrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtPatch", serializer.SerializeToBytes(loopbackPatchMsg), "Replica1", "sync-doc-1");
         await handler.HandlePayloadAsync(TestMeshId, new PeerId(localPeerGuid), serializer.SerializeToBytes(loopbackWrapper), CancellationToken.None);
 
         // Act 2: Remote peer ("Replica2") relays back a patch containing an operation authored by "Replica1"
         // (e.g. during anti-entropy or multi-hop forwarding)
         var bouncedPatchMsg = new CrdtPatchMessage("Replica2", new CrdtPatch(ownDocOps));
-        var bouncedWrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtPatch", serializer.SerializeToBytes(bouncedPatchMsg), "sync-doc-1");
+        var bouncedWrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtPatch", serializer.SerializeToBytes(bouncedPatchMsg), "Replica2", "sync-doc-1");
         await handler.HandlePayloadAsync(TestMeshId, new PeerId(remotePeerGuid), serializer.SerializeToBytes(bouncedWrapper), CancellationToken.None);
 
         // Assert - Local DVV remains at version 1 with no out-of-order dots or corruption, and "Replica1" is never registered as a remote peer
@@ -902,7 +902,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         node2Vvm.MergeShardState(shardId, globalState);
 
         var snapshotMsg = new CrdtSnapshotMessage("Replica2", serializer.SerializeToBytes(snapshotDoc), globalState);
-        var snapshotWrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtSnapshot", serializer.SerializeToBytes(snapshotMsg), "sync-doc-1");
+        var snapshotWrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtSnapshot", serializer.SerializeToBytes(snapshotMsg), "Replica2", "sync-doc-1");
 
         var node1Handler = node1Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
         var node2Handler = node2Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
@@ -928,7 +928,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         node1FullState[node2Orch.Registry.DocumentId] = node2FullState[node2Orch.Registry.DocumentId];
 
         var syncFromNode1 = new CrdtStateSyncMessage("Replica1", node1FullState);
-        var syncWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncFromNode1));
+        var syncWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncFromNode1), "Replica1");
         await node2Handler.HandlePayloadAsync(TestMeshId, new PeerId(Guid.NewGuid()), serializer.SerializeToBytes(syncWrapper), CancellationToken.None);
 
         // Assert 2: Node 2 sees that Node 1 is at (Replica1: 9000, Replica2: 10000) and does NOT resend any snapshot or patch!
@@ -970,7 +970,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
 
         var serializer = node1Sp.GetRequiredService<ICrdtSerializer>();
         var patchMsg = new CrdtPatchMessage("Replica2", mixedPatch);
-        var wrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtPatch", serializer.SerializeToBytes(patchMsg), "sync-doc-1");
+        var wrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtPatch", serializer.SerializeToBytes(patchMsg), "Replica2", "sync-doc-1");
         var handler = node1Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
 
         // Act
@@ -1032,7 +1032,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
             DocumentTypeAlias = "sync-doc-1"
         };
 
-        var wrapper = new CrdtMessageWrapper("lazy-read-doc", "CrdtReadReq", serializer.SerializeToBytes(readReq), "sync-doc-1");
+        var wrapper = new CrdtMessageWrapper("lazy-read-doc", "CrdtReadReq", serializer.SerializeToBytes(readReq), "RemoteReplica", "sync-doc-1");
 
         // Act - Remote node sends a CrdtReadReq for a document that is registered by type alias and owned by a local shard, but not yet promoted
         await handler.HandlePayloadAsync(TestMeshId, new PeerId(Guid.NewGuid()), serializer.SerializeToBytes(wrapper), CancellationToken.None);
@@ -1113,7 +1113,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         // Act 1: Node 2 sends initial CrdtSync (behind on "default" shard)
         var node2InitialState = await node2Scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>().GetFullSnapshotAsync(CancellationToken.None);
         var syncMsg1 = new CrdtStateSyncMessage("Replica2", node2InitialState);
-        var syncWrapper1 = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg1));
+        var syncWrapper1 = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg1), "Replica2");
         await node1Handler.HandlePayloadAsync(TestMeshId, node2PeerId, serializer.SerializeToBytes(syncWrapper1), CancellationToken.None);
 
         var firstBatchPayloads = node1ToNode2Payloads.ToList();
@@ -1141,7 +1141,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         // Act 4: Node 2 now sends a new CrdtSync with its updated DVV to Node 1
         node1ToNode2Payloads.Clear();
         var syncMsg2 = new CrdtStateSyncMessage("Replica2", node2UpdatedState);
-        var syncWrapper2 = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg2));
+        var syncWrapper2 = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg2), "Replica2");
         await node1Handler.HandlePayloadAsync(TestMeshId, node2PeerId, serializer.SerializeToBytes(syncWrapper2), CancellationToken.None);
 
         // Assert 4: Node 1 sees Node 2 is completely caught up and sends zero snapshots or patches
@@ -1265,7 +1265,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         // Act 1: Node 2 sends CrdtSync to Node 1. Node 1 dispatches snapshots for the registry, sync-doc-1, and sync-doc-2.
         var node2InitialState = await node2Vvm.GetFullSnapshotAsync(CancellationToken.None);
         var syncMsg1 = new CrdtStateSyncMessage("Replica2", node2InitialState);
-        var syncWrapper1 = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg1));
+        var syncWrapper1 = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg1), "Replica2");
         await node1Handler.HandlePayloadAsync(TestMeshId, node2PeerId, serializer.SerializeToBytes(syncWrapper1), CancellationToken.None);
 
         var initialBatch = node1ToNode2Payloads.ToList();
@@ -1314,7 +1314,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
 
         var node2RetryState = await node2Vvm.GetFullSnapshotAsync(CancellationToken.None);
         var syncMsg2 = new CrdtStateSyncMessage("Replica2", node2RetryState);
-        var syncWrapper2 = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg2));
+        var syncWrapper2 = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg2), "Replica2");
         await node1Handler.HandlePayloadAsync(TestMeshId, node2ReconnectedPeerId, serializer.SerializeToBytes(syncWrapper2), CancellationToken.None);
 
         // Assert 2: Because Node 2 never falsely advanced its "default" shard DVV, Node 1 detects the gap and resends the shard snapshots
@@ -1336,7 +1336,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         // A subsequent sync results in zero messages because convergence is complete
         node1ToNode2Payloads.Clear();
         var syncMsg3 = new CrdtStateSyncMessage("Replica2", node2FinalState);
-        var syncWrapper3 = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg3));
+        var syncWrapper3 = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg3), "Replica2");
         await node1Handler.HandlePayloadAsync(TestMeshId, node2ReconnectedPeerId, serializer.SerializeToBytes(syncWrapper3), CancellationToken.None);
         node1ToNode2Payloads.ShouldBeEmpty();
     }
@@ -1403,10 +1403,10 @@ public sealed class AntiEntropyStateSyncIntegrationTests
             CrdtRegistryEntry.GetRegistryKey("sync-doc-2", "sync-doc-2")
         };
         var snapMsg1 = new CrdtSnapshotMessage("Replica1", snap1.SnapshotData, snap1.GlobalState, expectedShardDocs);
-        var snapWrapper1 = new CrdtMessageWrapper("sync-doc-1", "CrdtSnapshot", serializer.SerializeToBytes(snapMsg1), "sync-doc-1");
+        var snapWrapper1 = new CrdtMessageWrapper("sync-doc-1", "CrdtSnapshot", serializer.SerializeToBytes(snapMsg1), "Replica1", "sync-doc-1");
 
         var snapMsg2 = new CrdtSnapshotMessage("Replica1", snap2.SnapshotData, snap2.GlobalState, expectedShardDocs);
-        var snapWrapper2 = new CrdtMessageWrapper("sync-doc-2", "CrdtSnapshot", serializer.SerializeToBytes(snapMsg2), "sync-doc-2");
+        var snapWrapper2 = new CrdtMessageWrapper("sync-doc-2", "CrdtSnapshot", serializer.SerializeToBytes(snapMsg2), "Replica1", "sync-doc-2");
 
         // Act 1: Deliver both skewed snapshots to Node 2
         await node2Handler.HandlePayloadAsync(TestMeshId, node1PeerId, serializer.SerializeToBytes(snapWrapper1), CancellationToken.None);
@@ -1428,7 +1428,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         node2StateAfterSnapshots[node1Orch.Registry.ShardId] = node1FullState[node1Orch.Registry.ShardId];
 
         var syncMsg = new CrdtStateSyncMessage("Replica2", node2StateAfterSnapshots);
-        var syncWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg));
+        var syncWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg), "Replica2");
         await node1Handler.HandlePayloadAsync(TestMeshId, node2PeerId, serializer.SerializeToBytes(syncWrapper), CancellationToken.None);
 
         // Assert 2: Node 1 sees Node 2 is at clock 2 and sends the missing clock 3 operation as a lightweight CrdtPatch (not a full snapshot!)
@@ -1503,7 +1503,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         // Act 1: Request sync from Node 1
         var node2InitialState = await node2Vvm.GetFullSnapshotAsync(CancellationToken.None);
         var syncMsg = new CrdtStateSyncMessage("Replica2", node2InitialState);
-        var syncWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg));
+        var syncWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(syncMsg), "Replica2");
         await node1Handler.HandlePayloadAsync(TestMeshId, node2PeerId, serializer.SerializeToBytes(syncWrapper), CancellationToken.None);
 
         var docSnapshots = node1ToNode2Payloads
@@ -1591,10 +1591,10 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         };
 
         var msg2 = new CrdtSnapshotMessage("Replica1", snap2Data.SnapshotData, state2, expectedBatchDocs);
-        var wrap2 = new CrdtMessageWrapper("sync-doc-2", "CrdtSnapshot", serializer.SerializeToBytes(msg2), "sync-doc-2");
+        var wrap2 = new CrdtMessageWrapper("sync-doc-2", "CrdtSnapshot", serializer.SerializeToBytes(msg2), "Replica1", "sync-doc-2");
 
         var msg1 = new CrdtSnapshotMessage("Replica1", snap1Data.SnapshotData, state1, expectedBatchDocs);
-        var wrap1 = new CrdtMessageWrapper("sync-doc-1", "CrdtSnapshot", serializer.SerializeToBytes(msg1), "sync-doc-1");
+        var wrap1 = new CrdtMessageWrapper("sync-doc-1", "CrdtSnapshot", serializer.SerializeToBytes(msg1), "Replica1", "sync-doc-1");
 
         // Act 1: Deliver sync-doc-2 first, then a duplicate of sync-doc-2
         await node2Handler.HandlePayloadAsync(TestMeshId, node1PeerId, serializer.SerializeToBytes(wrap2), CancellationToken.None);
@@ -1656,10 +1656,10 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         };
 
         var msg1 = new CrdtSnapshotMessage("Replica1", snap1.SnapshotData, snap1.GlobalState, expectedBatchDocs);
-        var wrap1 = new CrdtMessageWrapper("sync-doc-1", "CrdtSnapshot", serializer.SerializeToBytes(msg1), "sync-doc-1");
+        var wrap1 = new CrdtMessageWrapper("sync-doc-1", "CrdtSnapshot", serializer.SerializeToBytes(msg1), "Replica1", "sync-doc-1");
 
         var msg2 = new CrdtSnapshotMessage("Replica1", snap2.SnapshotData, snap2.GlobalState, expectedBatchDocs);
-        var wrap2 = new CrdtMessageWrapper("sync-doc-2", "CrdtSnapshot", serializer.SerializeToBytes(msg2), "sync-doc-2");
+        var wrap2 = new CrdtMessageWrapper("sync-doc-2", "CrdtSnapshot", serializer.SerializeToBytes(msg2), "Replica1", "sync-doc-2");
 
         // Act: Deliver snapshots to Node 2 before registry gossip
         await node2Handler.HandlePayloadAsync(TestMeshId, node1PeerId, serializer.SerializeToBytes(wrap1), CancellationToken.None);
@@ -1723,7 +1723,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         var serializer = node1Sp.GetRequiredService<ICrdtSerializer>();
         var node2Handler = node2Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
         var staleMsg = new CrdtSnapshotMessage("Replica1", staleSnapshot.SnapshotData, staleSnapshot.GlobalState);
-        var staleWrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtSnapshot", serializer.SerializeToBytes(staleMsg), "sync-doc-1");
+        var staleWrapper = new CrdtMessageWrapper("sync-doc-1", "CrdtSnapshot", serializer.SerializeToBytes(staleMsg), "Replica1", "sync-doc-1");
 
         // Act: Deliver the stale clock-1 snapshot to Node 2 (which is already at clock 2)
         await node2Handler.HandlePayloadAsync(TestMeshId, new PeerId(Guid.NewGuid()), serializer.SerializeToBytes(staleWrapper), CancellationToken.None);
@@ -1850,7 +1850,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
             [orchestrator.Registry.ShardId] = new DottedVersionVector()
         };
         var incomingSync = new CrdtStateSyncMessage("Replica2", remoteState);
-        var incomingWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(incomingSync));
+        var incomingWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(incomingSync), "Replica2");
         await handler.HandlePayloadAsync(TestMeshId, peerId, serializer.SerializeToBytes(incomingWrapper), CancellationToken.None);
 
         // Assert 2: Snapshot for "sync-doc-2" was immediately dispatched even though "sync-doc-1" was busy
@@ -1929,7 +1929,7 @@ public sealed class AntiEntropyStateSyncIntegrationTests
             [node1Orch.Registry.ShardId] = new DottedVersionVector()
         };
         var staleSyncMsg = new CrdtStateSyncMessage("Replica2", node2EmptyState);
-        var staleSyncWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(staleSyncMsg));
+        var staleSyncWrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", serializer.SerializeToBytes(staleSyncMsg), "Replica2");
         var node2PeerId = new PeerId(Guid.NewGuid());
 
         await node1Handler.HandlePayloadAsync(TestMeshId, node2PeerId, serializer.SerializeToBytes(staleSyncWrapper), CancellationToken.None);

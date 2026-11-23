@@ -117,7 +117,7 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         var serializerB = nodeB.Sp.GetRequiredService<ICrdtSerializer>();
         var syncMsgB = new CrdtStateSyncMessage(nodeB.ReplicaId, contextB.ShardVersionVectors);
         var syncBytesB = serializerB.SerializeToBytes(syncMsgB);
-        var wrapperB = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytesB);
+        var wrapperB = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytesB, nodeB.ReplicaId);
         var wrapperBytesB = serializerB.SerializeToBytes(wrapperB);
 
         var handlerA = nodeA.Sp.GetRequiredKeyedService<IApplicationPayloadHandler>("TestMesh");
@@ -172,7 +172,7 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         
         var syncMsgA = new CrdtStateSyncMessage(nodeA.ReplicaId, replicaContextA.ShardVersionVectors);
         var syncBytesA = serializerA.SerializeToBytes(syncMsgA);
-        var wrapperA = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytesA);
+        var wrapperA = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytesA, nodeA.ReplicaId);
         var wrapperBytesA = serializerA.SerializeToBytes(wrapperA);
 
         var handlerB = nodeB.Sp.GetRequiredKeyedService<IApplicationPayloadHandler>("TestMesh");
@@ -184,7 +184,7 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         
         var syncMsgB = new CrdtStateSyncMessage(nodeB.ReplicaId, replicaContextB.ShardVersionVectors);
         var syncBytesB = serializerB.SerializeToBytes(syncMsgB);
-        var wrapperB = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytesB);
+        var wrapperB = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytesB, nodeB.ReplicaId);
         var wrapperBytesB = serializerB.SerializeToBytes(wrapperB);
 
         var handlerA = nodeA.Sp.GetRequiredKeyedService<IApplicationPayloadHandler>("TestMesh");
@@ -287,7 +287,7 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         
         var syncMsgB = new CrdtStateSyncMessage(nodeB.ReplicaId, replicaContextB.ShardVersionVectors);
         var syncBytesB = serializerB.SerializeToBytes(syncMsgB);
-        var wrapperB = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytesB);
+        var wrapperB = new CrdtMessageWrapper("Cluster", "CrdtSync", syncBytesB, nodeB.ReplicaId);
         var wrapperBytesB = serializerB.SerializeToBytes(wrapperB);
 
         var handlerA = nodeA.Sp.GetRequiredKeyedService<IApplicationPayloadHandler>("TestMesh");
@@ -605,7 +605,7 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
                         IsSuccess = false,
                         ErrorMessage = "Simulated remote application rejection."
                     };
-                    var resWrapper = new CrdtMessageWrapper(reqWrapper.DocumentId, "CrdtIntentRes", serializerA.SerializeToBytes(failRes));
+                    var resWrapper = new CrdtMessageWrapper(reqWrapper.DocumentId, "CrdtIntentRes", serializerA.SerializeToBytes(failRes), "RejectingReplica");
                     await handlerA.HandlePayloadAsync("TestMesh", rejectingPeerId, serializerA.SerializeToBytes(resWrapper), CancellationToken.None);
                 });
 

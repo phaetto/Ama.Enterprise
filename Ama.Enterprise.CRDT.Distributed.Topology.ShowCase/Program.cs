@@ -44,7 +44,7 @@ public static class Program
     private static string currentRole = string.Empty;
     private static string currentRegion = string.Empty;
 
-    private readonly record struct DocumentStateDto<T>(string Id, IReadOnlyDictionary<string, T> Items);
+    private readonly record struct DocumentStateDto<T>(string ScopeId, string Id, IReadOnlyDictionary<string, T> Items);
 
     private readonly record struct PeerHealthDisplayDto(
         string MeshId,
@@ -55,6 +55,7 @@ public static class Program
         int TrackedShards);
 
     private readonly record struct ShardTopologyDisplayDto(
+        string ScopeId,
         string ShardId,
         int DocumentCount,
         bool IsLocal,
@@ -73,13 +74,13 @@ public static class Program
         if (currentMode == "server")
         {
             currentRole = string.Empty; // Server has no role, it can host both admin and user data
-            currentRegion = args.Length > 2 ? args[2] : "EU";
+            currentRegion = args.Length > 2 ? args[2] : "US";
             if (args.Length > 3) int.TryParse(args[3], out parentPort);
         }
         else
         {
             currentRole = args.Length > 2 ? args[2] : "user";
-            currentRegion = args.Length > 3 ? args[3] : "EU";
+            currentRegion = args.Length > 3 ? args[3] : "US";
             if (args.Length > 4) int.TryParse(args[4], out parentPort);
         }
 
@@ -124,7 +125,8 @@ public static class Program
             options.JournalSoftTrimThreshold = 15000;
         });
 
-        // Register custom topology provider tracking multi-mesh active session generic explicit partitions gracefully natively
+        // Register custom topology provider and RBAC evaluator tracking multi-mesh active session partitions
+        services.AddSingleton<IRbacScopeAccessEvaluator, RbacScopeAccessEvaluator>();
         services.Replace(ServiceDescriptor.Scoped<IScopeTopologyProvider, RbacScopeTopologyProvider>());
 
         // Register the showcase JSON AOT and CRDT AOT contexts directly into the generic CRDT pipeline
@@ -275,15 +277,17 @@ public static class Program
             }
 
             var scopeManager = provider.GetRequiredService<DistributedCrdtScopeManager>();
-            var scope = scopeManager.GetOrCreateScope(replicaId);
+            var primaryScopeId = GetPrimaryScopeId(currentMode, currentRole, currentRegion);
+            var initialScopeIds = GetInitialScopeIds(currentMode, currentRole, currentRegion);
 
-            var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
-            var taskManager = scope.ServiceProvider.GetRequiredService<ITaskManager>();
-            var fleetManager = scope.ServiceProvider.GetRequiredService<IFleetManager>();
-            var clusterTracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
-            var shardDistributionManager = scope.ServiceProvider.GetRequiredService<IShardDistributionManager>();
-            var shardIdProvider = scope.ServiceProvider.GetRequiredService<IShardIdProvider>();
+            foreach (var scopeId in initialScopeIds)
+            {
+                await scopeManager.GetOrCreateScopeAsync(scopeId, replicaId, cts.Token).ConfigureAwait(false);
+            }
+
+            var primaryScope = await scopeManager.GetOrCreateScopeAsync(primaryScopeId, replicaId, cts.Token).ConfigureAwait(false);
             var peerRegistry = provider.GetRequiredService<IPeerRegistry>();
+            var accessEvaluator = provider.GetRequiredService<IRbacScopeAccessEvaluator>();
 
             // Background UI rendering task to decouple Console I/O from hot CRDT operations
             _ = Task.Run(async () =>
@@ -296,7 +300,7 @@ public static class Program
                         if (needsRedraw)
                         {
                             needsRedraw = false;
-                            await DrawStateAsync(orchestrator, taskManager, fleetManager, cts.Token).ConfigureAwait(false);
+                            await DrawStateAsync(scopeManager, replicaId, cts.Token).ConfigureAwait(false);
                         }
                     }
                 }
@@ -308,8 +312,8 @@ public static class Program
 
             CancellationTokenSource? hammerCts = null;
 
-            DrawMenu();
-            await DrawStateAsync(orchestrator, taskManager, fleetManager, cts.Token).ConfigureAwait(false);
+            DrawMenu(primaryScopeId);
+            await DrawStateAsync(scopeManager, replicaId, cts.Token).ConfigureAwait(false);
 
             var shutdownCoordinator = provider.GetRequiredService<ICrdtShutdownCoordinator>();
             using var loopCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, shutdownCoordinator.ShutdownToken);
@@ -336,51 +340,105 @@ public static class Program
                     {
                         case "new-list":
                             if (parts.Length >= 2)
-                                await orchestrator.CreateDocumentAsync(parts[1], "task-list", cts.Token).ConfigureAwait(false);
+                            {
+                                var targetScope = parts.Length >= 3
+                                    ? await scopeManager.GetOrCreateScopeAsync(parts[2], replicaId, cts.Token).ConfigureAwait(false)
+                                    : primaryScope;
+                                await targetScope.Orchestrator.CreateDocumentAsync(parts[1], "task-list", cts.Token).ConfigureAwait(false);
+                            }
                             else
-                                WriteLineLocked("Usage: new-list <docId>");
+                            {
+                                WriteLineLocked("Usage: new-list <docId> [scopeId]");
+                            }
                             break;
 
                         case "new-fleet":
                             if (parts.Length >= 2)
-                                await orchestrator.CreateDocumentAsync(parts[1], "fleet-list", cts.Token).ConfigureAwait(false);
+                            {
+                                var targetScope = parts.Length >= 3
+                                    ? await scopeManager.GetOrCreateScopeAsync(parts[2], replicaId, cts.Token).ConfigureAwait(false)
+                                    : primaryScope;
+                                await targetScope.Orchestrator.CreateDocumentAsync(parts[1], "fleet-list", cts.Token).ConfigureAwait(false);
+                            }
                             else
-                                WriteLineLocked("Usage: new-fleet <docId>");
+                            {
+                                WriteLineLocked("Usage: new-fleet <docId> [scopeId]");
+                            }
                             break;
 
                         case "del-doc":
                             if (parts.Length >= 2)
-                                await orchestrator.DeleteDocumentAsync(parts[1], cts.Token).ConfigureAwait(false);
+                            {
+                                var targetScope = await ResolveScopeForDocumentAsync(scopeManager, primaryScope, parts[1], cts.Token).ConfigureAwait(false);
+                                await targetScope.Orchestrator.DeleteDocumentAsync(parts[1], cts.Token).ConfigureAwait(false);
+                            }
                             else
+                            {
                                 WriteLineLocked("Usage: del-doc <docId>");
+                            }
                             break;
 
                         case "tset":
                             if (parts.Length >= 5 && bool.TryParse(parts[4], out var isDone))
-                                await taskManager.SetTaskAsync(parts[1], parts[2], parts[3], isDone, cts.Token).ConfigureAwait(false);
+                            {
+                                var targetScope = await ResolveScopeForDocumentAsync(scopeManager, primaryScope, parts[1], cts.Token).ConfigureAwait(false);
+                                var taskMgr = targetScope.ServiceProvider.GetRequiredService<ITaskManager>();
+                                await taskMgr.SetTaskAsync(parts[1], parts[2], parts[3], isDone, cts.Token).ConfigureAwait(false);
+                            }
                             else
+                            {
                                 WriteLineLocked("Usage: tset <docId> <taskId> <desc_without_spaces> <true|false>");
+                            }
                             break;
 
                         case "tdel":
                             if (parts.Length >= 3)
-                                await taskManager.RemoveTaskAsync(parts[1], parts[2], cts.Token).ConfigureAwait(false);
+                            {
+                                var targetScope = await ResolveScopeForDocumentAsync(scopeManager, primaryScope, parts[1], cts.Token).ConfigureAwait(false);
+                                var taskMgr = targetScope.ServiceProvider.GetRequiredService<ITaskManager>();
+                                await taskMgr.RemoveTaskAsync(parts[1], parts[2], cts.Token).ConfigureAwait(false);
+                            }
                             else
+                            {
                                 WriteLineLocked("Usage: tdel <docId> <taskId>");
+                            }
                             break;
 
                         case "fset":
                             if (parts.Length >= 5 && bool.TryParse(parts[3], out var isOnline) && int.TryParse(parts[4], out var battery))
-                                await fleetManager.SetDeviceAsync(parts[1], parts[2], isOnline, battery, cts.Token).ConfigureAwait(false);
+                            {
+                                var targetScope = await ResolveScopeForDocumentAsync(scopeManager, primaryScope, parts[1], cts.Token).ConfigureAwait(false);
+                                var fleetMgr = targetScope.ServiceProvider.GetRequiredService<IFleetManager>();
+                                await fleetMgr.SetDeviceAsync(parts[1], parts[2], isOnline, battery, cts.Token).ConfigureAwait(false);
+                            }
                             else
+                            {
                                 WriteLineLocked("Usage: fset <docId> <deviceId> <true|false> <battery_int>");
+                            }
                             break;
 
                         case "fdel":
                             if (parts.Length >= 3)
-                                await fleetManager.RemoveDeviceAsync(parts[1], parts[2], cts.Token).ConfigureAwait(false);
+                            {
+                                var targetScope = await ResolveScopeForDocumentAsync(scopeManager, primaryScope, parts[1], cts.Token).ConfigureAwait(false);
+                                var fleetMgr = targetScope.ServiceProvider.GetRequiredService<IFleetManager>();
+                                await fleetMgr.RemoveDeviceAsync(parts[1], parts[2], cts.Token).ConfigureAwait(false);
+                            }
                             else
+                            {
                                 WriteLineLocked("Usage: fdel <docId> <deviceId>");
+                            }
+                            break;
+
+                        case "share":
+                            if (parts.Length >= 3)
+                            {
+                                await ShareDocumentToScopeAsync(scopeManager, primaryScope, accessEvaluator, replicaId, parts[1], parts[2], cts.Token).ConfigureAwait(false);
+                            }
+                            else
+                            {
+                                WriteLineLocked("Usage: share <docId> <targetScopeId> (e.g. share list1 eu-shared-list1)");
+                            }
                             break;
 
                         case "hammer":
@@ -398,27 +456,26 @@ public static class Program
                                 {
                                     hammerCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
                                     var token = hammerCts.Token;
+                                    var hammerOrchestrator = primaryScope.Orchestrator;
+                                    var hammerTaskManager = primaryScope.ServiceProvider.GetRequiredService<ITaskManager>();
 
                                     _ = Task.Run(async () =>
                                     {
                                         try
                                         {
-                                            await orchestrator.CreateDocumentAsync("nail", "task-list", token).ConfigureAwait(false);
-                                            logger.LogInformation("Hammer mode activated. Target: {Cps} ops/sec against doc 'nail'...", cps);
+                                            await hammerOrchestrator.CreateDocumentAsync("nail", "task-list", token).ConfigureAwait(false);
+                                            logger.LogInformation("Hammer mode activated in scope '{ScopeId}'. Target: {Cps} ops/sec against doc 'nail'...", primaryScope.ScopeId, cps);
 
                                             var sw = Stopwatch.StartNew();
                                             var reportSw = Stopwatch.StartNew();
                                             long opsCompleted = 0;
                                             long lastReportedOps = 0;
 
-                                            // Bounded pool of 10 keys: keeps document state size small
-                                            // but exercises CRDT map updates visibly in the console UI
                                             var taskIds = Enumerable.Range(1, 10).Select(i => $"nail-task-{i}").ToArray();
 
-                                            // Helper for concurrent dispatch avoiding closure captures or ValueTask casting ambiguities
                                             async Task FirePayloadAsync(string tId, long index, bool done, CancellationToken ct)
                                             {
-                                                await taskManager.SetTaskAsync("nail", tId, $"Hammered payload {index}", done, ct).ConfigureAwait(false);
+                                                await hammerTaskManager.SetTaskAsync("nail", tId, $"Hammered payload {index}", done, ct).ConfigureAwait(false);
                                             }
 
                                             while (!token.IsCancellationRequested)
@@ -488,7 +545,7 @@ public static class Program
                                 var showDetails = parts.Length >= 2 &&
                                     (string.Equals(parts[1], "details", StringComparison.OrdinalIgnoreCase) ||
                                      (bool.TryParse(parts[1], out var parsedDetails) && parsedDetails));
-                                await DrawTopologyAndPeersAsync(replicaId, orchestrator, clusterTracker, shardDistributionManager, shardIdProvider, peerRegistry, showDetails, cts.Token).ConfigureAwait(false);
+                                await DrawTopologyAndPeersAsync(replicaId, scopeManager, peerRegistry, showDetails, cts.Token).ConfigureAwait(false);
                             }
                             break;
 
@@ -522,7 +579,7 @@ public static class Program
 
                         default:
                             WriteLineLocked("Unknown command.");
-                            DrawMenu();
+                            DrawMenu(primaryScopeId);
                             break;
                     }
                 }
@@ -568,7 +625,124 @@ public static class Program
         logger.LogInformation("Cloned new cluster node on port {NextPort} in {Mode} mode with Role '{Role}' and Region '{Region}'.", nextPort, mode.ToUpperInvariant(), displayRole, region);
     }
 
-    private static void DrawMenu()
+    private static string GetPrimaryScopeId(string mode, string role, string region)
+    {
+        var normRegion = string.IsNullOrWhiteSpace(region) ? "eu" : region.ToLowerInvariant();
+        if (mode == "server" || string.IsNullOrWhiteSpace(role))
+        {
+            return $"{normRegion}-user";
+        }
+
+        return $"{normRegion}-{role.ToLowerInvariant()}";
+    }
+
+    private static IReadOnlyList<string> GetInitialScopeIds(string mode, string role, string region)
+    {
+        var normRegion = string.IsNullOrWhiteSpace(region) ? "eu" : region.ToLowerInvariant();
+        var scopes = new List<string>();
+
+        if (mode == "server" || string.IsNullOrWhiteSpace(role))
+        {
+            scopes.Add($"{normRegion}-user");
+            scopes.Add($"{normRegion}-admin");
+            if (string.Equals(normRegion, "eu", StringComparison.OrdinalIgnoreCase))
+            {
+                scopes.Add("us-user");
+                scopes.Add("us-admin");
+            }
+        }
+        else
+        {
+            var normRole = role.ToLowerInvariant();
+            scopes.Add($"{normRegion}-{normRole}");
+            if (string.Equals(normRegion, "eu", StringComparison.OrdinalIgnoreCase))
+            {
+                scopes.Add($"us-{normRole}");
+            }
+        }
+
+        return scopes;
+    }
+
+    private static async ValueTask<IDistributedCrdtScope> ResolveScopeForDocumentAsync(
+        DistributedCrdtScopeManager scopeManager,
+        IDistributedCrdtScope primaryScope,
+        string documentId,
+        CancellationToken cancellationToken)
+    {
+        if (await primaryScope.Orchestrator.DocumentExistsAsync(documentId, cancellationToken).ConfigureAwait(false))
+        {
+            return primaryScope;
+        }
+
+        foreach (var scope in scopeManager.GetActiveScopes())
+        {
+            if (string.Equals(scope.ReplicaId, primaryScope.ReplicaId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (await scope.Orchestrator.DocumentExistsAsync(documentId, cancellationToken).ConfigureAwait(false))
+            {
+                return scope;
+            }
+        }
+
+        return primaryScope;
+    }
+
+    private static async Task ShareDocumentToScopeAsync(
+        DistributedCrdtScopeManager scopeManager,
+        IDistributedCrdtScope primaryScope,
+        IRbacScopeAccessEvaluator accessEvaluator,
+        string hostReplicaId,
+        string documentId,
+        string targetScopeId,
+        CancellationToken cancellationToken)
+    {
+        if (!accessEvaluator.IsNodeAuthorizedForScope(currentRole, currentRegion, targetScopeId))
+        {
+            WriteLineLocked($"Cannot share to scope '{targetScopeId}': local node (Role='{currentRole}', Region='{currentRegion}') is not authorized for that scope.");
+            return;
+        }
+
+        var sourceScope = await ResolveScopeForDocumentAsync(scopeManager, primaryScope, documentId, cancellationToken).ConfigureAwait(false);
+        var targetScope = await scopeManager.GetOrCreateScopeAsync(targetScopeId, hostReplicaId, cancellationToken).ConfigureAwait(false);
+
+        if (await sourceScope.Orchestrator.DocumentExistsAsync<TaskListState>(documentId, cancellationToken).ConfigureAwait(false))
+        {
+            var sourceTasks = await sourceScope.ServiceProvider.GetRequiredService<ITaskManager>().GetTasksAsync(documentId, cancellationToken).ConfigureAwait(false);
+            await targetScope.Orchestrator.CreateDocumentAsync(documentId, "task-list", cancellationToken).ConfigureAwait(false);
+            var targetTaskMgr = targetScope.ServiceProvider.GetRequiredService<ITaskManager>();
+            foreach (var kvp in sourceTasks)
+            {
+                await targetTaskMgr.SetTaskAsync(documentId, kvp.Key, kvp.Value.Description, kvp.Value.IsDone, cancellationToken).ConfigureAwait(false);
+            }
+
+            await targetScope.Orchestrator.EvaluateAndDispatchAntiEntropyStateAsync(cancellationToken).ConfigureAwait(false);
+            WriteLineLocked($"Shared task list '{documentId}' from scope '{sourceScope.ScopeId}' into scope '{targetScope.ScopeId}'.");
+            return;
+        }
+
+        if (await sourceScope.Orchestrator.DocumentExistsAsync<FleetState>(documentId, cancellationToken).ConfigureAwait(false))
+        {
+            var sourceDevices = await sourceScope.ServiceProvider.GetRequiredService<IFleetManager>().GetDevicesAsync(documentId, cancellationToken).ConfigureAwait(false);
+            await targetScope.Orchestrator.CreateDocumentAsync(documentId, "fleet-list", cancellationToken).ConfigureAwait(false);
+            var targetFleetMgr = targetScope.ServiceProvider.GetRequiredService<IFleetManager>();
+            foreach (var kvp in sourceDevices)
+            {
+                await targetFleetMgr.SetDeviceAsync(documentId, kvp.Key, kvp.Value.IsOnline, kvp.Value.BatteryLevel, cancellationToken).ConfigureAwait(false);
+            }
+
+            await targetScope.Orchestrator.EvaluateAndDispatchAntiEntropyStateAsync(cancellationToken).ConfigureAwait(false);
+            WriteLineLocked($"Shared fleet '{documentId}' from scope '{sourceScope.ScopeId}' into scope '{targetScope.ScopeId}'.");
+            return;
+        }
+
+        WriteLineLocked($"Document '{documentId}' was not found in any active local scope.");
+    }
+
+    private static void DrawMenu(string primaryScopeId)
     {
         lock (ConsoleLock)
         {
@@ -576,16 +750,17 @@ public static class Program
 
             Console.WriteLine("=================================================");
             Console.WriteLine($" Multi-CRDT Peer Node - Listening on WS Port {currentPort}");
-            Console.WriteLine($" Session: Mode = {currentMode.ToUpperInvariant()}, Role = {displayRole}, Region = {currentRegion}");
+            Console.WriteLine($" Session: Mode = {currentMode.ToUpperInvariant()}, Role = {displayRole}, Region = {currentRegion}, Primary Scope = {primaryScopeId}");
             Console.WriteLine("=================================================");
             Console.WriteLine("Commands:");
-            Console.WriteLine(" new-list <docId>                               - Creates a new Task List document");
-            Console.WriteLine(" new-fleet <docId>                              - Creates a new Fleet List document");
+            Console.WriteLine(" new-list <docId> [scopeId]                     - Creates a new Task List document");
+            Console.WriteLine(" new-fleet <docId> [scopeId]                    - Creates a new Fleet List document");
             Console.WriteLine(" del-doc <docId>                                - Tombstones and removes an active document");
             Console.WriteLine(" tset <docId> <taskId> <desc> <true|false>      - Adds/Updates a task item");
             Console.WriteLine(" tdel <docId> <taskId>                          - Removes a task item");
             Console.WriteLine(" fset <docId> <deviceId> <true|false> <batt>    - Adds/Updates a fleet device");
             Console.WriteLine(" fdel <docId> <deviceId>                        - Removes a fleet device");
+            Console.WriteLine(" share <docId> <targetScopeId>                  - Shares a document into a dedicated scope (e.g. eu-shared-doc1)");
             Console.WriteLine(" hammer <cps>                                   - Pumps <cps> changes/sec into doc 'nail' (0 to stop)");
             Console.WriteLine(" topology [details] / peers [details]           - Prints connected peers health and shard topology");
             Console.WriteLine(" clone server [region]                          - Spawns a new server node (e.g. clone server EU)");
@@ -597,20 +772,22 @@ public static class Program
 
     private static async Task DrawTopologyAndPeersAsync(
         string replicaId,
-        ICrdtDocumentOrchestrator orchestrator,
-        IClusterStateTracker clusterTracker,
-        IShardDistributionManager shardDistributionManager,
-        IShardIdProvider shardIdProvider,
+        DistributedCrdtScopeManager scopeManager,
         IPeerRegistry peerRegistry,
         bool showDetails,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(replicaId);
-        ArgumentNullException.ThrowIfNull(orchestrator);
-        ArgumentNullException.ThrowIfNull(clusterTracker);
-        ArgumentNullException.ThrowIfNull(shardDistributionManager);
-        ArgumentNullException.ThrowIfNull(shardIdProvider);
+        ArgumentNullException.ThrowIfNull(scopeManager);
         ArgumentNullException.ThrowIfNull(peerRegistry);
+
+        var activeScopes = scopeManager.GetActiveScopes()
+            .Where(s => !string.Equals(s.ScopeId, replicaId, StringComparison.Ordinal))
+            .ToList();
+        if (activeScopes.Count == 0)
+        {
+            activeScopes = scopeManager.GetActiveScopes().ToList();
+        }
 
         var peerList = new List<PeerHealthDisplayDto>();
         var meshes = currentMode == "server" ? new[] { "server", "user" } : new[] { "user" };
@@ -624,13 +801,18 @@ public static class Program
                 foreach (var peer in peers)
                 {
                     var peerIdStr = peer.Id.Value.ToString();
-                    var mappedReplicaId = clusterTracker.GetReplicaIdByPeerId(peerIdStr);
+                    string? mappedReplicaId = null;
                     var trackedShards = 0;
 
-                    if (!string.IsNullOrEmpty(mappedReplicaId))
+                    foreach (var s in activeScopes)
                     {
-                        var peerState = clusterTracker.TryGetPeerState(mappedReplicaId);
-                        trackedShards = peerState?.Keys.Count ?? 0;
+                        var candidateRep = s.ClusterTracker.GetReplicaIdByPeerId(peerIdStr);
+                        if (!string.IsNullOrEmpty(candidateRep))
+                        {
+                            mappedReplicaId ??= candidateRep;
+                            var peerState = s.ClusterTracker.TryGetPeerState(candidateRep);
+                            trackedShards += peerState?.Keys.Count ?? 0;
+                        }
                     }
 
                     peerList.Add(new PeerHealthDisplayDto(
@@ -644,64 +826,73 @@ public static class Program
             }
         }
 
-        var activeReplicaIds = clusterTracker.GetActiveReplicaIds();
-        var exportedTrackerState = clusterTracker.ExportState();
-        var tombstonedReplicas = exportedTrackerState.TombstonedReplicas;
-
-        var regDoc = await orchestrator.Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-        var regState = regDoc.Data ?? new CrdtRegistryState();
-
-        var shardDocCounts = new Dictionary<string, int>(StringComparer.Ordinal)
-        {
-            [orchestrator.Registry.ShardId] = 1
-        };
-
+        var shardTopologies = new List<ShardTopologyDisplayDto>();
         var activeDocumentCount = 0;
         var deletedDocumentCount = 0;
-
-        foreach (var kvp in regState.Documents)
-        {
-            var entry = kvp.Value;
-            if (entry.IsDeleted)
-            {
-                deletedDocumentCount++;
-                continue;
-            }
-
-            activeDocumentCount++;
-            var shardId = ResolveShardIdForEntry(shardIdProvider, entry.DocumentId, entry.TypeAlias);
-            if (shardDocCounts.TryGetValue(shardId, out var currentCount))
-            {
-                shardDocCounts[shardId] = currentCount + 1;
-            }
-            else
-            {
-                shardDocCounts[shardId] = 1;
-            }
-        }
-
-        var shardTopologies = new List<ShardTopologyDisplayDto>(shardDocCounts.Count);
+        var localActiveDocsCount = 0;
         var localShardCount = 0;
         var remoteShardCount = 0;
 
-        foreach (var kvp in shardDocCounts.OrderBy(s => s.Key, StringComparer.Ordinal))
+        foreach (var scope in activeScopes.OrderBy(s => s.ScopeId, StringComparer.Ordinal))
         {
-            var isLocal = await shardDistributionManager.IsShardLocalAsync(kvp.Key, cancellationToken).ConfigureAwait(false);
-            var targetReplicas = await shardDistributionManager.GetTargetNodesForShardAsync(kvp.Key, cancellationToken).ConfigureAwait(false);
-
-            if (isLocal)
+            if (scope.Orchestrator.InitializationStage != OrchestratorInitializationStage.Initialized)
             {
-                localShardCount++;
-            }
-            else
-            {
-                remoteShardCount++;
+                continue;
             }
 
-            shardTopologies.Add(new ShardTopologyDisplayDto(kvp.Key, kvp.Value, isLocal, targetReplicas));
+            var orchestrator = scope.Orchestrator;
+            var shardDistributionManager = scope.ServiceProvider.GetRequiredService<IShardDistributionManager>();
+            var shardIdProvider = scope.ServiceProvider.GetRequiredService<IShardIdProvider>();
+
+            var regDoc = await orchestrator.Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+            var regState = regDoc.Data ?? new CrdtRegistryState();
+
+            var shardDocCounts = new Dictionary<string, int>(StringComparer.Ordinal)
+            {
+                [orchestrator.Registry.ShardId] = 1
+            };
+
+            foreach (var kvp in regState.Documents)
+            {
+                var entry = kvp.Value;
+                if (entry.IsDeleted)
+                {
+                    deletedDocumentCount++;
+                    continue;
+                }
+
+                activeDocumentCount++;
+                var shardId = ResolveShardIdForEntry(shardIdProvider, entry.DocumentId, entry.TypeAlias);
+                if (shardDocCounts.TryGetValue(shardId, out var currentCount))
+                {
+                    shardDocCounts[shardId] = currentCount + 1;
+                }
+                else
+                {
+                    shardDocCounts[shardId] = 1;
+                }
+            }
+
+            foreach (var kvp in shardDocCounts.OrderBy(s => s.Key, StringComparer.Ordinal))
+            {
+                var isLocal = await shardDistributionManager.IsShardLocalAsync(kvp.Key, cancellationToken).ConfigureAwait(false);
+                var targetReplicas = await shardDistributionManager.GetTargetNodesForShardAsync(kvp.Key, cancellationToken).ConfigureAwait(false);
+
+                if (isLocal)
+                {
+                    localShardCount++;
+                }
+                else
+                {
+                    remoteShardCount++;
+                }
+
+                shardTopologies.Add(new ShardTopologyDisplayDto(scope.ScopeId, kvp.Key, kvp.Value, isLocal, targetReplicas));
+            }
+
+            localActiveDocsCount += orchestrator.GetActiveDocuments().Count;
         }
 
-        var localActiveDocsCount = orchestrator.GetActiveDocuments().Count;
         var displayRole = string.IsNullOrEmpty(currentRole) ? "None" : currentRole;
         var portSummary = currentMode == "server"
             ? $"WS Port: {currentPort}, TCP Port: {currentTcpPort}, Handshake Port: {currentHandshakePort}"
@@ -710,10 +901,9 @@ public static class Program
         lock (ConsoleLock)
         {
             Console.WriteLine($"\n--- [Cluster Peers & Topology: {replicaId}] ---");
-            Console.WriteLine($" Local Replica ID       : {replicaId} ({portSummary})");
+            Console.WriteLine($" Local Host Node ID     : {replicaId} ({portSummary})");
             Console.WriteLine($" Local Session Context  : Mode={currentMode.ToUpperInvariant()}, Role={displayRole}, Region={currentRegion}");
-            Console.WriteLine($" Active CRDT Replicas   : {activeReplicaIds.Count + 1} (Local: {replicaId}{(activeReplicaIds.Count > 0 ? ", Remote: " + string.Join(", ", activeReplicaIds.OrderBy(r => r, StringComparer.Ordinal)) : string.Empty)})");
-            Console.WriteLine($" Tombstoned Replicas    : {tombstonedReplicas.Count}{(tombstonedReplicas.Count > 0 ? " (" + string.Join(", ", tombstonedReplicas.Keys.OrderBy(k => k, StringComparer.Ordinal)) + ")" : string.Empty)}");
+            Console.WriteLine($" Active Causal Scopes   : {activeScopes.Count} ({string.Join(", ", activeScopes.Select(s => s.ScopeId).OrderBy(s => s, StringComparer.Ordinal))})");
 
             Console.WriteLine("\n [P2P Network Peers & Health]");
             if (peerList.Count == 0)
@@ -726,30 +916,30 @@ public static class Program
                 var suspectedCount = peerList.Count(p => p.Status == PeerStatus.Suspect);
                 var deadCount = peerList.Count(p => p.Status == PeerStatus.Dead);
                 Console.WriteLine($"   Summary: Total={peerList.Count} | Alive={aliveCount} | Suspected={suspectedCount} | Dead={deadCount}");
-                Console.WriteLine($"   {"Mesh",-10} | {"Status",-10} | {"Replica ID",-16} | {"Tracked Shards",14} | {"Peer ID",-36} | {"Endpoint"}");
-                Console.WriteLine($"   {new string('-', 120)}");
+                Console.WriteLine($"   {"Mesh",-10} | {"Status",-10} | {"Replica ID",-24} | {"Tracked Shards",14} | {"Peer ID",-36} | {"Endpoint"}");
+                Console.WriteLine($"   {new string('-', 128)}");
 
                 foreach (var peer in peerList.OrderBy(p => p.MeshId, StringComparer.Ordinal).ThenBy(p => p.Status).ThenBy(p => p.ReplicaId, StringComparer.Ordinal))
                 {
-                    Console.WriteLine($"   {peer.MeshId,-10} | {peer.Status,-10} | {peer.ReplicaId,-16} | {peer.TrackedShards,14} | {peer.PeerId,-36} | {peer.Endpoint}");
+                    Console.WriteLine($"   {peer.MeshId,-10} | {peer.Status,-10} | {peer.ReplicaId,-24} | {peer.TrackedShards,14} | {peer.PeerId,-36} | {peer.Endpoint}");
                 }
             }
 
             Console.WriteLine("\n [CRDT Shard Topology Overview]");
-            Console.WriteLine($"   Cluster Registry Docs  : {activeDocumentCount} Active, {deletedDocumentCount} Tombstoned (+1 System Registry)");
-            Console.WriteLine($"   Local Hosted Documents : {localActiveDocsCount} in-memory");
-            Console.WriteLine($"   Total Cluster Shards   : {shardTopologies.Count} (Hosted Locally: {localShardCount}, Remote Only: {remoteShardCount})");
+            Console.WriteLine($"   Cluster Registry Docs  : {activeDocumentCount} Active, {deletedDocumentCount} Tombstoned");
+            Console.WriteLine($"   Local Hosted Documents : {localActiveDocsCount} in-memory across all scopes");
+            Console.WriteLine($"   Total Scoped Shards    : {shardTopologies.Count} (Hosted Locally: {localShardCount}, Remote Only: {remoteShardCount})");
 
             if (showDetails && shardTopologies.Count > 0)
             {
-                Console.WriteLine($"\n   {"Shard ID",-28} | {"Docs",6} | {"Locality",-10} | {"Assigned Replicas"}");
-                Console.WriteLine($"   {new string('-', 95)}");
+                Console.WriteLine($"\n   {"Scope ID",-16} | {"Shard ID",-28} | {"Docs",6} | {"Locality",-10} | {"Assigned Replicas"}");
+                Console.WriteLine($"   {new string('-', 114)}");
 
                 foreach (var shard in shardTopologies)
                 {
                     var locality = shard.IsLocal ? "Local" : "Remote";
                     var replicasText = shard.TargetReplicas.Count > 0 ? string.Join(", ", shard.TargetReplicas) : "(None)";
-                    Console.WriteLine($"   {shard.ShardId,-28} | {shard.DocumentCount,6} | {locality,-10} | {replicasText}");
+                    Console.WriteLine($"   {shard.ScopeId,-16} | {shard.ShardId,-28} | {shard.DocumentCount,6} | {locality,-10} | {replicasText}");
                 }
             }
             else if (!showDetails && shardTopologies.Count > 0)
@@ -771,20 +961,34 @@ public static class Program
         };
     }
 
-    private static async Task DrawStateAsync(ICrdtDocumentOrchestrator orchestrator, ITaskManager taskManager, IFleetManager fleetManager, CancellationToken cancellationToken)
+    private static async Task DrawStateAsync(DistributedCrdtScopeManager scopeManager, string hostReplicaId, CancellationToken cancellationToken)
     {
         var taskDocsInfo = new List<DocumentStateDto<TaskItem>>();
-        foreach (var doc in orchestrator.GetActiveDocuments().OfType<IDistributedCrdtDocument<TaskListState>>())
-        {
-            var tasks = await taskManager.GetTasksAsync(doc.DocumentId, cancellationToken).ConfigureAwait(false);
-            taskDocsInfo.Add(new DocumentStateDto<TaskItem>(doc.DocumentId, tasks));
-        }
-
         var fleetDocsInfo = new List<DocumentStateDto<DeviceStatus>>();
-        foreach (var doc in orchestrator.GetActiveDocuments().OfType<IDistributedCrdtDocument<FleetState>>())
+
+        foreach (var scope in scopeManager.GetActiveScopes().OrderBy(s => s.ScopeId, StringComparer.Ordinal))
         {
-            var devices = await fleetManager.GetDevicesAsync(doc.DocumentId, cancellationToken).ConfigureAwait(false);
-            fleetDocsInfo.Add(new DocumentStateDto<DeviceStatus>(doc.DocumentId, devices));
+            if (string.Equals(scope.ScopeId, hostReplicaId, StringComparison.Ordinal) ||
+                scope.Orchestrator.InitializationStage != OrchestratorInitializationStage.Initialized)
+            {
+                continue;
+            }
+
+            var orchestrator = scope.Orchestrator;
+            var taskManager = scope.ServiceProvider.GetRequiredService<ITaskManager>();
+            var fleetManager = scope.ServiceProvider.GetRequiredService<IFleetManager>();
+
+            foreach (var doc in orchestrator.GetActiveDocuments().OfType<IDistributedCrdtDocument<TaskListState>>())
+            {
+                var tasks = await taskManager.GetTasksAsync(doc.DocumentId, cancellationToken).ConfigureAwait(false);
+                taskDocsInfo.Add(new DocumentStateDto<TaskItem>(scope.ScopeId, doc.DocumentId, tasks));
+            }
+
+            foreach (var doc in orchestrator.GetActiveDocuments().OfType<IDistributedCrdtDocument<FleetState>>())
+            {
+                var devices = await fleetManager.GetDevicesAsync(doc.DocumentId, cancellationToken).ConfigureAwait(false);
+                fleetDocsInfo.Add(new DocumentStateDto<DeviceStatus>(scope.ScopeId, doc.DocumentId, devices));
+            }
         }
 
         lock (ConsoleLock)
@@ -800,7 +1004,7 @@ public static class Program
             {
                 foreach (var info in taskDocsInfo)
                 {
-                    Console.WriteLine($"   => List [{info.Id}]:");
+                    Console.WriteLine($"   => List [{info.Id}] (Scope: {info.ScopeId}):");
                     if (info.Items.Count == 0)
                     {
                         Console.WriteLine("      (Empty)");
@@ -824,7 +1028,7 @@ public static class Program
             {
                 foreach (var info in fleetDocsInfo)
                 {
-                    Console.WriteLine($"   => Fleet [{info.Id}]:");
+                    Console.WriteLine($"   => Fleet [{info.Id}] (Scope: {info.ScopeId}):");
                     if (info.Items.Count == 0)
                     {
                         Console.WriteLine("      (Empty)");

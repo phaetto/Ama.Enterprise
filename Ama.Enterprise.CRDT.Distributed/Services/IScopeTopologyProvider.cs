@@ -2,10 +2,17 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.Enterprise.CRDT.Distributed.Models;
 
 /// <summary>
-/// Contract evaluating expected peer topological inclusions dynamically isolating scope-level causality boundaries.
+/// Defines rules for deciding whether CRDT scope data can be accepted from or replicated to remote peers.
 /// </summary>
+/// <remarks>
+/// Implement this interface to filter peers based on authentication claims, tenant boundaries,
+/// or regional rules. Use <see cref="CanAcceptScopeFromPeerAsync"/> to control inbound state, patches,
+/// and requests, and <see cref="CanReplicateScopeToPeerAsync"/> to control outbound state, patches,
+/// snapshots, and version vectors.
+/// </remarks>
 /// <example>
 /// <code>
 /// public sealed class ClaimBasedTopologyProvider : IScopeTopologyProvider
@@ -17,11 +24,25 @@ using System.Threading.Tasks;
 ///         this.sessionRegistry = sessionRegistry;
 ///     }
 ///     
-///     public async ValueTask&lt;bool&gt; IsPeerExpectedAsync(string peerNetworkId, CancellationToken cancellationToken = default)
+///     public async ValueTask&lt;bool&gt; CanAcceptScopeFromPeerAsync(ScopeAccessContext context, CancellationToken cancellationToken = default)
 ///     {
-///         // Example: check if peer has an active Admin session
-///         if (!Guid.TryParse(peerNetworkId, out var peerGuid)) return false;
-///         var session = await sessionRegistry.GetSessionAsync("mesh-id", new PeerId(peerGuid), cancellationToken);
+///         if (context.ScopeId == "read-only-replica" || !Guid.TryParse(context.PeerNetworkId, out var peerGuid))
+///         {
+///             return false;
+///         }
+///         
+///         var session = await sessionRegistry.GetSessionAsync(context.MeshId ?? "mesh-id", new PeerId(peerGuid), cancellationToken);
+///         return session?.HasClaim("role", "admin") ?? false;
+///     }
+///     
+///     public async ValueTask&lt;bool&gt; CanReplicateScopeToPeerAsync(ScopeAccessContext context, CancellationToken cancellationToken = default)
+///     {
+///         if (!Guid.TryParse(context.PeerNetworkId, out var peerGuid))
+///         {
+///             return false;
+///         }
+///         
+///         var session = await sessionRegistry.GetSessionAsync(context.MeshId ?? "mesh-id", new PeerId(peerGuid), cancellationToken);
 ///         return session?.HasClaim("role", "admin") ?? false;
 ///     }
 /// }
@@ -30,10 +51,28 @@ using System.Threading.Tasks;
 public interface IScopeTopologyProvider
 {
     /// <summary>
-    /// Determines whether a specific remote peer is expected to participate in the current CRDT causal scope asynchronously.
+    /// Checks whether the local node can accept incoming state, patches, or requests for a scope from a remote peer.
     /// </summary>
-    /// <param name="peerNetworkId">The network identifier of the remote peer.</param>
-    /// <param name="cancellationToken">A cancellation token that can be used to cancel the work.</param>
-    /// <returns>True if the peer is allowed and expected; otherwise, false.</returns>
-    ValueTask<bool> IsPeerExpectedAsync(string peerNetworkId, CancellationToken cancellationToken = default);
+    /// <param name="context">Details about the scope, the remote peer, the mesh, and the message type being evaluated.</param>
+    /// <param name="cancellationToken">A token to cancel the asynchronous check.</param>
+    /// <returns>
+    /// A <see cref="ValueTask{TResult}"/> that resolves to <see langword="true"/> if the incoming data or request is allowed;
+    /// otherwise, <see langword="false"/>.
+    /// </returns>
+    ValueTask<bool> CanAcceptScopeFromPeerAsync(
+        ScopeAccessContext context,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Checks whether the local node can send state, patches, snapshots, or version vectors for a scope to a remote peer.
+    /// </summary>
+    /// <param name="context">Details about the scope, the remote peer, the mesh, and the message type being evaluated.</param>
+    /// <param name="cancellationToken">A token to cancel the asynchronous check.</param>
+    /// <returns>
+    /// A <see cref="ValueTask{TResult}"/> that resolves to <see langword="true"/> if data for the scope can be sent to the peer;
+    /// otherwise, <see langword="false"/>.
+    /// </returns>
+    ValueTask<bool> CanReplicateScopeToPeerAsync(
+        ScopeAccessContext context,
+        CancellationToken cancellationToken = default);
 }

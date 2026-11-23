@@ -359,7 +359,7 @@ public class EvictionIntegrationTests
         // Construct a CrdtPatch from ZombieReplica
         var dummyOp = default(CrdtOperation) with { Id = Guid.NewGuid(), ReplicaId = "ZombieReplica", JsonPath = "$.dataMap.ZombieKey", ShardId = "default", ShardClock = 1 };
         var patchMsg = new Models.CrdtPatchMessage("ZombieReplica", new CrdtPatch([dummyOp]));
-        var patchWrapper = new Models.CrdtMessageWrapper("test-doc", "CrdtPatch", serializer.SerializeToBytes(patchMsg), "test-doc");
+        var patchWrapper = new Models.CrdtMessageWrapper("test-doc", "CrdtPatch", serializer.SerializeToBytes(patchMsg), "ZombieReplica", "test-doc");
 
         // Construct a CrdtSnapshot from ZombieReplica
         var metadataManager = scope.ServiceProvider.GetRequiredService<ICrdtMetadataManager>();
@@ -367,7 +367,7 @@ public class EvictionIntegrationTests
         zombieState.DataMap["ZombieSnapKey"] = "ShouldBeRejected";
         var zombieDoc = new CrdtDocument<TestState>(zombieState, metadataManager.Initialize(zombieState));
         var snapMsg = new Models.CrdtSnapshotMessage("ZombieReplica", serializer.SerializeToBytes(zombieDoc), new ShardVersionVectorMap());
-        var snapWrapper = new Models.CrdtMessageWrapper("test-doc", "CrdtSnapshot", serializer.SerializeToBytes(snapMsg), "test-doc");
+        var snapWrapper = new Models.CrdtMessageWrapper("test-doc", "CrdtSnapshot", serializer.SerializeToBytes(snapMsg), "ZombieReplica", "test-doc");
 
         // Act
         await handler.HandlePayloadAsync("TestMesh", new P2p.Models.Core.PeerId(Guid.NewGuid()), serializer.SerializeToBytes(patchWrapper), CancellationToken.None);
@@ -407,7 +407,7 @@ public class EvictionIntegrationTests
 
         // Act 1 - Receive CrdtEviction targeting a different replica ("NodeB")
         var otherEviction = new Models.CrdtEvictionRejectionMessage("NodeB");
-        var otherWrapper = new Models.CrdtMessageWrapper("test-doc", "CrdtEviction", serializer.SerializeToBytes(otherEviction));
+        var otherWrapper = new Models.CrdtMessageWrapper("test-doc", "CrdtEviction", serializer.SerializeToBytes(otherEviction), "RemoteReplica");
         await handler.HandlePayloadAsync("TestMesh", new P2p.Models.Core.PeerId(Guid.NewGuid()), serializer.SerializeToBytes(otherWrapper), CancellationToken.None);
 
         // Assert 1 - Local identity is untouched
@@ -415,7 +415,7 @@ public class EvictionIntegrationTests
 
         // Act 2 - Receive CrdtEviction targeting local replica ("NodeA")
         var selfEviction = new Models.CrdtEvictionRejectionMessage("NodeA");
-        var selfWrapper = new Models.CrdtMessageWrapper("test-doc", "CrdtEviction", serializer.SerializeToBytes(selfEviction));
+        var selfWrapper = new Models.CrdtMessageWrapper("test-doc", "CrdtEviction", serializer.SerializeToBytes(selfEviction), "RemoteReplica");
         await handler.HandlePayloadAsync("TestMesh", new P2p.Models.Core.PeerId(Guid.NewGuid()), serializer.SerializeToBytes(selfWrapper), CancellationToken.None);
 
         // Assert 2 - Local identity was rebooted with a new GUID suffix

@@ -132,6 +132,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ICrdtShutdownCoordinator, CrdtShutdownCoordinator>();
         services.TryAddSingleton<ICrdtMemoryEstimator, CrdtMemoryEstimator>();
 
+        services.TryAddScoped<CrdtScopeContext>();
         services.TryAddScoped<IScopeTopologyProvider, DefaultScopeTopologyProvider>();
         services.TryAddScoped<IDocumentCommandPipeline, DocumentCommandPipeline>();
         

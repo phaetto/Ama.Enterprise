@@ -52,20 +52,29 @@ public sealed class CrdtStateSyncPayloadProcessor : ICrdtStateSyncPayloadProcess
         ArgumentNullException.ThrowIfNull(rejectEvictedReplicaAsync);
         ArgumentNullException.ThrowIfNull(isLocalLoopbackSender);
 
-        if (senderId.Value != Guid.Empty)
+        var logicalScopeId = !string.IsNullOrWhiteSpace(scope.ScopeId) ? scope.ScopeId : scope.ReplicaId;
+        var wireScopeId = !string.IsNullOrWhiteSpace(wrapper.ScopeId)
+            ? wrapper.ScopeId
+            : (!string.IsNullOrWhiteSpace(scope.ScopeId) && !string.Equals(scope.ScopeId, scope.HostReplicaId, StringComparison.Ordinal)
+                ? scope.ScopeId
+                : null);
+
+        var topologyProvider = scope.ServiceProvider.GetService<IScopeTopologyProvider>();
+
+        if (senderId.Value != Guid.Empty && topologyProvider != null)
         {
-            var topologyProvider = scope.ServiceProvider.GetService<IScopeTopologyProvider>();
-            if (topologyProvider != null)
+            var senderIdStr = senderId.Value.ToString();
+            var accessContext = new ScopeAccessContext(logicalScopeId, senderIdStr, meshId, "CrdtSync");
+            var canAccept = await topologyProvider.CanAcceptScopeFromPeerAsync(accessContext, cancellationToken).ConfigureAwait(false);
+            var canReplicate = await topologyProvider.CanReplicateScopeToPeerAsync(accessContext, cancellationToken).ConfigureAwait(false);
+            if (!canAccept && !canReplicate)
             {
-                var isExpected = await topologyProvider.IsPeerExpectedAsync(senderId.Value.ToString(), cancellationToken).ConfigureAwait(false);
-                if (!isExpected)
-                {
-                    logger.LogWarning(
-                        "[{ReplicaId}] Rejected CrdtSync payload from unexpected peer '{PeerId}'.",
-                        scope.ReplicaId,
-                        senderId.Value);
-                    return;
-                }
+                logger.LogWarning(
+                    "[{ReplicaId}] Rejected CrdtSync payload for scope '{ScopeId}' from unauthorized peer '{PeerId}'.",
+                    scope.ReplicaId,
+                    logicalScopeId,
+                    senderId.Value);
+                return;
             }
         }
 
@@ -106,6 +115,18 @@ public sealed class CrdtStateSyncPayloadProcessor : ICrdtStateSyncPayloadProcess
         }
 
         scope.ClusterTracker.UpdatePeerState(syncMsg.ReplicaId, senderId.Value.ToString(), syncMsg.State);
+
+        if (senderId.Value != Guid.Empty && topologyProvider != null)
+        {
+            var senderIdStr = senderId.Value.ToString();
+            var canReplicateToSender = await topologyProvider.CanReplicateScopeToPeerAsync(
+                new ScopeAccessContext(logicalScopeId, senderIdStr, meshId, "CrdtPatch"),
+                cancellationToken).ConfigureAwait(false);
+            if (!canReplicateToSender)
+            {
+                return;
+            }
+        }
 
         var concreteOrchestrator = scope.Orchestrator as CrdtDocumentOrchestrator;
         var safeLocalState = await versionVectorManager.GetFullSnapshotAsync(cancellationToken).ConfigureAwait(false);
@@ -497,7 +518,13 @@ public sealed class CrdtStateSyncPayloadProcessor : ICrdtStateSyncPayloadProcess
                             ? null
                             : targetDoc.TypeAlias;
 
-                        var replyWrapper = new CrdtMessageWrapper(targetDoc.DocumentId, "CrdtPatch", patchPayload, docTypeAlias);
+                        var replyWrapper = new CrdtMessageWrapper(
+                            targetDoc.DocumentId,
+                            "CrdtPatch",
+                            patchPayload,
+                            replicaContext.ReplicaId,
+                            docTypeAlias,
+                            wireScopeId);
                         var replyBytes = serializer.SerializeToBytes(replyWrapper);
 
                         await directSender.SendDirectAsync(senderId, replyBytes, cancellationToken).ConfigureAwait(false);
@@ -534,7 +561,13 @@ public sealed class CrdtStateSyncPayloadProcessor : ICrdtStateSyncPayloadProcess
 
                     var patchMsg = new CrdtPatchMessage(replicaContext.ReplicaId, new CrdtPatch(docOps));
                     var patchPayload = serializer.SerializeToBytes(patchMsg);
-                    var replyWrapper = new CrdtMessageWrapper(rawDocId, "CrdtPatch", patchPayload, docTypeAlias);
+                    var replyWrapper = new CrdtMessageWrapper(
+                        rawDocId,
+                        "CrdtPatch",
+                        patchPayload,
+                        replicaContext.ReplicaId,
+                        docTypeAlias,
+                        wireScopeId);
                     var replyBytes = serializer.SerializeToBytes(replyWrapper);
 
                     await directSender.SendDirectAsync(senderId, replyBytes, cancellationToken).ConfigureAwait(false);

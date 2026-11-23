@@ -72,49 +72,58 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver, IDisposable
 
         try
         {
-            var scope = scopeManager.GetOrCreateScope(replicaId);
-            var topologyProvider = scope.ServiceProvider.GetRequiredService<IScopeTopologyProvider>();
-            var isExpected = await topologyProvider.IsPeerExpectedAsync(node.Id.Value.ToString(), cancellationToken).ConfigureAwait(false);
-            if (!isExpected)
-            {
-                return;
-            }
+            var scopes = GetManagedScopes();
+            var anyScopeExpected = false;
+            var enableSharding = false;
+            var stabilizationDelayMs = 500;
+            var peerIdStr = node.Id.Value.ToString();
 
-            var options = scope.ServiceProvider.GetService<IOptions<DistributedCrdtOptions>>()?.Value;
-            var enableSharding = options?.EnableSharding ?? false;
-            var stabilizationDelayMs = options?.TopologyStabilizationDelayMilliseconds ?? 500;
-
-            if (!enableSharding || stabilizationDelayMs <= 0)
+            for (int i = 0; i < scopes.Count; i++)
             {
-                var registry = peerRegistry ??= serviceProvider.GetRequiredService<IPeerRegistry>();
-                var activePeers = await registry.GetPeersByStatusAsync(eventMeshId, PeerStatus.Active, cancellationToken);
-                if (activePeers.Count() <= 1 && Interlocked.CompareExchange(ref initialSyncTriggered, 1, 0) == 0)
+                var scope = scopes[i];
+                var logicalScopeId = !string.IsNullOrWhiteSpace(scope.ScopeId) ? scope.ScopeId : scope.ReplicaId;
+                if (!await CanSyncScopeWithPeerAsync(scope, logicalScopeId, peerIdStr, eventMeshId, cancellationToken).ConfigureAwait(false))
                 {
-                    logger.LogInformation(
-                        "[{MeshId}] Connected to first peer {PeerId}. Triggering immediate DVV state sync for replica {ReplicaId}.",
-                        eventMeshId,
-                        node.Id,
-                        replicaId);
-                    await scope.Orchestrator.DispatchAntiEntropyStateAsync(node.Id, cancellationToken).ConfigureAwait(false);
+                    continue;
                 }
 
-                return;
+                anyScopeExpected = true;
+                var options = scope.ServiceProvider.GetService<IOptions<DistributedCrdtOptions>>()?.Value;
+                enableSharding = options?.EnableSharding ?? false;
+                stabilizationDelayMs = options?.TopologyStabilizationDelayMilliseconds ?? 500;
+
+                if (!enableSharding || stabilizationDelayMs <= 0)
+                {
+                    var registry = peerRegistry ??= serviceProvider.GetRequiredService<IPeerRegistry>();
+                    var activePeers = await registry.GetPeersByStatusAsync(eventMeshId, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
+                    if (activePeers.Count() <= 1 && (scopes.Count > 1 || Interlocked.CompareExchange(ref initialSyncTriggered, 1, 0) == 0))
+                    {
+                        logger.LogInformation(
+                            "[{MeshId}] Connected to peer {PeerId}. Triggering immediate DVV state sync for replica scope {ReplicaId}.",
+                            eventMeshId,
+                            node.Id,
+                            scope.ReplicaId);
+                        await scope.Orchestrator.DispatchAntiEntropyStateAsync(node.Id, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+                else
+                {
+                    logger.LogDebug(
+                        "[{MeshId}] Connected to peer {PeerId} in sharded mode. Sending immediate topology announcement for replica scope {ReplicaId} and scheduling stabilized shard sync in {DelayMs}ms.",
+                        eventMeshId,
+                        node.Id,
+                        scope.ReplicaId,
+                        stabilizationDelayMs);
+
+                    await scope.Orchestrator.DispatchTopologyAnnouncementAsync(node.Id, cancellationToken).ConfigureAwait(false);
+                }
             }
 
-            // Phase 1: Immediately exchange replica identity and system registry DVV so the consistent hash ring
-            // includes all joining peers before any user data shard ownership or snapshots are evaluated.
-            logger.LogDebug(
-                "[{MeshId}] Connected to peer {PeerId} in sharded mode. Sending immediate topology announcement for replica {ReplicaId} and scheduling stabilized shard sync in {DelayMs}ms.",
-                eventMeshId,
-                node.Id,
-                replicaId,
-                stabilizationDelayMs);
-
-            await scope.Orchestrator.DispatchTopologyAnnouncementAsync(node.Id, cancellationToken).ConfigureAwait(false);
-
-            // Phase 2: Debounce full data shard synchronization across joining peers so the hash ring stabilizes first.
-            pendingPeers[node.Id.Value] = node.Id;
-            ScheduleStabilizedDataSync(stabilizationDelayMs);
+            if (anyScopeExpected && enableSharding && stabilizationDelayMs > 0)
+            {
+                pendingPeers[node.Id.Value] = node.Id;
+                ScheduleStabilizedDataSync(stabilizationDelayMs);
+            }
         }
         catch (Exception ex)
         {
@@ -137,8 +146,12 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver, IDisposable
             var stringId = peerId.Value.ToString();
             logger.LogInformation("[{MeshId}] Peer {PeerId} departed. Preserving localized replica {ReplicaId} CRDT states.", eventMeshId, stringId, replicaId);
             
-            var scope = scopeManager.GetOrCreateScope(replicaId);
-            scope.ClusterTracker.RemovePeerByNetworkId(stringId);
+            var scopes = GetManagedScopes();
+            for (int i = 0; i < scopes.Count; i++)
+            {
+                scopes[i].ClusterTracker.RemovePeerByNetworkId(stringId);
+            }
+
             peersDepartedCounter.Add(1, new KeyValuePair<string, object?>("mesh_id", eventMeshId));
         }
         
@@ -162,8 +175,12 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver, IDisposable
                 var stringId = peerId.Value.ToString();
                 logger.LogInformation("[{MeshId}] Peer {PeerId} marked as Dead targeting localized replica {ReplicaId}.", eventMeshId, stringId, replicaId);
                 
-                var scope = scopeManager.GetOrCreateScope(replicaId);
-                scope.ClusterTracker.RemovePeerByNetworkId(stringId);
+                var scopes = GetManagedScopes();
+                for (int i = 0; i < scopes.Count; i++)
+                {
+                    scopes[i].ClusterTracker.RemovePeerByNetworkId(stringId);
+                }
+
                 peersDepartedCounter.Add(1, new KeyValuePair<string, object?>("mesh_id", eventMeshId));
             }
         }
@@ -259,56 +276,60 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver, IDisposable
                 return;
             }
 
-            var scope = scopeManager.GetOrCreateScope(replicaId);
-            var topologyProvider = scope.ServiceProvider.GetRequiredService<IScopeTopologyProvider>();
-            var expectedPeersToSync = new List<PeerId>(peersToSync.Count);
-            for (int i = 0; i < peersToSync.Count; i++)
+            var scopes = GetManagedScopes();
+            for (int s = 0; s < scopes.Count; s++)
             {
-                var candidatePeer = peersToSync[i];
-                if (await topologyProvider.IsPeerExpectedAsync(candidatePeer.Value.ToString(), currentCts.Token).ConfigureAwait(false))
+                var scope = scopes[s];
+                var logicalScopeId = !string.IsNullOrWhiteSpace(scope.ScopeId) ? scope.ScopeId : scope.ReplicaId;
+                var expectedPeersToSync = new List<PeerId>(peersToSync.Count);
+                for (int i = 0; i < peersToSync.Count; i++)
                 {
-                    expectedPeersToSync.Add(candidatePeer);
+                    var candidatePeer = peersToSync[i];
+                    if (await CanSyncScopeWithPeerAsync(scope, logicalScopeId, candidatePeer.Value.ToString(), meshId, currentCts.Token).ConfigureAwait(false))
+                    {
+                        expectedPeersToSync.Add(candidatePeer);
+                    }
                 }
-            }
 
-            if (expectedPeersToSync.Count == 0)
-            {
-                return;
-            }
+                if (expectedPeersToSync.Count == 0)
+                {
+                    continue;
+                }
 
-            await scope.Orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, currentCts.Token).ConfigureAwait(false);
+                await scope.Orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, currentCts.Token).ConfigureAwait(false);
 
-            var inboundQueue = serviceProvider.GetKeyedService<IInboundMessageQueue<IMeshMessage>>(meshId);
-            var commandPipeline = scope.ServiceProvider.GetService<IDocumentCommandPipeline>();
-            var versionVectorManager = scope.ServiceProvider.GetService<IShardVersionVectorManager>();
-            var options = scope.ServiceProvider.GetService<IOptions<DistributedCrdtOptions>>()?.Value;
-            var snapshotActivityWindowMs = Math.Max(2000L, (options?.AntiEntropyStartupIntervalSeconds ?? 2) * 1500L);
+                var inboundQueue = serviceProvider.GetKeyedService<IInboundMessageQueue<IMeshMessage>>(meshId);
+                var commandPipeline = scope.ServiceProvider.GetService<IDocumentCommandPipeline>();
+                var versionVectorManager = scope.ServiceProvider.GetService<IShardVersionVectorManager>();
+                var options = scope.ServiceProvider.GetService<IOptions<DistributedCrdtOptions>>()?.Value;
+                var snapshotActivityWindowMs = Math.Max(2000L, (options?.AntiEntropyStartupIntervalSeconds ?? 2) * 1500L);
 
-            var hasInFlightBacklog =
-                (inboundQueue is { PendingCount: > 0 }) ||
-                (commandPipeline is { PendingCommandCount: > 0 }) ||
-                (versionVectorManager != null && versionVectorManager.TryGetActiveSnapshotReceptionState(snapshotActivityWindowMs, out _));
+                var hasInFlightBacklog =
+                    (inboundQueue is { PendingCount: > 0 }) ||
+                    (commandPipeline is { PendingCommandCount: > 0 }) ||
+                    (versionVectorManager != null && versionVectorManager.TryGetActiveSnapshotReceptionState(snapshotActivityWindowMs, out _));
 
-            if (hasInFlightBacklog)
-            {
-                logger.LogDebug(
-                    "[{MeshId}] Deferring stabilized shard DVV state sync for replica {ReplicaId} because inbound queues or snapshot reception are currently active. Periodic anti-entropy will resume once queues drain.",
+                if (hasInFlightBacklog)
+                {
+                    logger.LogDebug(
+                        "[{MeshId}] Deferring stabilized shard DVV state sync for replica {ReplicaId} because inbound queues or snapshot reception are currently active. Periodic anti-entropy will resume once queues drain.",
+                        meshId,
+                        scope.ReplicaId);
+                    continue;
+                }
+
+                logger.LogInformation(
+                    "[{MeshId}] Topology stabilization window ({DelayMs}ms) elapsed with {PeerCount} joined peer(s). Triggering full shard DVV state sync for replica {ReplicaId}.",
                     meshId,
-                    replicaId);
-                return;
-            }
+                    delayMs,
+                    expectedPeersToSync.Count,
+                    scope.ReplicaId);
 
-            logger.LogInformation(
-                "[{MeshId}] Topology stabilization window ({DelayMs}ms) elapsed with {PeerCount} joined peer(s). Triggering full shard DVV state sync for replica {ReplicaId}.",
-                meshId,
-                delayMs,
-                expectedPeersToSync.Count,
-                replicaId);
-
-            for (int i = 0; i < expectedPeersToSync.Count; i++)
-            {
-                currentCts.Token.ThrowIfCancellationRequested();
-                await scope.Orchestrator.DispatchAntiEntropyStateAsync(expectedPeersToSync[i], currentCts.Token).ConfigureAwait(false);
+                for (int i = 0; i < expectedPeersToSync.Count; i++)
+                {
+                    currentCts.Token.ThrowIfCancellationRequested();
+                    await scope.Orchestrator.DispatchAntiEntropyStateAsync(expectedPeersToSync[i], currentCts.Token).ConfigureAwait(false);
+                }
             }
         }
         catch (OperationCanceledException)
@@ -319,5 +340,45 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver, IDisposable
         {
             logger.LogError(ex, "[{MeshId}] Failed to execute stabilized data shard sync for replica {ReplicaId}.", meshId, replicaId);
         }
+    }
+
+    private List<IDistributedCrdtScope> GetManagedScopes()
+    {
+        var activeScopes = scopeManager.GetActiveScopes();
+        var matching = new List<IDistributedCrdtScope>();
+        for (int i = 0; i < activeScopes.Count; i++)
+        {
+            var s = activeScopes[i];
+            if (string.Equals(s.ReplicaId, replicaId, StringComparison.Ordinal) ||
+                string.Equals(s.HostReplicaId, replicaId, StringComparison.Ordinal) ||
+                string.Equals(s.ScopeId, replicaId, StringComparison.Ordinal))
+            {
+                matching.Add(s);
+            }
+        }
+
+        if (matching.Count == 0)
+        {
+            matching.Add(scopeManager.GetOrCreateScope(replicaId));
+        }
+
+        return matching;
+    }
+
+    private static async ValueTask<bool> CanSyncScopeWithPeerAsync(
+        IDistributedCrdtScope scope,
+        string logicalScopeId,
+        string peerNetworkId,
+        string meshId,
+        CancellationToken cancellationToken)
+    {
+        var topologyProvider = scope.ServiceProvider.GetRequiredService<IScopeTopologyProvider>();
+        var ctx = new ScopeAccessContext(logicalScopeId, peerNetworkId, meshId, "CrdtSync");
+        if (await topologyProvider.CanReplicateScopeToPeerAsync(ctx, cancellationToken).ConfigureAwait(false))
+        {
+            return true;
+        }
+
+        return await topologyProvider.CanAcceptScopeFromPeerAsync(ctx, cancellationToken).ConfigureAwait(false);
     }
 }

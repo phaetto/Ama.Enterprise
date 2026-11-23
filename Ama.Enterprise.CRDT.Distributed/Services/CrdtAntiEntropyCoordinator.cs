@@ -192,14 +192,13 @@ public sealed class CrdtAntiEntropyCoordinator : ICrdtAntiEntropyCoordinator
 
         try
         {
-            var topologyProvider = serviceProvider.GetRequiredService<IScopeTopologyProvider>();
-            var isExpected = await topologyProvider.IsPeerExpectedAsync(targetPeerId.Value.ToString(), cancellationToken).ConfigureAwait(false);
-            if (!isExpected)
+            var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
+            var logicalScopeId = GetLogicalScopeId(replicaContext.ReplicaId);
+            if (!await CanCommunicateScopeWithPeerAsync(logicalScopeId, targetPeerId.Value.ToString(), "CrdtSync", cancellationToken).ConfigureAwait(false))
             {
                 return;
             }
 
-            var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
             var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
             var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
             var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
@@ -218,7 +217,12 @@ public sealed class CrdtAntiEntropyCoordinator : ICrdtAntiEntropyCoordinator
             var syncMsg = new CrdtStateSyncMessage(replicaContext.ReplicaId, registryState, IsTopologyAnnouncementOnly: true);
             var payload = serializer.SerializeToBytes(syncMsg);
 
-            var wrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", payload);
+            var wrapper = new CrdtMessageWrapper(
+                "Cluster",
+                "CrdtSync",
+                payload,
+                replicaContext.ReplicaId,
+                ScopeId: GetWireScopeId());
             var finalBytes = serializer.SerializeToBytes(wrapper);
 
             await directSender.SendDirectAsync(targetPeerId, finalBytes, cancellationToken).ConfigureAwait(false);
@@ -252,15 +256,15 @@ public sealed class CrdtAntiEntropyCoordinator : ICrdtAntiEntropyCoordinator
             typeAlias = stringPool.GetOrAdd(typeAlias);
         }
 
-        var topologyProvider = serviceProvider.GetRequiredService<IScopeTopologyProvider>();
-        var isExpected = await topologyProvider.IsPeerExpectedAsync(targetPeerId.Value.ToString(), cancellationToken).ConfigureAwait(false);
+        var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
+        var logicalScopeId = GetLogicalScopeId(replicaContext.ReplicaId);
+        var isExpected = await CanReplicateScopeToPeerAsync(logicalScopeId, targetPeerId.Value.ToString(), "CrdtSnapshot", cancellationToken).ConfigureAwait(false);
         if (!isExpected)
         {
             logger.LogWarning("Rejected snapshot request for document {DocumentId} from excluded peer {PeerId}.", documentId, targetPeerId.Value);
             return;
         }
 
-        var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
         if (!IsPeerConnectedInBoundMeshes(replicaContext.ReplicaId, targetPeerId, cancellationToken))
         {
             logger.LogWarning("Rejected snapshot request for document {DocumentId} from peer {PeerId} not connected in replica {ReplicaId} bound meshes.", documentId, targetPeerId.Value, replicaContext.ReplicaId);
@@ -369,7 +373,13 @@ public sealed class CrdtAntiEntropyCoordinator : ICrdtAntiEntropyCoordinator
                 }
             }
 
-            var wrapper = new CrdtMessageWrapper(documentId, "CrdtSnapshot", payload, documentTypeAlias);
+            var wrapper = new CrdtMessageWrapper(
+                documentId,
+                "CrdtSnapshot",
+                payload,
+                replicaContext.ReplicaId,
+                documentTypeAlias,
+                logicalScopeId);
             var finalBytes = serializer.SerializeToBytes(wrapper);
 
             await directSender.SendDirectAsync(targetPeerId, finalBytes, cancellationToken).ConfigureAwait(false);
@@ -446,8 +456,13 @@ public sealed class CrdtAntiEntropyCoordinator : ICrdtAntiEntropyCoordinator
         try
         {
             var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
-            var topologyProvider = serviceProvider.GetRequiredService<IScopeTopologyProvider>();
-            var peerRegistry = serviceProvider.GetRequiredService<IPeerRegistry>();
+            var logicalScopeId = GetLogicalScopeId(replicaContext.ReplicaId);
+            var peerRegistry = serviceProvider.GetService<IPeerRegistry>();
+            if (peerRegistry == null)
+            {
+                return;
+            }
+
             var boundMeshIds = GetBoundMeshIds(replicaContext.ReplicaId);
 
             var validPeers = new List<PeerId>();
@@ -464,7 +479,7 @@ public sealed class CrdtAntiEntropyCoordinator : ICrdtAntiEntropyCoordinator
                     }
 
                     var networkIdStr = peer.Id.Value.ToString();
-                    var isExpected = await topologyProvider.IsPeerExpectedAsync(networkIdStr, cancellationToken).ConfigureAwait(false);
+                    var isExpected = await CanCommunicateScopeWithPeerAsync(logicalScopeId, networkIdStr, "CrdtSync", cancellationToken).ConfigureAwait(false);
                     if (isExpected)
                     {
                         validPeers.Add(peer.Id);
@@ -496,14 +511,14 @@ public sealed class CrdtAntiEntropyCoordinator : ICrdtAntiEntropyCoordinator
 
         try
         {
-            var topologyProvider = serviceProvider.GetRequiredService<IScopeTopologyProvider>();
-            var isExpected = await topologyProvider.IsPeerExpectedAsync(targetPeerId.Value.ToString(), cancellationToken).ConfigureAwait(false);
+            var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
+            var logicalScopeId = GetLogicalScopeId(replicaContext.ReplicaId);
+            var isExpected = await CanCommunicateScopeWithPeerAsync(logicalScopeId, targetPeerId.Value.ToString(), "CrdtSync", cancellationToken).ConfigureAwait(false);
             if (!isExpected)
             {
                 return;
             }
 
-            var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
             var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
             var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
             var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
@@ -523,7 +538,12 @@ public sealed class CrdtAntiEntropyCoordinator : ICrdtAntiEntropyCoordinator
             var syncMsg = new CrdtStateSyncMessage(replicaContext.ReplicaId, globalState, IsTopologyAnnouncementOnly: false);
             var payload = serializer.SerializeToBytes(syncMsg);
 
-            var wrapper = new CrdtMessageWrapper("Cluster", "CrdtSync", payload);
+            var wrapper = new CrdtMessageWrapper(
+                "Cluster",
+                "CrdtSync",
+                payload,
+                replicaContext.ReplicaId,
+                ScopeId: GetWireScopeId());
             var finalBytes = serializer.SerializeToBytes(wrapper);
 
             await directSender.SendDirectAsync(targetPeerId, finalBytes, cancellationToken).ConfigureAwait(false);
@@ -565,12 +585,16 @@ public sealed class CrdtAntiEntropyCoordinator : ICrdtAntiEntropyCoordinator
     private HashSet<string> GetBoundMeshIds(string? localReplicaId)
     {
         var meshIds = new HashSet<string>(StringComparer.Ordinal);
-        if (!string.IsNullOrWhiteSpace(localReplicaId))
+        var scopeContext = serviceProvider.GetService<CrdtScopeContext>();
+        var hostReplicaId = scopeContext?.HostReplicaId;
+
+        if (!string.IsNullOrWhiteSpace(localReplicaId) || !string.IsNullOrWhiteSpace(hostReplicaId))
         {
             var p2pRegistrations = serviceProvider.GetServices<DistributedCrdtP2pRegistration>();
             foreach (var registration in p2pRegistrations)
             {
-                if (string.Equals(registration.ReplicaId, localReplicaId, StringComparison.Ordinal) &&
+                if ((string.Equals(registration.ReplicaId, localReplicaId, StringComparison.Ordinal) ||
+                     (!string.IsNullOrWhiteSpace(hostReplicaId) && string.Equals(registration.ReplicaId, hostReplicaId, StringComparison.Ordinal))) &&
                     !string.IsNullOrWhiteSpace(registration.MeshId))
                 {
                     meshIds.Add(registration.MeshId);
@@ -591,6 +615,63 @@ public sealed class CrdtAntiEntropyCoordinator : ICrdtAntiEntropyCoordinator
         }
 
         return meshIds;
+    }
+
+    private string GetLogicalScopeId(string fallbackReplicaId)
+    {
+        var scopeContext = serviceProvider.GetService<CrdtScopeContext>();
+        return !string.IsNullOrWhiteSpace(scopeContext?.ScopeId) ? scopeContext.ScopeId : fallbackReplicaId;
+    }
+
+    private string? GetWireScopeId()
+    {
+        var scopeContext = serviceProvider.GetService<CrdtScopeContext>();
+        if (scopeContext != null &&
+            !string.IsNullOrWhiteSpace(scopeContext.ScopeId) &&
+            !string.Equals(scopeContext.ScopeId, scopeContext.HostReplicaId, StringComparison.Ordinal))
+        {
+            return scopeContext.ScopeId;
+        }
+
+        return null;
+    }
+
+    private async ValueTask<bool> CanReplicateScopeToPeerAsync(
+        string scopeId,
+        string peerNetworkId,
+        string messageType,
+        CancellationToken cancellationToken)
+    {
+        var topologyProvider = serviceProvider.GetService<IScopeTopologyProvider>();
+        if (topologyProvider != null)
+        {
+            return await topologyProvider.CanReplicateScopeToPeerAsync(
+                new ScopeAccessContext(scopeId, peerNetworkId, null, messageType),
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        return true;
+    }
+
+    private async ValueTask<bool> CanCommunicateScopeWithPeerAsync(
+        string scopeId,
+        string peerNetworkId,
+        string messageType,
+        CancellationToken cancellationToken)
+    {
+        var topologyProvider = serviceProvider.GetService<IScopeTopologyProvider>();
+        if (topologyProvider != null)
+        {
+            var ctx = new ScopeAccessContext(scopeId, peerNetworkId, null, messageType);
+            if (await topologyProvider.CanReplicateScopeToPeerAsync(ctx, cancellationToken).ConfigureAwait(false))
+            {
+                return true;
+            }
+
+            return await topologyProvider.CanAcceptScopeFromPeerAsync(ctx, cancellationToken).ConfigureAwait(false);
+        }
+
+        return true;
     }
 
     private bool IsPeerConnectedInBoundMeshes(string localReplicaId, PeerId targetPeerId, CancellationToken cancellationToken)
@@ -668,7 +749,8 @@ public sealed class CrdtAntiEntropyCoordinator : ICrdtAntiEntropyCoordinator
         {
             var versionVectorManager = serviceProvider.GetService<IShardVersionVectorManager>();
             var clusterTracker = serviceProvider.GetService<IClusterStateTracker>();
-            var topologyProvider = serviceProvider.GetService<IScopeTopologyProvider>();
+            var replicaContext = serviceProvider.GetService<ReplicaContext>();
+            var logicalScopeId = GetLogicalScopeId(replicaContext?.ReplicaId ?? string.Empty);
             if (versionVectorManager == null || clusterTracker == null)
             {
                 return 0;
@@ -680,35 +762,27 @@ public sealed class CrdtAntiEntropyCoordinator : ICrdtAntiEntropyCoordinator
                 return 0;
             }
 
-            IReadOnlyList<ShardVersionVectorMap> peerStates;
-            if (topologyProvider != null)
+            var filteredStates = new List<ShardVersionVectorMap>();
+            foreach (var replicaId in clusterTracker.GetActiveReplicaIds())
             {
-                var filteredStates = new List<ShardVersionVectorMap>();
-                foreach (var replicaId in clusterTracker.GetActiveReplicaIds())
+                var peerNetworkId = clusterTracker.GetPeerIdByReplicaId(replicaId);
+                if (!string.IsNullOrWhiteSpace(peerNetworkId))
                 {
-                    var peerNetworkId = clusterTracker.GetPeerIdByReplicaId(replicaId);
-                    if (!string.IsNullOrWhiteSpace(peerNetworkId))
+                    var isExpected = await CanReplicateScopeToPeerAsync(logicalScopeId, peerNetworkId, "CrdtSync", cancellationToken).ConfigureAwait(false);
+                    if (!isExpected)
                     {
-                        var isExpected = await topologyProvider.IsPeerExpectedAsync(peerNetworkId, cancellationToken).ConfigureAwait(false);
-                        if (!isExpected)
-                        {
-                            continue;
-                        }
-                    }
-
-                    var state = clusterTracker.TryGetPeerState(replicaId);
-                    if (state != null)
-                    {
-                        filteredStates.Add(state);
+                        continue;
                     }
                 }
 
-                peerStates = filteredStates;
+                var state = clusterTracker.TryGetPeerState(replicaId);
+                if (state != null)
+                {
+                    filteredStates.Add(state);
+                }
             }
-            else
-            {
-                peerStates = clusterTracker.GetClusterStates();
-            }
+
+            IReadOnlyList<ShardVersionVectorMap> peerStates = filteredStates;
 
             if (peerStates.Count == 0)
             {

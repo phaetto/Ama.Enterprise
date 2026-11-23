@@ -68,6 +68,12 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
         var jobAlias = ResolveMapReduceJobAlias<TState, TInput, TAccumulate, TResult>();
         var resolvedTypeAlias = string.IsNullOrWhiteSpace(documentTypeAlias) ? typeof(TState).Name : documentTypeAlias;
         var replicaContext = serviceProvider.GetRequiredService<ReplicaContext>();
+        var scopeContext = serviceProvider.GetService<CrdtScopeContext>();
+        var wireScopeId = scopeContext != null &&
+                          !string.IsNullOrWhiteSpace(scopeContext.ScopeId) &&
+                          !string.Equals(scopeContext.ScopeId, scopeContext.HostReplicaId, StringComparison.Ordinal)
+            ? scopeContext.ScopeId
+            : null;
         var shardIdProvider = serviceProvider.GetRequiredService<IShardIdProvider>();
 
         var candidateDocuments = await ResolveCandidateMapReduceDocumentsAsync<TState>(
@@ -474,6 +480,8 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
 
                     batchTasks[i] = DispatchRemoteMapReduceBatchAsync(
                         targetReplicaId,
+                        replicaContext.ReplicaId,
+                        wireScopeId,
                         jobAlias,
                         resolvedTypeAlias,
                         docBatch,
@@ -846,6 +854,8 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
 
     private static async Task<RemoteBatchAttemptOutcome> DispatchRemoteMapReduceBatchAsync(
         string targetReplicaId,
+        string senderReplicaId,
+        string? wireScopeId,
         string jobAlias,
         string documentTypeAlias,
         IReadOnlyList<string> documentBatch,
@@ -882,7 +892,13 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
         };
 
         var reqBytes = serializer.SerializeToBytes(req);
-        var wrapper = new CrdtMessageWrapper("Cluster", "CrdtMapReduceReq", reqBytes, documentTypeAlias);
+        var wrapper = new CrdtMessageWrapper(
+            "Cluster",
+            "CrdtMapReduceReq",
+            reqBytes,
+            senderReplicaId,
+            documentTypeAlias,
+            wireScopeId);
         var wrapperBytes = serializer.SerializeToBytes(wrapper);
 
         try

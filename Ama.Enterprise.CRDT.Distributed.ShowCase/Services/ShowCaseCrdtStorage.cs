@@ -2,6 +2,7 @@ namespace Ama.Enterprise.CRDT.Distributed.ShowCase.Services;
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -40,7 +41,8 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        this.connectionString = $"Data Source=showcase_crdt_{replicaContext.ReplicaId}.db;Pooling=True;";
+        var safeReplicaId = SanitizeFileName(replicaContext.ReplicaId);
+        this.connectionString = $"Data Source=showcase_crdt_{safeReplicaId}.db;Pooling=True;";
         
         InitializeDatabase();
 
@@ -745,6 +747,12 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         return colonIndex >= 0 && colonIndex < documentId.Length - 1
             ? documentId[(colonIndex + 1)..]
             : documentId;
+    }
+
+    private static string SanitizeFileName(string name)
+    {
+        var invalidChars = Path.GetInvalidFileNameChars();
+        return new string(name.Select(ch => invalidChars.Contains(ch) || ch == ':' || ch == '@' ? '_' : ch).ToArray());
     }
 
     public void Dispose()

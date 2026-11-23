@@ -80,24 +80,40 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             return;
         }
 
-        var scope = scopeManager.GetOrCreateScope(replicaId);
+        var targetScopeId = ResolveTargetScopeId(wrapper);
+        var hasExistingScope = scopeManager.TryGetScope(targetScopeId, out var scope);
+        var authScope = scope ?? scopeManager.GetOrCreateScope(replicaId);
 
         if (senderId.Value != Guid.Empty)
         {
-            var topologyProvider = scope.ServiceProvider.GetService<IScopeTopologyProvider>();
+            var senderIdStr = senderId.Value.ToString();
+            var topologyProvider = authScope.ServiceProvider.GetService<IScopeTopologyProvider>();
             if (topologyProvider != null)
             {
-                var isExpected = await topologyProvider.IsPeerExpectedAsync(senderId.Value.ToString(), cancellationToken).ConfigureAwait(false);
-                if (!isExpected)
+                var accessCtx = new ScopeAccessContext(targetScopeId, senderIdStr, meshId, wrapper.MessageType);
+                var isAllowed = await topologyProvider.CanAcceptScopeFromPeerAsync(accessCtx, cancellationToken).ConfigureAwait(false);
+                if (!isAllowed && string.Equals(wrapper.MessageType, "CrdtSync", StringComparison.Ordinal))
+                {
+                    // Allow a downstream peer to send a CrdtSync pull request if we are allowed to replicate this scope to that peer
+                    isAllowed = await topologyProvider.CanReplicateScopeToPeerAsync(accessCtx, cancellationToken).ConfigureAwait(false);
+                }
+
+                if (!isAllowed)
                 {
                     logger.LogWarning(
-                        "[{ReplicaId}] Dropped inbound {MessageType} payload from unexpected peer '{PeerId}'.",
-                        scope.ReplicaId,
+                        "[{ReplicaId}] Dropped inbound {MessageType} payload for scope '{ScopeId}' from unauthorized peer '{PeerId}'.",
+                        authScope.ReplicaId,
                         wrapper.MessageType,
+                        targetScopeId,
                         senderId.Value);
                     return;
                 }
             }
+        }
+
+        if (!hasExistingScope || scope == null)
+        {
+            scope = await scopeManager.GetOrCreateScopeAsync(targetScopeId, replicaId, cancellationToken).ConfigureAwait(false);
         }
 
         messagesProcessedCounter.Add(1, new KeyValuePair<string, object?>("message_type", wrapper.MessageType));
@@ -209,43 +225,51 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                 return;
             }
 
+            var preApplyState = targetDoc.GetLocalState();
+            preApplyState.TryGetValue(targetDoc.ShardId, out var preShardDvv);
+            var preDvvSnapshot = CloneDvv(preShardDvv);
+
             patchesProcessedCounter.Add(1, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
             var versionVectorManager = scope.ServiceProvider.GetService<IShardVersionVectorManager>();
             versionVectorManager?.RecordShardPatchActivity(targetDoc.ShardId, patchMsg.Patch.Operations.Count);
 
             await targetDoc.ApplyRemotePatchAsync(patchMsg.Patch, cancellationToken).ConfigureAwait(false);
 
-            if (!string.IsNullOrWhiteSpace(patchMsg.ReplicaId) && senderId.Value != Guid.Empty)
+            var updatedShardState = targetDoc.GetLocalState();
+            updatedShardState.TryGetValue(targetDoc.ShardId, out var localShardDvv);
+
+            if (!string.IsNullOrWhiteSpace(patchMsg.ReplicaId) && senderId.Value != Guid.Empty && localShardDvv != null)
             {
-                var updatedShardState = targetDoc.GetLocalState();
-                if (updatedShardState.TryGetValue(targetDoc.ShardId, out var localShardDvv))
+                var peerKnownDvv = new DottedVersionVector();
+                if (localShardDvv.Versions != null &&
+                    localShardDvv.Versions.TryGetValue(patchMsg.ReplicaId, out var contiguousVer) &&
+                    contiguousVer > 0)
                 {
-                    var peerKnownDvv = new DottedVersionVector();
-                    if (localShardDvv.Versions != null &&
-                        localShardDvv.Versions.TryGetValue(patchMsg.ReplicaId, out var contiguousVer) &&
-                        contiguousVer > 0)
-                    {
-                        peerKnownDvv.Versions[patchMsg.ReplicaId] = contiguousVer;
-                    }
+                    peerKnownDvv.Versions[patchMsg.ReplicaId] = contiguousVer;
+                }
 
-                    if (localShardDvv.Dots != null &&
-                        localShardDvv.Dots.TryGetValue(patchMsg.ReplicaId, out var dots) &&
-                        dots.Count > 0)
-                    {
-                        peerKnownDvv.Dots[patchMsg.ReplicaId] = new HashSet<long>(dots);
-                    }
+                if (localShardDvv.Dots != null &&
+                    localShardDvv.Dots.TryGetValue(patchMsg.ReplicaId, out var dots) &&
+                    dots.Count > 0)
+                {
+                    peerKnownDvv.Dots[patchMsg.ReplicaId] = new HashSet<long>(dots);
+                }
 
-                    if (peerKnownDvv.Versions.Count > 0 || peerKnownDvv.Dots.Count > 0)
-                    {
-                        scope.ClusterTracker.UpdatePeerState(
-                            patchMsg.ReplicaId,
-                            senderId.Value.ToString(),
-                            new ShardVersionVectorMap { [targetDoc.ShardId] = peerKnownDvv });
-                    }
+                if (peerKnownDvv.Versions.Count > 0 || peerKnownDvv.Dots.Count > 0)
+                {
+                    scope.ClusterTracker.UpdatePeerState(
+                        patchMsg.ReplicaId,
+                        senderId.Value.ToString(),
+                        new ShardVersionVectorMap { [targetDoc.ShardId] = peerKnownDvv });
                 }
             }
 
             operationsReceivedCounter.Add(patchMsg.Patch.Operations.Count, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
+
+            if (localShardDvv != null && DidDvvAdvance(preDvvSnapshot, localShardDvv))
+            {
+                await RelayPatchAcrossBoundMeshesAsync(scope, wrapper, senderId, cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (Exception ex)
         {
@@ -327,14 +351,161 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
 
         var rejectionMsg = new CrdtEvictionRejectionMessage(evictedReplicaId);
         var payload = serializer.SerializeToBytes(rejectionMsg);
+        var logicalScopeId = !string.IsNullOrWhiteSpace(scope.ScopeId) ? scope.ScopeId : scope.ReplicaId;
+        var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
 
-        var wrapper = new CrdtMessageWrapper(documentId, "CrdtEviction", payload);
+        var wrapper = new CrdtMessageWrapper(
+            documentId,
+            "CrdtEviction",
+            payload,
+            replicaContext.ReplicaId,
+            ScopeId: logicalScopeId);
         var wrapperBytes = serializer.SerializeToBytes(wrapper);
 
         var p2pProtocol = scope.ServiceProvider.GetService<IP2pAlgorithm>();
         if (p2pProtocol != null)
         {
             await p2pProtocol.BroadcastAsync(wrapperBytes, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static DottedVersionVector CloneDvv(DottedVersionVector? source)
+    {
+        if (source == null)
+        {
+            return new DottedVersionVector();
+        }
+
+        var versions = source.Versions != null
+            ? new Dictionary<string, long>(source.Versions, StringComparer.Ordinal)
+            : new Dictionary<string, long>(StringComparer.Ordinal);
+
+        var dots = new Dictionary<string, ISet<long>>(StringComparer.Ordinal);
+        if (source.Dots != null)
+        {
+            foreach (var kvp in source.Dots)
+            {
+                if (kvp.Value != null && kvp.Value.Count > 0)
+                {
+                    dots[kvp.Key] = new HashSet<long>(kvp.Value);
+                }
+            }
+        }
+
+        return new DottedVersionVector(versions, dots);
+    }
+
+    private static bool DidDvvAdvance(DottedVersionVector previous, DottedVersionVector current)
+    {
+        if (current.Versions != null)
+        {
+            foreach (var kvp in current.Versions)
+            {
+                long prevVer = 0;
+                previous.Versions?.TryGetValue(kvp.Key, out prevVer);
+                if (kvp.Value > prevVer)
+                {
+                    return true;
+                }
+            }
+        }
+
+        if (current.Dots != null)
+        {
+            foreach (var kvp in current.Dots)
+            {
+                if (kvp.Value == null || kvp.Value.Count == 0)
+                {
+                    continue;
+                }
+
+                long prevVer = 0;
+                previous.Versions?.TryGetValue(kvp.Key, out prevVer);
+                ISet<long>? prevDots = null;
+                previous.Dots?.TryGetValue(kvp.Key, out prevDots);
+
+                foreach (var dot in kvp.Value)
+                {
+                    if (dot > prevVer && (prevDots == null || !prevDots.Contains(dot)))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private async Task RelayPatchAcrossBoundMeshesAsync(
+        IDistributedCrdtScope scope,
+        CrdtMessageWrapper wrapper,
+        PeerId senderId,
+        CancellationToken cancellationToken)
+    {
+        var peerRegistry = scope.ServiceProvider.GetService<IPeerRegistry>();
+        var directSender = scope.ServiceProvider.GetService<IDirectMessageSender>();
+        if (peerRegistry == null || directSender == null)
+        {
+            return;
+        }
+
+        var hostId = !string.IsNullOrWhiteSpace(scope.HostReplicaId) ? scope.HostReplicaId : replicaId;
+        var logicalScopeId = !string.IsNullOrWhiteSpace(scope.ScopeId) ? scope.ScopeId : scope.ReplicaId;
+
+        var boundMeshes = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var reg in scope.ServiceProvider.GetServices<DistributedCrdtP2pRegistration>())
+        {
+            if ((string.Equals(reg.ReplicaId, scope.ReplicaId, StringComparison.Ordinal) ||
+                 string.Equals(reg.ReplicaId, hostId, StringComparison.Ordinal)) &&
+                !string.IsNullOrWhiteSpace(reg.MeshId))
+            {
+                boundMeshes.Add(reg.MeshId);
+            }
+        }
+
+        if (boundMeshes.Count == 0)
+        {
+            return;
+        }
+
+        var relayWrapper = string.IsNullOrWhiteSpace(wrapper.ScopeId)
+            ? wrapper with { ScopeId = logicalScopeId }
+            : wrapper;
+        byte[]? serializedRelayBytes = null;
+
+        var topologyProvider = scope.ServiceProvider.GetService<IScopeTopologyProvider>();
+        var seenPeers = new HashSet<Guid>();
+        if (senderId.Value != Guid.Empty)
+        {
+            seenPeers.Add(senderId.Value);
+        }
+
+        foreach (var boundMeshId in boundMeshes)
+        {
+            var activePeers = await peerRegistry.GetPeersByStatusAsync(boundMeshId, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
+            foreach (var peer in activePeers)
+            {
+                if (!seenPeers.Add(peer.Id.Value))
+                {
+                    continue;
+                }
+
+                var peerIdStr = peer.Id.Value.ToString();
+                var isAllowed = true;
+                if (topologyProvider != null)
+                {
+                    isAllowed = await topologyProvider.CanReplicateScopeToPeerAsync(
+                        new ScopeAccessContext(logicalScopeId, peerIdStr, boundMeshId, "CrdtPatch"),
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                if (isAllowed)
+                {
+                    serializedRelayBytes ??= serializer.SerializeToBytes(relayWrapper);
+                    await directSender.SendDirectAsync(boundMeshId, peer.Id, serializedRelayBytes, cancellationToken).ConfigureAwait(false);
+                }
+            }
         }
     }
 
@@ -423,5 +594,31 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
         {
             logger.LogDebug(ex, "[{ReplicaId}] Failed to record barrier progress for skipped snapshot {DocumentId}.", scope.ReplicaId, wrapper.DocumentId);
         }
+    }
+
+    private string ResolveTargetScopeId(CrdtMessageWrapper wrapper)
+    {
+        if (string.IsNullOrWhiteSpace(wrapper.ScopeId))
+        {
+            return replicaId;
+        }
+
+        var incomingScopeId = wrapper.ScopeId!;
+        if (scopeManager.TryGetScope(incomingScopeId, out _))
+        {
+            return incomingScopeId;
+        }
+
+        // If the sender stamped its own physical replica ID (e.g. "ReplicaA" or "node-1") as the default ScopeId
+        // because no explicit multi-tenant ScopeId was configured, route to this handler's local default replica scope
+        // instead of creating a phantom "localReplica@senderReplica" composite scope.
+        if (!incomingScopeId.Contains('@', StringComparison.Ordinal) &&
+            !string.IsNullOrWhiteSpace(wrapper.SenderReplicaId) &&
+            string.Equals(incomingScopeId, wrapper.SenderReplicaId, StringComparison.Ordinal))
+        {
+            return replicaId;
+        }
+
+        return incomingScopeId;
     }
 }

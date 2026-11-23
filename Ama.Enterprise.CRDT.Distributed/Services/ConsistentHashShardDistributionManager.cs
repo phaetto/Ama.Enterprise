@@ -158,13 +158,17 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
         // to prevent DI validation failures if P2P meshes are not explicitly registered or to break circular graphs.
         var peerRegistry = serviceProvider.GetService<IPeerRegistry>();
         var topologyProvider = serviceProvider.GetService<IScopeTopologyProvider>();
+        var scopeContext = serviceProvider.GetService<CrdtScopeContext>();
+        var hostReplicaId = !string.IsNullOrWhiteSpace(scopeContext?.HostReplicaId) ? scopeContext.HostReplicaId : localReplicaId;
+        var logicalScopeId = !string.IsNullOrWhiteSpace(scopeContext?.ScopeId) ? scopeContext.ScopeId : localReplicaId;
 
         if (peerRegistry != null)
         {
             // Dynamically map connected live network peers bypassing offline tracked tombstone cooldowns
             foreach (var registration in p2pRegistrations)
             {
-                if (!string.Equals(registration.ReplicaId, localReplicaId, StringComparison.Ordinal))
+                if (!string.Equals(registration.ReplicaId, localReplicaId, StringComparison.Ordinal) &&
+                    !string.Equals(registration.ReplicaId, hostReplicaId, StringComparison.Ordinal))
                 {
                     continue;
                 }
@@ -175,8 +179,10 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
                     var peerIdStr = peer.Id.Value.ToString();
                     if (topologyProvider != null)
                     {
-                        var isExpected = await topologyProvider.IsPeerExpectedAsync(peerIdStr, cancellationToken).ConfigureAwait(false);
-                        if (!isExpected)
+                        var accessCtx = new ScopeAccessContext(logicalScopeId, peerIdStr, registration.MeshId, "ShardRing");
+                        var canReplicate = await topologyProvider.CanReplicateScopeToPeerAsync(accessCtx, cancellationToken).ConfigureAwait(false);
+                        var canAccept = await topologyProvider.CanAcceptScopeFromPeerAsync(accessCtx, cancellationToken).ConfigureAwait(false);
+                        if (!canReplicate || !canAccept)
                         {
                             continue;
                         }

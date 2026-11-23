@@ -3,74 +3,90 @@ namespace Ama.Enterprise.CRDT.Distributed.Topology.ShowCase.Services;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Ama.CRDT.Services.Serialization;
+using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Topology.ShowCase.Models;
+using Ama.Enterprise.P2p.Models.Algorithms;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 
 /// <summary>
-/// Evaluates real-time P2P broadcast routing preventing Gossip payloads from leaking across boundaries.
+/// Evaluates real-time P2P transport routing by inspecting the CRDT envelope's ScopeId and enforcing role and regional sovereignty boundaries.
 /// </summary>
 public sealed class RbacMeshRoutingPolicy : IMeshRoutingPolicy
 {
     private readonly ShowCaseNodeContext context;
+    private readonly IRbacScopeAccessEvaluator accessEvaluator;
+    private readonly ICrdtSerializer? serializer;
 
-    public RbacMeshRoutingPolicy(ShowCaseNodeContext context)
+    public RbacMeshRoutingPolicy(
+        ShowCaseNodeContext context,
+        IRbacScopeAccessEvaluator accessEvaluator,
+        ICrdtSerializer? serializer = null)
     {
         this.context = context ?? throw new ArgumentNullException(nameof(context));
+        this.accessEvaluator = accessEvaluator ?? throw new ArgumentNullException(nameof(accessEvaluator));
+        this.serializer = serializer;
     }
 
     /// <inheritdoc />
     public Task<bool> EvaluateInboundAsync(string meshId, SessionContext session, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
-        if (!session.Claims.TryGetValue("role", out var remoteRole) || 
+        if (!session.Claims.TryGetValue("role", out var remoteRole) ||
             !session.Claims.TryGetValue("region", out var remoteRegion))
         {
             return Task.FromResult(false);
         }
 
-        // Inbound flow: Remote is sending data to Local.
-        return Task.FromResult(IsDataFlowAllowed(sourceRole: remoteRole, sourceRegion: remoteRegion, targetRole: context.Role, targetRegion: context.Region));
+        var scopeId = TryExtractScopeId(payload);
+        if (!string.IsNullOrWhiteSpace(scopeId))
+        {
+            var allowed = accessEvaluator.IsNodeAuthorizedForScope(context.Role, context.Region, scopeId) &&
+                          accessEvaluator.IsNodeAuthorizedForScope(remoteRole, remoteRegion, scopeId);
+            return Task.FromResult(allowed);
+        }
+
+        return Task.FromResult(accessEvaluator.IsPhysicalNodeFlowAllowed(sourceRole: remoteRole, sourceRegion: remoteRegion, targetRole: context.Role, targetRegion: context.Region));
     }
 
     /// <inheritdoc />
     public Task<bool> EvaluateOutboundAsync(string meshId, SessionContext session, IMeshMessage message, CancellationToken cancellationToken)
     {
-        if (!session.Claims.TryGetValue("role", out var remoteRole) || 
+        if (!session.Claims.TryGetValue("role", out var remoteRole) ||
             !session.Claims.TryGetValue("region", out var remoteRegion))
         {
             return Task.FromResult(false);
         }
 
-        // Outbound flow: Local is sending data to Remote.
-        return Task.FromResult(IsDataFlowAllowed(sourceRole: context.Role, sourceRegion: context.Region, targetRole: remoteRole, targetRegion: remoteRegion));
+        if (message is GossipMessage gossipMessage && !gossipMessage.Payload.IsEmpty)
+        {
+            var scopeId = TryExtractScopeId(gossipMessage.Payload);
+            if (!string.IsNullOrWhiteSpace(scopeId))
+            {
+                var allowed = accessEvaluator.IsNodeAuthorizedForScope(context.Role, context.Region, scopeId) &&
+                              accessEvaluator.IsNodeAuthorizedForScope(remoteRole, remoteRegion, scopeId);
+                return Task.FromResult(allowed);
+            }
+        }
+
+        return Task.FromResult(accessEvaluator.IsPhysicalNodeFlowAllowed(sourceRole: context.Role, sourceRegion: context.Region, targetRole: remoteRole, targetRegion: remoteRegion));
     }
 
-    private static bool IsDataFlowAllowed(string sourceRole, string sourceRegion, string targetRole, string targetRegion)
+    private string? TryExtractScopeId(ReadOnlyMemory<byte> payload)
     {
-        var isSourceServer = string.IsNullOrEmpty(sourceRole);
-        var isTargetServer = string.IsNullOrEmpty(targetRole);
-
-        // Rule 1: Admin and user data are completely separated. Servers have no explicit role and host/exchange everything securely natively.
-        if (!isSourceServer && !isTargetServer && !string.Equals(sourceRole, targetRole, StringComparison.OrdinalIgnoreCase))
+        if (serializer == null || payload.IsEmpty)
         {
-            return false;
+            return null;
         }
 
-        // Rule 2 & 3: The flow of data is allowed from US to EU, but EU data must stay in the region.
-        if (string.Equals(targetRegion, "US", StringComparison.OrdinalIgnoreCase))
+        try
         {
-            // US only expects data from US (EU data is rejected to stay in its region).
-            return string.Equals(sourceRegion, "US", StringComparison.OrdinalIgnoreCase);
+            var wrapper = serializer.DeserializeFromBytes<CrdtMessageWrapper>(payload.Span);
+            return wrapper.ScopeId;
         }
-
-        if (string.Equals(targetRegion, "EU", StringComparison.OrdinalIgnoreCase))
+        catch
         {
-            // EU expects data from EU, and also from US (flow of data is allowed from US to EU).
-            return string.Equals(sourceRegion, "EU", StringComparison.OrdinalIgnoreCase) || 
-                   string.Equals(sourceRegion, "US", StringComparison.OrdinalIgnoreCase);
+            return null;
         }
-
-        // Fallback for any other regions: strict bidirectional isolation.
-        return string.Equals(sourceRegion, targetRegion, StringComparison.OrdinalIgnoreCase);
     }
 }

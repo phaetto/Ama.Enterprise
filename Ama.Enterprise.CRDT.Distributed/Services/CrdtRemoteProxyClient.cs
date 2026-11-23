@@ -77,6 +77,7 @@ public sealed class CrdtRemoteProxyClient : ICrdtRemoteProxyClient
         var maxRetries = Math.Max(1, options.RpcMaxRetries);
         var rpcTimeout = TimeSpan.FromMilliseconds(Math.Max(1, options.RpcTimeoutMilliseconds));
         var retryDelayMs = Math.Max(0, options.RpcRetryDelayMilliseconds);
+        var wireScopeId = GetWireScopeId();
         Exception? lastException = null;
 
         for (int attempt = 0; attempt < maxRetries; attempt++)
@@ -116,7 +117,13 @@ public sealed class CrdtRemoteProxyClient : ICrdtRemoteProxyClient
                 };
 
                 var reqPayload = serializer.SerializeToBytes(req);
-                var wrapper = new CrdtMessageWrapper(documentId, "CrdtReadReq", reqPayload, documentTypeAlias);
+                var wrapper = new CrdtMessageWrapper(
+                    documentId,
+                    "CrdtReadReq",
+                    reqPayload,
+                    replicaContext.ReplicaId,
+                    documentTypeAlias,
+                    wireScopeId);
                 var wrapperBytes = serializer.SerializeToBytes(wrapper);
 
                 logger.LogTrace("Requesting remote state for document {DocumentId} from replica {TargetReplica} (peer {TargetPeer}), attempt {Attempt}.", documentId, candidateReplica, candidatePeer, attempt + 1);
@@ -193,6 +200,7 @@ public sealed class CrdtRemoteProxyClient : ICrdtRemoteProxyClient
 
         var intentTypeAlias = CrdtTypeRegistry.GetDiscriminator(intent.GetType());
         var serializedIntent = serializer.SerializeToBytes(intent);
+        var wireScopeId = GetWireScopeId();
 
         if (deliveryMode == IntentDeliveryMode.FireAndForget)
         {
@@ -221,7 +229,13 @@ public sealed class CrdtRemoteProxyClient : ICrdtRemoteProxyClient
                 };
 
                 var ffReqPayload = serializer.SerializeToBytes(ffReq);
-                var ffWrapper = new CrdtMessageWrapper(documentId, "CrdtIntentReq", ffReqPayload, documentTypeAlias);
+                var ffWrapper = new CrdtMessageWrapper(
+                    documentId,
+                    "CrdtIntentReq",
+                    ffReqPayload,
+                    replicaContext.ReplicaId,
+                    documentTypeAlias,
+                    wireScopeId);
                 var ffWrapperBytes = serializer.SerializeToBytes(ffWrapper);
 
                 logger.LogTrace("Forwarding fire-and-forget intent for document {DocumentId} to remote replica {TargetReplica} (peer {TargetPeer}).", documentId, candidateReplica, candidatePeer);
@@ -292,7 +306,13 @@ public sealed class CrdtRemoteProxyClient : ICrdtRemoteProxyClient
                 };
 
                 var reqPayload = serializer.SerializeToBytes(req);
-                var wrapper = new CrdtMessageWrapper(documentId, "CrdtIntentReq", reqPayload, documentTypeAlias);
+                var wrapper = new CrdtMessageWrapper(
+                    documentId,
+                    "CrdtIntentReq",
+                    reqPayload,
+                    replicaContext.ReplicaId,
+                    documentTypeAlias,
+                    wireScopeId);
                 var wrapperBytes = serializer.SerializeToBytes(wrapper);
 
                 logger.LogTrace("Forwarding intent for document {DocumentId} to remote replica {TargetReplica} (peer {TargetPeer}), attempt {Attempt}.", documentId, candidateReplica, candidatePeer, attempt + 1);
@@ -361,10 +381,17 @@ public sealed class CrdtRemoteProxyClient : ICrdtRemoteProxyClient
 
         var directSender = serviceProvider.GetRequiredService<IDirectMessageSender>();
         var p2pAlgorithm = serviceProvider.GetService<IP2pAlgorithm>();
+        var wireScopeId = GetWireScopeId();
 
         var patchMsg = new CrdtPatchMessage(replicaContext.ReplicaId, patch);
         var payload = serializer.SerializeToBytes(patchMsg);
-        var wrapper = new CrdtMessageWrapper(documentId, "CrdtPatch", payload, documentTypeAlias);
+        var wrapper = new CrdtMessageWrapper(
+            documentId,
+            "CrdtPatch",
+            payload,
+            replicaContext.ReplicaId,
+            documentTypeAlias,
+            wireScopeId);
         var wrapperBytes = serializer.SerializeToBytes(wrapper);
 
         var activeNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
@@ -423,6 +450,7 @@ public sealed class CrdtRemoteProxyClient : ICrdtRemoteProxyClient
                 return;
             }
 
+            var wireScopeId = GetWireScopeId();
             CrdtSnapshotDataDto? snapshotResult = null;
 
             for (int i = 0; i < targetNodes.Count; i++)
@@ -444,7 +472,13 @@ public sealed class CrdtRemoteProxyClient : ICrdtRemoteProxyClient
 
                 var resMsg = new CrdtSnapshotMessage(replicaContext.ReplicaId, snapshot.SnapshotData, snapshot.GlobalState);
                 var payload = serializer.SerializeToBytes(resMsg);
-                var wrapper = new CrdtMessageWrapper(document.DocumentId, "CrdtSnapshot", payload, document.TypeAlias);
+                var wrapper = new CrdtMessageWrapper(
+                    document.DocumentId,
+                    "CrdtSnapshot",
+                    payload,
+                    replicaContext.ReplicaId,
+                    document.TypeAlias,
+                    wireScopeId);
                 var finalBytes = serializer.SerializeToBytes(wrapper);
 
                 await directSender.SendDirectAsync(new PeerId(peerGuid), finalBytes, cancellationToken).ConfigureAwait(false);
@@ -493,5 +527,18 @@ public sealed class CrdtRemoteProxyClient : ICrdtRemoteProxyClient
         }
 
         return candidates;
+    }
+
+    private string? GetWireScopeId()
+    {
+        var scopeContext = serviceProvider.GetService<CrdtScopeContext>();
+        if (scopeContext != null &&
+            !string.IsNullOrWhiteSpace(scopeContext.ScopeId) &&
+            !string.Equals(scopeContext.ScopeId, scopeContext.HostReplicaId, StringComparison.Ordinal))
+        {
+            return scopeContext.ScopeId;
+        }
+
+        return null;
     }
 }

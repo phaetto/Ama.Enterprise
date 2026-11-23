@@ -12,6 +12,7 @@ using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.Services.Observers;
+using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -162,16 +163,32 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
 
                     var patchMsg = new CrdtPatchMessage(replicaContext.ReplicaId, item.Patch);
                     var payload = serializer.SerializeToBytes(patchMsg);
-                    
-                    var wrapper = new CrdtMessageWrapper(item.DocumentId, "CrdtPatch", payload, documentTypeAlias);
+                    var scopeContext = serviceProvider.GetService<CrdtScopeContext>();
+                    var hasExplicitScope = !string.IsNullOrWhiteSpace(scopeContext?.ScopeId) &&
+                                           !string.Equals(scopeContext.ScopeId, scopeContext.HostReplicaId, StringComparison.Ordinal);
+                    var logicalScopeId = !string.IsNullOrWhiteSpace(scopeContext?.ScopeId)
+                        ? scopeContext.ScopeId
+                        : replicaContext.ReplicaId;
+
+                    var wrapper = new CrdtMessageWrapper(
+                        item.DocumentId,
+                        "CrdtPatch",
+                        payload,
+                        replicaContext.ReplicaId,
+                        documentTypeAlias,
+                        hasExplicitScope ? logicalScopeId : null);
                     var finalBytes = serializer.SerializeToBytes(wrapper);
 
                     broadcastBytesCounter.Add(finalBytes.Length, new KeyValuePair<string, object?>("document_id", item.DocumentId));
 
-                    await p2pAlgorithm.BroadcastAsync(finalBytes, disposeCts.Token).ConfigureAwait(false);
+                    var sentViaDirect = await TryDispatchToScopeAuthorizedPeersAsync(logicalScopeId, finalBytes, disposeCts.Token).ConfigureAwait(false);
+                    if (!sentViaDirect)
+                    {
+                        await p2pAlgorithm.BroadcastAsync(finalBytes, disposeCts.Token).ConfigureAwait(false);
+                    }
                     
                     patchesBroadcastedCounter.Add(1, new KeyValuePair<string, object?>("document_id", item.DocumentId));
-                    logger.LogTrace("Broadcasted patch for document {DocumentId}.", item.DocumentId);
+                    logger.LogTrace("Broadcasted patch for document {DocumentId} in scope {ScopeId}.", item.DocumentId, logicalScopeId);
                 }
                 catch (OperationCanceledException) when (disposeCts.IsCancellationRequested)
                 {
@@ -190,5 +207,90 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
         {
             logger.LogCritical(ex, "Broadcast background channel failed.");
         }
+    }
+
+    private async ValueTask<bool> TryDispatchToScopeAuthorizedPeersAsync(
+        string logicalScopeId,
+        byte[] finalBytes,
+        CancellationToken cancellationToken)
+    {
+        var peerRegistry = serviceProvider.GetService<IPeerRegistry>();
+        var directSender = serviceProvider.GetService<IDirectMessageSender>();
+        if (peerRegistry == null || directSender == null)
+        {
+            return false;
+        }
+
+        var scopeContext = serviceProvider.GetService<CrdtScopeContext>();
+        var hostReplicaId = !string.IsNullOrWhiteSpace(scopeContext?.HostReplicaId)
+            ? scopeContext.HostReplicaId
+            : replicaContext.ReplicaId;
+
+        var boundMeshes = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var reg in serviceProvider.GetServices<DistributedCrdtP2pRegistration>())
+        {
+            if ((string.Equals(reg.ReplicaId, replicaContext.ReplicaId, StringComparison.Ordinal) ||
+                 string.Equals(reg.ReplicaId, hostReplicaId, StringComparison.Ordinal)) &&
+                !string.IsNullOrWhiteSpace(reg.MeshId))
+            {
+                boundMeshes.Add(reg.MeshId);
+            }
+        }
+
+        if (boundMeshes.Count == 0)
+        {
+            foreach (var mesh in serviceProvider.GetServices<P2pMeshMetadata>())
+            {
+                if (!string.IsNullOrWhiteSpace(mesh.MeshId))
+                {
+                    boundMeshes.Add(mesh.MeshId);
+                }
+            }
+        }
+
+        if (boundMeshes.Count == 0)
+        {
+            return false;
+        }
+
+        var topologyProvider = serviceProvider.GetService<IScopeTopologyProvider>();
+        var seenPeers = new HashSet<Guid>();
+        var hasAnyPeersInRegistry = false;
+
+        foreach (var meshId in boundMeshes)
+        {
+            var activePeers = await peerRegistry.GetPeersByStatusAsync(meshId, PeerStatus.Active, cancellationToken).ConfigureAwait(false);
+            foreach (var peer in activePeers)
+            {
+                hasAnyPeersInRegistry = true;
+                if (!seenPeers.Add(peer.Id.Value))
+                {
+                    continue;
+                }
+
+                var peerIdStr = peer.Id.Value.ToString();
+                var isAllowed = true;
+                if (topologyProvider != null)
+                {
+                    isAllowed = await topologyProvider.CanReplicateScopeToPeerAsync(
+                        new ScopeAccessContext(logicalScopeId, peerIdStr, meshId, "CrdtPatch"),
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                if (isAllowed)
+                {
+                    if (boundMeshes.Count > 1)
+                    {
+                        await directSender.SendDirectAsync(meshId, peer.Id, finalBytes, cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await directSender.SendDirectAsync(peer.Id, finalBytes, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
+        }
+
+        return hasAnyPeersInRegistry;
     }
 }

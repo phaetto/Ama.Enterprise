@@ -41,6 +41,13 @@ public sealed class CrdtRpcPayloadProcessor : ICrdtRpcPayloadProcessor
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(wrapper);
 
+        var wireScopeId = !string.IsNullOrWhiteSpace(wrapper.ScopeId)
+            ? wrapper.ScopeId
+            : (!string.IsNullOrWhiteSpace(scope.ScopeId) && !string.Equals(scope.ScopeId, scope.HostReplicaId, StringComparison.Ordinal)
+                ? scope.ScopeId
+                : null);
+        var senderReplicaId = scope.ServiceProvider.GetService<ReplicaContext>()?.ReplicaId ?? scope.ReplicaId;
+
         try
         {
             if (wrapper.MessageType == "CrdtReadReq")
@@ -87,7 +94,7 @@ public sealed class CrdtRpcPayloadProcessor : ICrdtRpcPayloadProcessor
 
                 var res = new CrdtReadResponseDto { CorrelationId = req.CorrelationId, StatePayload = statePayload };
                 var resPayload = serializer.SerializeToBytes(res);
-                var resWrapper = new CrdtMessageWrapper(req.DocumentId, "CrdtReadRes", resPayload, typeAlias);
+                var resWrapper = new CrdtMessageWrapper(req.DocumentId, "CrdtReadRes", resPayload, senderReplicaId, typeAlias, wireScopeId);
                 var directSender = scope.ServiceProvider.GetRequiredService<IDirectMessageSender>();
                 await directSender.SendDirectAsync(senderId, serializer.SerializeToBytes(resWrapper), cancellationToken).ConfigureAwait(false);
             }
@@ -133,7 +140,7 @@ public sealed class CrdtRpcPayloadProcessor : ICrdtRpcPayloadProcessor
                 {
                     var res = new CrdtIntentForwardResponseDto { CorrelationId = req.CorrelationId, IsSuccess = isSuccess, ErrorMessage = errorMessage };
                     var resPayload = serializer.SerializeToBytes(res);
-                    var resWrapper = new CrdtMessageWrapper(req.DocumentId, "CrdtIntentRes", resPayload);
+                    var resWrapper = new CrdtMessageWrapper(req.DocumentId, "CrdtIntentRes", resPayload, senderReplicaId, ScopeId: wireScopeId);
                     var directSender = scope.ServiceProvider.GetRequiredService<IDirectMessageSender>();
                     await directSender.SendDirectAsync(senderId, serializer.SerializeToBytes(resWrapper), cancellationToken).ConfigureAwait(false);
                 }
@@ -201,7 +208,7 @@ public sealed class CrdtRpcPayloadProcessor : ICrdtRpcPayloadProcessor
                 }
 
                 var resPayload = serializer.SerializeToBytes(responseDto);
-                var resWrapper = new CrdtMessageWrapper(wrapper.DocumentId, "CrdtMapReduceRes", resPayload, typeAlias);
+                var resWrapper = new CrdtMessageWrapper(wrapper.DocumentId, "CrdtMapReduceRes", resPayload, senderReplicaId, typeAlias, wireScopeId);
                 var directSender = scope.ServiceProvider.GetRequiredService<IDirectMessageSender>();
                 await directSender.SendDirectAsync(senderId, serializer.SerializeToBytes(resWrapper), cancellationToken).ConfigureAwait(false);
             }

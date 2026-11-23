@@ -135,10 +135,14 @@ public sealed class CrdtMaintenanceService : BackgroundService
                         else
                         {
                             var validClusterStates = new List<DottedVersionVector> { shardDvv };
+                            var logicalScopeId = !string.IsNullOrWhiteSpace(scope.ScopeId) ? scope.ScopeId : scope.ReplicaId;
 
                             foreach (var networkKvp in exportedClusterState.NetworkIdToReplicaId)
                             {
-                                var isExpected = await topologyProvider.IsPeerExpectedAsync(networkKvp.Key, stoppingToken).ConfigureAwait(false);
+                                var isExpected = await topologyProvider.CanReplicateScopeToPeerAsync(
+                                    new ScopeAccessContext(logicalScopeId, networkKvp.Key, null, "GMVV"),
+                                    stoppingToken).ConfigureAwait(false);
+
                                 if (isExpected)
                                 {
                                     if (exportedClusterState.PeerStates.TryGetValue(networkKvp.Value, out var peerStateDto))

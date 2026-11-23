@@ -513,7 +513,7 @@ public sealed class LiveMigrationIntegrationTests
                             CorrelationId = req.CorrelationId,
                             StatePayload = remoteDocBytes
                         };
-                        var resWrapper = new CrdtMessageWrapper(wrapper.DocumentId, "CrdtReadRes", serializer.SerializeToBytes(res));
+                        var resWrapper = new CrdtMessageWrapper(wrapper.DocumentId, "CrdtReadRes", serializer.SerializeToBytes(res), "replica-v1-remote-owner");
                         await handlerV1.HandlePayloadAsync("mesh-v1", remoteOwnerPeerId, serializer.SerializeToBytes(resWrapper), CancellationToken.None);
                     });
                 }
