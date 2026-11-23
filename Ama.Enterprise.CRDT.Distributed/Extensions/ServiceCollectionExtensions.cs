@@ -130,6 +130,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IDistributedCrdtScopeFactory, DistributedCrdtScopeFactory>();
         services.TryAddSingleton<DistributedCrdtScopeManager>();
         services.TryAddSingleton<ICrdtShutdownCoordinator, CrdtShutdownCoordinator>();
+        services.TryAddSingleton<ICrdtMemoryEstimator, CrdtMemoryEstimator>();
 
         services.TryAddScoped<IScopeTopologyProvider, DefaultScopeTopologyProvider>();
         services.TryAddScoped<IDocumentCommandPipeline, DocumentCommandPipeline>();
@@ -137,6 +138,12 @@ public static class ServiceCollectionExtensions
         // Register Consistent Hashing Distribution mappings
         services.TryAddScoped<IShardDistributionManager, ConsistentHashShardDistributionManager>();
         services.TryAddScoped<IShardVersionVectorManager, ShardVersionVectorManager>();
+
+        services.TryAddScoped<ICrdtRemoteProxyClient, CrdtRemoteProxyClient>();
+        services.TryAddScoped<ICrdtMapReduceCoordinator, CrdtMapReduceCoordinator>();
+        services.TryAddScoped<ICrdtAntiEntropyCoordinator, CrdtAntiEntropyCoordinator>();
+        services.TryAddScoped<ICrdtRpcPayloadProcessor, CrdtRpcPayloadProcessor>();
+        services.TryAddScoped<ICrdtStateSyncPayloadProcessor, CrdtStateSyncPayloadProcessor>();
 
         services.AddScoped<ICrdtDocumentOrchestrator, CrdtDocumentOrchestrator>();
         services.AddScoped<IClusterStateTracker, ClusterStateTracker>();

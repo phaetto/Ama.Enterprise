@@ -40,7 +40,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Ama.CRDT" Version="5.0.261121" />
+		<PackageReference Include="Ama.CRDT" Version="5.0.261122" />
 	</ItemGroup>
 
 	<ItemGroup>

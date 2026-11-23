@@ -499,4 +499,75 @@ public sealed class ScopeTopologyProviderIntegrationTests
         var updatedState = await orchestrator.GetDocumentStateAsync<TopologyTestState>("topo-doc", CancellationToken.None);
         updatedState.Data.DataMap.ShouldContainKeyAndValue("InjectedKey", "InjectedVal");
     }
+
+    [IntegrationFact]
+    public async Task AntiEntropyAndShardDistribution_ShouldExcludePeersInUnboundMeshesAndUnexpectedPeersFromWorkloadAndHashRing()
+    {
+        // Arrange
+        var topologyProvider = new TestTopologyProvider();
+        var boundPeerGuid = Guid.NewGuid();
+        var unboundMeshPeerGuid = Guid.NewGuid();
+        var revokedPeerGuid = Guid.NewGuid();
+
+        // Both boundPeerGuid and unboundMeshPeerGuid are allowed by the topology provider,
+        // but unboundMeshPeerGuid is only connected on "UnboundMesh" (not bound to Replica1).
+        topologyProvider.ExpectedPeers.Add(boundPeerGuid.ToString());
+        topologyProvider.ExpectedPeers.Add(unboundMeshPeerGuid.ToString());
+
+        var mockSender = new Mock<IDirectMessageSender>();
+        var sp = BuildNode("Replica1", topologyProvider, services =>
+        {
+            services.Configure<Models.DistributedCrdtOptions>(opt =>
+            {
+                opt.EnableSharding = true;
+                opt.ShardReplicationFactor = 1;
+            });
+            services.AddSingleton(new P2pMeshMetadata("UnboundMesh"));
+            services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var scope = scopeManager.GetOrCreateScope("Replica1");
+        var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        var peerRegistry = sp.GetRequiredService<IPeerRegistry>();
+        await peerRegistry.AddOrUpdatePeerAsync(
+            "UnboundMesh",
+            new PeerNode(new PeerId(unboundMeshPeerGuid), new TcpPeerEndpoint("127.0.0.1", 6101)),
+            PeerStatus.Active,
+            CancellationToken.None);
+
+        await peerRegistry.AddOrUpdatePeerAsync(
+            TestMeshId,
+            new PeerNode(new PeerId(revokedPeerGuid), new TcpPeerEndpoint("127.0.0.1", 6102)),
+            PeerStatus.Active,
+            CancellationToken.None);
+
+        // Register a previously tracked peer whose permissions were revoked, with a large DVV gap (1000 ops behind)
+        scope.ClusterTracker.UpdatePeerState(
+            "RevokedReplica",
+            revokedPeerGuid.ToString(),
+            new ShardVersionVectorMap
+            {
+                ["default"] = new DottedVersionVector { Versions = { ["RevokedReplica"] = 1000 } }
+            });
+
+        mockSender.Invocations.Clear();
+
+        // Act 1 - Dispatch anti-entropy when only an unbound mesh peer and an unexpected bound-mesh peer exist
+        var workload = await orchestrator.EvaluateAndDispatchAntiEntropyStateAsync(CancellationToken.None);
+
+        // Assert 1 - No sync sent to unbound mesh peer or revoked peer, and revoked peer's 1000-item gap is ignored
+        mockSender.Verify(p => p.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never());
+        workload.EstimatedPendingSyncItems.ShouldBe(0);
+
+        // Act 2 - Check consistent hash ring targets while RevokedReplica is active in IPeerRegistry on TestMeshId
+        var distributionManager = scope.ServiceProvider.GetRequiredService<IShardDistributionManager>();
+        var targets = await distributionManager.GetTargetNodesForShardAsync("user-shard-1", CancellationToken.None);
+
+        // Assert 2 - RevokedReplica must not be included in the hash ring even though its network peer is Active in IPeerRegistry
+        targets.ShouldNotContain("RevokedReplica");
+        targets.ShouldContain("Replica1");
+    }
 }

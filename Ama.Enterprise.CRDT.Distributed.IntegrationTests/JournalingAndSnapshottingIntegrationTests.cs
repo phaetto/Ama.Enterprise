@@ -244,17 +244,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var globalDvv = new DottedVersionVector();
         globalDvv.Versions["RemoteA"] = 10;
         
-        var globalMap = new ShardVersionVectorMap { { "journal-doc", globalDvv } };
-        
-        lock (context.ShardVersionVectors)
-        {
-            if (!context.ShardVersionVectors.TryGetValue("journal-doc", out var dvv))
-            {
-                dvv = new DottedVersionVector();
-                context.ShardVersionVectors["journal-doc"] = dvv;
-            }
-            dvv.Merge(globalDvv);
-        }
+        var globalMap = new ShardVersionVectorMap { { "default", globalDvv } };
         
         var metadataManager = scope.ServiceProvider.GetRequiredService<ICrdtMetadataManager>();
         
@@ -278,7 +268,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         // Assert
         var crdtDoc = await orchestrator.GetDocumentStateAsync<JournalTestState>("journal-doc", CancellationToken.None);
         crdtDoc.Data.DataMap.ShouldContainKeyAndValue("Field", "SnapshotData");
-        context.ShardVersionVectors["journal-doc"].Versions["RemoteA"].ShouldBe(10);
+        context.ShardVersionVectors["default"].Versions["RemoteA"].ShouldBe(10);
     }
 
     [IntegrationFact]

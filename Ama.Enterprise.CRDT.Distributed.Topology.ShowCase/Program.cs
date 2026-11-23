@@ -8,12 +8,16 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Ama.CRDT.Extensions;
+using Ama.CRDT.Services.Providers;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
+using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 using Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 using Ama.Enterprise.CRDT.MessagePack.Extensions;
 using Ama.Enterprise.P2p.Extensions;
+using Ama.Enterprise.P2p.Models.Core;
+using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -34,9 +38,27 @@ public static class Program
     private static readonly object ConsoleLock = new();
     private static string currentMode = string.Empty;
     private static int currentPort;
-    private static volatile bool _needsRedraw;
+    private static int currentTcpPort;
+    private static int currentHandshakePort;
+    private static volatile bool needsRedraw;
     private static string currentRole = string.Empty;
     private static string currentRegion = string.Empty;
+
+    private readonly record struct DocumentStateDto<T>(string Id, IReadOnlyDictionary<string, T> Items);
+
+    private readonly record struct PeerHealthDisplayDto(
+        string MeshId,
+        string PeerId,
+        string ReplicaId,
+        PeerStatus Status,
+        string Endpoint,
+        int TrackedShards);
+
+    private readonly record struct ShardTopologyDisplayDto(
+        string ShardId,
+        int DocumentCount,
+        bool IsLocal,
+        IReadOnlyList<string> TargetReplicas);
 
     public static async Task Main(string[] args)
     {
@@ -61,8 +83,8 @@ public static class Program
             if (args.Length > 4) int.TryParse(args[4], out parentPort);
         }
 
-        var currentTcpPort = 0;
-        var currentHandshakePort = 0;
+        currentTcpPort = 0;
+        currentHandshakePort = 0;
 
         if (currentMode == "server")
         {
@@ -258,6 +280,10 @@ public static class Program
             var orchestrator = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
             var taskManager = scope.ServiceProvider.GetRequiredService<ITaskManager>();
             var fleetManager = scope.ServiceProvider.GetRequiredService<IFleetManager>();
+            var clusterTracker = scope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
+            var shardDistributionManager = scope.ServiceProvider.GetRequiredService<IShardDistributionManager>();
+            var shardIdProvider = scope.ServiceProvider.GetRequiredService<IShardIdProvider>();
+            var peerRegistry = provider.GetRequiredService<IPeerRegistry>();
 
             // Background UI rendering task to decouple Console I/O from hot CRDT operations
             _ = Task.Run(async () =>
@@ -267,9 +293,9 @@ public static class Program
                     using var uiTimer = new PeriodicTimer(TimeSpan.FromMilliseconds(500));
                     while (await uiTimer.WaitForNextTickAsync(cts.Token).ConfigureAwait(false))
                     {
-                        if (_needsRedraw)
+                        if (needsRedraw)
                         {
-                            _needsRedraw = false;
+                            needsRedraw = false;
                             await DrawStateAsync(orchestrator, taskManager, fleetManager, cts.Token).ConfigureAwait(false);
                         }
                     }
@@ -456,6 +482,16 @@ public static class Program
                             }
                             break;
 
+                        case "peers":
+                        case "topology":
+                            {
+                                var showDetails = parts.Length >= 2 &&
+                                    (string.Equals(parts[1], "details", StringComparison.OrdinalIgnoreCase) ||
+                                     (bool.TryParse(parts[1], out var parsedDetails) && parsedDetails));
+                                await DrawTopologyAndPeersAsync(replicaId, orchestrator, clusterTracker, shardDistributionManager, shardIdProvider, peerRegistry, showDetails, cts.Token).ConfigureAwait(false);
+                            }
+                            break;
+
                         case "clone":
                             var cMode = parts.Length > 1 ? parts[1].ToLowerInvariant() : "user";
                             if (cMode != "server" && cMode != "user")
@@ -551,6 +587,7 @@ public static class Program
             Console.WriteLine(" fset <docId> <deviceId> <true|false> <batt>    - Adds/Updates a fleet device");
             Console.WriteLine(" fdel <docId> <deviceId>                        - Removes a fleet device");
             Console.WriteLine(" hammer <cps>                                   - Pumps <cps> changes/sec into doc 'nail' (0 to stop)");
+            Console.WriteLine(" topology [details] / peers [details]           - Prints connected peers health and shard topology");
             Console.WriteLine(" clone server [region]                          - Spawns a new server node (e.g. clone server EU)");
             Console.WriteLine(" clone user [role] [region]                     - Spawns a new user node connecting via WebRTC (e.g. clone user user EU)");
             Console.WriteLine(" exit                                           - Shuts down the node");
@@ -558,20 +595,196 @@ public static class Program
         }
     }
 
+    private static async Task DrawTopologyAndPeersAsync(
+        string replicaId,
+        ICrdtDocumentOrchestrator orchestrator,
+        IClusterStateTracker clusterTracker,
+        IShardDistributionManager shardDistributionManager,
+        IShardIdProvider shardIdProvider,
+        IPeerRegistry peerRegistry,
+        bool showDetails,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(replicaId);
+        ArgumentNullException.ThrowIfNull(orchestrator);
+        ArgumentNullException.ThrowIfNull(clusterTracker);
+        ArgumentNullException.ThrowIfNull(shardDistributionManager);
+        ArgumentNullException.ThrowIfNull(shardIdProvider);
+        ArgumentNullException.ThrowIfNull(peerRegistry);
+
+        var peerList = new List<PeerHealthDisplayDto>();
+        var meshes = currentMode == "server" ? new[] { "server", "user" } : new[] { "user" };
+        var statuses = new[] { PeerStatus.Active, PeerStatus.Suspect, PeerStatus.Dead };
+
+        foreach (var meshId in meshes)
+        {
+            foreach (var status in statuses)
+            {
+                var peers = await peerRegistry.GetPeersByStatusAsync(meshId, status, cancellationToken).ConfigureAwait(false);
+                foreach (var peer in peers)
+                {
+                    var peerIdStr = peer.Id.Value.ToString();
+                    var mappedReplicaId = clusterTracker.GetReplicaIdByPeerId(peerIdStr);
+                    var trackedShards = 0;
+
+                    if (!string.IsNullOrEmpty(mappedReplicaId))
+                    {
+                        var peerState = clusterTracker.TryGetPeerState(mappedReplicaId);
+                        trackedShards = peerState?.Keys.Count ?? 0;
+                    }
+
+                    peerList.Add(new PeerHealthDisplayDto(
+                        meshId,
+                        peerIdStr,
+                        mappedReplicaId ?? "(Unmapped)",
+                        status,
+                        peer.Endpoint.ToString() ?? "Unknown",
+                        trackedShards));
+                }
+            }
+        }
+
+        var activeReplicaIds = clusterTracker.GetActiveReplicaIds();
+        var exportedTrackerState = clusterTracker.ExportState();
+        var tombstonedReplicas = exportedTrackerState.TombstonedReplicas;
+
+        var regDoc = await orchestrator.Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+        var regState = regDoc.Data ?? new CrdtRegistryState();
+
+        var shardDocCounts = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            [orchestrator.Registry.ShardId] = 1
+        };
+
+        var activeDocumentCount = 0;
+        var deletedDocumentCount = 0;
+
+        foreach (var kvp in regState.Documents)
+        {
+            var entry = kvp.Value;
+            if (entry.IsDeleted)
+            {
+                deletedDocumentCount++;
+                continue;
+            }
+
+            activeDocumentCount++;
+            var shardId = ResolveShardIdForEntry(shardIdProvider, entry.DocumentId, entry.TypeAlias);
+            if (shardDocCounts.TryGetValue(shardId, out var currentCount))
+            {
+                shardDocCounts[shardId] = currentCount + 1;
+            }
+            else
+            {
+                shardDocCounts[shardId] = 1;
+            }
+        }
+
+        var shardTopologies = new List<ShardTopologyDisplayDto>(shardDocCounts.Count);
+        var localShardCount = 0;
+        var remoteShardCount = 0;
+
+        foreach (var kvp in shardDocCounts.OrderBy(s => s.Key, StringComparer.Ordinal))
+        {
+            var isLocal = await shardDistributionManager.IsShardLocalAsync(kvp.Key, cancellationToken).ConfigureAwait(false);
+            var targetReplicas = await shardDistributionManager.GetTargetNodesForShardAsync(kvp.Key, cancellationToken).ConfigureAwait(false);
+
+            if (isLocal)
+            {
+                localShardCount++;
+            }
+            else
+            {
+                remoteShardCount++;
+            }
+
+            shardTopologies.Add(new ShardTopologyDisplayDto(kvp.Key, kvp.Value, isLocal, targetReplicas));
+        }
+
+        var localActiveDocsCount = orchestrator.GetActiveDocuments().Count;
+        var displayRole = string.IsNullOrEmpty(currentRole) ? "None" : currentRole;
+        var portSummary = currentMode == "server"
+            ? $"WS Port: {currentPort}, TCP Port: {currentTcpPort}, Handshake Port: {currentHandshakePort}"
+            : $"WS Port: {currentPort}";
+
+        lock (ConsoleLock)
+        {
+            Console.WriteLine($"\n--- [Cluster Peers & Topology: {replicaId}] ---");
+            Console.WriteLine($" Local Replica ID       : {replicaId} ({portSummary})");
+            Console.WriteLine($" Local Session Context  : Mode={currentMode.ToUpperInvariant()}, Role={displayRole}, Region={currentRegion}");
+            Console.WriteLine($" Active CRDT Replicas   : {activeReplicaIds.Count + 1} (Local: {replicaId}{(activeReplicaIds.Count > 0 ? ", Remote: " + string.Join(", ", activeReplicaIds.OrderBy(r => r, StringComparer.Ordinal)) : string.Empty)})");
+            Console.WriteLine($" Tombstoned Replicas    : {tombstonedReplicas.Count}{(tombstonedReplicas.Count > 0 ? " (" + string.Join(", ", tombstonedReplicas.Keys.OrderBy(k => k, StringComparer.Ordinal)) + ")" : string.Empty)}");
+
+            Console.WriteLine("\n [P2P Network Peers & Health]");
+            if (peerList.Count == 0)
+            {
+                Console.WriteLine("   (No peers discovered across meshes)");
+            }
+            else
+            {
+                var aliveCount = peerList.Count(p => p.Status == PeerStatus.Active);
+                var suspectedCount = peerList.Count(p => p.Status == PeerStatus.Suspect);
+                var deadCount = peerList.Count(p => p.Status == PeerStatus.Dead);
+                Console.WriteLine($"   Summary: Total={peerList.Count} | Alive={aliveCount} | Suspected={suspectedCount} | Dead={deadCount}");
+                Console.WriteLine($"   {"Mesh",-10} | {"Status",-10} | {"Replica ID",-16} | {"Tracked Shards",14} | {"Peer ID",-36} | {"Endpoint"}");
+                Console.WriteLine($"   {new string('-', 120)}");
+
+                foreach (var peer in peerList.OrderBy(p => p.MeshId, StringComparer.Ordinal).ThenBy(p => p.Status).ThenBy(p => p.ReplicaId, StringComparer.Ordinal))
+                {
+                    Console.WriteLine($"   {peer.MeshId,-10} | {peer.Status,-10} | {peer.ReplicaId,-16} | {peer.TrackedShards,14} | {peer.PeerId,-36} | {peer.Endpoint}");
+                }
+            }
+
+            Console.WriteLine("\n [CRDT Shard Topology Overview]");
+            Console.WriteLine($"   Cluster Registry Docs  : {activeDocumentCount} Active, {deletedDocumentCount} Tombstoned (+1 System Registry)");
+            Console.WriteLine($"   Local Hosted Documents : {localActiveDocsCount} in-memory");
+            Console.WriteLine($"   Total Cluster Shards   : {shardTopologies.Count} (Hosted Locally: {localShardCount}, Remote Only: {remoteShardCount})");
+
+            if (showDetails && shardTopologies.Count > 0)
+            {
+                Console.WriteLine($"\n   {"Shard ID",-28} | {"Docs",6} | {"Locality",-10} | {"Assigned Replicas"}");
+                Console.WriteLine($"   {new string('-', 95)}");
+
+                foreach (var shard in shardTopologies)
+                {
+                    var locality = shard.IsLocal ? "Local" : "Remote";
+                    var replicasText = shard.TargetReplicas.Count > 0 ? string.Join(", ", shard.TargetReplicas) : "(None)";
+                    Console.WriteLine($"   {shard.ShardId,-28} | {shard.DocumentCount,6} | {locality,-10} | {replicasText}");
+                }
+            }
+            else if (!showDetails && shardTopologies.Count > 0)
+            {
+                Console.WriteLine("   (Run 'topology details' or 'peers details' to list individual shard assignments)");
+            }
+
+            Console.WriteLine("------------------------------------\n> ");
+        }
+    }
+
+    private static string ResolveShardIdForEntry(IShardIdProvider shardIdProvider, string documentId, string typeAlias)
+    {
+        return typeAlias switch
+        {
+            "task-list" => shardIdProvider.GetShardId<TaskListState>(documentId),
+            "fleet-list" => shardIdProvider.GetShardId<FleetState>(documentId),
+            _ => documentId
+        };
+    }
+
     private static async Task DrawStateAsync(ICrdtDocumentOrchestrator orchestrator, ITaskManager taskManager, IFleetManager fleetManager, CancellationToken cancellationToken)
     {
-        var taskDocsInfo = new List<(string Id, IReadOnlyDictionary<string, TaskItem> Tasks)>();
+        var taskDocsInfo = new List<DocumentStateDto<TaskItem>>();
         foreach (var doc in orchestrator.GetActiveDocuments().OfType<IDistributedCrdtDocument<TaskListState>>())
         {
             var tasks = await taskManager.GetTasksAsync(doc.DocumentId, cancellationToken).ConfigureAwait(false);
-            taskDocsInfo.Add((doc.DocumentId, tasks));
+            taskDocsInfo.Add(new DocumentStateDto<TaskItem>(doc.DocumentId, tasks));
         }
 
-        var fleetDocsInfo = new List<(string Id, IReadOnlyDictionary<string, DeviceStatus> Devices)>();
+        var fleetDocsInfo = new List<DocumentStateDto<DeviceStatus>>();
         foreach (var doc in orchestrator.GetActiveDocuments().OfType<IDistributedCrdtDocument<FleetState>>())
         {
             var devices = await fleetManager.GetDevicesAsync(doc.DocumentId, cancellationToken).ConfigureAwait(false);
-            fleetDocsInfo.Add((doc.DocumentId, devices));
+            fleetDocsInfo.Add(new DocumentStateDto<DeviceStatus>(doc.DocumentId, devices));
         }
 
         lock (ConsoleLock)
@@ -588,13 +801,13 @@ public static class Program
                 foreach (var info in taskDocsInfo)
                 {
                     Console.WriteLine($"   => List [{info.Id}]:");
-                    if (info.Tasks.Count == 0)
+                    if (info.Items.Count == 0)
                     {
                         Console.WriteLine("      (Empty)");
                     }
                     else
                     {
-                        foreach (var task in info.Tasks.OrderBy(t => t.Key))
+                        foreach (var task in info.Items.OrderBy(t => t.Key))
                         {
                             Console.WriteLine($"      [{task.Key}]: {task.Value.Description} (Done: {task.Value.IsDone})");
                         }
@@ -612,13 +825,13 @@ public static class Program
                 foreach (var info in fleetDocsInfo)
                 {
                     Console.WriteLine($"   => Fleet [{info.Id}]:");
-                    if (info.Devices.Count == 0)
+                    if (info.Items.Count == 0)
                     {
                         Console.WriteLine("      (Empty)");
                     }
                     else
                     {
-                        foreach (var device in info.Devices.OrderBy(d => d.Key))
+                        foreach (var device in info.Items.OrderBy(d => d.Key))
                         {
                             Console.WriteLine($"      [{device.Key}]: Online: {device.Value.IsOnline}, Battery: {device.Value.BatteryLevel}%");
                         }
@@ -672,13 +885,13 @@ public static class Program
     {
         public Task OnStateChangedAsync(string documentId, CancellationToken cancellationToken = default)
         {
-            _needsRedraw = true;
+            needsRedraw = true;
             return Task.CompletedTask;
         }
 
         public Task OnTopologyChangedAsync(CancellationToken cancellationToken = default)
         {
-            _needsRedraw = true;
+            needsRedraw = true;
             return Task.CompletedTask;
         }
     }

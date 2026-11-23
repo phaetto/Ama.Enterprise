@@ -29,10 +29,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 {
     private static readonly ConcurrentDictionary<string, Expression<Func<TState, object>>> PropertySelectorCache = new(StringComparer.Ordinal);
 
-    // Shared static estimation resources to prevent per-document HashSet retention and LOH bloat
-    private static readonly object EstimationSyncRoot = new();
-    private static readonly HashSet<object> SharedEstimationVisitedSet = new(ReferenceEqualityComparer.Instance);
-
     private readonly IServiceProvider serviceProvider;
     private readonly IShardVersionVectorManager versionVectorManager;
     private readonly IAsyncCrdtApplicator applicator;
@@ -585,48 +581,25 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             currentDoc = currentDocument;
         }
 
-        var aotContexts = GetAotContexts();
-
-        long dataBytes;
-        long metadataBytes;
-        long dataAndMetaBytes;
-        long wholeObjectBytes;
-
-        lock (EstimationSyncRoot)
+        var debounceCapacity = -1;
+        if (debounceBuffer != null)
         {
-            SharedEstimationVisitedSet.Clear();
-
-            dataBytes = EstimateGraphSize(currentDoc.Data, SharedEstimationVisitedSet, aotContexts);
-            metadataBytes = EstimateGraphSize(currentDoc.Metadata, SharedEstimationVisitedSet, aotContexts);
-            dataAndMetaBytes = 32L + dataBytes + metadataBytes;
-
-            // Base overhead for DistributedCrdtDocument instance, references, and locks
-            long managerOverheadBytes = 256;
-
-            // Strings (Object header + length + UTF-16 chars)
-            managerOverheadBytes += EstimateStringSize(DocumentId);
-            managerOverheadBytes += EstimateStringSize(ShardId);
-
-            // Debounce buffer and timer overhead
-            if (debounceBuffer != null)
+            lock (debounceSyncRoot)
             {
-                lock (debounceSyncRoot)
-                {
-                    managerOverheadBytes += 160 + (debounceBuffer.Capacity * 64L);
-                }
+                debounceCapacity = debounceBuffer.Capacity;
             }
-
-            wholeObjectBytes = managerOverheadBytes + dataAndMetaBytes;
-
-            SharedEstimationVisitedSet.Clear();
-            SharedEstimationVisitedSet.TrimExcess(64);
         }
 
-        var globalState = GetLocalState();
-        var shardDvvBytes = EstimateShardVersionVectorSize(globalState);
+        var estimator = serviceProvider.GetService<ICrdtMemoryEstimator>() ?? new CrdtMemoryEstimator();
+        var footprint = estimator.EstimateDocumentFootprint(
+            currentDoc,
+            DocumentId,
+            ShardId,
+            debounceCapacity,
+            GetLocalState(),
+            GetAotContexts());
 
-        return new ValueTask<DocumentMemoryFootprintDto>(
-            new DocumentMemoryFootprintDto(dataBytes, metadataBytes, dataAndMetaBytes, wholeObjectBytes, shardDvvBytes));
+        return new ValueTask<DocumentMemoryFootprintDto>(footprint);
     }
 
     /// <inheritdoc />
@@ -1147,7 +1120,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             }
 
             var stateChanged = !wasAlreadyDirty
-                ? HasIncomingSnapshotAdvance(currentDoc.Metadata, snapshotDoc.Metadata)
+                ? HasIncomingSnapshotAdvance(currentDoc.Metadata, snapshotDoc.Metadata, cmd.GlobalState)
                 : true;
 
             if (stateChanged)
@@ -1216,7 +1189,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
     }
 
-    private bool HasIncomingSnapshotAdvance(CrdtMetadata? localMeta, CrdtMetadata? incomingMeta)
+    private bool HasIncomingSnapshotAdvance(CrdtMetadata? localMeta, CrdtMetadata? incomingMeta, ShardVersionVectorMap? incomingGlobalState)
     {
         if (incomingMeta == null)
         {
@@ -1233,7 +1206,31 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         if (IsVersionVectorEmpty(incomingVector))
         {
-            return !IsVersionVectorEmpty(localVector);
+            if (IsVersionVectorEmpty(localVector))
+            {
+                // If both document-level version vectors are empty (e.g. a document initialized directly with data
+                // via metadataManager.Initialize without applying incremental operations), check if the incoming
+                // shard-level DVV carries any positive causal versions before skipping the merge.
+                if (incomingGlobalState != null)
+                {
+                    if (incomingGlobalState.TryGetValue(ShardId, out var shardDvv) && !IsVersionVectorEmpty(shardDvv))
+                    {
+                        return true;
+                    }
+
+                    foreach (var dvv in incomingGlobalState.Values)
+                    {
+                        if (!IsVersionVectorEmpty(dvv))
+                        {
+                            return true;
+                        }
+                    }
+                }
+
+                return false;
+            }
+
+            return false;
         }
 
         var syncService = serviceProvider.GetService<IVersionVectorSyncService>();
@@ -1531,41 +1528,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
     }
 
-    private static long EstimateShardVersionVectorSize(ShardVersionVectorMap globalState)
-    {
-        if (globalState == null)
-        {
-            return 0;
-        }
-
-        // ConcurrentDictionary / Dictionary wrapper + bucket arrays
-        long size = 128;
-        foreach (var kvp in globalState)
-        {
-            // Entry overhead + key string + DottedVersionVector object header
-            size += 64 + EstimateStringSize(kvp.Key);
-            if (kvp.Value.Dots != null)
-            {
-                // Dots dictionary overhead + 24 bytes per dot entry (long + hash bucket)
-                size += 80 + (kvp.Value.Dots.Count * 24L);
-            }
-        }
-
-        return size;
-    }
-
-    private static long EstimateStringSize(string? str)
-    {
-        if (str is null)
-        {
-            return 0;
-        }
-
-        // 64-bit CLR string: 16B object header + 4B length + 2B null terminator + UTF-16 chars, aligned to 8 bytes
-        long raw = 22L + ((long)str.Length * sizeof(char));
-        return (raw + 7L) & ~7L;
-    }
-
     private CrdtAotContext[] GetAotContexts()
     {
         if (cachedAotContexts != null)
@@ -1582,207 +1544,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         cachedAotContexts = list.ToArray();
         return cachedAotContexts;
-    }
-
-    private static long EstimateGraphSize(object? obj, HashSet<object> visited, CrdtAotContext[] aotContexts)
-    {
-        if (obj is null)
-        {
-            return 0;
-        }
-
-        if (obj is string str)
-        {
-            return EstimateStringSize(str);
-        }
-
-        var type = obj.GetType();
-        if (IsSimpleValueType(type))
-        {
-            return GetPrimitiveOrSimpleValueSize(type);
-        }
-
-        if (!type.IsValueType && !visited.Add(obj))
-        {
-            return 0;
-        }
-
-        if (obj is byte[] byteArray)
-        {
-            return 24L + byteArray.LongLength;
-        }
-
-        if (obj is Array array)
-        {
-            var elemType = type.GetElementType();
-            if (elemType != null && IsSimpleValueType(elemType))
-            {
-                return 24L + (array.LongLength * GetPrimitiveOrSimpleValueSize(elemType));
-            }
-
-            long arrSize = 24L + (array.LongLength * 8L);
-            foreach (var item in array)
-            {
-                arrSize += EstimateGraphSize(item, visited, aotContexts);
-            }
-
-            return arrSize;
-        }
-
-        if (obj is CrdtMetadata metadata)
-        {
-            return EstimateCrdtMetadataSize(metadata, visited, aotContexts);
-        }
-
-        if (obj is IDictionary dict)
-        {
-            // Dictionary object + internal Entry[] and buckets[] overhead (~48 bytes per entry in 64-bit CLR)
-            long dictSize = 80L + (dict.Count * 48L);
-            foreach (DictionaryEntry entry in dict)
-            {
-                dictSize += EstimateGraphSize(entry.Key, visited, aotContexts);
-                dictSize += EstimateGraphSize(entry.Value, visited, aotContexts);
-            }
-
-            return dictSize;
-        }
-
-        if (obj is ICollection collection)
-        {
-            long colSize = 48L + (collection.Count * 16L);
-            foreach (var item in collection)
-            {
-                colSize += EstimateGraphSize(item, visited, aotContexts);
-            }
-
-            return colSize;
-        }
-
-        var aotTypeInfo = ResolveAotTypeInfo(type, aotContexts);
-        if (aotTypeInfo != null)
-        {
-            long objSize = type.IsValueType ? 0L : 24L;
-            foreach (var prop in aotTypeInfo.Properties.Values)
-            {
-                if (!prop.CanRead || prop.Getter == null)
-                {
-                    continue;
-                }
-
-                if (IsSimpleValueType(prop.PropertyType))
-                {
-                    objSize += GetPrimitiveOrSimpleValueSize(prop.PropertyType);
-                }
-                else
-                {
-                    objSize += type.IsValueType ? 0L : 8L;
-                    var val = prop.Getter(obj);
-                    objSize += EstimateGraphSize(val, visited, aotContexts);
-                }
-            }
-
-            return Math.Max(objSize, type.IsValueType ? 8L : 24L);
-        }
-
-        if (obj is IEnumerable enumerable)
-        {
-            long enumSize = 48L;
-            foreach (var item in enumerable)
-            {
-                enumSize += 16L + EstimateGraphSize(item, visited, aotContexts);
-            }
-
-            return enumSize;
-        }
-
-        return 32L;
-    }
-
-    private static long EstimateCrdtMetadataSize(CrdtMetadata metadata, HashSet<object> visited, CrdtAotContext[] aotContexts)
-    {
-        // CrdtMetadata instance + 13 ConcurrentDictionary/List field references
-        long size = 128L;
-
-        size += EstimateGraphSize(metadata.States, visited, aotContexts);
-        size += EstimateGraphSize(metadata.VersionVector, visited, aotContexts);
-
-        // SeenExceptions is a HashSet<CrdtOperation> (struct of ~64 bytes + string/object refs)
-        if (metadata.SeenExceptions != null && visited.Add(metadata.SeenExceptions))
-        {
-            size += 64L + (metadata.SeenExceptions.Count * 72L);
-            foreach (var op in metadata.SeenExceptions)
-            {
-                size += EstimateStringSize(op.ReplicaId);
-                size += EstimateStringSize(op.JsonPath);
-                size += EstimateGraphSize(op.Value, visited, aotContexts);
-            }
-        }
-
-        return size;
-    }
-
-    private static CrdtTypeInfo? ResolveAotTypeInfo(Type type, CrdtAotContext[] aotContexts)
-    {
-        for (int i = 0; i < aotContexts.Length; i++)
-        {
-            var info = aotContexts[i].GetTypeInfo(type);
-            if (info != null)
-            {
-                return info;
-            }
-        }
-
-        return null;
-    }
-
-    private static bool IsSimpleValueType(Type type)
-    {
-        var underlying = Nullable.GetUnderlyingType(type) ?? type;
-        return underlying.IsPrimitive
-            || underlying.IsEnum
-            || underlying == typeof(decimal)
-            || underlying == typeof(Guid)
-            || underlying == typeof(DateTime)
-            || underlying == typeof(DateTimeOffset)
-            || underlying == typeof(TimeSpan);
-    }
-
-    private static long GetPrimitiveOrSimpleValueSize(Type type)
-    {
-        var underlying = Nullable.GetUnderlyingType(type) ?? type;
-        long extraNullable = Nullable.GetUnderlyingType(type) != null ? 4L : 0L;
-
-        if (underlying == typeof(bool) || underlying == typeof(byte) || underlying == typeof(sbyte))
-        {
-            return 1L + extraNullable;
-        }
-
-        if (underlying == typeof(short) || underlying == typeof(ushort) || underlying == typeof(char))
-        {
-            return 2L + extraNullable;
-        }
-
-        if (underlying == typeof(int) || underlying == typeof(uint) || underlying == typeof(float))
-        {
-            return 4L + extraNullable;
-        }
-
-        if (underlying == typeof(long) || underlying == typeof(ulong) || underlying == typeof(double) || underlying == typeof(DateTime) || underlying == typeof(TimeSpan) || underlying == typeof(nint) || underlying == typeof(nuint))
-        {
-            return 8L + extraNullable;
-        }
-
-        if (underlying == typeof(decimal) || underlying == typeof(Guid) || underlying == typeof(DateTimeOffset))
-        {
-            return 16L + extraNullable;
-        }
-
-        if (underlying.IsEnum)
-        {
-            return GetPrimitiveOrSimpleValueSize(Enum.GetUnderlyingType(underlying)) + extraNullable;
-        }
-
-        return 8L + extraNullable;
     }
 
     private static string ResolveTypeAlias(IServiceProvider sp, string? explicitTypeAlias)

@@ -157,6 +157,7 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
         // Resolve the registry through the service provider dynamically bridging capabilities 
         // to prevent DI validation failures if P2P meshes are not explicitly registered or to break circular graphs.
         var peerRegistry = serviceProvider.GetService<IPeerRegistry>();
+        var topologyProvider = serviceProvider.GetService<IScopeTopologyProvider>();
 
         if (peerRegistry != null)
         {
@@ -172,6 +173,15 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
                 foreach (var peer in activePeers)
                 {
                     var peerIdStr = peer.Id.Value.ToString();
+                    if (topologyProvider != null)
+                    {
+                        var isExpected = await topologyProvider.IsPeerExpectedAsync(peerIdStr, cancellationToken).ConfigureAwait(false);
+                        if (!isExpected)
+                        {
+                            continue;
+                        }
+                    }
+
                     var replicaId = clusterTracker.GetReplicaIdByPeerId(peerIdStr);
                     
                     if (!string.IsNullOrWhiteSpace(replicaId))

@@ -18,6 +18,7 @@ using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
+using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Ama.Enterprise.Project.Tests.Common.Attributes;
@@ -208,13 +209,22 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         var docB1 = orchB.TryGetLocalDocument<DvvTestState>("doc-snap-1")!;
         var docB2 = orchB.TryGetLocalDocument<DvvTestState>("doc-snap-2")!;
 
-        await docB1.MergeSnapshotAsync(snap1.SnapshotData, snap1.GlobalState, CancellationToken.None);
+        await docB1.MergeSnapshotAsync(
+            snap1.SnapshotData,
+            snap1.GlobalState,
+            ["dvv-doc:doc-snap-1", "dvv-doc:doc-snap-2"], // Use multi-document batch barrier
+            cancellationToken: CancellationToken.None
+        );
 
         var partialDvvB = dvvManagerB.GetShardSnapshot("default");
         partialDvvB["default"].Versions.ContainsKey("ReplicaA").ShouldBeFalse();
 
         // Step 2: Merge the second document's snapshot on Node B; now all active documents in the shard have merged snapshots
-        await docB2.MergeSnapshotAsync(snap2.SnapshotData, snap2.GlobalState, CancellationToken.None);
+        await docB2.MergeSnapshotAsync(
+            snap2.SnapshotData,
+            snap2.GlobalState,
+            ["dvv-doc:doc-snap-1", "dvv-doc:doc-snap-2"], // Use multi-document batch barrier
+            cancellationToken: CancellationToken.None);
 
         var completeDvvB = dvvManagerB.GetShardSnapshot("default");
         completeDvvB["default"].Versions.ShouldContainKeyAndValue("ReplicaA", 2);
@@ -1783,6 +1793,92 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         steadyMessages.ShouldAllBe(m => m.MessageType == "CrdtSync");
     }
 
+    [IntegrationFact]
+    public async Task AllReplicas_IncomingSnapshotWithAllZeroDvvEntries_ShouldNotMarkDocumentDirtyOrTriggerStateChangedOrOscillate()
+    {
+        // Arrange - Tests that if a CrdtSnapshot message arrives whose document metadata VersionVector AND
+        // incoming GlobalState shard DVV both contain only 0-version entries ({ ReplicaA: 0, ReplicaB: 0 }),
+        // MergeSnapshotAsync treats it as a no-op (does not mark the document dirty, does not fire state observers,
+        // and does not trigger any subsequent anti-entropy oscillation).
+        var stateChangedNotifications = 0;
+        var mockStateObserver = new Mock<IDocumentStateObserver<DvvTestState>>();
+        mockStateObserver
+            .Setup(o => o.OnStateChangedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback(() => Interlocked.Increment(ref stateChangedNotifications))
+            .Returns(Task.CompletedTask);
+
+        var nodeA = BuildNode("ReplicaA", opt => opt.ActiveSyncEnabled = false);
+        var nodeB = BuildNode("ReplicaB", opt => opt.ActiveSyncEnabled = false, configureExtra: services =>
+        {
+            services.AddSingleton(mockStateObserver.Object);
+        });
+
+        var scopeA = nodeA.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeA.ReplicaId);
+        var orchA = scopeA.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchA.InitializeAsync(CancellationToken.None);
+        await orchA.CreateDocumentAsync("doc-zero-snap", "dvv-doc", CancellationToken.None);
+
+        var scopeB = nodeB.Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(nodeB.ReplicaId);
+        var orchB = scopeB.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await orchB.InitializeAsync(CancellationToken.None);
+        await orchB.CreateDocumentAsync("doc-zero-snap", "dvv-doc", CancellationToken.None);
+
+        var docA = orchA.TryGetLocalDocument<DvvTestState>("doc-zero-snap")!;
+        var docB = orchB.TryGetLocalDocument<DvvTestState>("doc-zero-snap")!;
+
+        // Checkpoint docB so its dirty flag is cleared and reset notification count
+        await docB.CheckpointAsync(CancellationToken.None);
+        Volatile.Write(ref stateChangedNotifications, 0);
+
+        // Build a snapshot from docA where both document Metadata.VersionVector and GlobalState have explicit 0 entries
+        var serializer = nodeA.Sp.GetRequiredService<ICrdtSerializer>();
+        var rawSnapA = await docA.GetSnapshotDataAsync(CancellationToken.None);
+        var snapDocA = serializer.DeserializeFromBytes<CrdtDocument<DvvTestState>>(rawSnapA.SnapshotData);
+        snapDocA.Metadata!.VersionVector["ReplicaA"] = 0L;
+        snapDocA.Metadata.VersionVector["ReplicaB"] = 0L;
+
+        var zeroGlobalState = new ShardVersionVectorMap
+        {
+            ["default"] = new DottedVersionVector(
+                new Dictionary<string, long>(StringComparer.Ordinal)
+                {
+                    ["ReplicaA"] = 0L,
+                    ["ReplicaB"] = 0L
+                },
+                new Dictionary<string, ISet<long>>(StringComparer.Ordinal))
+        };
+
+        // Act - Merge the all-zero snapshot into docB (whose own document DVV is also all-zero)
+        await docB.MergeSnapshotAsync(
+            serializer.SerializeToBytes(snapDocA),
+            zeroGlobalState,
+            CancellationToken.None);
+
+        // Assert - Because both local and incoming document & shard DVVs are all 0, HasIncomingSnapshotAdvance
+        // returned false: state observer was NOT fired and subsequent DVV exchanges do not oscillate
+        Volatile.Read(ref stateChangedNotifications).ShouldBe(0);
+
+        var recordedMessages = new ConcurrentQueue<CapturedMessageDto>();
+        using var network = WireMeshWithInspection(recordedMessages, nodeA, nodeB);
+
+        // Sync registry once, then clear and verify steady-state exchanges
+        await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
+        await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
+        await network.DrainAsync();
+        recordedMessages.Clear();
+
+        for (int round = 0; round < 3; round++)
+        {
+            await orchA.DispatchAntiEntropyStateAsync(nodeB.PeerId, CancellationToken.None);
+            await orchB.DispatchAntiEntropyStateAsync(nodeA.PeerId, CancellationToken.None);
+            await network.DrainAsync();
+        }
+
+        var steadyMessages = recordedMessages.ToList();
+        steadyMessages.Count.ShouldBe(6);
+        steadyMessages.ShouldAllBe(m => m.MessageType == "CrdtSync");
+    }
+
     public async ValueTask DisposeAsync()
     {
         foreach (var node in nodes)
@@ -1851,7 +1947,8 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         string replicaId,
         Action<DistributedCrdtOptions>? configureOptions = null,
         bool usePrefixShardProvider = false,
-        PeerId? explicitPeerId = null)
+        PeerId? explicitPeerId = null,
+        Action<IServiceCollection>? configureExtra = null)
     {
         var senderMock = new Mock<IDirectMessageSender>();
         var gossipMock = new Mock<IP2pAlgorithm>();
@@ -1892,6 +1989,8 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
         services.AddSingleton<IP2pRpcCorrelator, P2pRpcCorrelator>();
         services.AddSingleton(new P2pMeshMetadata("TestMesh"));
+
+        configureExtra?.Invoke(services);
 
         var sp = services.BuildServiceProvider();
 

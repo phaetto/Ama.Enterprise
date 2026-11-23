@@ -260,6 +260,22 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver, IDisposable
             }
 
             var scope = scopeManager.GetOrCreateScope(replicaId);
+            var topologyProvider = scope.ServiceProvider.GetRequiredService<IScopeTopologyProvider>();
+            var expectedPeersToSync = new List<PeerId>(peersToSync.Count);
+            for (int i = 0; i < peersToSync.Count; i++)
+            {
+                var candidatePeer = peersToSync[i];
+                if (await topologyProvider.IsPeerExpectedAsync(candidatePeer.Value.ToString(), currentCts.Token).ConfigureAwait(false))
+                {
+                    expectedPeersToSync.Add(candidatePeer);
+                }
+            }
+
+            if (expectedPeersToSync.Count == 0)
+            {
+                return;
+            }
+
             await scope.Orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, currentCts.Token).ConfigureAwait(false);
 
             var inboundQueue = serviceProvider.GetKeyedService<IInboundMessageQueue<IMeshMessage>>(meshId);
@@ -286,13 +302,13 @@ public sealed class CrdtTopologyObserver : IPeerTopologyObserver, IDisposable
                 "[{MeshId}] Topology stabilization window ({DelayMs}ms) elapsed with {PeerCount} joined peer(s). Triggering full shard DVV state sync for replica {ReplicaId}.",
                 meshId,
                 delayMs,
-                peersToSync.Count,
+                expectedPeersToSync.Count,
                 replicaId);
 
-            for (int i = 0; i < peersToSync.Count; i++)
+            for (int i = 0; i < expectedPeersToSync.Count; i++)
             {
                 currentCts.Token.ThrowIfCancellationRequested();
-                await scope.Orchestrator.DispatchAntiEntropyStateAsync(peersToSync[i], currentCts.Token).ConfigureAwait(false);
+                await scope.Orchestrator.DispatchAntiEntropyStateAsync(expectedPeersToSync[i], currentCts.Token).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)

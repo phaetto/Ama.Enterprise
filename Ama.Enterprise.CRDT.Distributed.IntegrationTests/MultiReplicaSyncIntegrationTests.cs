@@ -318,8 +318,9 @@ public sealed class MultiReplicaSyncIntegrationTests : IAsyncDisposable
         var nodeA = BuildNode("ReplicaA");
         var nodeB = BuildNode("ReplicaB", opt =>
         {
+            opt.AntiEntropyIntervalSeconds = 1;
             opt.MaintenanceIntervalSeconds = 1;
-            opt.PeerEvictionTtlSeconds = 1;
+            opt.PeerEvictionTtlSeconds = 3;
             opt.PeerTombstoneCooldownSeconds = 1;
         });
 
