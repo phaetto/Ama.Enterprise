@@ -234,7 +234,12 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
         List<JournaledOperation> snapshot;
         lock (syncRoot) 
         { 
-            snapshot = shardedOperations.Values.SelectMany(x => x).ToList(); 
+            snapshot = shardedOperations
+                .Values
+                .SelectMany(x => x)
+                .OrderBy(x => x.Operation.ShardClock)
+                .ThenBy(x => x.Operation.Clock)
+                .ToList(); 
         }
 
         foreach (var op in snapshot)

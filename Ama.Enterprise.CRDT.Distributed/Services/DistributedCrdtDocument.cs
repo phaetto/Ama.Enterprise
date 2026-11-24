@@ -1467,11 +1467,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                     return;
                 }
 
-                if (isMemoryStorage)
-                {
-                    currentDoc = currentDocument;
-                }
-                else
+                currentDoc = currentDocument;
+                if (!isMemoryStorage)
                 {
                     // Serialize once inside the document lock so storage backends
                     // can persist the exact byte array without re-serializing or hitting concurrent mutations.

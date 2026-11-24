@@ -346,7 +346,6 @@ public static class ServiceCollectionExtensions
 
         services.RemoveAll(typeof(IDistributedCrdtStorage));
         services.TryAddScoped<TStorage>();
-        services.AddScoped<TStorage>();
         services.AddScoped(sp => ResolveDecoratedStorage(sp, sp.GetRequiredService<TStorage>()));
         
         return services;

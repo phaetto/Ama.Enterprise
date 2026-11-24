@@ -212,7 +212,10 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
         }
 
         // 5. Prune any stale non-active shard DVVs left over in storage from a previous IShardIdProvider implementation
-        PruneStaleShardVersionVectors(orchestrator, versionVectorManager);
+        if (orchestrator.GetActiveDocuments().Count > 1)
+        {
+            PruneStaleShardVersionVectors(orchestrator, versionVectorManager);
+        }
     }
 
     private static void PruneStaleShardVersionVectors(

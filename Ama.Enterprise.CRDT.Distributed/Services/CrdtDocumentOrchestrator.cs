@@ -42,6 +42,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     private readonly ConcurrentDictionary<string, IDistributedCrdtDocument> activeDocuments = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> shardIdCache = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<Type, string> stateTypeAliases = new();
+    private readonly ConcurrentDictionary<Type, string[]> stateTypeAllAliases = new();
 
     private readonly Channel<PooledOrchestratorCommand> commandChannel;
     private readonly ConcurrentQueue<PooledOrchestratorCommand> commandPool = new();
@@ -104,9 +105,27 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         this.stringPool = stringPool ?? CrdtStringPool.Shared;
         this.options = options.Value;
 
+        var aliasesByType = new Dictionary<Type, List<string>>();
         foreach (var factory in this.serviceProvider.GetServices<IDocumentFactory>())
         {
-            this.stateTypeAliases.TryAdd(factory.StateType, this.stringPool.GetOrAdd(factory.TypeAlias));
+            var pooledAlias = this.stringPool.GetOrAdd(factory.TypeAlias);
+            this.stateTypeAliases.TryAdd(factory.StateType, pooledAlias);
+
+            if (!aliasesByType.TryGetValue(factory.StateType, out var list))
+            {
+                list = new List<string>(1);
+                aliasesByType[factory.StateType] = list;
+            }
+
+            if (!list.Contains(pooledAlias))
+            {
+                list.Add(pooledAlias);
+            }
+        }
+
+        foreach (var kvp in aliasesByType)
+        {
+            this.stateTypeAllAliases[kvp.Key] = kvp.Value.ToArray();
         }
 
         var capacity = this.options.ChannelCapacity;
@@ -227,9 +246,9 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     public IReadOnlyList<IDistributedCrdtDocument> GetActiveDocuments()
     {
         var registry = Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
-        var docs = new List<IDistributedCrdtDocument>(activeDocuments.Count + 1) { registry };
-        docs.AddRange(activeDocuments.Values);
-        return docs;
+        var activeDocs = new List<IDistributedCrdtDocument>(activeDocuments.Count + 1) { registry };
+        activeDocs.AddRange(activeDocuments.Values);
+        return activeDocs;
     }
 
     /// <inheritdoc />
@@ -254,9 +273,32 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             }
         }
 
+        if (stateTypeAllAliases.TryGetValue(typeof(TState), out var allAliases) && allAliases.Length > 1)
+        {
+            for (int i = 0; i < allAliases.Length; i++)
+            {
+                var candidateAlias = allAliases[i];
+                if (string.Equals(candidateAlias, typeAlias, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var candidateKey = CrdtRegistryEntry.GetRegistryKey(candidateAlias, documentId);
+                if (activeDocuments.TryGetValue(candidateKey, out var candidateDoc) && candidateDoc is IDistributedCrdtDocument<TState> typedCandidate)
+                {
+                    return typedCandidate;
+                }
+            }
+        }
+
         if (activeDocuments.TryGetValue(documentId, out var doc) && doc is IDistributedCrdtDocument<TState> typedDoc)
         {
             return typedDoc;
+        }
+
+        if (!string.IsNullOrWhiteSpace(typeAlias))
+        {
+            return null;
         }
 
         foreach (var activeDoc in activeDocuments.Values)
@@ -286,6 +328,24 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             if (activeDocuments.TryGetValue(compositeKey, out var docByComposite) && docByComposite is IDistributedCrdtDocument<TState> typedByComposite)
             {
                 return typedByComposite;
+            }
+        }
+
+        if (stateTypeAllAliases.TryGetValue(typeof(TState), out var allAliases) && allAliases.Length > 1)
+        {
+            for (int i = 0; i < allAliases.Length; i++)
+            {
+                var candidateAlias = allAliases[i];
+                if (string.Equals(candidateAlias, resolvedTypeAlias, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var candidateKey = CrdtRegistryEntry.GetRegistryKey(candidateAlias, documentId);
+                if (activeDocuments.TryGetValue(candidateKey, out var candidateDoc) && candidateDoc is IDistributedCrdtDocument<TState> typedCandidate)
+                {
+                    return typedCandidate;
+                }
             }
         }
 
@@ -366,15 +426,6 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 return new ValueTask<bool>(true);
             }
 
-            foreach (var doc in activeDocuments.Values)
-            {
-                if (string.Equals(doc.DocumentId, documentId, StringComparison.Ordinal) &&
-                    string.Equals(doc.TypeAlias, typeAlias, StringComparison.Ordinal))
-                {
-                    return new ValueTask<bool>(true);
-                }
-            }
-
             return new ValueTask<bool>(false);
         }
 
@@ -428,6 +479,29 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             {
                 shardIdCache.TryAdd(cacheKey, typedActiveDoc.ShardId);
                 return new ValueTask<string?>(typedActiveDoc.ShardId);
+            }
+
+            if (Registry != null)
+            {
+                var registryDoc = Registry.CurrentDocument;
+                if ((registryDoc.Data.Documents.TryGetValue(cacheKey, out var entry) ||
+                     (registryDoc.Data.Documents.TryGetValue(documentId, out entry) &&
+                      string.Equals(entry?.TypeAlias, typeAlias, StringComparison.Ordinal))) &&
+                    entry != null)
+                {
+                    if (entry.IsDeleted)
+                    {
+                        return new ValueTask<string?>((string?)null);
+                    }
+
+                    var factory = serviceProvider.GetKeyedService<IDocumentFactory>(typeAlias);
+                    if (factory != null)
+                    {
+                        var resolvedShardId = stringPool.GetOrAdd(factory.GetShardId(serviceProvider, documentId));
+                        shardIdCache.TryAdd(cacheKey, resolvedShardId);
+                        return new ValueTask<string?>(resolvedShardId);
+                    }
+                }
             }
         }
         else if (activeDocuments.TryGetValue(documentId, out var activeDoc))
@@ -543,6 +617,18 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 {
                     return null;
                 }
+
+                if (entry == null &&
+                    TryFindRegistryEntry(registryDoc.Data.Documents, documentId, null, out var fallbackEntry) &&
+                    fallbackEntry is { IsDeleted: false })
+                {
+                    var requestedFactory = serviceProvider.GetKeyedService<IDocumentFactory>(resolvedAlias);
+                    var actualFactory = serviceProvider.GetKeyedService<IDocumentFactory>(fallbackEntry.TypeAlias);
+                    if (requestedFactory != null && actualFactory != null && requestedFactory.StateType == actualFactory.StateType)
+                    {
+                        resolvedAlias = fallbackEntry.TypeAlias;
+                    }
+                }
             }
         }
 
@@ -601,6 +687,104 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         activeDocuments.TryGetValue(resolvedKey, out var promotedDoc);
         return promotedDoc;
+    }
+
+    private async ValueTask<IDistributedCrdtDocument?> ResolveOrPromoteLocalDocumentAsync(
+        string documentId,
+        string? typeAlias,
+        IntentDeliveryMode deliveryMode,
+        CancellationToken cancellationToken)
+    {
+        if (deliveryMode == IntentDeliveryMode.FireAndForget && !string.IsNullOrWhiteSpace(typeAlias))
+        {
+            return await EnsureLocalDocumentRegisteredForFireAndForgetAsync(documentId, typeAlias, cancellationToken).ConfigureAwait(false);
+        }
+
+        return await ResolveOrPromoteLocalDocumentAsync(documentId, typeAlias, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async ValueTask<IDistributedCrdtDocument?> EnsureLocalDocumentRegisteredForFireAndForgetAsync(
+        string documentId,
+        string typeAlias,
+        CancellationToken cancellationToken)
+    {
+        documentId = stringPool.GetOrAdd(documentId);
+        typeAlias = stringPool.GetOrAdd(typeAlias);
+
+        var compositeKey = CrdtRegistryEntry.GetRegistryKey(typeAlias, documentId);
+        if (activeDocuments.TryGetValue(compositeKey, out var existingDoc))
+        {
+            return existingDoc;
+        }
+
+        if (Registry != null)
+        {
+            var registryMap = Registry.CurrentDocument.Data.Documents;
+            if ((registryMap.TryGetValue(compositeKey, out var existingEntry) || registryMap.TryGetValue(documentId, out existingEntry))
+                && existingEntry != null
+                && existingEntry.IsDeleted)
+            {
+                return null;
+            }
+        }
+
+        var factory = serviceProvider.GetKeyedService<IDocumentFactory>(typeAlias);
+        if (factory == null)
+        {
+            return null;
+        }
+
+        if (!shardIdCache.TryGetValue(compositeKey, out var shardId))
+        {
+            shardId = stringPool.GetOrAdd(factory.GetShardId(serviceProvider, documentId));
+            shardIdCache.TryAdd(compositeKey, shardId);
+        }
+
+        if (!await distributionManager.IsShardLocalAsync(shardId, cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        if (activeDocuments.TryGetValue(compositeKey, out existingDoc))
+        {
+            return existingDoc;
+        }
+
+        var doc = factory.CreateDocument(serviceProvider, documentId);
+        if (!activeDocuments.TryAdd(compositeKey, doc))
+        {
+            try
+            {
+                if (doc is IDisposable d) d.Dispose();
+            }
+            catch (ObjectDisposedException) { }
+
+            activeDocuments.TryGetValue(compositeKey, out existingDoc);
+            return existingDoc;
+        }
+
+        telemetry.RecordOrchestratorDocumentCreated(documentId);
+        logger.LogDebug("Mapped new active CRDT document (fire-and-forget): {DocumentId} ({TypeAlias})", documentId, typeAlias);
+
+        var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
+        versionVectorManager.EnsureShardRegistered(doc.ShardId);
+
+        if (doc is IDocumentCommandTarget commandTarget)
+        {
+            var commandPipeline = serviceProvider.GetRequiredService<IDocumentCommandPipeline>();
+            var initCmd = commandPipeline.RentCommand();
+            initCmd.Target = commandTarget;
+            initCmd.Type = DocumentCommandType.Initialize;
+            await commandPipeline.EnqueueFireAndForgetAsync(initCmd, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            await doc.InitializeAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await NotifyTopologyChangedAsync(cancellationToken).ConfigureAwait(false);
+
+        return doc;
     }
 
     /// <inheritdoc />
@@ -732,7 +916,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         if (isLocal)
         {
-            var activeDoc = await ResolveOrPromoteLocalDocumentAsync(documentId, documentTypeAlias, cancellationToken).ConfigureAwait(false);
+            var activeDoc = await ResolveOrPromoteLocalDocumentAsync(documentId, documentTypeAlias, deliveryMode, cancellationToken).ConfigureAwait(false);
             if (activeDoc is IDistributedCrdtDocument<TState> typedDoc)
             {
                 return await typedDoc.ApplyRemoteIntentAsync(intent, targetProperty, patcher, deliveryMode, cancellationToken).ConfigureAwait(false);
@@ -790,7 +974,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         if (isLocal)
         {
-            var activeDoc = await ResolveOrPromoteLocalDocumentAsync(documentId, documentTypeAlias, cancellationToken).ConfigureAwait(false);
+            var activeDoc = await ResolveOrPromoteLocalDocumentAsync(documentId, documentTypeAlias, deliveryMode, cancellationToken).ConfigureAwait(false);
             if (activeDoc is IDistributedCrdtDocument<TState> typedDoc)
             {
                 await typedDoc.ApplyPatchAsync(patch, deliveryMode, cancellationToken).ConfigureAwait(false);
@@ -825,7 +1009,15 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             var applied = await registryTyped.ApplyRemoteIntentAsync(intent, nameof(CrdtRegistryState.Documents), patcher, deliveryMode, cancellationToken).ConfigureAwait(false);
             if (applied)
             {
-                await PromoteSingleDocumentAsync(documentId, typeAlias, deliveryMode, cancellationToken).ConfigureAwait(false);
+                if (deliveryMode == IntentDeliveryMode.FireAndForget)
+                {
+                    await EnsureLocalDocumentRegisteredForFireAndForgetAsync(documentId, typeAlias, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await PromoteSingleDocumentAsync(documentId, typeAlias, deliveryMode, cancellationToken).ConfigureAwait(false);
+                }
+
                 logger.LogDebug("Forwarded creation intent for document {DocumentId} ({TypeAlias}).", documentId, typeAlias);
             }
             else
@@ -1361,6 +1553,9 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 return isLocal;
             }
 
+            var toDelete = new List<string>();
+            var toDemote = new List<string>();
+
             foreach (var kvp in registryMap)
             {
                 var entry = kvp.Value;
@@ -1420,16 +1615,21 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                         }
                     }
                 }
+                else if (activeDocuments.ContainsKey(compositeKey) || activeDocuments.ContainsKey(entry.DocumentId))
+                {
+                    toDelete.Add(compositeKey);
+                    if (!string.Equals(compositeKey, entry.DocumentId, StringComparison.Ordinal))
+                    {
+                        toDelete.Add(entry.DocumentId);
+                    }
+                }
             }
-
-            var toDelete = new List<string>();
-            var toDemote = new List<string>();
 
             foreach (var active in activeDocuments)
             {
-                if (TryFindRegistryEntry(registryMap, active.Value.DocumentId, active.Value.TypeAlias, out var entry) && entry != null)
+                if (TryFindRegistryEntry(registryMap, active.Value.DocumentId, active.Value.TypeAlias, out var entry))
                 {
-                    if (entry.IsDeleted)
+                    if (entry != null && entry.IsDeleted)
                     {
                         toDelete.Add(active.Key);
                     }

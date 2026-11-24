@@ -813,7 +813,7 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
                 .AddCrdtJsonTypeInfoResolver(DynamicShardingTestJsonContext.Default)
                 .AddCrdtShardIdProvider<TShardProvider>();
 
-        services.AddSingleton(sharedStorage);
+        services.AddSingleton((SharedPersistentCrdtStorage)sharedStorage);
         services.AddDistributedCrdtStorage<SharedPersistentCrdtStorage>();
         services.AddDistributedDocumentType<ShardedDocState>(DocTypeAlias);
         services.AddDistributedCrdtReplica(replicaId, MeshId);

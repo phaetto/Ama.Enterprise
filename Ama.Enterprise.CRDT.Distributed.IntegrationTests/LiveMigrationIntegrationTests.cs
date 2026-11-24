@@ -885,11 +885,11 @@ public sealed class LiveMigrationIntegrationTests
         await orchestratorMediatorV2.FlushAsync();
         await orchestratorPureV2.FlushAsync();
 
-        // Wait for Pure V2 node to receive the translated V2 document over mesh-v2
+        // Wait for Pure V2 node to receive the translated V2 document and both initial milestones over mesh-v2
         await WaitUntilAsync(() =>
         {
             var localDoc = orchestratorPureV2.TryGetLocalDocument<ModernTaskListStateV2>("global-roadmap");
-            return localDoc != null;
+            return localDoc != null && localDoc.CurrentDocument.Data.Tasks.Count == 2;
         }, TimeSpan.FromSeconds(5));
 
         var pureV2Doc = await orchestratorPureV2.GetDocumentStateAsync<ModernTaskListStateV2>("global-roadmap");

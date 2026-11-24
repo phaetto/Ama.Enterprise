@@ -197,9 +197,12 @@ public sealed class ConcurrencyIntegrationTests
         // Register the target peer in the cluster tracker so DispatchAntiEntropyStateAsync actually routes targeted messages natively
         clusterTracker.UpdatePeerState("RemoteRep", targetPeerId.ToString(), new ShardVersionVectorMap());
 
-        // Wait to allow any background observers (e.g. CrdtTopologyObserver) tracking new peers to finish firing state syncs natively avoiding verification counts accumulating implicitly.
-        await Task.Delay(200);
+        // Drain the orchestrator and document pipelines so the CreateDocumentAsync registry patch broadcast
+        // and peer update topology re-evaluation have completely settled before resetting mock invocations.
+        await orchestrator.FlushAsync(CancellationToken.None);
+        await Task.Delay(50);
         mockP2p.Invocations.Clear();
+        mockSender.Invocations.Clear();
 
         // Act - Flood orchestrator channel with distinct network bound intent messages
         var broadcastTasks = Enumerable.Range(0, TotalTasks).Select(i => Task.Run(async () =>

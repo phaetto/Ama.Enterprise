@@ -72,11 +72,11 @@ public sealed class CrdtCheckpointService : BackgroundService
 
                     var versionVectorManager = scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
                     var orchestrator = scope.Orchestrator;
-                    var documents = orchestrator.GetActiveDocuments();
-                    
+
                     var tag = new KeyValuePair<string, object?>("replica_id", scope.ReplicaId);
                     checkpointCyclesCounter.Add(1, tag);
 
+                    var documents = orchestrator.GetActiveDocuments();
                     foreach (var document in documents)
                     {
                         await document.CheckpointAsync(stoppingToken).ConfigureAwait(false);

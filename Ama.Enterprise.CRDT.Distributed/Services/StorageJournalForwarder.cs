@@ -396,18 +396,19 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         var orchestrator = this.serviceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         var clusterTracker = this.serviceProvider.GetService<IClusterStateTracker>();
         var syncService = this.serviceProvider.GetService<IVersionVectorSyncService>();
-        
+
         var documents = orchestrator.GetActiveDocuments();
         var safelyPersistedMap = versionVectorManager.GetFullSnapshot();
 
         foreach (var shardGroup in documents.GroupBy(d => d.ShardId, StringComparer.Ordinal))
         {
-            if (!string.IsNullOrEmpty(shardGroup.Key))
+            var shardId = shardGroup.Key;
+            if (!string.IsNullOrEmpty(shardId))
             {
-                var freshShardSnapshot = versionVectorManager.GetShardSnapshot(shardGroup.Key);
-                if (freshShardSnapshot.TryGetValue(shardGroup.Key, out var freshDvv))
+                var freshShardSnapshot = versionVectorManager.GetShardSnapshot(shardId);
+                if (freshShardSnapshot.TryGetValue(shardId, out var freshDvv))
                 {
-                    safelyPersistedMap[shardGroup.Key] = freshDvv;
+                    safelyPersistedMap[shardId] = freshDvv;
                 }
             }
 
