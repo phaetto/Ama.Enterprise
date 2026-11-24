@@ -25,6 +25,14 @@ public sealed class FleetManager :
     }
 
     /// <inheritdoc />
+    public Task CreateFleetFireAndForgetAsync(string documentId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document Id cannot be null or empty.", nameof(documentId));
+
+        return orchestrator.CreateDocumentAsync(documentId, "fleet-list", IntentDeliveryMode.FireAndForget, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public async ValueTask<IReadOnlyDictionary<string, DeviceStatus>> GetDevicesAsync(string documentId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document Id cannot be null or empty.", nameof(documentId));
@@ -60,6 +68,12 @@ public sealed class FleetManager :
     }
 
     /// <inheritdoc />
+    public Task SetDeviceFireAndForgetAsync(string documentId, string id, bool isOnline, int batteryLevel, CancellationToken cancellationToken = default)
+    {
+        return SetDeviceAsync(documentId, id, isOnline, batteryLevel, IntentDeliveryMode.FireAndForget, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public Task RemoveDeviceAsync(string documentId, string id, CancellationToken cancellationToken = default)
     {
         return RemoveDeviceAsync(documentId, id, IntentDeliveryMode.Acknowledged, cancellationToken);
@@ -73,6 +87,12 @@ public sealed class FleetManager :
 
         var intent = new MapRemoveIntent(id);
         await orchestrator.ApplyIntentAsync<FleetState>(documentId, intent, "Devices", deliveryMode, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public Task RemoveDeviceFireAndForgetAsync(string documentId, string id, CancellationToken cancellationToken = default)
+    {
+        return RemoveDeviceAsync(documentId, id, IntentDeliveryMode.FireAndForget, cancellationToken);
     }
 
     /// <inheritdoc />

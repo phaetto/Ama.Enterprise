@@ -37,15 +37,15 @@
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/ShowCaseJsonContext.cs` | Registered Map/Reduce and cluster query DTOs in the showcase AOT JSON context. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskItem.cs` | Data structure representing an individual task item. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Models/TaskListState.cs` | Root CRDT document model representing a task list. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Derived UDP handshake ports from the node's allocated 4-port block (`[TcpPort, AdminTcpPort, HandshakePort, AdminHandshakePort]`) so concurrent `clone` invocations do not collide on UDP handshake ports. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Program.cs` | Updated `gen-fleets`, `gen-fleets-serial`, `hammer`, and `hammer-serial` to use dedicated fire-and-forget methods on `IFleetManager` and `ITaskManager`. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetBatteryAnalyticsMapReduce.cs` | Multi-stage Map/Reduce handler calculating global mean, standard deviation, min, and max battery levels across sharded fleet documents. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetManager.cs` | Implemented `ICrdtClusterQuery` for low-battery device search and added orchestrator invocations for statistical aggregation and in-place offline device purging. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/IFleetManager.cs` | Added `SearchLowBatteryDevicesAsync`, `GetClusterBatteryStatsAsync`, and `PurgeOfflineDevicesAsync` to `IFleetManager`. |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ITaskManager.cs` | Added overloads accepting `IntentDeliveryMode` for setting and removing tasks. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/FleetManager.cs` | Implemented `CreateFleetFireAndForgetAsync`, `SetDeviceFireAndForgetAsync`, and `RemoveDeviceFireAndForgetAsync`. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/IFleetManager.cs` | Added dedicated fire-and-forget methods `CreateFleetFireAndForgetAsync`, `SetDeviceFireAndForgetAsync`, and `RemoveDeviceFireAndForgetAsync`. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ITaskManager.cs` | Added dedicated fire-and-forget methods `CreateTaskListFireAndForgetAsync`, `SetTaskFireAndForgetAsync`, and `RemoveTaskFireAndForgetAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/PurgeOfflineDevicesMapReduce.cs` | Pipelined `ApplyIntentAsync` removal operations per document using `Task.WhenAll` instead of awaiting each key removal sequentially. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseCrdtStorage.cs` | Implemented `LoadDocumentFromAnyShardAsync` querying SQLite `Documents` by `DocumentId` regardless of `ShardId`. |
 | `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/ShowCaseShardIdProvider.cs` | Updated shard ID provider to map documents deterministically across 10 logical shards (`shard-0` through `shard-9`). |
-| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/TaskManager.cs` | Added `DocumentExistsAsync` check and input validation to `GetTasksAsync`. |
+| `$/Ama.Enterprise.CRDT.Distributed.ShowCase/Services/TaskManager.cs` | Implemented `CreateTaskListFireAndForgetAsync`, `SetTaskFireAndForgetAsync`, and `RemoveTaskFireAndForgetAsync`. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Ama.Enterprise.CRDT.Distributed.TableStorage.csproj` | Scoped `<Features>runtime-async=on</Features>` to `net11.0` only. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Extensions/ServiceCollectionExtensions.cs` | Simplified Table Storage DI extensions to strictly register a single unified scoped storage using `TryAddSingleton` to register default AOT JSON fallbacks safely bridging implementations. |
 | `$/Ama.Enterprise.CRDT.Distributed.TableStorage/Models/CrdtTableEntity.cs` | Refactored into a static helper directly mapping chunks onto the dictionary-backed `TableEntity` avoiding reflection-heavy SDK deserialization limits ensuring AOT compatibility. |

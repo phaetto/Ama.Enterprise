@@ -23,6 +23,14 @@ public sealed class TaskManager : ITaskManager
     }
 
     /// <inheritdoc />
+    public Task CreateTaskListFireAndForgetAsync(string documentId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document Id cannot be null or empty.", nameof(documentId));
+
+        return orchestrator.CreateDocumentAsync(documentId, "task-list", IntentDeliveryMode.FireAndForget, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public async ValueTask<IReadOnlyDictionary<string, TaskItem>> GetTasksAsync(string documentId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document Id cannot be null or empty.", nameof(documentId));
@@ -58,6 +66,12 @@ public sealed class TaskManager : ITaskManager
     }
 
     /// <inheritdoc />
+    public Task SetTaskFireAndForgetAsync(string documentId, string id, string description, bool isDone, CancellationToken cancellationToken = default)
+    {
+        return SetTaskAsync(documentId, id, description, isDone, IntentDeliveryMode.FireAndForget, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public Task RemoveTaskAsync(string documentId, string id, CancellationToken cancellationToken = default)
     {
         return RemoveTaskAsync(documentId, id, IntentDeliveryMode.Acknowledged, cancellationToken);
@@ -71,5 +85,11 @@ public sealed class TaskManager : ITaskManager
 
         var intent = new MapRemoveIntent(id);
         await orchestrator.ApplyIntentAsync<TaskListState>(documentId, intent, "Tasks", deliveryMode, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public Task RemoveTaskFireAndForgetAsync(string documentId, string id, CancellationToken cancellationToken = default)
+    {
+        return RemoveTaskAsync(documentId, id, IntentDeliveryMode.FireAndForget, cancellationToken);
     }
 }

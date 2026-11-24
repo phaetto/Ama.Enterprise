@@ -13,7 +13,6 @@ using Ama.Enterprise.Licensing.Extensions;
 using Ama.Enterprise.P2p.Extensions;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
-using Ama.Enterprise.P2p.Telemetry.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -186,39 +185,40 @@ public static class Program
                 options.HeartbeatInterval = TimeSpan.FromSeconds(30);
             });
 
-        services
-            .AddP2pTelemetryForwarder(options =>
-            {
-                options.TargetMeshId = "admin";
-                options.FlushInterval = TimeSpan.FromSeconds(1);
-                options.IncludedMeterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    string.Empty // Get ALL
-                };
-            })
-#pragma warning disable DCRDT0003 // "admin" mesh is dedicated to P2P telemetry forwarding and does not host CRDT replicas
-            .AddP2pMesh("admin")
-#pragma warning restore DCRDT0003
-            .AddTcpTransport(options =>
-            {
-                options.ListenPort = currentAdminPort;
-                options.ListenHost = "127.0.0.1";
-            })
-            .AddUdpPeerDiscovery(options =>
-            {
-                options.MulticastAddress = "239.255.0.3";
-                options.MulticastPort = 8036;
-                options.DiscoveryInterval = TimeSpan.FromSeconds(1);
-                options.DiscoveryTimeout = TimeSpan.FromSeconds(1);
-            })
-            .AddUdpPeerHandshake(options =>
-            {
-                options.ListenPort = currentAdminHandshakePort;
-            })
-            .ConfigureFailureDetector(options =>
-            {
-                options.HeartbeatInterval = TimeSpan.FromSeconds(30);
-            });
+          // TODO: HAS MEM LEAK
+//        services
+//            .AddP2pTelemetryForwarder(options =>
+//            {
+//                options.TargetMeshId = "admin";
+//                options.FlushInterval = TimeSpan.FromSeconds(1);
+//                options.IncludedMeterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+//                {
+//                    string.Empty // Get ALL
+//                };
+//            })
+//#pragma warning disable DCRDT0003 // "admin" mesh is dedicated to P2P telemetry forwarding and does not host CRDT replicas
+//            .AddP2pMesh("admin")
+//#pragma warning restore DCRDT0003
+//            .AddTcpTransport(options =>
+//            {
+//                options.ListenPort = currentAdminPort;
+//                options.ListenHost = "127.0.0.1";
+//            })
+//            .AddUdpPeerDiscovery(options =>
+//            {
+//                options.MulticastAddress = "239.255.0.3";
+//                options.MulticastPort = 8036;
+//                options.DiscoveryInterval = TimeSpan.FromSeconds(1);
+//                options.DiscoveryTimeout = TimeSpan.FromSeconds(1);
+//            })
+//            .AddUdpPeerHandshake(options =>
+//            {
+//                options.ListenPort = currentAdminHandshakePort;
+//            })
+//            .ConfigureFailureDetector(options =>
+//            {
+//                options.HeartbeatInterval = TimeSpan.FromSeconds(30);
+//            });
 
         await using var provider = services.BuildServiceProvider();
         var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("ShowCase");
@@ -414,6 +414,9 @@ public static class Program
                             {
                                 WriteLineLocked($"[INFO] ShowCase: Generating {fleetCount} fleets with {devicesPerFleet} devices each...");
                                 var genSw = Stopwatch.StartNew();
+                                var progressSw = Stopwatch.StartNew();
+                                var totalOps = fleetCount + ((long)fleetCount * devicesPerFleet);
+                                long completedOps = 0;
 
                                 Interlocked.Exchange(ref isBulkGenerating, 1);
                                 try
@@ -423,12 +426,21 @@ public static class Program
                                     {
                                         if (cts.Token.IsCancellationRequested) break;
                                         var docId = $"auto-fleet-{i}";
-                                        createTasks.Add(orchestrator.CreateDocumentAsync(docId, "fleet-list", IntentDeliveryMode.FireAndForget, cts.Token));
+                                        createTasks.Add(fleetManager.CreateFleetFireAndForgetAsync(docId, cts.Token));
+                                        completedOps++;
 
                                         if (createTasks.Count >= 2048)
                                         {
                                             await Task.WhenAll(createTasks).ConfigureAwait(false);
                                             createTasks.Clear();
+
+                                            if (progressSw.Elapsed.TotalMilliseconds >= 500)
+                                            {
+                                                progressSw.Restart();
+                                                var pct = totalOps > 0 ? (completedOps * 100.0) / totalOps : 100.0;
+                                                var rate = genSw.Elapsed.TotalSeconds > 0 ? (long)(completedOps / genSw.Elapsed.TotalSeconds) : completedOps;
+                                                WriteLineLocked($"[Gen-Fleets Progress] Phase 1/2 (Creating Documents): {i:N0}/{fleetCount:N0} fleets | {completedOps:N0}/{totalOps:N0} ops ({pct:F1}%) | ~{rate:N0} ops/s");
+                                            }
                                         }
                                     }
 
@@ -454,12 +466,21 @@ public static class Program
                                             var deviceId = $"dev-{j}";
                                             var isDevOnline = Random.Shared.NextDouble() > 0.5;
                                             var deviceBattery = Random.Shared.Next(0, 101);
-                                            deviceTasks.Add(fleetManager.SetDeviceAsync(docId, deviceId, isDevOnline, deviceBattery, IntentDeliveryMode.FireAndForget, cts.Token));
+                                            deviceTasks.Add(fleetManager.SetDeviceFireAndForgetAsync(docId, deviceId, isDevOnline, deviceBattery, cts.Token));
+                                            completedOps++;
 
                                             if (deviceTasks.Count >= 4096)
                                             {
                                                 await Task.WhenAll(deviceTasks).ConfigureAwait(false);
                                                 deviceTasks.Clear();
+
+                                                if (progressSw.Elapsed.TotalMilliseconds >= 500)
+                                                {
+                                                    progressSw.Restart();
+                                                    var pct = totalOps > 0 ? (completedOps * 100.0) / totalOps : 100.0;
+                                                    var rate = genSw.Elapsed.TotalSeconds > 0 ? (long)(completedOps / genSw.Elapsed.TotalSeconds) : completedOps;
+                                                    WriteLineLocked($"[Gen-Fleets Progress] Phase 2/2 (Populating Devices): Fleet {i:N0}/{fleetCount:N0} | {completedOps:N0}/{totalOps:N0} ops ({pct:F1}%) | ~{rate:N0} ops/s");
+                                                }
                                             }
                                         }
                                     }
@@ -470,6 +491,7 @@ public static class Program
                                         deviceTasks.Clear();
                                     }
 
+                                    WriteLineLocked($"[Gen-Fleets Progress] 100.0% enqueued ({completedOps:N0}/{totalOps:N0} ops). Flushing pipelines and observers...");
                                     await orchestrator.FlushAsync(cts.Token).ConfigureAwait(false);
                                     foreach (var patchObserver in patchObservers)
                                     {
@@ -483,13 +505,81 @@ public static class Program
 
                                 genSw.Stop();
 
-                                var totalOps = fleetCount + ((long)fleetCount * devicesPerFleet);
                                 var opsPerSec = genSw.Elapsed.TotalSeconds > 0 ? (long)(totalOps / genSw.Elapsed.TotalSeconds) : totalOps;
-                                WriteLineLocked($"[INFO] ShowCase: Finished generating {fleetCount} fleets ({totalOps} total ops) in {genSw.ElapsedMilliseconds} ms (~{opsPerSec} ops/sec).");
+                                WriteLineLocked($"[INFO] ShowCase: Finished generating {fleetCount} fleets ({totalOps:N0} total ops) in {genSw.ElapsedMilliseconds} ms (~{opsPerSec:N0} ops/sec).");
                             }
                             else
                             {
                                 WriteLineLocked("Usage: gen-fleets <numberOfFleets> <devicesPerFleet>");
+                            }
+                            break;
+
+                        case "gen-fleets-serial":
+                            if (parts.Length >= 3 && int.TryParse(parts[1], out var serialFleetCount) && int.TryParse(parts[2], out var serialDevicesPerFleet))
+                            {
+                                WriteLineLocked($"[INFO] ShowCase: Generating {serialFleetCount} fleets with {serialDevicesPerFleet} devices each sequentially (no Task batching)...");
+                                var genSw = Stopwatch.StartNew();
+                                var progressSw = Stopwatch.StartNew();
+                                var totalOps = serialFleetCount + ((long)serialFleetCount * serialDevicesPerFleet);
+                                long completedOps = 0;
+
+                                Interlocked.Exchange(ref isBulkGenerating, 1);
+                                try
+                                {
+                                    for (int i = 1; i <= serialFleetCount; i++)
+                                    {
+                                        if (cts.Token.IsCancellationRequested) break;
+                                        var docId = $"auto-fleet-{i}";
+                                        await fleetManager.CreateFleetFireAndForgetAsync(docId, cts.Token).ConfigureAwait(false);
+                                        completedOps++;
+
+                                        for (int j = 1; j <= serialDevicesPerFleet; j++)
+                                        {
+                                            if (cts.Token.IsCancellationRequested) break;
+                                            var deviceId = $"dev-{j}";
+                                            var isDevOnline = Random.Shared.NextDouble() > 0.5;
+                                            var deviceBattery = Random.Shared.Next(0, 101);
+                                            await fleetManager.SetDeviceFireAndForgetAsync(docId, deviceId, isDevOnline, deviceBattery, cts.Token).ConfigureAwait(false);
+                                            completedOps++;
+
+                                            if (progressSw.Elapsed.TotalMilliseconds >= 500)
+                                            {
+                                                progressSw.Restart();
+                                                var pct = totalOps > 0 ? (completedOps * 100.0) / totalOps : 100.0;
+                                                var rate = genSw.Elapsed.TotalSeconds > 0 ? (long)(completedOps / genSw.Elapsed.TotalSeconds) : completedOps;
+                                                WriteLineLocked($"[Gen-Fleets-Serial Progress] Fleet {i:N0}/{serialFleetCount:N0} (Device {j:N0}/{serialDevicesPerFleet:N0}) | {completedOps:N0}/{totalOps:N0} ops ({pct:F1}%) | ~{rate:N0} ops/s");
+                                            }
+                                        }
+
+                                        if (progressSw.Elapsed.TotalMilliseconds >= 500)
+                                        {
+                                            progressSw.Restart();
+                                            var pct = totalOps > 0 ? (completedOps * 100.0) / totalOps : 100.0;
+                                            var rate = genSw.Elapsed.TotalSeconds > 0 ? (long)(completedOps / genSw.Elapsed.TotalSeconds) : completedOps;
+                                            WriteLineLocked($"[Gen-Fleets-Serial Progress] Fleet {i:N0}/{serialFleetCount:N0} | {completedOps:N0}/{totalOps:N0} ops ({pct:F1}%) | ~{rate:N0} ops/s");
+                                        }
+                                    }
+
+                                    WriteLineLocked($"[Gen-Fleets-Serial Progress] 100.0% completed ({completedOps:N0}/{totalOps:N0} ops). Flushing pipelines and observers...");
+                                    await orchestrator.FlushAsync(cts.Token).ConfigureAwait(false);
+                                    foreach (var patchObserver in patchObservers)
+                                    {
+                                        await patchObserver.FlushAsync(cts.Token).ConfigureAwait(false);
+                                    }
+                                }
+                                finally
+                                {
+                                    Interlocked.Exchange(ref isBulkGenerating, 0);
+                                }
+
+                                genSw.Stop();
+
+                                var opsPerSec = genSw.Elapsed.TotalSeconds > 0 ? (long)(totalOps / genSw.Elapsed.TotalSeconds) : totalOps;
+                                WriteLineLocked($"[INFO] ShowCase: Finished generating {serialFleetCount} fleets sequentially ({totalOps:N0} total ops) in {genSw.ElapsedMilliseconds} ms (~{opsPerSec:N0} ops/sec).");
+                            }
+                            else
+                            {
+                                WriteLineLocked("Usage: gen-fleets-serial <numberOfFleets> <devicesPerFleet>");
                             }
                             break;
 
@@ -532,7 +622,7 @@ public static class Program
                                             var targetDocs = Enumerable.Range(1, 5).Select(i => $"nail-{i}").ToArray();
                                             foreach (var doc in targetDocs)
                                             {
-                                                await orchestrator.CreateDocumentAsync(doc, "task-list", token).ConfigureAwait(false);
+                                                await taskManager.CreateTaskListFireAndForgetAsync(doc, token).ConfigureAwait(false);
                                             }
 
                                             WriteLineLocked($"[INFO] ShowCase: Hammer mode activated. Target: {cps} ops/sec sharded across {targetDocs.Length} nail documents...");
@@ -541,6 +631,8 @@ public static class Program
                                             var reportSw = Stopwatch.StartNew();
                                             long opsCompleted = 0;
                                             long lastReportedOps = 0;
+                                            long setsCompleted = 0;
+                                            long deletesCompleted = 0;
 
                                             // Bounded pool of 20 keys: keeping ~80% alive ensures roughly 16 active items, satisfying the 10-20 active items boundary.
                                             var taskIds = Enumerable.Range(1, 20).Select(i => $"nail-task-{i}").ToArray();
@@ -555,11 +647,11 @@ public static class Program
                                                     // Do not use cancellation tokens here, because we will break the process in memory/journal
                                                     if (delete)
                                                     {
-                                                        await taskManager.RemoveTaskAsync(dId, tId).ConfigureAwait(false);
+                                                        await taskManager.RemoveTaskFireAndForgetAsync(dId, tId).ConfigureAwait(false);
                                                     }
                                                     else
                                                     {
-                                                        await taskManager.SetTaskAsync(dId, tId, description: $"Hammered payload {index}", isDone: done).ConfigureAwait(false);
+                                                        await taskManager.SetTaskFireAndForgetAsync(dId, tId, description: $"Hammered payload {index}", isDone: done).ConfigureAwait(false);
                                                     }
                                                 }
                                                 // Suppress cancellation exceptions to avoid massive unwinding delays when stopping heavy loads
@@ -581,6 +673,7 @@ public static class Program
                                                     }
 
                                                     var pendingTasks = new List<Task>((int)batch);
+                                                    long executedInBatch = 0;
 
                                                     for (var i = 0; i < batch; i++)
                                                     {
@@ -590,6 +683,17 @@ public static class Program
                                                         var taskId = taskIds[Random.Shared.Next(taskIds.Length)];
                                                         var isDelete = Random.Shared.NextDouble() < 0.2; // 20% chance to delete
                                                         var isDone = (opsCompleted + i) % 2 == 0;
+
+                                                        if (isDelete)
+                                                        {
+                                                            deletesCompleted++;
+                                                        }
+                                                        else
+                                                        {
+                                                            setsCompleted++;
+                                                        }
+
+                                                        executedInBatch++;
                                                         
                                                         // Enqueue operation without awaiting immediately
                                                         pendingTasks.Add(FirePayloadAsync(docId, taskId, opsCompleted + i, isDone, isDelete, token));
@@ -597,7 +701,7 @@ public static class Program
                                                     
                                                     // Await the entire batch concurrently, maximizing thread pool utilization and breaking the serial bottleneck
                                                     await Task.WhenAll(pendingTasks).ConfigureAwait(false);
-                                                    opsCompleted += batch;
+                                                    opsCompleted += executedInBatch;
                                                 }
                                                 else
                                                 {
@@ -606,12 +710,17 @@ public static class Program
                                                 }
 
                                                 // Output actual telemetry every second to track bottlenecks natively
-                                                if (reportSw.Elapsed.TotalSeconds >= 1.0)
+                                                var reportElapsedSec = reportSw.Elapsed.TotalSeconds;
+                                                if (reportElapsedSec >= 1.0)
                                                 {
-                                                    var currentCps = opsCompleted - lastReportedOps;
+                                                    var currentCps = (long)((opsCompleted - lastReportedOps) / reportElapsedSec);
+                                                    var avgCps = sw.Elapsed.TotalSeconds > 0 ? (long)(opsCompleted / sw.Elapsed.TotalSeconds) : opsCompleted;
+                                                    var currentTargetOps = (long)(sw.Elapsed.TotalSeconds * cps);
+                                                    var backlog = Math.Max(0, currentTargetOps - opsCompleted);
+                                                    var efficiencyPct = cps > 0 ? (currentCps * 100.0) / cps : 100.0;
                                                     lastReportedOps = opsCompleted;
                                                     reportSw.Restart();
-                                                    WriteLineLocked($"[Hammer Telemetry] Target: {cps}/s | Actual: {currentCps}/s | Total Ops: {opsCompleted}");
+                                                    WriteLineLocked($"[Hammer Progress | {sw.Elapsed:hh\\:mm\\:ss}] Rate: {currentCps:N0}/s (Avg: {avgCps:N0}/s, Target: {cps:N0}/s, {efficiencyPct:F1}%) | Total: {opsCompleted:N0} (Sets: {setsCompleted:N0}, Dels: {deletesCompleted:N0}) | Backlog: {backlog:N0}");
                                                 }
                                             }
                                         }
@@ -629,6 +738,147 @@ public static class Program
                             else
                             {
                                 WriteLineLocked("Usage: hammer <changes_per_second> (use 0 to stop)");
+                            }
+                            break;
+
+                        case "hammer-serial":
+                            if (parts.Length >= 2 && int.TryParse(parts[1], out var serialCps))
+                            {
+                                if (hammerCts is not null)
+                                {
+                                    WriteLineLocked("[INFO] ShowCase: Stopping hammer mode... Please wait, draining pending operations (this may take a moment)...");
+                                    await hammerCts.CancelAsync().ConfigureAwait(false);
+
+                                    if (hammerTask is not null)
+                                    {
+                                        try
+                                        {
+                                            await hammerTask.ConfigureAwait(false);
+                                        }
+                                        catch
+                                        {
+                                            // Ignore expected task cancellation exceptions during unwinding
+                                        }
+                                    }
+
+                                    hammerCts.Dispose();
+                                    hammerCts = null;
+                                    hammerTask = null;
+                                    WriteLineLocked("[INFO] ShowCase: Hammer mode stopped.");
+                                }
+
+                                if (serialCps > 0)
+                                {
+                                    hammerCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+                                    var token = hammerCts.Token;
+
+                                    hammerTask = Task.Run(async () =>
+                                    {
+                                        try
+                                        {
+                                            var targetDocs = Enumerable.Range(1, 5).Select(i => $"nail-{i}").ToArray();
+                                            foreach (var doc in targetDocs)
+                                            {
+                                                await taskManager.CreateTaskListFireAndForgetAsync(doc, token).ConfigureAwait(false);
+                                            }
+
+                                            WriteLineLocked($"[INFO] ShowCase: Serial hammer mode activated. Target: {serialCps} ops/sec sequentially across {targetDocs.Length} nail documents...");
+
+                                            var sw = Stopwatch.StartNew();
+                                            var reportSw = Stopwatch.StartNew();
+                                            long opsCompleted = 0;
+                                            long lastReportedOps = 0;
+                                            long setsCompleted = 0;
+                                            long deletesCompleted = 0;
+
+                                            var taskIds = Enumerable.Range(1, 20).Select(i => $"nail-task-{i}").ToArray();
+
+                                            while (!token.IsCancellationRequested)
+                                            {
+                                                var targetOps = (long)(sw.Elapsed.TotalSeconds * serialCps);
+                                                var batch = targetOps - opsCompleted;
+
+                                                if (batch > 0)
+                                                {
+                                                    if (batch > 5000)
+                                                    {
+                                                        batch = 5000;
+                                                    }
+
+                                                    for (var i = 0; i < batch; i++)
+                                                    {
+                                                        if (token.IsCancellationRequested) break;
+
+                                                        var docId = targetDocs[Random.Shared.Next(targetDocs.Length)];
+                                                        var taskId = taskIds[Random.Shared.Next(taskIds.Length)];
+                                                        var isDelete = Random.Shared.NextDouble() < 0.2;
+                                                        var isDone = (opsCompleted + i) % 2 == 0;
+
+                                                        try
+                                                        {
+                                                            if (isDelete)
+                                                            {
+                                                                await taskManager.RemoveTaskFireAndForgetAsync(docId, taskId).ConfigureAwait(false);
+                                                                deletesCompleted++;
+                                                            }
+                                                            else
+                                                            {
+                                                                await taskManager.SetTaskFireAndForgetAsync(docId, taskId, description: $"Hammered payload {opsCompleted + i}", isDone: isDone).ConfigureAwait(false);
+                                                                setsCompleted++;
+                                                            }
+                                                        }
+                                                        catch (TaskCanceledException) { }
+                                                        catch (OperationCanceledException) { }
+
+                                                        opsCompleted++;
+
+                                                        var innerElapsedSec = reportSw.Elapsed.TotalSeconds;
+                                                        if (innerElapsedSec >= 1.0)
+                                                        {
+                                                            var currentCps = (long)((opsCompleted - lastReportedOps) / innerElapsedSec);
+                                                            var avgCps = sw.Elapsed.TotalSeconds > 0 ? (long)(opsCompleted / sw.Elapsed.TotalSeconds) : opsCompleted;
+                                                            var currentTargetOps = (long)(sw.Elapsed.TotalSeconds * serialCps);
+                                                            var backlog = Math.Max(0, currentTargetOps - opsCompleted);
+                                                            var efficiencyPct = serialCps > 0 ? (currentCps * 100.0) / serialCps : 100.0;
+                                                            lastReportedOps = opsCompleted;
+                                                            reportSw.Restart();
+                                                            WriteLineLocked($"[Hammer-Serial Progress | {sw.Elapsed:hh\\:mm\\:ss}] Rate: {currentCps:N0}/s (Avg: {avgCps:N0}/s, Target: {serialCps:N0}/s, {efficiencyPct:F1}%) | Total: {opsCompleted:N0} (Sets: {setsCompleted:N0}, Dels: {deletesCompleted:N0}) | Backlog: {backlog:N0}");
+                                                        }
+                                                    }
+                                                }
+                                                else
+                                                {
+                                                    await Task.Delay(1, token).ConfigureAwait(false);
+                                                }
+
+                                                var reportElapsedSec = reportSw.Elapsed.TotalSeconds;
+                                                if (reportElapsedSec >= 1.0)
+                                                {
+                                                    var currentCps = (long)((opsCompleted - lastReportedOps) / reportElapsedSec);
+                                                    var avgCps = sw.Elapsed.TotalSeconds > 0 ? (long)(opsCompleted / sw.Elapsed.TotalSeconds) : opsCompleted;
+                                                    var currentTargetOps = (long)(sw.Elapsed.TotalSeconds * serialCps);
+                                                    var backlog = Math.Max(0, currentTargetOps - opsCompleted);
+                                                    var efficiencyPct = serialCps > 0 ? (currentCps * 100.0) / serialCps : 100.0;
+                                                    lastReportedOps = opsCompleted;
+                                                    reportSw.Restart();
+                                                    WriteLineLocked($"[Hammer-Serial Progress | {sw.Elapsed:hh\\:mm\\:ss}] Rate: {currentCps:N0}/s (Avg: {avgCps:N0}/s, Target: {serialCps:N0}/s, {efficiencyPct:F1}%) | Total: {opsCompleted:N0} (Sets: {setsCompleted:N0}, Dels: {deletesCompleted:N0}) | Backlog: {backlog:N0}");
+                                                }
+                                            }
+                                        }
+                                        catch (OperationCanceledException)
+                                        {
+                                            // Expected during cancellation
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            WriteLineLocked($"[ERROR] ShowCase: Serial hammer generator failed.{Environment.NewLine}{ex}");
+                                        }
+                                    }, token);
+                                }
+                            }
+                            else
+                            {
+                                WriteLineLocked("Usage: hammer-serial <changes_per_second> (use 0 to stop)");
                             }
                             break;
 
@@ -746,7 +996,9 @@ public static class Program
             Console.WriteLine(" fstats [onlineOnly]                            - Cluster-wide Map/Reduce statistical battery health report");
             Console.WriteLine(" fpurge <maxBatt>                               - In-place distributed purge of offline low-battery devices");
             Console.WriteLine(" gen-fleets <count> <devices>                   - Generates <count> fleets with <devices> devices each");
+            Console.WriteLine(" gen-fleets-serial <count> <devices>            - Generates <count> fleets with <devices> devices sequentially");
             Console.WriteLine(" hammer <cps>                                   - Pumps <cps> changes/sec into 5 sharded documents (0 to stop)");
+            Console.WriteLine(" hammer-serial <cps>                            - Pumps <cps> changes/sec sequentially without task lists (0 to stop)");
             Console.WriteLine(" read <docId>                                   - Reads and prints a specific document (local or remote shard)");
             Console.WriteLine(" print                                          - Prints the current state of documents hosted on this node");
             Console.WriteLine(" mem [details]                                  - Prints memory overview (add 'details' to list each document)");

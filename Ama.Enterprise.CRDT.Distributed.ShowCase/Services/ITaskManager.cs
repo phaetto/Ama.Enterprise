@@ -18,6 +18,14 @@ using Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 public interface ITaskManager
 {
     /// <summary>
+    /// Creates a task list document in fire-and-forget mode without waiting for acknowledgement.
+    /// </summary>
+    /// <param name="documentId">The target document ID.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task CreateTaskListFireAndForgetAsync(string documentId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Retrieves the read-only dictionary of active tasks for the specified document.
     /// </summary>
     /// <param name="documentId">The target document ID.</param>
@@ -49,6 +57,17 @@ public interface ITaskManager
     Task SetTaskAsync(string documentId, string id, string description, bool isDone, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Adds or updates a task in the list in fire-and-forget mode without waiting for acknowledgement.
+    /// </summary>
+    /// <param name="documentId">The target document ID.</param>
+    /// <param name="id">The unique task ID.</param>
+    /// <param name="description">The task description.</param>
+    /// <param name="isDone">Indicates whether the task is completed.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task SetTaskFireAndForgetAsync(string documentId, string id, string description, bool isDone, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Removes a task from the list using the default acknowledged delivery mode.
     /// </summary>
     /// <param name="documentId">The target document ID.</param>
@@ -66,4 +85,13 @@ public interface ITaskManager
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     Task RemoveTaskAsync(string documentId, string id, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Removes a task from the list in fire-and-forget mode without waiting for acknowledgement.
+    /// </summary>
+    /// <param name="documentId">The target document ID.</param>
+    /// <param name="id">The unique task ID to remove.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task RemoveTaskFireAndForgetAsync(string documentId, string id, CancellationToken cancellationToken = default);
 }

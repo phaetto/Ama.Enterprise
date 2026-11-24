@@ -18,6 +18,14 @@ using Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 public interface IFleetManager
 {
     /// <summary>
+    /// Creates a fleet document in fire-and-forget mode without waiting for acknowledgement.
+    /// </summary>
+    /// <param name="documentId">The target document ID.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task CreateFleetFireAndForgetAsync(string documentId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Retrieves the read-only dictionary of active devices for the specified document.
     /// </summary>
     /// <param name="documentId">The target document ID.</param>
@@ -49,6 +57,17 @@ public interface IFleetManager
     Task SetDeviceAsync(string documentId, string id, bool isOnline, int batteryLevel, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Adds or updates a device in the fleet state in fire-and-forget mode without waiting for acknowledgement.
+    /// </summary>
+    /// <param name="documentId">The target document ID.</param>
+    /// <param name="id">The unique device ID.</param>
+    /// <param name="isOnline">Indicates whether the device is online.</param>
+    /// <param name="batteryLevel">The battery level percentage of the device.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task SetDeviceFireAndForgetAsync(string documentId, string id, bool isOnline, int batteryLevel, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Removes a device from the fleet state using the default acknowledged delivery mode.
     /// </summary>
     /// <param name="documentId">The target document ID.</param>
@@ -66,6 +85,15 @@ public interface IFleetManager
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     Task RemoveDeviceAsync(string documentId, string id, IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Removes a device from the fleet state in fire-and-forget mode without waiting for acknowledgement.
+    /// </summary>
+    /// <param name="documentId">The target document ID.</param>
+    /// <param name="id">The unique device ID to remove.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task RemoveDeviceFireAndForgetAsync(string documentId, string id, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Executes a cluster-wide search across all sharded fleet documents for devices with a battery level at or below the threshold.
