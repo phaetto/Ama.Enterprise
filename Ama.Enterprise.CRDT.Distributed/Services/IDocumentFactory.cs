@@ -117,6 +117,15 @@ internal sealed class DocumentFactory<TState> : IDocumentFactory where TState : 
 
         if (storedDoc == null)
         {
+            storedDoc = await storage.LoadDocumentFromAnyShardAsync<TState>(compositeKey, cancellationToken).ConfigureAwait(false);
+            if (storedDoc == null && !string.Equals(compositeKey, documentId, StringComparison.Ordinal))
+            {
+                storedDoc = await storage.LoadDocumentFromAnyShardAsync<TState>(documentId, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        if (storedDoc == null)
+        {
             storedDoc = await storage.LoadOrphanedDocumentAsync<TState>(shardId, compositeKey, cancellationToken).ConfigureAwait(false);
             if (storedDoc == null && !string.Equals(compositeKey, documentId, StringComparison.Ordinal))
             {

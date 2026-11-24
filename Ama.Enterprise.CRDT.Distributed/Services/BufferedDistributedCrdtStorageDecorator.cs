@@ -339,6 +339,10 @@ public sealed class BufferedDistributedCrdtStorageDecorator : IDistributedCrdtSt
         => this.innerStorage.LoadDocumentAsync<TState>(shardId, documentId, cancellationToken);
 
     /// <inheritdoc />
+    public Task<CrdtDocument<TState>?> LoadDocumentFromAnyShardAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+        => this.innerStorage.LoadDocumentFromAnyShardAsync<TState>(documentId, cancellationToken);
+
+    /// <inheritdoc />
     public Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new()
         => this.innerStorage.LoadOrphanedDocumentAsync<TState>(shardId, documentId, cancellationToken);
 

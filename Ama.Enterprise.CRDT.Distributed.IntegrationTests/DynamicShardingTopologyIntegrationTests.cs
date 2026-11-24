@@ -111,6 +111,98 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
         }
     }
 
+    private sealed class LegacyBucketShardProvider : IShardIdProvider
+    {
+        public string GetShardId<T>(CrdtDocument<T> document) where T : class
+        {
+            if (document.Data is ShardedDocState state && !string.IsNullOrWhiteSpace(state.Id))
+            {
+                return $"legacy-bucket-{Math.Abs(state.Id.GetHashCode(StringComparison.Ordinal)) % 2}";
+            }
+
+            return "legacy-default";
+        }
+
+        public string GetShardId<T>(IComparable documentId) where T : class
+        {
+            ArgumentNullException.ThrowIfNull(documentId);
+            var idStr = documentId.ToString() ?? string.Empty;
+            return $"legacy-bucket-{Math.Abs(idStr.GetHashCode(StringComparison.Ordinal)) % 2}";
+        }
+
+        public string GetShardId(IComparable documentId, Type documentType)
+        {
+            ArgumentNullException.ThrowIfNull(documentId);
+            ArgumentNullException.ThrowIfNull(documentType);
+            var idStr = documentId.ToString() ?? string.Empty;
+            return $"legacy-bucket-{Math.Abs(idStr.GetHashCode(StringComparison.Ordinal)) % 2}";
+        }
+    }
+
+    private sealed class SharedPersistentCrdtStorage : IDistributedCrdtStorage
+    {
+        private readonly MemoryCrdtStorage inner;
+
+        public SharedPersistentCrdtStorage(MemoryCrdtStorage inner)
+        {
+            this.inner = inner ?? throw new ArgumentNullException(nameof(inner));
+        }
+
+        public Task<ShardVersionVectorMap?> LoadShardVersionVectorMapAsync(string replicaId, CancellationToken cancellationToken = default)
+            => inner.LoadShardVersionVectorMapAsync(replicaId, cancellationToken);
+
+        public Task SaveShardVersionVectorMapAsync(string replicaId, ShardVersionVectorMap shardVersionVectorMap, CancellationToken cancellationToken = default)
+            => inner.SaveShardVersionVectorMapAsync(replicaId, shardVersionVectorMap, cancellationToken);
+
+        public Task<ClusterStateSnapshotDto?> LoadClusterStateAsync(string replicaId, CancellationToken cancellationToken = default)
+            => inner.LoadClusterStateAsync(replicaId, cancellationToken);
+
+        public Task SaveClusterStateAsync(string replicaId, ClusterStateSnapshotDto state, CancellationToken cancellationToken = default)
+            => inner.SaveClusterStateAsync(replicaId, state, cancellationToken);
+
+        public Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+            => inner.LoadDocumentAsync<TState>(shardId, documentId, cancellationToken);
+
+        public Task<CrdtDocument<TState>?> LoadDocumentFromAnyShardAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+            => inner.LoadDocumentFromAnyShardAsync<TState>(documentId, cancellationToken);
+
+        public Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+            => inner.LoadOrphanedDocumentAsync<TState>(shardId, documentId, cancellationToken);
+
+        public Task SaveDocumentAsync<TState>(string shardId, string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new()
+            => inner.SaveDocumentAsync(shardId, documentId, document, cancellationToken);
+
+        public Task SaveSerializedDocumentAsync<TState>(string shardId, string documentId, byte[] serializedDocument, CancellationToken cancellationToken = default) where TState : class, new()
+            => inner.SaveSerializedDocumentAsync<TState>(shardId, documentId, serializedDocument, cancellationToken);
+
+        public Task DeleteDocumentAsync(string shardId, string documentId, CancellationToken cancellationToken = default)
+            => inner.DeleteDocumentAsync(shardId, documentId, cancellationToken);
+
+        public Task<long> GetJournalCountAsync(string shardId, CancellationToken cancellationToken = default)
+            => inner.GetJournalCountAsync(shardId, cancellationToken);
+
+        public Task TrimAsync(string shardId, IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default)
+            => inner.TrimAsync(shardId, globalMinimumVersionVector, cancellationToken);
+
+        public IAsyncEnumerable<JournaledOperation> GetAllJournaledOperationsAsync(CancellationToken cancellationToken = default)
+            => inner.GetAllJournaledOperationsAsync(cancellationToken);
+
+        public Task AppendBatchAsync(IReadOnlyList<JournaledOperation> operations, CancellationToken cancellationToken = default)
+            => inner.AppendBatchAsync(operations, cancellationToken);
+
+        public void Append(IComparable documentId, IReadOnlyList<CrdtOperation> operations)
+            => inner.Append(documentId, operations);
+
+        public Task AppendAsync(IComparable documentId, IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default)
+            => inner.AppendAsync(documentId, operations, cancellationToken);
+
+        public IAsyncEnumerable<JournaledOperation> GetOperationsByRangeAsync(string shardId, string originReplicaId, long minShardClock, long maxShardClock, CancellationToken cancellationToken = default)
+            => inner.GetOperationsByRangeAsync(shardId, originReplicaId, minShardClock, maxShardClock, cancellationToken);
+
+        public IAsyncEnumerable<JournaledOperation> GetOperationsByDotsAsync(string shardId, string originReplicaId, IEnumerable<long> shardClocks, CancellationToken cancellationToken = default)
+            => inner.GetOperationsByDotsAsync(shardId, originReplicaId, shardClocks, cancellationToken);
+    }
+
     private readonly List<ShardedTestNode> nodes = new();
 
     [IntegrationFact]
@@ -504,6 +596,102 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
         }
     }
 
+    [IntegrationFact]
+    public async Task ShardIdProviderImplementationChange_AcrossDeploymentRestart_LoadsCheckpointsAndReplaysJournalsFromOldShards()
+    {
+        // Arrange - Simulate Deployment V1 using LegacyBucketShardProvider ("legacy-bucket-0", "legacy-bucket-1")
+        // persisting both checkpoints and uncheckpointed journal operations into storage.
+        var sharedStorage = new SharedPersistentCrdtStorage(new MemoryCrdtStorage());
+        const string ReplicaId = "Upgrade-Replica-1";
+        var docIds = new[] { "upgrade-doc-1", "upgrade-doc-2", "upgrade-doc-3", "upgrade-doc-4" };
+
+        {
+            await using var spV1 = await CreateAndStartNodeWithCustomProviderAsync<LegacyBucketShardProvider>(
+                ReplicaId,
+                sharedStorage);
+
+            var scopeV1 = spV1.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(ReplicaId);
+            var dvvManagerV1 = scopeV1.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+
+            foreach (var docId in docIds)
+            {
+                await scopeV1.Orchestrator.CreateDocumentAsync(docId, DocTypeAlias, CancellationToken.None);
+                await scopeV1.Orchestrator.ApplyIntentAsync<ShardedDocState>(
+                    docId,
+                    new MapSetIntent("CheckpointedKey", $"V1-Checkpointed-{docId}"),
+                    nameof(ShardedDocState.DataMap),
+                    IntentDeliveryMode.Acknowledged,
+                    CancellationToken.None);
+            }
+
+            // Persist checkpoints and Global DVV under the V1 legacy shard IDs
+            foreach (var activeDocument in scopeV1.Orchestrator.GetActiveDocuments())
+            {
+                await activeDocument.CheckpointAsync(CancellationToken.None);
+            }
+
+            await scopeV1.Storage.SaveShardVersionVectorMapAsync(
+                scopeV1.ReplicaId,
+                dvvManagerV1.GetFullSnapshot(),
+                CancellationToken.None);
+
+            // Apply additional mutations that remain ONLY in the operation journal (uncheckpointed) under the V1 legacy shard IDs
+            foreach (var docId in docIds)
+            {
+                await scopeV1.Orchestrator.ApplyIntentAsync<ShardedDocState>(
+                    docId,
+                    new MapSetIntent("UncheckpointedWalKey", $"V1-WalOnly-{docId}"),
+                    nameof(ShardedDocState.DataMap),
+                    IntentDeliveryMode.Acknowledged,
+                    CancellationToken.None);
+            }
+
+            var v1Shards = dvvManagerV1.GetShardIds();
+            v1Shards.ShouldContain(s => s.StartsWith("legacy-bucket-", StringComparison.Ordinal));
+        }
+
+        // Act - Simulate Deployment V2 where the developer changed IShardIdProvider to DocumentIdShardProvider ("shard-{docId}")
+        // running against the existing persisted storage data from V1.
+        await using var spV2 = await CreateAndStartNodeWithCustomProviderAsync<DocumentIdShardProvider>(
+            ReplicaId,
+            sharedStorage);
+
+        var scopeV2 = spV2.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(ReplicaId);
+        var dvvManagerV2 = scopeV2.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+
+        // Assert 1 - Every document recovered both its V1 checkpointed state AND its V1 uncheckpointed journaled operations,
+        // and is now mapped under the new V2 shard ID ("shard-{docId}") and accepts new V2 writes seamlessly.
+        foreach (var docId in docIds)
+        {
+            var localDoc = scopeV2.Orchestrator.TryGetLocalDocument<ShardedDocState>(docId);
+            localDoc.ShouldNotBeNull();
+            localDoc.ShardId.ShouldBe($"shard-{docId}");
+
+            var state = await scopeV2.Orchestrator.GetDocumentStateAsync<ShardedDocState>(docId, CancellationToken.None);
+            state.Data.DataMap.ShouldContainKeyAndValue("CheckpointedKey", $"V1-Checkpointed-{docId}");
+            state.Data.DataMap.ShouldContainKeyAndValue("UncheckpointedWalKey", $"V1-WalOnly-{docId}");
+
+            var appliedV2 = await scopeV2.Orchestrator.ApplyIntentAsync<ShardedDocState>(
+                docId,
+                new MapSetIntent("PostUpgradeKey", $"V2-NewShard-{docId}"),
+                nameof(ShardedDocState.DataMap),
+                IntentDeliveryMode.Acknowledged,
+                CancellationToken.None);
+            appliedV2.ShouldBeTrue();
+
+            var updatedState = await scopeV2.Orchestrator.GetDocumentStateAsync<ShardedDocState>(docId, CancellationToken.None);
+            updatedState.Data.DataMap.ShouldContainKeyAndValue("PostUpgradeKey", $"V2-NewShard-{docId}");
+        }
+
+        // Assert 2 - Stale V1 shard IDs ("legacy-bucket-*") were pruned from the active ShardVersionVectorManager so they do not bloat anti-entropy
+        var v2Shards = dvvManagerV2.GetShardIds();
+        v2Shards.ShouldNotContain(s => s.StartsWith("legacy-bucket-", StringComparison.Ordinal));
+        foreach (var docId in docIds)
+        {
+            v2Shards.ShouldContain($"shard-{docId}");
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         foreach (var node in nodes)
@@ -592,6 +780,55 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
 
         nodes.Add(node);
         return node;
+    }
+
+    private static async Task<ServiceProvider> CreateAndStartNodeWithCustomProviderAsync<TShardProvider>(
+        string replicaId,
+        IDistributedCrdtStorage sharedStorage)
+        where TShardProvider : class, IShardIdProvider
+    {
+        var senderMock = new Mock<IDirectMessageSender>();
+        var gossipMock = new Mock<IP2pAlgorithm>();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        services.AddDistributedCrdtCore(opt =>
+        {
+            opt.EnableSharding = true;
+            opt.ShardReplicationFactor = 1;
+            opt.VirtualNodesPerReplica = 64;
+            opt.ActiveSyncEnabled = false;
+            opt.AntiEntropyInitialDelaySeconds = 3600;
+            opt.AntiEntropyMaxAdaptiveIntervalSeconds = 3600;
+            opt.AntiEntropyIntervalSeconds = 3600;
+            opt.CheckpointIntervalSeconds = 3600;
+            opt.MaintenanceIntervalSeconds = 3600;
+            opt.EnableGracefulShutdown = false;
+            opt.JournalMode = CrdtJournalMode.Direct;
+        });
+
+        services.AddCrdt()
+                .AddCrdtAotContext(new DynamicShardingTestAotContext())
+                .AddCrdtJsonTypeInfoResolver(DynamicShardingTestJsonContext.Default)
+                .AddCrdtShardIdProvider<TShardProvider>();
+
+        services.AddSingleton(sharedStorage);
+        services.AddDistributedCrdtStorage<SharedPersistentCrdtStorage>();
+        services.AddDistributedDocumentType<ShardedDocState>(DocTypeAlias);
+        services.AddDistributedCrdtReplica(replicaId, MeshId);
+
+        services.AddSingleton(senderMock.Object);
+        services.AddSingleton(gossipMock.Object);
+        services.AddSingleton<IPeerRegistry, InMemoryPeerRegistry>();
+        services.AddSingleton<IP2pRpcCorrelator, P2pRpcCorrelator>();
+        services.AddSingleton(new P2pMeshMetadata(MeshId));
+
+        var sp = services.BuildServiceProvider();
+        var initService = sp.GetServices<IHostedService>().OfType<CrdtInitializationService>().Single();
+        await initService.StartAsync(CancellationToken.None);
+
+        return sp;
     }
 
     private static async Task SyncAllNodesAsync(DynamicMeshFabric fabric)

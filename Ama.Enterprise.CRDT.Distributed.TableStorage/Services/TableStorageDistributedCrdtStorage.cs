@@ -266,6 +266,57 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         return null;
     }
 
+    public async Task<CrdtDocument<TState>?> LoadDocumentFromAnyShardAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        ArgumentException.ThrowIfNullOrEmpty(documentId);
+
+        try
+        {
+            var localReplicaId = this.GetLocalReplicaId();
+            var localPrefix = localReplicaId != null
+                ? $"{localReplicaId}_{DocumentStatePartitionKey}_"
+                : $"{DocumentStatePartitionKey}_";
+            var localPrefixEnd = $"{localPrefix}~";
+
+            var filter = TableClient.CreateQueryFilter($"PartitionKey ge {localPrefix} and PartitionKey le {localPrefixEnd} and RowKey eq {documentId}");
+            var query = this.tableClient.QueryAsync<TableEntity>(filter, cancellationToken: cancellationToken);
+
+            TableEntity? latestEntity = null;
+            await foreach (var entity in query.WithCancellation(cancellationToken).ConfigureAwait(false))
+            {
+                if (latestEntity == null || Nullable.Compare(entity.Timestamp, latestEntity.Timestamp) > 0)
+                {
+                    latestEntity = entity;
+                }
+            }
+
+            if (latestEntity != null)
+            {
+                var tags = new KeyValuePair<string, object?>[] { new("type", "document") };
+                this.operationsReadCounter.Add(1, tags);
+
+                var payload = CrdtTableEntity.GetPayload(latestEntity);
+                if (payload != null)
+                {
+                    this.payloadBytesHistogram.Record(payload.Length, tags);
+                }
+
+                return this.serializer.DeserializeFromBytes<CrdtDocument<TState>>(payload);
+            }
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404 && ex.ErrorCode != "TableNotFound")
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            this.logger.LogError(ex, "Storage connection failed during LoadDocumentFromAnyShardAsync. Failing fast to prevent state corruption.");
+            throw;
+        }
+
+        return null;
+    }
+
     public async Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new()
     {
         ArgumentException.ThrowIfNullOrEmpty(documentId);

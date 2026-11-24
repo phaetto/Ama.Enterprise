@@ -58,6 +58,19 @@ public interface IDistributedCrdtStorage : ICrdtOperationJournal
     Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new();
 
     /// <summary>
+    /// Attempts to load a stored CRDT document state regardless of its persisted shard identifier.
+    /// Used as a fallback when a product's <see cref="Ama.CRDT.Services.Providers.IShardIdProvider"/> implementation changes across deployments and runs against older persisted data.
+    /// </summary>
+    /// <typeparam name="TState">The application state bounded by the document.</typeparam>
+    /// <param name="documentId">The globally unique identifier for this document type (Topic).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The stored document, or null if no previous state exists under any shard.</returns>
+    Task<CrdtDocument<TState>?> LoadDocumentFromAnyShardAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        return Task.FromResult<CrdtDocument<TState>?>(null);
+    }
+
+    /// <summary>
     /// Attempts to load an orphaned document state from previous replica identities. 
     /// Used as a fallback during initialization to prevent state loss when dynamic node scaling occurs.
     /// </summary>

@@ -79,6 +79,10 @@ public sealed class CrdtStateSyncPayloadProcessor : ICrdtStateSyncPayloadProcess
         }
 
         var syncMsg = serializer.DeserializeFromBytes<CrdtStateSyncMessage>(wrapper.Payload!);
+        if (syncMsg is null)
+        {
+            return;
+        }
 
         if (syncMsg.ReplicaId != null && scope.ClusterTracker.IsReplicaTombstoned(syncMsg.ReplicaId))
         {

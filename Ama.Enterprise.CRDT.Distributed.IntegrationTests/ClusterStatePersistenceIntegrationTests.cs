@@ -230,7 +230,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
         var savedDvv = new DottedVersionVector();
         savedDvv.Versions["Replica1"] = 100;
         
-        var savedMap = new ShardVersionVectorMap { { "", savedDvv } };
+        var savedMap = new ShardVersionVectorMap { { "shard", savedDvv } };
         
         mockStorage.Setup(s => s.LoadShardVersionVectorMapAsync("Replica1", It.IsAny<CancellationToken>()))
                    .ReturnsAsync(savedMap);
@@ -248,7 +248,7 @@ public sealed class ClusterStatePersistenceIntegrationTests
         var scope = scopeManager.GetOrCreateScope("Replica1");
         var context = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
 
-        context.ShardVersionVectors[""].Versions["Replica1"].ShouldBe(100);
+        context.ShardVersionVectors["shard"].Versions["Replica1"].ShouldBe(100);
     }
 
     [IntegrationFact]

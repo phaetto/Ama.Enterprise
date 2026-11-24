@@ -719,6 +719,22 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 localStoredDoc = await storage.LoadDocumentAsync<TState>(ShardId, DocumentId, cancellationToken).ConfigureAwait(false);
             }
 
+            var loadedFromMigratedShard = false;
+            if (localStoredDoc == null)
+            {
+                localStoredDoc = await storage.LoadDocumentFromAnyShardAsync<TState>(storageDocKey, cancellationToken).ConfigureAwait(false);
+                if (localStoredDoc == null && !string.Equals(storageDocKey, DocumentId, StringComparison.Ordinal))
+                {
+                    localStoredDoc = await storage.LoadDocumentFromAnyShardAsync<TState>(DocumentId, cancellationToken).ConfigureAwait(false);
+                }
+
+                if (localStoredDoc != null)
+                {
+                    loadedFromMigratedShard = true;
+                    logger.LogInformation("Loaded state for document {DocumentId} ({TypeAlias}) from a previous shard mapping into current shard {ShardId}.", DocumentId, TypeAlias, ShardId);
+                }
+            }
+
             CrdtDocument<TState>? orphanedDoc = null;
             if (!isMemoryStorage)
             {
@@ -755,7 +771,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                     if (!isDirty)
                     {
                         currentDocument = storedDoc.Value;
-                        if (localStoredDoc != null && orphanedDoc != null)
+                        if ((localStoredDoc != null && orphanedDoc != null) || loadedFromMigratedShard)
                         {
                             isDirty = true;
                         }

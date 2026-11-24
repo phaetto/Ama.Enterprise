@@ -313,6 +313,46 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     }
 
     /// <inheritdoc />
+    public Task<CrdtDocument<TState>?> LoadDocumentFromAnyShardAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        if (string.IsNullOrWhiteSpace(documentId))
+        {
+            return Task.FromResult<CrdtDocument<TState>?>(null);
+        }
+
+        var suffix = $"_{documentId}";
+        byte[]? rawBytes = null;
+
+        lock (syncRoot)
+        {
+            foreach (var kvp in documents)
+            {
+                if (kvp.Key.EndsWith(suffix, StringComparison.Ordinal) && kvp.Value is CrdtDocument<TState> typedDoc)
+                {
+                    return Task.FromResult<CrdtDocument<TState>?>(typedDoc);
+                }
+            }
+
+            foreach (var kvp in serializedDocuments)
+            {
+                if (kvp.Key.EndsWith(suffix, StringComparison.Ordinal))
+                {
+                    rawBytes = kvp.Value;
+                    break;
+                }
+            }
+        }
+
+        if (rawBytes is { Length: > 0 } && serializer is not null)
+        {
+            var deserializedDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(rawBytes);
+            return Task.FromResult<CrdtDocument<TState>?>(deserializedDoc);
+        }
+
+        return Task.FromResult<CrdtDocument<TState>?>(null);
+    }
+
+    /// <inheritdoc />
     public Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new()
     {
         // In-memory storage is ephemeral and not shared across processes boundaries, 

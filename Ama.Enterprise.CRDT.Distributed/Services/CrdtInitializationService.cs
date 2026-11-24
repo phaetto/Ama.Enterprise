@@ -158,6 +158,7 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
 
         // 4. Replay uncheckpointed WAL operations
         var operationsByDocAndShard = new Dictionary<(string DocKey, string ShardId), List<CrdtOperation>>();
+        var operationsByDocOnly = new Dictionary<string, List<CrdtOperation>>(StringComparer.Ordinal);
         
         await foreach (var jOp in globalStorage.GetAllJournaledOperationsAsync(cancellationToken).ConfigureAwait(false))
         {
@@ -170,6 +171,16 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
                 operationsByDocAndShard[key] = opList;
             }
             opList.Add(jOp.Operation);
+
+            if (!string.IsNullOrEmpty(docIdStr))
+            {
+                if (!operationsByDocOnly.TryGetValue(docIdStr, out var docOnlyList))
+                {
+                    docOnlyList = new List<CrdtOperation>();
+                    operationsByDocOnly[docIdStr] = docOnlyList;
+                }
+                docOnlyList.Add(jOp.Operation);
+            }
         }
 
         if (operationsByDocAndShard.Count > 0)
@@ -178,7 +189,7 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
             replayedOperationsCounter.Add(totalReplayed, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
             logger.LogInformation("Replaying {Count} journaled operations for replica {ReplicaId}.", totalReplayed, replicaContext.ReplicaId);
             
-            var registryOps = GetMatchingOperations(operationsByDocAndShard, orchestrator.Registry);
+            var registryOps = GetMatchingOperations(operationsByDocAndShard, operationsByDocOnly, orchestrator.Registry);
             if (registryOps.Count > 0)
             {
                 await orchestrator.Registry.ApplyJournaledPatchAsync(new CrdtPatch(registryOps), cancellationToken).ConfigureAwait(false);
@@ -191,7 +202,7 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
             {
                 if (document.DocumentId != orchestrator.Registry.DocumentId)
                 {
-                    var docOps = GetMatchingOperations(operationsByDocAndShard, document);
+                    var docOps = GetMatchingOperations(operationsByDocAndShard, operationsByDocOnly, document);
                     if (docOps.Count > 0)
                     {
                         await document.ApplyJournaledPatchAsync(new CrdtPatch(docOps), cancellationToken).ConfigureAwait(false);
@@ -199,10 +210,36 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
                 }
             }
         }
+
+        // 5. Prune any stale non-active shard DVVs left over in storage from a previous IShardIdProvider implementation
+        PruneStaleShardVersionVectors(orchestrator, versionVectorManager);
+    }
+
+    private static void PruneStaleShardVersionVectors(
+        ICrdtDocumentOrchestrator orchestrator,
+        IShardVersionVectorManager versionVectorManager)
+    {
+        var activeShardIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var doc in orchestrator.GetActiveDocuments())
+        {
+            if (!string.IsNullOrWhiteSpace(doc.ShardId))
+            {
+                activeShardIds.Add(doc.ShardId);
+            }
+        }
+
+        foreach (var trackedShardId in versionVectorManager.GetShardIds())
+        {
+            if (!activeShardIds.Contains(trackedShardId))
+            {
+                versionVectorManager.RemoveShard(trackedShardId);
+            }
+        }
     }
 
     private static List<CrdtOperation> GetMatchingOperations(
         Dictionary<(string DocKey, string ShardId), List<CrdtOperation>> operationsByDocAndShard,
+        Dictionary<string, List<CrdtOperation>> operationsByDocOnly,
         IDistributedCrdtDocument document)
     {
         var compositeKey = CrdtRegistryEntry.GetRegistryKey(document.TypeAlias, document.DocumentId);
@@ -227,6 +264,31 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
             return fallbackDocOps;
         }
 
+        // Fallback when IShardIdProvider implementation changed across deployments and operations were journaled under an older ShardId
+        if (operationsByDocOnly.TryGetValue(compositeKey, out var migratedCompositeOps))
+        {
+            return NormalizeOperationsToCurrentShard(migratedCompositeOps, document.ShardId);
+        }
+
+        if (operationsByDocOnly.TryGetValue(document.DocumentId, out var migratedDocOps))
+        {
+            return NormalizeOperationsToCurrentShard(migratedDocOps, document.ShardId);
+        }
+
         return [];
+    }
+
+    private static List<CrdtOperation> NormalizeOperationsToCurrentShard(List<CrdtOperation> operations, string currentShardId)
+    {
+        var normalized = new List<CrdtOperation>(operations.Count);
+        for (int i = 0; i < operations.Count; i++)
+        {
+            var op = operations[i];
+            normalized.Add(string.Equals(op.ShardId, currentShardId, StringComparison.Ordinal)
+                ? op
+                : op with { ShardId = currentShardId });
+        }
+
+        return normalized;
     }
 }
