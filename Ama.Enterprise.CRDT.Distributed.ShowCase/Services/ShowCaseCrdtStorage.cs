@@ -83,6 +83,34 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         return null;
     }
 
+    public async Task<CrdtDocument<TState>?> LoadDocumentFromAnyShardAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
+
+        try
+        {
+            using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT Payload FROM Documents WHERE DocumentId = @DocId LIMIT 1";
+            AddParameter(command, "@DocId", documentId);
+
+            var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+            if (result is byte[] bytes)
+            {
+                return serializer.DeserializeFromBytes<CrdtDocument<TState>>(bytes);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to load document '{DocumentId}' from any shard in SQLite", documentId);
+            throw;
+        }
+
+        return null;
+    }
+
     public Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new()
     {
         // Showcase SQLite storage maps databases explicitly to localized ReplicaId files. 
@@ -676,6 +704,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
                     Payload BLOB NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS IDX_Journal_Shard_Clock ON Journal(ShardId, ShardClock);
+                CREATE INDEX IF NOT EXISTS IDX_Journal_Shard_Origin_Clock ON Journal(ShardId, OriginReplicaId, ShardClock);
             ";
             command.ExecuteNonQuery();
             
@@ -725,6 +754,13 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
                 ";
                 alterCmd.ExecuteNonQuery();
             }
+
+            using var indexCmd = connection.CreateCommand();
+            indexCmd.CommandText = @"
+                CREATE INDEX IF NOT EXISTS IDX_Documents_Shard_Doc ON Documents(ShardId, DocumentId);
+                CREATE INDEX IF NOT EXISTS IDX_Journal_Shard_Origin_Clock ON Journal(ShardId, OriginReplicaId, ShardClock);
+            ";
+            indexCmd.ExecuteNonQuery();
         }
         catch (Exception ex)
         {

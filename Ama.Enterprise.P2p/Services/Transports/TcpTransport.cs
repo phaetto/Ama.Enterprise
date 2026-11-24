@@ -104,7 +104,10 @@ public sealed class TcpTransport : ITransport, IDisposable
         {
             if (!activeConnections.TryGetValue(tcpEndpoint, out var connection))
             {
-                var client = new TcpClient();
+                var client = new TcpClient
+                {
+                    NoDelay = true
+                };
                 client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
                 
                 await client.ConnectAsync(tcpEndpoint.Host, tcpEndpoint.Port, cts.Token).ConfigureAwait(false);
@@ -115,18 +118,17 @@ public sealed class TcpTransport : ITransport, IDisposable
 
             var payload = wireEncoder.Encode(message);
 
-            byte[] lengthBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(4);
+            byte[] frameBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(4 + payload.Length);
             try
             {
-                BinaryPrimitives.WriteInt32LittleEndian(lengthBuffer.AsSpan(0, 4), payload.Length);
+                BinaryPrimitives.WriteInt32LittleEndian(frameBuffer.AsSpan(0, 4), payload.Length);
+                payload.AsSpan().CopyTo(frameBuffer.AsSpan(4, payload.Length));
 
-                await connection.Stream.WriteAsync(lengthBuffer.AsMemory(0, 4), cts.Token).ConfigureAwait(false);
-                await connection.Stream.WriteAsync(payload, cts.Token).ConfigureAwait(false);
-                await connection.Stream.FlushAsync(cts.Token).ConfigureAwait(false);
+                await connection.Stream.WriteAsync(frameBuffer.AsMemory(0, 4 + payload.Length), cts.Token).ConfigureAwait(false);
             }
             finally
             {
-                System.Buffers.ArrayPool<byte>.Shared.Return(lengthBuffer);
+                System.Buffers.ArrayPool<byte>.Shared.Return(frameBuffer);
             }
 
             var tags = new KeyValuePair<string, object?>[] { new("mesh_id", meshId) };

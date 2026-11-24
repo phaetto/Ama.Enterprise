@@ -1834,8 +1834,36 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         var syncWrapper = serializer.DeserializeFromBytes<CrdtMessageWrapper>(capturedSends[0].ToArray());
         syncWrapper.MessageType.ShouldBe("CrdtSync");
         var syncMsg = serializer.DeserializeFromBytes<CrdtStateSyncMessage>(syncWrapper.Payload!);
+        syncMsg.IsPartialShardSelection.ShouldBeTrue();
         syncMsg.State.ShouldContainKey("sync-doc-2");
         syncMsg.State.ShouldNotContainKey("sync-doc-1");
+
+        // Verify that when a remote peer receives this partial CrdtSync message (which intentionally omits "sync-doc-1"),
+        // it does NOT mistake the omitted "sync-doc-1" shard for an empty DVV and send back a false snapshot or patch for "sync-doc-1".
+        var peerCapturedSends = new List<ReadOnlyMemory<byte>>();
+        var mockPeerSender = new Mock<IDirectMessageSender>();
+        mockPeerSender.Setup(p => p.SendDirectAsync(It.IsAny<PeerId>(), Capture.In(peerCapturedSends), It.IsAny<CancellationToken>()))
+               .Returns(Task.CompletedTask);
+
+        var peerSp = BuildNode("Replica2", services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(mockPeerSender.Object));
+            services.AddSingleton<IShardIdProvider, DocumentIdAsShardIdProvider>();
+        });
+        var peerScope = peerSp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica2");
+        var peerOrch = peerScope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await peerOrch.InitializeAsync(CancellationToken.None);
+        await peerOrch.CreateDocumentAsync("sync-doc-1", "sync-doc-1", CancellationToken.None);
+        await peerOrch.ApplyIntentAsync<SyncTestState>("sync-doc-1", new MapSetIntent("PeerK1", "PeerV1"), nameof(SyncTestState.DataMap), CancellationToken.None);
+
+        var peerHandler = peerSp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        await peerHandler.HandlePayloadAsync(TestMeshId, new PeerId(Guid.NewGuid()), capturedSends[0], CancellationToken.None);
+
+        var peerSentDocIds = peerCapturedSends
+            .Select(p => serializer.DeserializeFromBytes<CrdtMessageWrapper>(p.ToArray()))
+            .Select(w => w.DocumentId)
+            .ToList();
+        peerSentDocIds.ShouldNotContain("sync-doc-1");
 
         // Act 2: Trim journals for both shards and send an incoming CrdtSync from a remote peer requesting both shards while "sync-doc-1" is still locked
         await scope.Storage.TrimAsync("sync-doc-1", new Dictionary<string, long> { ["Replica1"] = 1 }, CancellationToken.None);
@@ -1940,5 +1968,71 @@ public sealed class AntiEntropyStateSyncIntegrationTests
 
         // Assert 2: Second duplicate CrdtSync within the cooldown window did not re-push the same operations again
         node1ToNode2Payloads.ShouldBeEmpty();
+    }
+
+    [IntegrationFact]
+    public async Task ProcessPatchAndSnapshotBatch_WithThousandsOfPerDocumentShards_ShouldNotIncurQuadraticScalingBottleneck()
+    {
+        // Arrange: Simulate ShowCaseShardIdProvider where every document has its own shard ID (e.g. 500 documents -> 500 shards).
+        // Verify that receiving 500 distinct shard patches/snapshots on a newly spawned node completes in well under a few seconds
+        // without O(N^2) ClusterTracker DVV cloning or O(N^2) TryFindRegistryEntry scans.
+        const int documentCount = 500;
+
+        var node1Sp = BuildNode("Replica1", services =>
+        {
+            services.AddSingleton<IShardIdProvider, DocumentIdAsShardIdProvider>();
+        });
+        var node1Scope = node1Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica1");
+        var node1Orch = node1Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await node1Orch.InitializeAsync(CancellationToken.None);
+
+        var node2Sp = BuildNode("Replica2", services =>
+        {
+            services.AddSingleton<IShardIdProvider, DocumentIdAsShardIdProvider>();
+        });
+        var node2Scope = node2Sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica2");
+        var node2Orch = node2Scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+        await node2Orch.InitializeAsync(CancellationToken.None);
+
+        var serializer = node1Sp.GetRequiredService<ICrdtSerializer>();
+        var node2Handler = node2Sp.GetRequiredKeyedService<IApplicationPayloadHandler>(TestMeshId);
+        var node1PeerId = new PeerId(Guid.NewGuid());
+
+        var payloads = new List<byte[]>(documentCount);
+        for (int i = 1; i <= documentCount; i++)
+        {
+            var docId = $"doc-shard-{i}";
+            await node1Orch.CreateDocumentAsync(docId, "sync-doc-1", IntentDeliveryMode.FireAndForget, CancellationToken.None);
+            await node1Orch.ApplyIntentAsync<SyncTestState>(docId, new MapSetIntent("K", "V"), nameof(SyncTestState.DataMap), IntentDeliveryMode.FireAndForget, CancellationToken.None);
+        }
+
+        await node1Orch.FlushAsync(CancellationToken.None);
+
+        for (int i = 1; i <= documentCount; i++)
+        {
+            var docId = $"doc-shard-{i}";
+            var doc = node1Orch.TryGetLocalDocument<SyncTestState>(docId)!;
+            var snap = await doc.GetSnapshotDataAsync(CancellationToken.None);
+            var msg = new CrdtSnapshotMessage("Replica1", snap.SnapshotData, snap.GlobalState);
+            var wrapper = new CrdtMessageWrapper(docId, "CrdtSnapshot", serializer.SerializeToBytes(msg), "Replica1", "sync-doc-1");
+            payloads.Add(serializer.SerializeToBytes(wrapper));
+        }
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        // Act: Deliver all 500 per-shard snapshots to Node 2 (which has not even received the registry yet)
+        for (int i = 0; i < payloads.Count; i++)
+        {
+            await node2Handler.HandlePayloadAsync(TestMeshId, node1PeerId, payloads[i], CancellationToken.None);
+        }
+
+        sw.Stop();
+
+        // Assert: All 500 documents promoted, merged, and tracked in ClusterTracker in a fraction of a second
+        node2Orch.GetActiveDocuments().Count.ShouldBe(documentCount + 1); // +1 for Registry
+        var trackedPeerState = node2Scope.ClusterTracker.TryGetPeerState("Replica1");
+        trackedPeerState.ShouldNotBeNull();
+        trackedPeerState!.Count.ShouldBe(documentCount);
+        sw.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
     }
 }

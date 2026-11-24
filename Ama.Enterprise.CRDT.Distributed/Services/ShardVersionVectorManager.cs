@@ -3,7 +3,6 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
@@ -19,11 +18,11 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
     private readonly ReplicaContext replicaContext;
     private readonly IVersionVectorSyncService syncService;
     private readonly ICrdtStringPool stringPool;
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> shardLocks = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, DottedVersionVector>> pendingDocumentSnapshots = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> pendingShardExpectedCounts = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, long> pendingShardLastActivityTicks = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, long> lastShardSnapshotMergeTicks = new(StringComparer.Ordinal);
+    private readonly SemaphoreSlim[] stripedShardLocks;
     private long lastSnapshotMergeTicks;
 
     public ShardVersionVectorManager(
@@ -34,6 +33,13 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         this.replicaContext = replicaContext ?? throw new ArgumentNullException(nameof(replicaContext));
         this.syncService = syncService ?? throw new ArgumentNullException(nameof(syncService));
         this.stringPool = stringPool ?? CrdtStringPool.Shared;
+
+        var stripeCount = Math.Clamp(BitOperationsRoundUpToPowerOf2(Environment.ProcessorCount * 32), 128, 2048);
+        this.stripedShardLocks = new SemaphoreSlim[stripeCount];
+        for (int i = 0; i < stripeCount; i++)
+        {
+            this.stripedShardLocks[i] = new SemaphoreSlim(1, 1);
+        }
     }
 
     /// <inheritdoc />
@@ -136,7 +142,6 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         }
 
         shardId = stringPool.GetOrAdd(shardId);
-        _ = GetShardSemaphore(shardId);
 
         var sourceMap = replicaContext.ShardVersionVectors;
         lock (sourceMap)
@@ -162,7 +167,6 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
                 if (!string.IsNullOrWhiteSpace(rawShardId))
                 {
                     var shardId = stringPool.GetOrAdd(rawShardId);
-                    _ = GetShardSemaphore(shardId);
                     if (!sourceMap.ContainsKey(shardId))
                     {
                         sourceMap[shardId] = new DottedVersionVector();
@@ -174,7 +178,6 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
             foreach (var key in sourceMap.Keys)
             {
                 var pooledKey = stringPool.GetOrAdd(key);
-                _ = GetShardSemaphore(pooledKey);
                 result.Add(pooledKey);
             }
         }
@@ -395,7 +398,6 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
             foreach (var kvp in savedMap)
             {
                 var pooledKey = stringPool.GetOrAdd(kvp.Key);
-                _ = GetShardSemaphore(pooledKey);
                 sourceMap[pooledKey] = CloneDvv(kvp.Value, stringPool);
             }
         }
@@ -504,19 +506,31 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
     /// <inheritdoc />
     public void Dispose()
     {
-        foreach (var sem in shardLocks.Values)
+        for (int i = 0; i < stripedShardLocks.Length; i++)
         {
-            sem.Dispose();
+            stripedShardLocks[i].Dispose();
         }
-        shardLocks.Clear();
+
         pendingDocumentSnapshots.Clear();
         pendingShardExpectedCounts.Clear();
         pendingShardLastActivityTicks.Clear();
+        lastShardSnapshotMergeTicks.Clear();
     }
 
     private SemaphoreSlim GetShardSemaphore(string shardId)
     {
-        return shardLocks.GetOrAdd(stringPool.GetOrAdd(shardId), _ => new SemaphoreSlim(1, 1));
+        var index = (shardId.GetHashCode() & 0x7FFFFFFF) & (stripedShardLocks.Length - 1);
+        return stripedShardLocks[index];
+    }
+
+    private static int BitOperationsRoundUpToPowerOf2(int value)
+    {
+        int power = 1;
+        while (power < value)
+        {
+            power <<= 1;
+        }
+        return power;
     }
 
     private void MergeDvvIntoShard(string shardId, DottedVersionVector incomingDvv)
@@ -557,26 +571,33 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
 
     private static DottedVersionVector CloneDvv(DottedVersionVector dvv, ICrdtStringPool stringPool)
     {
-        var copiedVersions = new Dictionary<string, long>(StringComparer.Ordinal);
-        var copiedDots = new Dictionary<string, ISet<long>>(StringComparer.Ordinal);
-
         lock (dvv)
         {
-            foreach (var kvp in dvv.Versions)
+            var versionsCount = dvv.Versions?.Count ?? 0;
+            var copiedVersions = new Dictionary<string, long>(versionsCount, StringComparer.Ordinal);
+            if (versionsCount > 0)
             {
-                copiedVersions[stringPool.GetOrAdd(kvp.Key)] = kvp.Value;
-            }
-
-            if ( dvv.Dots != null)
-            {
-                foreach (var kvp in dvv.Dots)
+                foreach (var kvp in dvv.Versions!)
                 {
-                    copiedDots[stringPool.GetOrAdd(kvp.Key)] = new HashSet<long>(kvp.Value);
+                    copiedVersions[stringPool.GetOrAdd(kvp.Key)] = kvp.Value;
                 }
             }
-        }
 
-        return new DottedVersionVector(copiedVersions, copiedDots);
+            var dotsCount = dvv.Dots?.Count ?? 0;
+            var copiedDots = new Dictionary<string, ISet<long>>(dotsCount, StringComparer.Ordinal);
+            if (dotsCount > 0)
+            {
+                foreach (var kvp in dvv.Dots!)
+                {
+                    if (kvp.Value.Count > 0)
+                    {
+                        copiedDots[stringPool.GetOrAdd(kvp.Key)] = new HashSet<long>(kvp.Value);
+                    }
+                }
+            }
+
+            return new DottedVersionVector(copiedVersions, copiedDots);
+        }
     }
 
     private static IDictionary<string, long> CalculateSnapshotBatchMinimumVersions(

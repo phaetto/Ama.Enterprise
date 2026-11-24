@@ -19,7 +19,7 @@ public sealed class BufferedDistributedCrdtStorageDecorator : IDistributedCrdtSt
     private readonly IDistributedCrdtStorage innerStorage;
     private readonly ICrdtWriteAheadBuffer writeAheadBuffer;
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<Guid, JournaledOperation>> inFlightByShard = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, long>> lastTrimmedVectors = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<(string ShardId, string OriginReplicaId), long> lastTrimmedVectors = new();
     private readonly ConcurrentDictionary<(string ShardId, string RawDocId), long> deletedDocuments = new();
 
     /// <summary>
@@ -221,14 +221,14 @@ public sealed class BufferedDistributedCrdtStorageDecorator : IDistributedCrdtSt
 
         if (globalMinimumVersionVector.Count > 0)
         {
-            var shardTrimMap = this.lastTrimmedVectors.GetOrAdd(shardId, _ => new ConcurrentDictionary<string, long>(StringComparer.Ordinal));
-            foreach (var kvp in globalMinimumVersionVector)
-            {
-                shardTrimMap.AddOrUpdate(kvp.Key, kvp.Value, (_, existing) => Math.Max(existing, kvp.Value));
-            }
-
             if (this.inFlightByShard.TryGetValue(shardId, out var shardDict))
             {
+                foreach (var kvp in globalMinimumVersionVector)
+                {
+                    var key = (shardId, kvp.Key);
+                    this.lastTrimmedVectors.AddOrUpdate(key, kvp.Value, (_, existing) => Math.Max(existing, kvp.Value));
+                }
+
                 foreach (var kvp in shardDict)
                 {
                     var op = kvp.Value.Operation;
@@ -236,6 +236,22 @@ public sealed class BufferedDistributedCrdtStorageDecorator : IDistributedCrdtSt
                     {
                         shardDict.TryRemove(kvp.Key, out _);
                     }
+                }
+
+                if (shardDict.IsEmpty)
+                {
+                    this.inFlightByShard.TryRemove(new KeyValuePair<string, ConcurrentDictionary<Guid, JournaledOperation>>(shardId, shardDict));
+                    foreach (var kvp in globalMinimumVersionVector)
+                    {
+                        this.lastTrimmedVectors.TryRemove((shardId, kvp.Key), out _);
+                    }
+                }
+            }
+            else
+            {
+                foreach (var kvp in globalMinimumVersionVector)
+                {
+                    this.lastTrimmedVectors.TryRemove((shardId, kvp.Key), out _);
                 }
             }
         }
@@ -254,21 +270,49 @@ public sealed class BufferedDistributedCrdtStorageDecorator : IDistributedCrdtSt
         var normalizedShardId = shardId ?? string.Empty;
         var rawDocId = ExtractRawDocumentId(documentId);
 
-        this.deletedDocuments[(normalizedShardId, rawDocId)] = Environment.TickCount64;
+        var hasInFlightMatch = false;
 
         if (!string.IsNullOrEmpty(normalizedShardId))
         {
             if (this.inFlightByShard.TryGetValue(normalizedShardId, out var shardDict))
             {
-                RemoveMatchingDocumentOperations(shardDict, documentId, rawDocId);
+                hasInFlightMatch = RemoveMatchingDocumentOperations(shardDict, documentId, rawDocId);
+                if (shardDict.IsEmpty)
+                {
+                    this.inFlightByShard.TryRemove(new KeyValuePair<string, ConcurrentDictionary<Guid, JournaledOperation>>(normalizedShardId, shardDict));
+                    this.RemoveLastTrimmedVectorsForShard(normalizedShardId);
+                }
+            }
+            else
+            {
+                this.RemoveLastTrimmedVectorsForShard(normalizedShardId);
             }
         }
         else
         {
-            foreach (var shardDict in this.inFlightByShard.Values)
+            foreach (var kvp in this.inFlightByShard)
             {
-                RemoveMatchingDocumentOperations(shardDict, documentId, rawDocId);
+                if (RemoveMatchingDocumentOperations(kvp.Value, documentId, rawDocId))
+                {
+                    hasInFlightMatch = true;
+                }
+
+                if (kvp.Value.IsEmpty)
+                {
+                    this.inFlightByShard.TryRemove(kvp);
+                    this.RemoveLastTrimmedVectorsForShard(kvp.Key);
+                }
             }
+        }
+
+        if (hasInFlightMatch)
+        {
+            this.deletedDocuments[(normalizedShardId, rawDocId)] = Environment.TickCount64;
+        }
+        else
+        {
+            this.deletedDocuments.TryRemove((normalizedShardId, rawDocId), out _);
+            this.deletedDocuments.TryRemove((string.Empty, rawDocId), out _);
         }
 
         await this.innerStorage.DeleteDocumentAsync(shardId, documentId, cancellationToken).ConfigureAwait(false);
@@ -403,7 +447,7 @@ public sealed class BufferedDistributedCrdtStorageDecorator : IDistributedCrdtSt
             var jOp = new JournaledOperation(documentId, op);
             journaledList.Add(jOp);
 
-            var shardDict = this.inFlightByShard.GetOrAdd(shardId, _ => new ConcurrentDictionary<Guid, JournaledOperation>());
+            var shardDict = this.inFlightByShard.GetOrAdd(shardId, _ => new ConcurrentDictionary<Guid, JournaledOperation>(1, 4));
             shardDict[op.Id] = jOp;
         }
 
@@ -422,7 +466,7 @@ public sealed class BufferedDistributedCrdtStorageDecorator : IDistributedCrdtSt
             this.deletedDocuments.TryRemove((shardId, rawDocId), out _);
             this.deletedDocuments.TryRemove((string.Empty, rawDocId), out _);
 
-            var shardDict = this.inFlightByShard.GetOrAdd(shardId, _ => new ConcurrentDictionary<Guid, JournaledOperation>());
+            var shardDict = this.inFlightByShard.GetOrAdd(shardId, _ => new ConcurrentDictionary<Guid, JournaledOperation>(1, 4));
             shardDict[jOp.Operation.Id] = jOp;
         }
     }
@@ -438,8 +482,7 @@ public sealed class BufferedDistributedCrdtStorageDecorator : IDistributedCrdtSt
             return false;
         }
 
-        if (this.lastTrimmedVectors.TryGetValue(shardId, out var trimMap) &&
-            trimMap.TryGetValue(op.ReplicaId, out var trimmedClock) &&
+        if (this.lastTrimmedVectors.TryGetValue((shardId, op.ReplicaId), out var trimmedClock) &&
             op.ShardClock <= trimmedClock)
         {
             return false;
@@ -464,12 +507,52 @@ public sealed class BufferedDistributedCrdtStorageDecorator : IDistributedCrdtSt
             if (this.inFlightByShard.TryGetValue(shardId, out var shardDict))
             {
                 shardDict.TryRemove(jOp.Operation.Id, out _);
+                if (shardDict.IsEmpty)
+                {
+                    this.inFlightByShard.TryRemove(new KeyValuePair<string, ConcurrentDictionary<Guid, JournaledOperation>>(shardId, shardDict));
+                    this.lastTrimmedVectors.TryRemove((shardId, jOp.Operation.ReplicaId), out _);
+                }
+            }
+            else
+            {
+                this.lastTrimmedVectors.TryRemove((shardId, jOp.Operation.ReplicaId), out _);
+            }
+
+            if (!this.deletedDocuments.IsEmpty)
+            {
+                var docIdStr = jOp.DocumentId?.ToString() ?? string.Empty;
+                var rawDocId = ExtractRawDocumentId(docIdStr);
+                this.deletedDocuments.TryRemove((shardId, rawDocId), out _);
+                this.deletedDocuments.TryRemove((string.Empty, rawDocId), out _);
+            }
+        }
+
+        if (this.inFlightByShard.IsEmpty)
+        {
+            this.lastTrimmedVectors.Clear();
+            this.deletedDocuments.Clear();
+        }
+    }
+
+    private void RemoveLastTrimmedVectorsForShard(string shardId)
+    {
+        if (this.lastTrimmedVectors.IsEmpty)
+        {
+            return;
+        }
+
+        foreach (var kvp in this.lastTrimmedVectors)
+        {
+            if (string.Equals(kvp.Key.ShardId, shardId, StringComparison.Ordinal))
+            {
+                this.lastTrimmedVectors.TryRemove(kvp.Key, out _);
             }
         }
     }
 
-    private static void RemoveMatchingDocumentOperations(ConcurrentDictionary<Guid, JournaledOperation> shardDict, string documentId, string rawDocId)
+    private static bool RemoveMatchingDocumentOperations(ConcurrentDictionary<Guid, JournaledOperation> shardDict, string documentId, string rawDocId)
     {
+        var removedAny = false;
         foreach (var kvp in shardDict)
         {
             var opDocId = kvp.Value.DocumentId?.ToString();
@@ -478,9 +561,14 @@ public sealed class BufferedDistributedCrdtStorageDecorator : IDistributedCrdtSt
                 string.Equals(opDocId, rawDocId, StringComparison.Ordinal) ||
                 string.Equals(opRawDocId, rawDocId, StringComparison.Ordinal))
             {
-                shardDict.TryRemove(kvp.Key, out _);
+                if (shardDict.TryRemove(kvp.Key, out _))
+                {
+                    removedAny = true;
+                }
             }
         }
+
+        return removedAny;
     }
 
     private static string ExtractRawDocumentId(string documentId)

@@ -1,7 +1,6 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System;
-using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq.Expressions;
@@ -55,8 +54,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private CrdtDocument<TState> currentDocument;
     
     private readonly object debounceSyncRoot = new();
-    private readonly List<CrdtOperation>? debounceBuffer;
-    private readonly Timer? debounceTimer;
+    private List<CrdtOperation>? debounceBuffer;
+    private Timer? debounceTimer;
 
     private volatile bool isDirty;
     private volatile bool isDisposed;
@@ -145,12 +144,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         ShardId = this.stringPool.GetOrAdd(initialState is CrdtRegistryState
             ? DocumentId
             : shardIdProvider.GetShardId(currentDocument) ?? string.Empty);
-
-        if (this.activeSyncEnabled && this.activeSyncDebounceMs > 0)
-        {
-            this.debounceBuffer = new List<CrdtOperation>();
-            this.debounceTimer = new Timer(OnDebounceTimerFired, null, Timeout.Infinite, Timeout.Infinite);
-        }
     }
     
     /// <inheritdoc />
@@ -349,7 +342,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// <inheritdoc />
     public async Task<CrdtSnapshotDataDto> GetSnapshotDataAsync(CancellationToken cancellationToken = default)
     {
-        if (isDisposed)
+        if (isDisposed || commandPipeline.IsCurrentThreadPipelineProcessor)
         {
             CrdtDocument<TState> currentDoc;
             lock (syncRoot) { currentDoc = currentDocument; }
@@ -547,11 +540,16 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         lock (debounceSyncRoot)
         {
-            debounceTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+            if (debounceTimer is not null)
+            {
+                debounceTimer.Dispose();
+                debounceTimer = null;
+            }
+
             if (debounceBuffer != null && debounceBuffer.Count > 0)
             {
-                opsToBroadcast = new List<CrdtOperation>(debounceBuffer);
-                debounceBuffer.Clear();
+                opsToBroadcast = debounceBuffer;
+                debounceBuffer = null;
             }
         }
 
@@ -582,9 +580,9 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
 
         var debounceCapacity = -1;
-        if (debounceBuffer != null)
+        lock (debounceSyncRoot)
         {
-            lock (debounceSyncRoot)
+            if (debounceBuffer != null)
             {
                 debounceCapacity = debounceBuffer.Capacity;
             }
@@ -649,7 +647,12 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     public void Dispose()
     {
         isDisposed = true;
-        debounceTimer?.Dispose();
+        lock (debounceSyncRoot)
+        {
+            debounceTimer?.Dispose();
+            debounceTimer = null;
+            debounceBuffer = null;
+        }
     }
 
     private static Expression<Func<TState, object>> GetOrAddPropertySelector(string? targetProperty)
@@ -765,7 +768,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
                 if (!hasUnpersistedLocalMutations)
                 {
-                    MergeDocumentMetadataIntoShardVersionVector(storedDoc.Value);
+                    MergeDocumentMetadataIntoShardVersionVector(storedDoc.Value, forceMergeForSingleDocumentShard: true);
                 }
                 else
                 {
@@ -776,7 +779,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                     }
 
                     await merger.MergeStateAsync(currentDoc, storedDoc.Value, cancellationToken).ConfigureAwait(false);
-                    MergeDocumentMetadataIntoShardVersionVector(currentDoc);
+                    MergeDocumentMetadataIntoShardVersionVector(currentDoc, forceMergeForSingleDocumentShard: true);
 
                     lock (syncRoot)
                     {
@@ -796,7 +799,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
     }
 
-    private void MergeDocumentMetadataIntoShardVersionVector(CrdtDocument<TState> doc)
+    private void MergeDocumentMetadataIntoShardVersionVector(CrdtDocument<TState> doc, bool forceMergeForSingleDocumentShard = false)
     {
         var metadata = doc.Metadata;
         if (metadata?.VersionVector == null || metadata.VersionVector.Count == 0)
@@ -806,13 +809,19 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
         // Document-level metadata VersionVector tracks per-document clocks (CrdtOperation.Clock),
         // whereas ShardVersionVectors track shard-wide clocks (CrdtOperation.ShardClock).
-        // Only the system registry document has a 1:1 document-to-shard mapping where DocumentClock == ShardClock.
-        // Merging a multi-document shard's per-document clock into the shard DVV corrupts or under-reports the shard clock.
-        if (typeof(TState) != typeof(CrdtRegistryState) &&
-            !string.Equals(DocumentId, Constants.SystemRegistryDocumentId, StringComparison.Ordinal))
+        // When a shard is re-promoted after demotion (or has a 1:1 document-to-shard mapping where no other
+        // active document shares the shard), restoring the document's VersionVector prevents the shard DVV
+        // from resetting to empty/0 and causing endless anti-entropy resync loops.
+        var isSystemRegistry = typeof(TState) == typeof(CrdtRegistryState) ||
+                               string.Equals(DocumentId, Constants.SystemRegistryDocumentId, StringComparison.Ordinal);
+
+        if (!isSystemRegistry)
         {
-            versionVectorManager.EnsureShardRegistered(ShardId);
-            return;
+            if (!forceMergeForSingleDocumentShard)
+            {
+                versionVectorManager.EnsureShardRegistered(ShardId);
+                return;
+            }
         }
 
         var versions = new Dictionary<string, long>(metadata.VersionVector, StringComparer.Ordinal);
@@ -935,8 +944,39 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             {
                 lock (debounceSyncRoot)
                 {
-                    debounceBuffer!.AddRange(patch.Operations);
-                    debounceTimer!.Change(activeSyncDebounceMs, Timeout.Infinite);
+                    if (isDisposed)
+                    {
+                        return;
+                    }
+
+                    debounceBuffer ??= new List<CrdtOperation>(patch.Operations.Count);
+                    debounceBuffer.AddRange(patch.Operations);
+
+                    if (debounceTimer is null)
+                    {
+                        var restoreFlow = false;
+                        try
+                        {
+                            if (!ExecutionContext.IsFlowSuppressed())
+                            {
+                                ExecutionContext.SuppressFlow();
+                                restoreFlow = true;
+                            }
+
+                            debounceTimer = new Timer(OnDebounceTimerFired, null, activeSyncDebounceMs, Timeout.Infinite);
+                        }
+                        finally
+                        {
+                            if (restoreFlow)
+                            {
+                                ExecutionContext.RestoreFlow();
+                            }
+                        }
+                    }
+                    else
+                    {
+                        debounceTimer.Change(activeSyncDebounceMs, Timeout.Infinite);
+                    }
                 }
             }
             else
@@ -948,14 +988,24 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
     private void OnDebounceTimerFired(object? state)
     {
-        List<CrdtOperation> opsToBroadcast;
+        List<CrdtOperation>? opsToBroadcast;
 
         lock (debounceSyncRoot)
         {
-            if (debounceBuffer == null || debounceBuffer.Count == 0) return;
+            if (debounceTimer is not null)
+            {
+                debounceTimer.Dispose();
+                debounceTimer = null;
+            }
+
+            if (debounceBuffer == null || debounceBuffer.Count == 0)
+            {
+                debounceBuffer = null;
+                return;
+            }
             
-            opsToBroadcast = new List<CrdtOperation>(debounceBuffer);
-            debounceBuffer.Clear();
+            opsToBroadcast = debounceBuffer;
+            debounceBuffer = null;
         }
 
         if (opsToBroadcast.Count > 0)

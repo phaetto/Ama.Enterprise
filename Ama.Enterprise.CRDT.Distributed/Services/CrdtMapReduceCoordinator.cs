@@ -98,16 +98,18 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
                 UnreachableDocumentIds: Array.Empty<string>());
         }
 
-        var localDocumentBatch = new List<string>();
+        var concreteOrchestrator = orchestrator as CrdtDocumentOrchestrator;
+        var localDocumentBatch = new List<CandidateLocalDocument<TState>>(candidateDocuments.Count);
         var remoteBatchesByReplicaId = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-        var docCandidateReplicas = new Dictionary<string, List<string>>(candidateDocuments.Count, StringComparer.Ordinal);
-        var shardTargetNodesCache = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-        var shardFallbackRemotesCache = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-        var replicaPeerIdCache = new Dictionary<string, string?>(StringComparer.Ordinal);
+        Dictionary<string, IReadOnlyList<string>>? docCandidateReplicas = null;
+        Dictionary<string, IReadOnlyList<string>>? shardTargetNodesCache = null;
+        Dictionary<string, List<string>>? shardFallbackRemotesCache = null;
+        Dictionary<string, string?>? replicaPeerIdCache = null;
         var unreachableDocumentIds = new List<string>();
 
         string? GetCachedPeerId(string replicaId)
         {
+            replicaPeerIdCache ??= new Dictionary<string, string?>(StringComparer.Ordinal);
             if (!replicaPeerIdCache.TryGetValue(replicaId, out var cachedPeerId))
             {
                 cachedPeerId = clusterStateTracker.GetPeerIdByReplicaId(replicaId);
@@ -119,6 +121,7 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
 
         async ValueTask<List<string>> GetCachedFallbackRemotesAsync(string shardId)
         {
+            shardFallbackRemotesCache ??= new Dictionary<string, List<string>>(StringComparer.Ordinal);
             if (!shardFallbackRemotesCache.TryGetValue(shardId, out var cachedFallbacks))
             {
                 cachedFallbacks = await remoteProxyClient.GetCandidateRemoteReplicasForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
@@ -128,44 +131,50 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
             return cachedFallbacks;
         }
 
+        async ValueTask<IReadOnlyList<string>> GetCachedShardReplicasAsync(string shardId)
+        {
+            shardTargetNodesCache ??= new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+            if (!shardTargetNodesCache.TryGetValue(shardId, out var cachedShardReplicas))
+            {
+                var targetNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
+                cachedShardReplicas = targetNodes ?? Array.Empty<string>();
+                shardTargetNodesCache[shardId] = cachedShardReplicas;
+            }
+
+            return cachedShardReplicas;
+        }
+
         foreach (var item in candidateDocuments)
         {
             var docId = item.DocumentId;
             var shardId = item.ShardId;
+            var liveLocalDoc = item.LiveDocument ?? (concreteOrchestrator is not null
+                ? concreteOrchestrator.TryGetLocalDocumentFast<TState>(docId, resolvedTypeAlias)
+                : orchestrator.TryGetLocalDocument<TState>(docId));
 
-            if (!shardTargetNodesCache.TryGetValue(shardId, out var cachedShardReplicas))
+            // Fast path for MinimalShardCover: if the document is already promoted in local memory,
+            // skip consistent hash ring SHA256 calculation and shard target node dictionary allocations entirely.
+            if (scope.RoutingMode == CrdtMapReduceRoutingMode.MinimalShardCover && liveLocalDoc is not null)
             {
-                var targetNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
-                cachedShardReplicas = new List<string>(targetNodes?.Count ?? 0);
-                if (targetNodes != null)
-                {
-                    for (var i = 0; i < targetNodes.Count; i++)
-                    {
-                        if (!cachedShardReplicas.Contains(targetNodes[i]))
-                        {
-                            cachedShardReplicas.Add(targetNodes[i]);
-                        }
-                    }
-                }
-
-                shardTargetNodesCache[shardId] = cachedShardReplicas;
+                localDocumentBatch.Add(new CandidateLocalDocument<TState>(docId, shardId, liveLocalDoc));
+                continue;
             }
 
-            var orderedReplicas = cachedShardReplicas;
-            docCandidateReplicas[docId] = orderedReplicas;
+            var orderedReplicas = await GetCachedShardReplicasAsync(shardId).ConfigureAwait(false);
 
             switch (scope.RoutingMode)
             {
                 case CrdtMapReduceRoutingMode.MinimalShardCover:
                 {
-                    var isLoadedLocally = orchestrator.TryGetLocalDocument<TState>(docId) != null;
-                    var isLocalReplicaInRing = orderedReplicas.Contains(replicaContext.ReplicaId);
-
-                    if (isLoadedLocally || isLocalReplicaInRing)
+                    if (ContainsReplica(orderedReplicas, replicaContext.ReplicaId))
                     {
-                        localDocumentBatch.Add(docId);
+                        docCandidateReplicas ??= new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+                        docCandidateReplicas[docId] = orderedReplicas;
+                        localDocumentBatch.Add(new CandidateLocalDocument<TState>(docId, shardId, liveLocalDoc));
                         break;
                     }
+
+                    docCandidateReplicas ??= new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
 
                     string? chosenRemote = null;
                     for (var i = 0; i < orderedReplicas.Count; i++)
@@ -197,20 +206,34 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
                     if (chosenRemote is null)
                     {
                         var fallbackRemotes = await GetCachedFallbackRemotesAsync(shardId).ConfigureAwait(false);
-                        for (var i = 0; i < fallbackRemotes.Count; i++)
+                        if (fallbackRemotes.Count > 0)
                         {
-                            var candidate = fallbackRemotes[i];
-                            if (!orderedReplicas.Contains(candidate))
+                            var expandedReplicas = new List<string>(orderedReplicas.Count + fallbackRemotes.Count);
+                            for (var i = 0; i < orderedReplicas.Count; i++)
                             {
-                                orderedReplicas.Add(candidate);
+                                expandedReplicas.Add(orderedReplicas[i]);
                             }
 
-                            if (chosenRemote is null && !string.IsNullOrWhiteSpace(GetCachedPeerId(candidate)))
+                            for (var i = 0; i < fallbackRemotes.Count; i++)
                             {
-                                chosenRemote = candidate;
+                                var candidate = fallbackRemotes[i];
+                                if (!expandedReplicas.Contains(candidate))
+                                {
+                                    expandedReplicas.Add(candidate);
+                                }
+
+                                if (chosenRemote is null && !string.IsNullOrWhiteSpace(GetCachedPeerId(candidate)))
+                                {
+                                    chosenRemote = candidate;
+                                }
                             }
+
+                            orderedReplicas = expandedReplicas;
+                            shardTargetNodesCache![shardId] = orderedReplicas;
                         }
                     }
+
+                    docCandidateReplicas[docId] = orderedReplicas;
 
                     if (chosenRemote is not null)
                     {
@@ -252,18 +275,30 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
                     if (chosenPrimary is null)
                     {
                         var fallbackRemotes = await GetCachedFallbackRemotesAsync(shardId).ConfigureAwait(false);
-                        for (var i = 0; i < fallbackRemotes.Count; i++)
+                        if (fallbackRemotes.Count > 0)
                         {
-                            var candidate = fallbackRemotes[i];
-                            if (!orderedReplicas.Contains(candidate))
+                            var expandedReplicas = new List<string>(orderedReplicas.Count + fallbackRemotes.Count);
+                            for (var i = 0; i < orderedReplicas.Count; i++)
                             {
-                                orderedReplicas.Add(candidate);
+                                expandedReplicas.Add(orderedReplicas[i]);
                             }
 
-                            if (chosenPrimary is null && !string.IsNullOrWhiteSpace(GetCachedPeerId(candidate)))
+                            for (var i = 0; i < fallbackRemotes.Count; i++)
                             {
-                                chosenPrimary = candidate;
+                                var candidate = fallbackRemotes[i];
+                                if (!expandedReplicas.Contains(candidate))
+                                {
+                                    expandedReplicas.Add(candidate);
+                                }
+
+                                if (chosenPrimary is null && !string.IsNullOrWhiteSpace(GetCachedPeerId(candidate)))
+                                {
+                                    chosenPrimary = candidate;
+                                }
                             }
+
+                            orderedReplicas = expandedReplicas;
+                            shardTargetNodesCache![shardId] = orderedReplicas;
                         }
                     }
 
@@ -273,10 +308,19 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
                     }
                     else if (string.Equals(chosenPrimary, replicaContext.ReplicaId, StringComparison.Ordinal))
                     {
-                        localDocumentBatch.Add(docId);
+                        if (liveLocalDoc is null)
+                        {
+                            docCandidateReplicas ??= new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+                            docCandidateReplicas[docId] = orderedReplicas;
+                        }
+
+                        localDocumentBatch.Add(new CandidateLocalDocument<TState>(docId, shardId, liveLocalDoc));
                     }
                     else
                     {
+                        docCandidateReplicas ??= new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+                        docCandidateReplicas[docId] = orderedReplicas;
+
                         if (!remoteBatchesByReplicaId.TryGetValue(chosenPrimary, out var list))
                         {
                             list = new List<string>();
@@ -297,7 +341,7 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
                         var replica = orderedReplicas[i];
                         if (string.Equals(replica, replicaContext.ReplicaId, StringComparison.Ordinal))
                         {
-                            localDocumentBatch.Add(docId);
+                            localDocumentBatch.Add(new CandidateLocalDocument<TState>(docId, shardId, liveLocalDoc));
                             assignedAny = true;
                         }
                         else if (!string.IsNullOrWhiteSpace(GetCachedPeerId(replica)))
@@ -338,12 +382,14 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
         if (localDocumentBatch.Count > 0)
         {
             var localAccumulators = new List<TAccumulate>(localDocumentBatch.Count);
-            var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
+            ICrdtSerializer? serializer = null;
+            HashSet<string>? localExcludedReplicaSet = null;
 
             for (var i = 0; i < localDocumentBatch.Count; i++)
             {
-                var docId = localDocumentBatch[i];
-                var liveDoc = orchestrator.TryGetLocalDocument<TState>(docId);
+                var localItem = localDocumentBatch[i];
+                var docId = localItem.DocumentId;
+                var liveDoc = localItem.LiveDocument;
                 if (liveDoc is null)
                 {
                     var promoted = await orchestrator.ResolveOrPromoteLocalDocumentAsync(docId, resolvedTypeAlias, cancellationToken).ConfigureAwait(false);
@@ -379,10 +425,11 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
                 var storedBytes = await orchestrator.TryLoadStoredDocumentSnapshotBytesAsync(docId, resolvedTypeAlias, cancellationToken).ConfigureAwait(false);
                 if (storedBytes is { Length: > 0 })
                 {
+                    serializer ??= serviceProvider.GetRequiredService<ICrdtSerializer>();
                     var storedDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(storedBytes);
                     if (storedDoc.Data is not null)
                     {
-                        var shardId = shardIdProvider.GetShardId<TState>(docId) ?? docId;
+                        var shardId = localItem.ShardId;
                         var demotedContext = new CrdtMapContext<TState>(
                             docId,
                             shardId,
@@ -407,21 +454,23 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
                     }
                 }
 
-                if (scope.RoutingMode != CrdtMapReduceRoutingMode.AllReplicas &&
-                    TryAssignFallbackReplica(docId, replicaContext.ReplicaId, docCandidateReplicas, new HashSet<string>(StringComparer.Ordinal) { replicaContext.ReplicaId }, clusterStateTracker, out var fallbackReplica))
+                if (scope.RoutingMode != CrdtMapReduceRoutingMode.AllReplicas)
                 {
-                    if (!remoteBatchesByReplicaId.TryGetValue(fallbackReplica!, out var list))
+                    localExcludedReplicaSet ??= new HashSet<string>(StringComparer.Ordinal) { replicaContext.ReplicaId };
+                    if (TryAssignFallbackReplica(docId, replicaContext.ReplicaId, docCandidateReplicas, localExcludedReplicaSet, clusterStateTracker, out var fallbackReplica))
                     {
-                        list = new List<string>();
-                        remoteBatchesByReplicaId[fallbackReplica!] = list;
-                    }
+                        if (!remoteBatchesByReplicaId.TryGetValue(fallbackReplica!, out var list))
+                        {
+                            list = new List<string>();
+                            remoteBatchesByReplicaId[fallbackReplica!] = list;
+                        }
 
-                    list.Add(docId);
+                        list.Add(docId);
+                        continue;
+                    }
                 }
-                else
-                {
-                    unreachableDocumentIds.Add(docId);
-                }
+
+                unreachableDocumentIds.Add(docId);
             }
 
             if (localAccumulators.Count > 0)
@@ -674,7 +723,17 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
             UnreachableDocumentIds: unreachableDocumentIds);
     }
 
-    private readonly record struct CandidateMapReduceDocument(string DocumentId, string ShardId);
+    private readonly record struct CandidateMapReduceDocument<TState>(
+        string DocumentId,
+        string ShardId,
+        IDistributedCrdtDocument<TState>? LiveDocument)
+        where TState : class, new();
+
+    private readonly record struct CandidateLocalDocument<TState>(
+        string DocumentId,
+        string ShardId,
+        IDistributedCrdtDocument<TState>? LiveDocument)
+        where TState : class, new();
 
     private readonly record struct RemoteBatchAttemptOutcome(
         bool IsSuccess,
@@ -685,6 +744,19 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
         IList<string>? MissingDocumentIds,
         string? ErrorMessage,
         Exception? Exception);
+
+    private static bool ContainsReplica(IReadOnlyList<string> replicas, string replicaId)
+    {
+        for (var i = 0; i < replicas.Count; i++)
+        {
+            if (string.Equals(replicas[i], replicaId, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private string ResolveMapReduceJobAlias<TState, TInput, TAccumulate, TResult>()
     {
@@ -703,7 +775,7 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
             $"No ICrdtMapReduceExecutor is registered for ({typeof(TState).Name}, {typeof(TInput).Name}, {typeof(TAccumulate).Name}, {typeof(TResult).Name}).");
     }
 
-    private async Task<List<CandidateMapReduceDocument>> ResolveCandidateMapReduceDocumentsAsync<TState>(
+    private async Task<List<CandidateMapReduceDocument<TState>>> ResolveCandidateMapReduceDocumentsAsync<TState>(
         ICrdtDocumentOrchestrator orchestrator,
         string documentTypeAlias,
         IShardIdProvider shardIdProvider,
@@ -711,18 +783,22 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
         CancellationToken cancellationToken)
         where TState : class, new()
     {
-        var candidates = new List<CandidateMapReduceDocument>();
-        var seenDocIds = new HashSet<string>(StringComparer.Ordinal);
+        var registry = orchestrator.Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
+        var registryDoc = registry.CurrentDocument;
+        var registryMap = registryDoc.Data.Documents;
+        var concreteOrchestrator = orchestrator as CrdtDocumentOrchestrator;
+
+        var initialCapacity = scope.TargetDocumentIds is { Count: > 0 }
+            ? scope.TargetDocumentIds.Count
+            : registryMap.Count;
+        var candidates = new List<CandidateMapReduceDocument<TState>>(initialCapacity);
+        var seenDocIds = new HashSet<string>(initialCapacity, StringComparer.Ordinal);
         HashSet<string>? targetShardSet = null;
 
         if (scope.TargetShardIds is { Count: > 0 })
         {
             targetShardSet = new HashSet<string>(scope.TargetShardIds, StringComparer.Ordinal);
         }
-
-        var registry = orchestrator.Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
-        var registryDoc = registry.CurrentDocument;
-        var registryMap = registryDoc.Data.Documents;
 
         if (scope.TargetDocumentIds is { Count: > 0 })
         {
@@ -748,12 +824,24 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
                     continue;
                 }
 
-                var shardId = await orchestrator.TryGetShardIdAsync(docId, documentTypeAlias, cancellationToken).ConfigureAwait(false)
-                    ?? stringPool.GetOrAdd(shardIdProvider.GetShardId<TState>(docId) ?? docId);
+                var liveDoc = concreteOrchestrator is not null
+                    ? concreteOrchestrator.TryGetLocalDocumentFast<TState>(docId, documentTypeAlias)
+                    : orchestrator.TryGetLocalDocument<TState>(docId);
+
+                string shardId;
+                if (liveDoc is not null)
+                {
+                    shardId = liveDoc.ShardId;
+                }
+                else
+                {
+                    shardId = await orchestrator.TryGetShardIdAsync(docId, documentTypeAlias, cancellationToken).ConfigureAwait(false)
+                        ?? stringPool.GetOrAdd(shardIdProvider.GetShardId<TState>(docId) ?? docId);
+                }
 
                 if (targetShardSet is null || targetShardSet.Contains(shardId))
                 {
-                    candidates.Add(new CandidateMapReduceDocument(docId, shardId));
+                    candidates.Add(new CandidateMapReduceDocument<TState>(docId, shardId, liveDoc));
                 }
             }
 
@@ -773,32 +861,73 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
                 continue;
             }
 
-            var shardId = await orchestrator.TryGetShardIdAsync(entry.DocumentId, documentTypeAlias, cancellationToken).ConfigureAwait(false)
-                ?? stringPool.GetOrAdd(shardIdProvider.GetShardId<TState>(entry.DocumentId) ?? entry.DocumentId);
+            var liveDoc = concreteOrchestrator is not null
+                ? concreteOrchestrator.TryGetLocalDocumentFast<TState>(entry.DocumentId, documentTypeAlias)
+                : orchestrator.TryGetLocalDocument<TState>(entry.DocumentId);
+
+            string shardId;
+            if (liveDoc is not null)
+            {
+                shardId = liveDoc.ShardId;
+            }
+            else
+            {
+                shardId = await orchestrator.TryGetShardIdAsync(entry.DocumentId, documentTypeAlias, cancellationToken).ConfigureAwait(false)
+                    ?? stringPool.GetOrAdd(shardIdProvider.GetShardId<TState>(entry.DocumentId) ?? entry.DocumentId);
+            }
 
             if (targetShardSet is null || targetShardSet.Contains(shardId))
             {
-                candidates.Add(new CandidateMapReduceDocument(entry.DocumentId, shardId));
+                candidates.Add(new CandidateMapReduceDocument<TState>(entry.DocumentId, shardId, liveDoc));
             }
         }
 
-        var activeDocs = orchestrator.GetActiveDocuments();
-        for (int i = 0; i < activeDocs.Count; i++)
+        if (concreteOrchestrator is not null)
         {
-            var activeDoc = activeDocs[i];
-            if (!string.Equals(activeDoc.TypeAlias, documentTypeAlias, StringComparison.Ordinal))
+            foreach (var activeDoc in concreteOrchestrator.EnumerateActiveDocuments())
             {
-                continue;
-            }
+                if (!string.Equals(activeDoc.TypeAlias, documentTypeAlias, StringComparison.Ordinal))
+                {
+                    continue;
+                }
 
-            if (!seenDocIds.Add(activeDoc.DocumentId))
-            {
-                continue;
-            }
+                if (!seenDocIds.Add(activeDoc.DocumentId))
+                {
+                    continue;
+                }
 
-            if (targetShardSet is null || targetShardSet.Contains(activeDoc.ShardId))
+                if (targetShardSet is null || targetShardSet.Contains(activeDoc.ShardId))
+                {
+                    candidates.Add(new CandidateMapReduceDocument<TState>(
+                        activeDoc.DocumentId,
+                        activeDoc.ShardId,
+                        activeDoc as IDistributedCrdtDocument<TState>));
+                }
+            }
+        }
+        else
+        {
+            var activeDocs = orchestrator.GetActiveDocuments();
+            for (int i = 0; i < activeDocs.Count; i++)
             {
-                candidates.Add(new CandidateMapReduceDocument(activeDoc.DocumentId, activeDoc.ShardId));
+                var activeDoc = activeDocs[i];
+                if (!string.Equals(activeDoc.TypeAlias, documentTypeAlias, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (!seenDocIds.Add(activeDoc.DocumentId))
+                {
+                    continue;
+                }
+
+                if (targetShardSet is null || targetShardSet.Contains(activeDoc.ShardId))
+                {
+                    candidates.Add(new CandidateMapReduceDocument<TState>(
+                        activeDoc.DocumentId,
+                        activeDoc.ShardId,
+                        activeDoc as IDistributedCrdtDocument<TState>));
+                }
             }
         }
 
@@ -808,14 +937,14 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
     private static bool TryAssignFallbackReplica(
         string docId,
         string localReplicaId,
-        Dictionary<string, List<string>> docCandidateReplicas,
+        Dictionary<string, IReadOnlyList<string>>? docCandidateReplicas,
         HashSet<string> triedReplicas,
         IClusterStateTracker clusterStateTracker,
         out string? fallbackReplica)
     {
         fallbackReplica = null;
 
-        if (docCandidateReplicas.TryGetValue(docId, out var candidates))
+        if (docCandidateReplicas is not null && docCandidateReplicas.TryGetValue(docId, out var candidates))
         {
             for (var i = 0; i < candidates.Count; i++)
             {

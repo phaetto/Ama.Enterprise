@@ -1,6 +1,7 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
@@ -102,10 +103,16 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
                 return cachedAllReplicas;
             }
 
-            if (ringKeys.Length == 0)
+            if (ringKeys.Length == 0 || cachedAllReplicas.Count <= 1)
             {
-                return [localReplicaId];
+                return cachedAllReplicas;
             }
+
+            if (replicationFactor >= cachedAllReplicas.Count && cachedAllReplicas.Count == 1)
+            {
+                return cachedAllReplicas;
+            }
+
             currentKeys = ringKeys;
             currentValues = ringValues;
         }
@@ -262,8 +269,25 @@ public sealed class ConsistentHashShardDistributionManager : IShardDistributionM
 
     private static uint ComputeHash(string input)
     {
-        var bytes = Encoding.UTF8.GetBytes(input);
-        var hashBytes = SHA256.HashData(bytes);
-        return BitConverter.ToUInt32(hashBytes, 0);
+        var maxByteCount = Encoding.UTF8.GetMaxByteCount(input.Length);
+        byte[]? rentedBytes = null;
+        Span<byte> utf8Bytes = maxByteCount <= 256
+            ? stackalloc byte[maxByteCount]
+            : (rentedBytes = ArrayPool<byte>.Shared.Rent(maxByteCount));
+
+        try
+        {
+            var bytesWritten = Encoding.UTF8.GetBytes(input.AsSpan(), utf8Bytes);
+            Span<byte> hashBytes = stackalloc byte[32];
+            SHA256.HashData(utf8Bytes[..bytesWritten], hashBytes);
+            return BitConverter.ToUInt32(hashBytes);
+        }
+        finally
+        {
+            if (rentedBytes is not null)
+            {
+                ArrayPool<byte>.Shared.Return(rentedBytes);
+            }
+        }
     }
 }

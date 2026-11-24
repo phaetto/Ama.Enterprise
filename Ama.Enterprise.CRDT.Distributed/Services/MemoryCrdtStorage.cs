@@ -52,13 +52,13 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
                 var shardId = op.ShardId ?? "";
                 if (!shardedOperations.TryGetValue(shardId, out var shardList))
                 {
-                    shardList = new List<JournaledOperation>();
+                    shardList = new List<JournaledOperation>(2);
                     shardedOperations[shardId] = shardList;
                 }
 
                 if (!shardedOperationIds.TryGetValue(shardId, out var shardOpIds))
                 {
-                    shardOpIds = new HashSet<Guid>();
+                    shardOpIds = new HashSet<Guid>(2);
                     shardedOperationIds[shardId] = shardOpIds;
                 }
 
@@ -95,13 +95,13 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
                 var shardId = jOp.Operation.ShardId ?? "";
                 if (!shardedOperations.TryGetValue(shardId, out var shardList))
                 {
-                    shardList = new List<JournaledOperation>();
+                    shardList = new List<JournaledOperation>(2);
                     shardedOperations[shardId] = shardList;
                 }
 
                 if (!shardedOperationIds.TryGetValue(shardId, out var shardOpIds))
                 {
-                    shardOpIds = new HashSet<Guid>();
+                    shardOpIds = new HashSet<Guid>(2);
                     shardedOperationIds[shardId] = shardOpIds;
                 }
 

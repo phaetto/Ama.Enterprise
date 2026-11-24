@@ -270,6 +270,41 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         return null;
     }
 
+    /// <summary>
+    /// Fast-path lookup for a locally loaded document using a pre-resolved type alias and document identifier without redundant string pooling or linear fallback scans.
+    /// </summary>
+    internal IDistributedCrdtDocument<TState>? TryGetLocalDocumentFast<TState>(string documentId, string? resolvedTypeAlias) where TState : class, new()
+    {
+        if (Registry != null && string.Equals(Registry.DocumentId, documentId, StringComparison.Ordinal) && Registry is IDistributedCrdtDocument<TState> registryTyped)
+        {
+            return registryTyped;
+        }
+
+        if (!string.IsNullOrEmpty(resolvedTypeAlias))
+        {
+            var compositeKey = CrdtRegistryEntry.GetRegistryKey(resolvedTypeAlias, documentId);
+            if (activeDocuments.TryGetValue(compositeKey, out var docByComposite) && docByComposite is IDistributedCrdtDocument<TState> typedByComposite)
+            {
+                return typedByComposite;
+            }
+        }
+
+        if (activeDocuments.TryGetValue(documentId, out var doc) && doc is IDistributedCrdtDocument<TState> typedDoc)
+        {
+            return typedDoc;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Enumerates active in-memory documents without allocating a snapshot list.
+    /// </summary>
+    internal IEnumerable<IDistributedCrdtDocument> EnumerateActiveDocuments()
+    {
+        return activeDocuments.Values;
+    }
+
     /// <inheritdoc />
     public ValueTask<bool> DocumentExistsAsync(string documentId, CancellationToken cancellationToken = default)
     {
@@ -401,13 +436,15 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             return new ValueTask<string?>(activeDoc.ShardId);
         }
 
-        foreach (var doc in activeDocuments.Values)
+        if (string.IsNullOrWhiteSpace(typeAlias))
         {
-            if (string.Equals(doc.DocumentId, documentId, StringComparison.Ordinal) &&
-                (string.IsNullOrWhiteSpace(typeAlias) || string.Equals(doc.TypeAlias, typeAlias, StringComparison.Ordinal)))
+            foreach (var doc in activeDocuments.Values)
             {
-                shardIdCache.TryAdd(cacheKey, doc.ShardId);
-                return new ValueTask<string?>(doc.ShardId);
+                if (string.Equals(doc.DocumentId, documentId, StringComparison.Ordinal))
+                {
+                    shardIdCache.TryAdd(cacheKey, doc.ShardId);
+                    return new ValueTask<string?>(doc.ShardId);
+                }
             }
         }
 
@@ -484,16 +521,27 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         if (Registry != null)
         {
             var registryDoc = Registry.CurrentDocument;
-            if (TryFindRegistryEntry(registryDoc.Data.Documents, documentId, resolvedAlias, out var entry) && entry != null)
+            if (string.IsNullOrWhiteSpace(resolvedAlias))
             {
-                if (entry.IsDeleted)
+                if (TryFindRegistryEntry(registryDoc.Data.Documents, documentId, null, out var entry) && entry != null)
+                {
+                    if (entry.IsDeleted)
+                    {
+                        return null;
+                    }
+
+                    resolvedAlias = entry.TypeAlias;
+                }
+            }
+            else
+            {
+                var compositeLookupKey = CrdtRegistryEntry.GetRegistryKey(resolvedAlias, documentId);
+                if ((registryDoc.Data.Documents.TryGetValue(compositeLookupKey, out var entry) ||
+                     (registryDoc.Data.Documents.TryGetValue(documentId, out entry) &&
+                      string.Equals(entry?.TypeAlias, resolvedAlias, StringComparison.Ordinal))) &&
+                    entry is { IsDeleted: true })
                 {
                     return null;
-                }
-
-                if (string.IsNullOrWhiteSpace(resolvedAlias))
-                {
-                    resolvedAlias = entry.TypeAlias;
                 }
             }
         }
@@ -1298,6 +1346,21 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
             versionVectorManager.EnsureShardRegistered(registry.ShardId);
 
+            var demotedDocs = new List<IDistributedCrdtDocument>();
+            var shardLocalityCache = new Dictionary<string, bool>(StringComparer.Ordinal);
+
+            async ValueTask<bool> IsShardLocalCachedAsync(string targetShardId)
+            {
+                if (shardLocalityCache.TryGetValue(targetShardId, out var isLocal))
+                {
+                    return isLocal;
+                }
+
+                isLocal = await distributionManager.IsShardLocalAsync(targetShardId, cancellationToken).ConfigureAwait(false);
+                shardLocalityCache[targetShardId] = isLocal;
+                return isLocal;
+            }
+
             foreach (var kvp in registryMap)
             {
                 var entry = kvp.Value;
@@ -1316,7 +1379,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                                 shardIdCache.TryAdd(compositeKey, shardId);
                             }
 
-                            if (await distributionManager.IsShardLocalAsync(shardId, cancellationToken).ConfigureAwait(false))
+                            if (await IsShardLocalCachedAsync(shardId).ConfigureAwait(false))
                             {
                                 var doc = factory.CreateDocument(serviceProvider, entry.DocumentId);
                                 await doc.InitializeAsync(cancellationToken).ConfigureAwait(false);
@@ -1346,12 +1409,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                     }
                     else if (activeDocuments.TryGetValue(compositeKey, out var activeDoc))
                     {
-                        if (!await distributionManager.IsShardLocalAsync(activeDoc.ShardId, cancellationToken).ConfigureAwait(false))
+                        if (!await IsShardLocalCachedAsync(activeDoc.ShardId).ConfigureAwait(false))
                         {
-                            if (activeDocuments.TryRemove(compositeKey, out _))
+                            if (activeDocuments.TryRemove(compositeKey, out var removedDoc))
                             {
-                                await DemoteActiveDocumentSafelyAsync(activeDoc, cancellationToken).ConfigureAwait(false);
-
+                                demotedDocs.Add(removedDoc);
                                 changed = true;
                                 logger.LogDebug("Removed CRDT document footprint: {DocumentId} ({TypeAlias})", entry.DocumentId, entry.TypeAlias);
                             }
@@ -1372,7 +1434,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                         toDelete.Add(active.Key);
                     }
                 }
-                else if (!await distributionManager.IsShardLocalAsync(active.Value.ShardId, cancellationToken).ConfigureAwait(false))
+                else if (!await IsShardLocalCachedAsync(active.Value.ShardId).ConfigureAwait(false))
                 {
                     toDemote.Add(active.Key);
                 }
@@ -1382,11 +1444,15 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             {
                 if (activeDocuments.TryRemove(compositeKey, out var doc))
                 {
-                    await DemoteActiveDocumentSafelyAsync(doc, cancellationToken).ConfigureAwait(false);
-
+                    demotedDocs.Add(doc);
                     changed = true;
                     logger.LogDebug("Removed CRDT document footprint: {DocumentId} ({TypeAlias})", doc.DocumentId, doc.TypeAlias);
                 }
+            }
+
+            if (demotedDocs.Count > 0)
+            {
+                await DemoteActiveDocumentsSafelyAsync(demotedDocs, cancellationToken).ConfigureAwait(false);
             }
 
             foreach (var compositeKey in toDelete)
@@ -1420,11 +1486,6 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                                 break;
                             }
                         }
-                    }
-
-                    if (!shardStillInUse)
-                    {
-                        versionVectorManager.RemoveShard(shardId);
                     }
 
                     changed = true;
@@ -1604,7 +1665,59 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         return stateTypeAliases.TryGetValue(typeof(TState), out var alias) ? alias : null;
     }
 
-    private async Task DemoteActiveDocumentSafelyAsync(IDistributedCrdtDocument doc, CancellationToken cancellationToken)
+    private async Task DemoteActiveDocumentsSafelyAsync(IReadOnlyList<IDistributedCrdtDocument> docs, CancellationToken cancellationToken)
+    {
+        if (docs.Count == 1)
+        {
+            await DemoteSingleDocumentCoreAsync(docs[0], cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            var tasks = new Task[docs.Count];
+            for (int i = 0; i < docs.Count; i++)
+            {
+                tasks[i] = DemoteSingleDocumentCoreAsync(docs[i], cancellationToken);
+            }
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+
+        var activeShards = new HashSet<string>(StringComparer.Ordinal);
+        if (Registry != null)
+        {
+            activeShards.Add(Registry.ShardId);
+        }
+
+        foreach (var remainingDoc in activeDocuments.Values)
+        {
+            activeShards.Add(remainingDoc.ShardId);
+        }
+
+        var versionVectorManager = serviceProvider.GetService<IShardVersionVectorManager>();
+        var checkedShards = new HashSet<string>(StringComparer.Ordinal);
+
+        for (int i = 0; i < docs.Count; i++)
+        {
+            var doc = docs[i];
+            if (versionVectorManager != null && checkedShards.Add(doc.ShardId) && !activeShards.Contains(doc.ShardId))
+            {
+                versionVectorManager.RemoveShard(doc.ShardId);
+            }
+
+            try
+            {
+                if (doc is IDisposable d)
+                {
+                    d.Dispose();
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+    }
+
+    private async Task DemoteSingleDocumentCoreAsync(IDistributedCrdtDocument doc, CancellationToken cancellationToken)
     {
         try
         {
@@ -1625,16 +1738,5 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
 
         await remoteProxyClient.PushDemotedDocumentSnapshotToTargetPeersAsync(doc, CancellationToken.None).ConfigureAwait(false);
-
-        try
-        {
-            if (doc is IDisposable d)
-            {
-                d.Dispose();
-            }
-        }
-        catch (ObjectDisposedException)
-        {
-        }
     }
 }

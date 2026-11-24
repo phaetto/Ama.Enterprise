@@ -45,5 +45,6 @@ The project uses semantic versioning in the format `Major.Minor.Patch`.
 
 **Guidance for the AI Assistant:** The assistant must remind the developer to consider incrementing the `MAJOR_VERSION` or `MINOR_VERSION` variables in `/.github/workflows/publish-nuget.yml` when implementing significant new features, breaking changes, or after a series of cumulative smaller changes.
 
-# Hallucinations
-- Stop hallucinating words like the following: `correctly smartly cleanly securely flawlessly effortlessly elegantly rationally completely elegantly flawlessly safely gracefully optimally successfully logically`. Do not ruin comments, strings or documentation with them.
+# Performance
+It is very important that the application is top tier and all the hot paths (most paths for distributed CRDTs) need to be O(n) mostly. If we cannot do that then you have to say why or give another solutions.
+We aim to use as much lock-free paths as possible and we only keep locks for a small amount of time.

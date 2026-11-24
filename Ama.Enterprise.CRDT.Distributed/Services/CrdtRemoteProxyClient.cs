@@ -451,7 +451,8 @@ public sealed class CrdtRemoteProxyClient : ICrdtRemoteProxyClient
             }
 
             var wireScopeId = GetWireScopeId();
-            CrdtSnapshotDataDto? snapshotResult = null;
+            byte[]? finalBytes = null;
+            List<Task>? sendTasks = null;
 
             for (int i = 0; i < targetNodes.Count; i++)
             {
@@ -467,21 +468,28 @@ public sealed class CrdtRemoteProxyClient : ICrdtRemoteProxyClient
                     continue;
                 }
 
-                snapshotResult ??= await document.GetSnapshotDataAsync(cancellationToken).ConfigureAwait(false);
-                var snapshot = snapshotResult.Value;
+                if (finalBytes == null)
+                {
+                    var snapshot = await document.GetSnapshotDataAsync(cancellationToken).ConfigureAwait(false);
+                    var resMsg = new CrdtSnapshotMessage(replicaContext.ReplicaId, snapshot.SnapshotData, snapshot.GlobalState);
+                    var payload = serializer.SerializeToBytes(resMsg);
+                    var wrapper = new CrdtMessageWrapper(
+                        document.DocumentId,
+                        "CrdtSnapshot",
+                        payload,
+                        replicaContext.ReplicaId,
+                        document.TypeAlias,
+                        wireScopeId);
+                    finalBytes = serializer.SerializeToBytes(wrapper);
+                }
 
-                var resMsg = new CrdtSnapshotMessage(replicaContext.ReplicaId, snapshot.SnapshotData, snapshot.GlobalState);
-                var payload = serializer.SerializeToBytes(resMsg);
-                var wrapper = new CrdtMessageWrapper(
-                    document.DocumentId,
-                    "CrdtSnapshot",
-                    payload,
-                    replicaContext.ReplicaId,
-                    document.TypeAlias,
-                    wireScopeId);
-                var finalBytes = serializer.SerializeToBytes(wrapper);
+                sendTasks ??= new List<Task>(targetNodes.Count);
+                sendTasks.Add(directSender.SendDirectAsync(new PeerId(peerGuid), finalBytes, cancellationToken));
+            }
 
-                await directSender.SendDirectAsync(new PeerId(peerGuid), finalBytes, cancellationToken).ConfigureAwait(false);
+            if (sendTasks != null)
+            {
+                await Task.WhenAll(sendTasks).ConfigureAwait(false);
             }
         }
         catch (Exception ex)

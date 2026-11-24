@@ -149,6 +149,21 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             return;
         }
 
+        if (wrapper.MessageType == "CrdtPatch" && senderId.Value != Guid.Empty && !string.IsNullOrWhiteSpace(wrapper.SenderReplicaId))
+        {
+            var replicaContext = scope.ServiceProvider.GetRequiredService<ReplicaContext>();
+            if (!string.Equals(wrapper.SenderReplicaId, replicaContext.ReplicaId, StringComparison.Ordinal) &&
+                !scope.ClusterTracker.IsReplicaTombstoned(wrapper.SenderReplicaId))
+            {
+                var senderIdStr = senderId.Value.ToString();
+                if (string.IsNullOrWhiteSpace(scope.ClusterTracker.GetReplicaIdByPeerId(senderIdStr)) &&
+                    string.IsNullOrWhiteSpace(scope.ClusterTracker.GetPeerIdByReplicaId(wrapper.SenderReplicaId)))
+                {
+                    scope.ClusterTracker.UpdatePeerState(wrapper.SenderReplicaId, senderIdStr, new ShardVersionVectorMap());
+                }
+            }
+        }
+
         var targetDoc = string.IsNullOrWhiteSpace(wrapper.DocumentId)
             ? null
             : await scope.Orchestrator.ResolveOrPromoteLocalDocumentAsync(wrapper.DocumentId, wrapper.DocumentTypeAlias, cancellationToken).ConfigureAwait(false);
@@ -157,7 +172,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
         {
             if (wrapper.MessageType == "CrdtSnapshot")
             {
-                await RecordSkippedOrBufferedSnapshotAsync(scope, wrapper, senderId, cancellationToken).ConfigureAwait(false);
+                await RecordSkippedOrBufferedSnapshotAsync(scope, meshId, wrapper, senderId, cancellationToken).ConfigureAwait(false);
             }
             return;
         }
@@ -536,7 +551,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
         return nodeOptions != null && nodeOptions.LocalPeerId != Guid.Empty && nodeOptions.LocalPeerId == senderId.Value;
     }
 
-    private async Task RecordSkippedOrBufferedSnapshotAsync(IDistributedCrdtScope scope, CrdtMessageWrapper wrapper, PeerId senderId, CancellationToken cancellationToken)
+    private async Task RecordSkippedOrBufferedSnapshotAsync(IDistributedCrdtScope scope, string meshId, CrdtMessageWrapper wrapper, PeerId senderId, CancellationToken cancellationToken)
     {
         try
         {
@@ -562,23 +577,41 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
                 scope.ClusterTracker.UpdatePeerState(resMsg.ReplicaId, senderId.Value.ToString(), resMsg.GlobalState);
             }
 
+            var distributionManager = scope.ServiceProvider.GetRequiredService<IShardDistributionManager>();
+            var resolvedShardId = await scope.Orchestrator.TryGetShardIdAsync(wrapper.DocumentId, wrapper.DocumentTypeAlias, cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(resolvedShardId) && !string.IsNullOrWhiteSpace(wrapper.DocumentTypeAlias))
+            {
+                var factory = scope.ServiceProvider.GetKeyedService<IDocumentFactory>(wrapper.DocumentTypeAlias);
+                if (factory != null)
+                {
+                    resolvedShardId = factory.GetShardId(scope.ServiceProvider, wrapper.DocumentId);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(resolvedShardId) &&
+                !await distributionManager.IsShardLocalAsync(resolvedShardId, cancellationToken).ConfigureAwait(false))
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(wrapper.DocumentTypeAlias))
+            {
+                var promotedDoc = await scope.Orchestrator.ResolveOrPromoteLocalDocumentAsync(wrapper.DocumentId, wrapper.DocumentTypeAlias, cancellationToken).ConfigureAwait(false);
+                if (promotedDoc != null)
+                {
+                    await ProcessSnapshotAsync(scope, promotedDoc, meshId, wrapper, senderId, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+            }
+
             var compositeDocId = string.IsNullOrWhiteSpace(wrapper.DocumentTypeAlias) ||
                                  string.Equals(wrapper.DocumentId, Constants.SystemRegistryDocumentId, StringComparison.Ordinal)
                 ? wrapper.DocumentId
                 : CrdtRegistryEntry.GetRegistryKey(wrapper.DocumentTypeAlias, wrapper.DocumentId);
 
-            if (resMsg.SnapshotData is { Length: > 0 } && !string.IsNullOrWhiteSpace(wrapper.DocumentTypeAlias))
+            if (resMsg.SnapshotData is { Length: > 0 } && !string.IsNullOrWhiteSpace(resolvedShardId))
             {
-                var factory = scope.ServiceProvider.GetKeyedService<IDocumentFactory>(wrapper.DocumentTypeAlias);
-                if (factory != null)
-                {
-                    var shardId = await scope.Orchestrator.TryGetShardIdAsync(wrapper.DocumentId, wrapper.DocumentTypeAlias, cancellationToken).ConfigureAwait(false)
-                                  ?? factory.GetShardId(scope.ServiceProvider, wrapper.DocumentId);
-                    if (!string.IsNullOrWhiteSpace(shardId))
-                    {
-                        await scope.Storage.SaveSerializedDocumentAsync<object>(shardId, compositeDocId, resMsg.SnapshotData, cancellationToken).ConfigureAwait(false);
-                    }
-                }
+                await scope.Storage.SaveSerializedDocumentAsync<object>(resolvedShardId, compositeDocId, resMsg.SnapshotData, cancellationToken).ConfigureAwait(false);
             }
 
             var expectedShardDocIds = resMsg.ShardDocumentIds as IReadOnlyList<string>
@@ -587,7 +620,10 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             var versionVectorManager = scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
             foreach (var shardId in resMsg.GlobalState.Keys)
             {
-                versionVectorManager.RecordDocumentSnapshotMerge(shardId, compositeDocId, resMsg.GlobalState, expectedShardDocIds);
+                if (await distributionManager.IsShardLocalAsync(shardId, cancellationToken).ConfigureAwait(false))
+                {
+                    versionVectorManager.RecordDocumentSnapshotMerge(shardId, compositeDocId, resMsg.GlobalState, expectedShardDocIds);
+                }
             }
         }
         catch (Exception ex)

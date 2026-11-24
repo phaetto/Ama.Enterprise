@@ -524,9 +524,12 @@ public sealed class CrdtAntiEntropyCoordinator : ICrdtAntiEntropyCoordinator
             var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
 
             HashSet<string> localShards;
+            var isPartialSelection = false;
             if (allowedShards != null)
             {
                 localShards = new HashSet<string>(allowedShards, StringComparer.Ordinal);
+                var allLocalShards = await GetLocalAntiEntropyShardsAsync(orchestrator, versionVectorManager, cancellationToken).ConfigureAwait(false);
+                isPartialSelection = localShards.Count < allLocalShards.Count;
             }
             else
             {
@@ -535,7 +538,11 @@ public sealed class CrdtAntiEntropyCoordinator : ICrdtAntiEntropyCoordinator
 
             var globalState = await versionVectorManager.GetShardsSnapshotAsync(localShards, cancellationToken).ConfigureAwait(false);
 
-            var syncMsg = new CrdtStateSyncMessage(replicaContext.ReplicaId, globalState, IsTopologyAnnouncementOnly: false);
+            var syncMsg = new CrdtStateSyncMessage(
+                replicaContext.ReplicaId,
+                globalState,
+                IsTopologyAnnouncementOnly: false,
+                IsPartialShardSelection: isPartialSelection);
             var payload = serializer.SerializeToBytes(syncMsg);
 
             var wrapper = new CrdtMessageWrapper(

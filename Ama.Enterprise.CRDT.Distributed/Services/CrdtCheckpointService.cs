@@ -24,8 +24,8 @@ public sealed class CrdtCheckpointService : BackgroundService
     private readonly Meter meter;
     private readonly Counter<long> checkpointCyclesCounter;
 
-    private readonly Dictionary<string, ShardVersionVectorMap> lastKnownMapCache = new();
-    private readonly Dictionary<string, ClusterStateSnapshotDto> lastKnownClusterStateCache = new();
+    private readonly Dictionary<string, int> lastKnownMapDigestCache = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> lastKnownClusterStateDigestCache = new(StringComparer.Ordinal);
 
     public CrdtCheckpointService(
         DistributedCrdtScopeManager scopeManager,
@@ -67,6 +67,9 @@ public sealed class CrdtCheckpointService : BackgroundService
             {
                 try
                 {
+                    var isMemoryStorage = scope.Storage is MemoryCrdtStorage
+                        || (scope.Storage is BufferedDistributedCrdtStorageDecorator decorator && decorator.InnerStorage is MemoryCrdtStorage);
+
                     var versionVectorManager = scope.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
                     var orchestrator = scope.Orchestrator;
                     var documents = orchestrator.GetActiveDocuments();
@@ -74,28 +77,39 @@ public sealed class CrdtCheckpointService : BackgroundService
                     var tag = new KeyValuePair<string, object?>("replica_id", scope.ReplicaId);
                     checkpointCyclesCounter.Add(1, tag);
 
+                    foreach (var document in documents)
+                    {
+                        await document.CheckpointAsync(stoppingToken).ConfigureAwait(false);
+                    }
+
+                    // Ephemeral MemoryCrdtStorage lives inside the same RAM space as ShardVersionVectorManager and ClusterStateTracker.
+                    // Deep-cloning 100K+ ShardVersionVectors and ClusterState snapshots every few seconds into MemoryCrdtStorage
+                    // and local cache dictionaries only duplicates the entire version vector heap in memory with zero durability benefit.
+                    if (isMemoryStorage)
+                    {
+                        continue;
+                    }
+
                     var safelyPersistedMap = versionVectorManager.GetFullSnapshot();
                     var exportedClusterState = scope.ClusterTracker.ExportState();
+
+                    var mapDigest = ComputeMapDigest(safelyPersistedMap);
+                    var clusterDigest = ComputeClusterStateDigest(exportedClusterState);
 
                     var dvvChanged = true;
                     var clusterStateChanged = true;
 
                     if (avoidBlindWrites)
                     {
-                        if (lastKnownMapCache.TryGetValue(scope.ReplicaId, out var cachedMap))
+                        if (lastKnownMapDigestCache.TryGetValue(scope.ReplicaId, out var cachedMapDigest))
                         {
-                            dvvChanged = !AreMapsEqual(cachedMap, safelyPersistedMap);
+                            dvvChanged = cachedMapDigest != mapDigest;
                         }
 
-                        if (lastKnownClusterStateCache.TryGetValue(scope.ReplicaId, out var cachedState))
+                        if (lastKnownClusterStateDigestCache.TryGetValue(scope.ReplicaId, out var cachedStateDigest))
                         {
-                            clusterStateChanged = !cachedState.Equals(exportedClusterState);
+                            clusterStateChanged = cachedStateDigest != clusterDigest;
                         }
-                    }
-
-                    foreach (var document in documents)
-                    {
-                        await document.CheckpointAsync(stoppingToken).ConfigureAwait(false);
                     }
 
                     if (dvvChanged || !avoidBlindWrites)
@@ -103,7 +117,7 @@ public sealed class CrdtCheckpointService : BackgroundService
                         await scope.Storage.SaveShardVersionVectorMapAsync(scope.ReplicaId, safelyPersistedMap, stoppingToken).ConfigureAwait(false);
                         if (avoidBlindWrites)
                         {
-                            lastKnownMapCache[scope.ReplicaId] = safelyPersistedMap;
+                            lastKnownMapDigestCache[scope.ReplicaId] = mapDigest;
                         }
                     }
 
@@ -112,7 +126,7 @@ public sealed class CrdtCheckpointService : BackgroundService
                         await scope.Storage.SaveClusterStateAsync(scope.ReplicaId, exportedClusterState, stoppingToken).ConfigureAwait(false);
                         if (avoidBlindWrites)
                         {
-                            lastKnownClusterStateCache[scope.ReplicaId] = exportedClusterState;
+                            lastKnownClusterStateDigestCache[scope.ReplicaId] = clusterDigest;
                         }
                     }
                 }
@@ -130,45 +144,68 @@ public sealed class CrdtCheckpointService : BackgroundService
         base.Dispose();
     }
 
-    private static bool AreMapsEqual(ShardVersionVectorMap? a, ShardVersionVectorMap? b)
+    private static int ComputeMapDigest(ShardVersionVectorMap? map)
     {
-        if (ReferenceEquals(a, b)) return true;
-        if (a is null || b is null) return false;
-
-        if (a.Count != b.Count) return false;
-
-        foreach (var kvp in a)
+        if (map is null)
         {
-            if (!b.TryGetValue(kvp.Key, out var bDvv)) return false;
-            
-            var aDvv = kvp.Value;
-            if (aDvv.Versions.Count != bDvv.Versions.Count) return false;
-            
-            foreach (var vKvp in aDvv.Versions)
-            {
-                if (!bDvv.Versions.TryGetValue(vKvp.Key, out var bVal) || vKvp.Value != bVal)
-                {
-                    return false;
-                }
-            }
-
-            if (aDvv.Dots is null && bDvv.Dots is null) continue;
-            if (aDvv.Dots is null || bDvv.Dots is null) return false;
-
-            if (aDvv.Dots.Count != bDvv.Dots.Count) return false;
-            
-            foreach (var dKvp in aDvv.Dots)
-            {
-                if (!bDvv.Dots.TryGetValue(dKvp.Key, out var bSet)) return false;
-                if (dKvp.Value.Count != bSet.Count) return false;
-                
-                foreach (var dot in dKvp.Value)
-                {
-                    if (!bSet.Contains(dot)) return false;
-                }
-            }
+            return 0;
         }
 
-        return true;
+        int hash = map.Count * 397;
+        foreach (var kvp in map)
+        {
+            int shardHash = StringComparer.Ordinal.GetHashCode(kvp.Key);
+            var dvv = kvp.Value;
+            if (dvv.Versions != null)
+            {
+                shardHash ^= dvv.Versions.Count * 17;
+                foreach (var vKvp in dvv.Versions)
+                {
+                    shardHash ^= HashCode.Combine(StringComparer.Ordinal.GetHashCode(vKvp.Key), vKvp.Value);
+                }
+            }
+
+            if (dvv.Dots != null)
+            {
+                shardHash ^= dvv.Dots.Count * 31;
+                foreach (var dKvp in dvv.Dots)
+                {
+                    int dotHash = StringComparer.Ordinal.GetHashCode(dKvp.Key) ^ (dKvp.Value.Count * 13);
+                    foreach (var dot in dKvp.Value)
+                    {
+                        dotHash ^= dot.GetHashCode();
+                    }
+                    shardHash ^= dotHash;
+                }
+            }
+
+            hash ^= shardHash;
+        }
+
+        return hash;
+    }
+
+    private static int ComputeClusterStateDigest(ClusterStateSnapshotDto? state)
+    {
+        if (state is null)
+        {
+            return 0;
+        }
+
+        int hash = (state.TombstonedReplicas.Count * 397) ^ state.PeerStates.Count;
+        foreach (var tKvp in state.TombstonedReplicas)
+        {
+            hash ^= HashCode.Combine(StringComparer.Ordinal.GetHashCode(tKvp.Key), tKvp.Value);
+        }
+
+        foreach (var pKvp in state.PeerStates)
+        {
+            hash ^= HashCode.Combine(
+                StringComparer.Ordinal.GetHashCode(pKvp.Key),
+                pKvp.Value.LastSeen,
+                ComputeMapDigest(pKvp.Value.State));
+        }
+
+        return hash;
     }
 }

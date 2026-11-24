@@ -453,7 +453,7 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
 
             // If we hit the hard threshold and lagging peers prevented GMVV from freeing sufficient journal space,
             // fall back to trimming up to the local checkpointed version vector to protect node memory/storage bounds.
-            if (isHardEmergency && shardJournalCount >= hardThreshold)
+            if (isHardEmergency && shardJournalCount > 0)
             {
                 await this.storage.TrimAsync(shardKvp.Key, shardKvp.Value.Versions.AsReadOnly(), cancellationToken).ConfigureAwait(false);
                 shardJournalCount = await this.storage.GetJournalCountAsync(shardKvp.Key, cancellationToken).ConfigureAwait(false);

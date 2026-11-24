@@ -102,23 +102,29 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
                 topologyChanged = true;
             }
 
-            var mergedState = CloneShardVersionVectorMap(globalState);
+            ShardVersionVectorMap targetState;
             if (peerStates.TryGetValue(peerReplicaId, out var existingEntry))
             {
-                foreach (var existingShardKvp in existingEntry.State)
+                targetState = existingEntry.State;
+                foreach (var incomingShardKvp in globalState)
                 {
-                    if (!mergedState.TryGetValue(existingShardKvp.Key, out var incomingDvv))
+                    var pooledShardKey = stringPool.GetOrAdd(incomingShardKvp.Key);
+                    if (targetState.TryGetValue(pooledShardKey, out var existingDvv))
                     {
-                        mergedState[existingShardKvp.Key] = CloneDvv(existingShardKvp.Value);
+                        existingDvv.Merge(incomingShardKvp.Value);
                     }
                     else
                     {
-                        incomingDvv.Merge(existingShardKvp.Value);
+                        targetState[pooledShardKey] = CloneDvv(incomingShardKvp.Value);
                     }
                 }
             }
+            else
+            {
+                targetState = CloneShardVersionVectorMap(globalState);
+            }
 
-            peerStates[peerReplicaId] = new PeerStateEntry(mergedState, DateTime.UtcNow);
+            peerStates[peerReplicaId] = new PeerStateEntry(targetState, DateTime.UtcNow);
             networkIdToReplicaId[peerId] = peerReplicaId;
         }
 
@@ -375,11 +381,7 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
                 foreach (var shardKvp in kvp.Value.State)
                 {
                     var pooledShardKey = stringPool.GetOrAdd(shardKvp.Key);
-                    var safeStateVersions = shardKvp.Value.Versions.ToDictionary(v => stringPool.GetOrAdd(v.Key), v => v.Value, StringComparer.Ordinal);
-                    var safeStateDots = shardKvp.Value.Dots?.ToDictionary(d => stringPool.GetOrAdd(d.Key), d => (ISet<long>)new HashSet<long>(d.Value), StringComparer.Ordinal) 
-                                        ?? new Dictionary<string, ISet<long>>(StringComparer.Ordinal);
-
-                    safeMap[pooledShardKey] = new DottedVersionVector(safeStateVersions, safeStateDots);
+                    safeMap[pooledShardKey] = CloneDvv(shardKvp.Value);
                 }
 
                 dto.PeerStates[stringPool.GetOrAdd(kvp.Key)] = new ClusterPeerStateDto
@@ -424,10 +426,7 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
                 foreach (var shardKvp in kvp.Value.State)
                 {
                     var pooledShardKey = stringPool.GetOrAdd(shardKvp.Key);
-                    var safeStateVersions = shardKvp.Value.Versions.ToDictionary(v => stringPool.GetOrAdd(v.Key), v => v.Value, StringComparer.Ordinal);
-                    var safeStateDots = shardKvp.Value.Dots?.ToDictionary(d => stringPool.GetOrAdd(d.Key), d => (ISet<long>)new HashSet<long>(d.Value), StringComparer.Ordinal);
-
-                    safeMap[pooledShardKey] = new DottedVersionVector(safeStateVersions, safeStateDots);
+                    safeMap[pooledShardKey] = CloneDvv(shardKvp.Value);
                 }
 
                 peerStates[stringPool.GetOrAdd(kvp.Key)] = new PeerStateEntry(
@@ -476,12 +475,28 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
 
     private DottedVersionVector CloneDvv(DottedVersionVector dvv)
     {
-        var safeVersions = dvv.Versions != null
-            ? dvv.Versions.ToDictionary(v => stringPool.GetOrAdd(v.Key), v => v.Value, StringComparer.Ordinal)
-            : new Dictionary<string, long>(StringComparer.Ordinal);
-        var safeDots = dvv.Dots != null
-            ? dvv.Dots.ToDictionary(d => stringPool.GetOrAdd(d.Key), d => (ISet<long>)new HashSet<long>(d.Value), StringComparer.Ordinal)
-            : new Dictionary<string, ISet<long>>(StringComparer.Ordinal);
+        var versionsCount = dvv.Versions?.Count ?? 0;
+        var safeVersions = new Dictionary<string, long>(versionsCount, StringComparer.Ordinal);
+        if (versionsCount > 0)
+        {
+            foreach (var kvp in dvv.Versions!)
+            {
+                safeVersions[stringPool.GetOrAdd(kvp.Key)] = kvp.Value;
+            }
+        }
+
+        var dotsCount = dvv.Dots?.Count ?? 0;
+        var safeDots = new Dictionary<string, ISet<long>>(dotsCount, StringComparer.Ordinal);
+        if (dotsCount > 0)
+        {
+            foreach (var kvp in dvv.Dots!)
+            {
+                if (kvp.Value.Count > 0)
+                {
+                    safeDots[stringPool.GetOrAdd(kvp.Key)] = new HashSet<long>(kvp.Value);
+                }
+            }
+        }
 
         return new DottedVersionVector(safeVersions, safeDots);
     }

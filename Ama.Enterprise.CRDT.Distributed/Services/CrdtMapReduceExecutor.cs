@@ -78,6 +78,7 @@ internal sealed class CrdtMapReduceExecutor<TState, TInput, TAccumulate, TResult
             }
         }
 
+        var concreteOrchestrator = orchestrator as CrdtDocumentOrchestrator;
         var localAccumulators = new List<TAccumulate>(targetDocumentIds.Count);
         List<string>? missingDocumentIds = null;
         Dictionary<string, bool>? shardLocalityCache = null;
@@ -87,7 +88,9 @@ internal sealed class CrdtMapReduceExecutor<TState, TInput, TAccumulate, TResult
             var docId = targetDocumentIds[i];
 
             // 1. Check active in-memory documents directly without channel hops, or promote if this replica is a local owner
-            var liveDoc = orchestrator.TryGetLocalDocument<TState>(docId);
+            var liveDoc = concreteOrchestrator is not null
+                ? concreteOrchestrator.TryGetLocalDocumentFast<TState>(docId, resolvedTypeAlias)
+                : orchestrator.TryGetLocalDocument<TState>(docId);
             if (liveDoc is null)
             {
                 var promotedDoc = await orchestrator.ResolveOrPromoteLocalDocumentAsync(docId, resolvedTypeAlias, cancellationToken).ConfigureAwait(false);
