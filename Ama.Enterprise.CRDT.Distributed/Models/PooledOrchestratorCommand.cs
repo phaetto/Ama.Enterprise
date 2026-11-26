@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Threading.Tasks.Sources;
 using Ama.CRDT.Models;
+using Ama.Enterprise.CRDT.Distributed.Services;
 
 public enum OrchestratorCommandType
 {
@@ -30,6 +31,7 @@ internal sealed class PooledOrchestratorCommand : IValueTaskSource
         core.RunContinuationsAsynchronously = true;
     }
 
+    public IOrchestratorCommandTarget? Target { get; set; }
     public OrchestratorCommandType Type { get; set; }
     public string? DocumentId { get; set; }
     public string? TypeAlias { get; set; }
@@ -40,6 +42,7 @@ internal sealed class PooledOrchestratorCommand : IValueTaskSource
     public void Reset()
     {
         core.Reset();
+        Target = null;
         Type = default;
         DocumentId = null;
         TypeAlias = null;

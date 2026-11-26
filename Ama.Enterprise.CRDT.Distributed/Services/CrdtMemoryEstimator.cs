@@ -44,8 +44,8 @@ public sealed class CrdtMemoryEstimator : ICrdtMemoryEstimator
             dataAndMetaBytes = 32L + dataBytes + metadataBytes;
 
             long managerOverheadBytes = 256;
-            managerOverheadBytes += EstimateStringSize(documentId);
-            managerOverheadBytes += EstimateStringSize(shardId);
+            managerOverheadBytes += EstimateStringSize(documentId, visitedSet);
+            managerOverheadBytes += EstimateStringSize(shardId, visitedSet);
 
             if (debounceBufferCapacity >= 0)
             {
@@ -58,26 +58,52 @@ public sealed class CrdtMemoryEstimator : ICrdtMemoryEstimator
             visitedSet.TrimExcess(64);
         }
 
-        var shardDvvBytes = EstimateShardVersionVectorSize(globalState);
+        var shardDvvBytes = EstimateShardVersionVectorSize(globalState, shardId);
         return new DocumentMemoryFootprintDto(dataBytes, metadataBytes, dataAndMetaBytes, wholeObjectBytes, shardDvvBytes);
     }
 
-    private static long EstimateShardVersionVectorSize(ShardVersionVectorMap globalState)
+    private static long EstimateShardVersionVectorSize(ShardVersionVectorMap globalState, string shardId)
     {
         long size = 128;
         foreach (var kvp in globalState)
         {
-            size += 64 + EstimateStringSize(kvp.Key);
+            long entrySize = 64 + EstimateRawStringSize(kvp.Key);
+            if (kvp.Value.Versions != null)
+            {
+                entrySize += 80;
+                foreach (var versionKvp in kvp.Value.Versions)
+                {
+                    entrySize += 48 + EstimateRawStringSize(versionKvp.Key);
+                }
+            }
+
             if (kvp.Value.Dots != null)
             {
-                size += 80 + (kvp.Value.Dots.Count * 24L);
+                entrySize += 80;
+                foreach (var dotKvp in kvp.Value.Dots)
+                {
+                    int dotCount = dotKvp.Value?.Count ?? 0;
+                    entrySize += 48 + EstimateRawStringSize(dotKvp.Key) + 64 + (dotCount * 24L);
+                }
             }
+
+            size += entrySize;
         }
 
         return size;
     }
 
-    private static long EstimateStringSize(string? str)
+    private static long EstimateStringSize(string? str, HashSet<object> visited)
+    {
+        if (str is null || !visited.Add(str))
+        {
+            return 0;
+        }
+
+        return EstimateRawStringSize(str);
+    }
+
+    private static long EstimateRawStringSize(string? str)
     {
         if (str is null)
         {
@@ -97,7 +123,7 @@ public sealed class CrdtMemoryEstimator : ICrdtMemoryEstimator
 
         if (obj is string str)
         {
-            return EstimateStringSize(str);
+            return EstimateStringSize(str, visited);
         }
 
         var type = obj.GetType();
@@ -213,8 +239,8 @@ public sealed class CrdtMemoryEstimator : ICrdtMemoryEstimator
             size += 64L + (metadata.SeenExceptions.Count * 72L);
             foreach (var op in metadata.SeenExceptions)
             {
-                size += EstimateStringSize(op.ReplicaId);
-                size += EstimateStringSize(op.JsonPath);
+                size += EstimateStringSize(op.ReplicaId, visited);
+                size += EstimateStringSize(op.JsonPath, visited);
                 size += EstimateGraphSize(op.Value, visited, aotContexts);
             }
         }

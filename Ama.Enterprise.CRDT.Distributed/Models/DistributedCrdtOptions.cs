@@ -107,6 +107,13 @@ public sealed class DistributedCrdtOptions
     public int PeerTombstoneCooldownSeconds { get; set; } = 0;
 
     /// <summary>
+    /// Gets or sets the Time-To-Live (TTL) in seconds after which an idle dynamic scope (<c>{hostReplicaId}@{scopeId}</c>)
+    /// is flushed, checkpointed, and evicted from memory. Pinned host scopes registered at startup are never evicted.
+    /// Defaults to 0 (disabled, meaning dynamic scopes remain in memory indefinitely).
+    /// </summary>
+    public int DynamicScopeIdleTtlSeconds { get; set; } = 0;
+
+    /// <summary>
     /// Gets or sets the soft threshold limit for the total number of operations kept in the background journal.
     /// When this limit is exceeded, an aggressive trim is forced utilizing the local version vector in the background,
     /// seamlessly offloading lagging peer synchronization entirely to fallback Snapshot mechanisms.

@@ -241,17 +241,14 @@ public sealed class BufferedDistributedCrdtStorageDecorator : IDistributedCrdtSt
                 if (shardDict.IsEmpty)
                 {
                     this.inFlightByShard.TryRemove(new KeyValuePair<string, ConcurrentDictionary<Guid, JournaledOperation>>(shardId, shardDict));
-                    foreach (var kvp in globalMinimumVersionVector)
-                    {
-                        this.lastTrimmedVectors.TryRemove((shardId, kvp.Key), out _);
-                    }
                 }
             }
             else
             {
                 foreach (var kvp in globalMinimumVersionVector)
                 {
-                    this.lastTrimmedVectors.TryRemove((shardId, kvp.Key), out _);
+                    var key = (shardId, kvp.Key);
+                    this.lastTrimmedVectors.AddOrUpdate(key, kvp.Value, (_, existing) => Math.Max(existing, kvp.Value));
                 }
             }
         }

@@ -1,304 +1,83 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System;
-using System.Collections.Concurrent;
 using System.Threading;
-using System.Threading.Channels;
 using System.Threading.Tasks;
 using Ama.Enterprise.CRDT.Distributed.Models;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Shared scoped state machine pipeline that processes all CRDT document commands through a single channel and object pool.
+/// Lightweight scoped facade over the shared node-wide <see cref="IDocumentCommandStripePool"/>.
+/// Eliminates per-scope channels, background worker tasks, object pools, and telemetry gauge registrations.
 /// </summary>
 public sealed class DocumentCommandPipeline : IDocumentCommandPipeline, IDisposable
 {
-    private static readonly AsyncLocal<DocumentCommandPipeline?> CurrentProcessingPipeline = new();
-
-    private readonly IDistributedCrdtTelemetry telemetry;
-    private readonly ILogger<DocumentCommandPipeline> logger;
-    private readonly Channel<PooledDocumentCommand> commandChannel;
-    private readonly ConcurrentQueue<PooledDocumentCommand> commandPool = new();
-    private readonly CancellationTokenSource disposeCts = new();
-    private readonly IDisposable telemetryRegistration;
-    private readonly Task processingTask;
-    private int activeCommandCount;
-
-    /// <summary>
-    /// Gets a value indicating whether the current execution context is already running inside this pipeline's processing loop.
-    /// </summary>
-    public bool IsCurrentThreadPipelineProcessor => ReferenceEquals(CurrentProcessingPipeline.Value, this);
+    private readonly IDocumentCommandStripePool stripePool;
+    private readonly string scopeReplicaId;
+    private int scopePendingCommandCount;
+    private volatile bool isDisposed;
 
     /// <inheritdoc />
-    public int PendingCommandCount =>
-        (commandChannel.Reader.CanCount ? commandChannel.Reader.Count : 0) +
-        Volatile.Read(ref activeCommandCount);
+    public bool IsCurrentThreadPipelineProcessor => stripePool.IsCurrentThreadStripeProcessor;
+
+    /// <inheritdoc />
+    public int PendingCommandCount => Math.Max(0, Volatile.Read(ref scopePendingCommandCount));
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DocumentCommandPipeline"/> class.
     /// </summary>
-    /// <param name="options">The distributed CRDT options.</param>
-    /// <param name="telemetry">The centralized telemetry service.</param>
-    /// <param name="logger">The logger instance.</param>
+    /// <param name="stripePool">The shared node-wide striped command processor.</param>
+    /// <param name="scopeContext">The optional scope context identifying the current replica scope.</param>
     public DocumentCommandPipeline(
-        IOptions<DistributedCrdtOptions> options,
-        IDistributedCrdtTelemetry telemetry,
-        ILogger<DocumentCommandPipeline> logger)
+        IDocumentCommandStripePool stripePool,
+        CrdtScopeContext? scopeContext = null)
     {
-        ArgumentNullException.ThrowIfNull(options);
-        this.telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
-        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-
-        var capacity = options.Value.ChannelCapacity;
-        if (capacity > 0)
-        {
-            this.commandChannel = Channel.CreateBounded<PooledDocumentCommand>(new BoundedChannelOptions(capacity)
-            {
-                SingleReader = true,
-                SingleWriter = false,
-                FullMode = BoundedChannelFullMode.Wait
-            });
-        }
-        else
-        {
-            this.commandChannel = Channel.CreateUnbounded<PooledDocumentCommand>(new UnboundedChannelOptions
-            {
-                SingleReader = true,
-                SingleWriter = false
-            });
-        }
-
-        this.telemetryRegistration = this.telemetry.RegisterDocumentPipelineMetrics(
-            () => this.commandChannel.Reader.CanCount ? this.commandChannel.Reader.Count : 0,
-            () => this.commandPool.Count);
-
-        this.processingTask = Task.Run(ProcessChannelAsync);
+        this.stripePool = stripePool ?? throw new ArgumentNullException(nameof(stripePool));
+        this.scopeReplicaId = scopeContext?.ReplicaId ?? string.Empty;
     }
 
     /// <inheritdoc />
-    public PooledDocumentCommand RentCommand()
-    {
-        return commandPool.TryDequeue(out var cmd) ? cmd : new PooledDocumentCommand();
-    }
+    public PooledDocumentCommand RentCommand() => stripePool.RentCommand();
 
     /// <inheritdoc />
-    public void ReturnCommand(PooledDocumentCommand command)
-    {
-        ArgumentNullException.ThrowIfNull(command);
-        command.Reset();
-        commandPool.Enqueue(command);
-    }
+    public void ReturnCommand(PooledDocumentCommand command) => stripePool.ReturnCommand(command);
 
     /// <inheritdoc />
     public async ValueTask EnqueueAndWaitAsync(PooledDocumentCommand command, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(command);
-        if (command.Target is null)
-        {
-            throw new InvalidOperationException("Command Target must be assigned before enqueuing.");
-        }
 
-        if (IsCurrentThreadPipelineProcessor)
-        {
-            var inlineDocId = command.Target.DocumentId;
-            telemetry.RecordDocumentCommandEnqueued(inlineDocId);
-            var previousPipeline = CurrentProcessingPipeline.Value;
-            try
-            {
-                command.CancellationToken.ThrowIfCancellationRequested();
-                await command.Target.ExecuteCommandInternalAsync(command).ConfigureAwait(false);
-                telemetry.RecordDocumentCommandProcessed(inlineDocId);
-                return;
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                telemetry.RecordDocumentCommandFailure(inlineDocId);
-                logger.LogError(ex, "Error executing inline document command {CommandType} for document {DocumentId}.", command.Type, inlineDocId);
-                throw;
-            }
-            finally
-            {
-                CurrentProcessingPipeline.Value = previousPipeline;
-            }
-        }
-
-        var documentId = command.Target.DocumentId;
-        await commandChannel.Writer.WriteAsync(command, cancellationToken).ConfigureAwait(false);
-        telemetry.RecordDocumentCommandEnqueued(documentId);
-        await command.ExecuteAsync().ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public async ValueTask EnqueueFireAndForgetAsync(PooledDocumentCommand command, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(command);
-        if (command.Target is null)
-        {
-            throw new InvalidOperationException("Command Target must be assigned before enqueuing.");
-        }
-
-        if (IsCurrentThreadPipelineProcessor)
-        {
-            var inlineDocId = command.Target.DocumentId;
-            telemetry.RecordDocumentCommandEnqueued(inlineDocId);
-            var previousPipeline = CurrentProcessingPipeline.Value;
-            try
-            {
-                await command.Target.ExecuteCommandInternalAsync(command).ConfigureAwait(false);
-                telemetry.RecordDocumentCommandProcessed(inlineDocId);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (Exception ex)
-            {
-                telemetry.RecordDocumentCommandFailure(inlineDocId);
-                logger.LogError(ex, "Error executing inline fire-and-forget document command {CommandType} for document {DocumentId}.", command.Type, inlineDocId);
-            }
-            finally
-            {
-                CurrentProcessingPipeline.Value = previousPipeline;
-                ReturnCommand(command);
-            }
-
-            return;
-        }
-
-        var documentId = command.Target.DocumentId;
-        command.IsFireAndForget = true;
-        command.CancellationToken = CancellationToken.None;
-
-        if (commandChannel.Writer.TryWrite(command))
-        {
-            telemetry.RecordDocumentCommandEnqueued(documentId);
-            return;
-        }
-
-        await commandChannel.Writer.WriteAsync(command, cancellationToken).ConfigureAwait(false);
-        telemetry.RecordDocumentCommandEnqueued(documentId);
-    }
-
-    /// <inheritdoc />
-    public async Task FlushAsync(CancellationToken cancellationToken = default)
-    {
-        if (disposeCts.IsCancellationRequested || IsCurrentThreadPipelineProcessor)
-        {
-            return;
-        }
-
-        var cmd = RentCommand();
-        cmd.Type = DocumentCommandType.FlushBarrier;
-        cmd.CancellationToken = cancellationToken;
-
+        Interlocked.Increment(ref scopePendingCommandCount);
         try
         {
-            if (!commandChannel.Writer.TryWrite(cmd))
-            {
-                await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
-            }
-
-            await cmd.ExecuteAsync().ConfigureAwait(false);
-        }
-        catch (ChannelClosedException)
-        {
+            await stripePool.EnqueueAndWaitAsync(command, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            ReturnCommand(cmd);
+            Interlocked.Decrement(ref scopePendingCommandCount);
         }
+    }
+
+    /// <inheritdoc />
+    public ValueTask EnqueueFireAndForgetAsync(PooledDocumentCommand command, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        return stripePool.EnqueueFireAndForgetAsync(command, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task FlushAsync(CancellationToken cancellationToken = default)
+    {
+        if (isDisposed)
+        {
+            return Task.CompletedTask;
+        }
+
+        return stripePool.FlushScopeAsync(scopeReplicaId, cancellationToken);
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
-        telemetryRegistration.Dispose();
-        disposeCts.Cancel();
-        commandChannel.Writer.TryComplete();
-        disposeCts.Dispose();
-    }
-
-    private async Task ProcessChannelAsync()
-    {
-        try
-        {
-            await foreach (var cmd in commandChannel.Reader.ReadAllAsync(disposeCts.Token).ConfigureAwait(false))
-            {
-                var target = cmd.Target;
-                var documentId = target?.DocumentId ?? string.Empty;
-
-                Interlocked.Increment(ref activeCommandCount);
-                try
-                {
-                    cmd.CancellationToken.ThrowIfCancellationRequested();
-
-                    if (target is not null)
-                    {
-                        CurrentProcessingPipeline.Value = this;
-                        try
-                        {
-                            await target.ExecuteCommandInternalAsync(cmd).ConfigureAwait(false);
-                        }
-                        finally
-                        {
-                            CurrentProcessingPipeline.Value = null;
-                        }
-                    }
-
-                    telemetry.RecordDocumentCommandProcessed(documentId);
-
-                    if (cmd.IsFireAndForget)
-                    {
-                        ReturnCommand(cmd);
-                    }
-                    else
-                    {
-                        cmd.SetResult();
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    if (cmd.IsFireAndForget)
-                    {
-                        ReturnCommand(cmd);
-                    }
-                    else
-                    {
-                        cmd.SetException(new OperationCanceledException("Document operation cancelled."));
-                    }
-                }
-                catch (Exception ex)
-                {
-                    telemetry.RecordDocumentCommandFailure(documentId);
-                    logger.LogError(ex, "Error executing document command {CommandType} for document {DocumentId}.", cmd.Type, documentId);
-                    if (cmd.IsFireAndForget)
-                    {
-                        ReturnCommand(cmd);
-                    }
-                    else
-                    {
-                        cmd.SetException(ex);
-                    }
-                }
-                finally
-                {
-                    Interlocked.Decrement(ref activeCommandCount);
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-        catch (Exception ex)
-        {
-            logger.LogCritical(ex, "Shared document command pipeline failed.");
-        }
+        isDisposed = true;
     }
 }

@@ -63,6 +63,11 @@ public sealed class CrdtCheckpointService : BackgroundService
 
             var scopes = scopeManager.GetActiveScopes();
 
+            if (avoidBlindWrites && (lastKnownMapDigestCache.Count > 0 || lastKnownClusterStateDigestCache.Count > 0))
+            {
+                PruneEvictedScopeDigests(scopes);
+            }
+
             foreach (var scope in scopes)
             {
                 try
@@ -76,10 +81,21 @@ public sealed class CrdtCheckpointService : BackgroundService
                     var tag = new KeyValuePair<string, object?>("replica_id", scope.ReplicaId);
                     checkpointCyclesCounter.Add(1, tag);
 
-                    var documents = orchestrator.GetActiveDocuments();
-                    foreach (var document in documents)
+                    if (orchestrator is CrdtDocumentOrchestrator concreteOrchestrator)
                     {
-                        await document.CheckpointAsync(stoppingToken).ConfigureAwait(false);
+                        await concreteOrchestrator.Registry.CheckpointAsync(stoppingToken).ConfigureAwait(false);
+                        foreach (var document in concreteOrchestrator.EnumerateActiveDocuments())
+                        {
+                            await document.CheckpointAsync(stoppingToken).ConfigureAwait(false);
+                        }
+                    }
+                    else
+                    {
+                        var documents = orchestrator.GetActiveDocuments();
+                        foreach (var document in documents)
+                        {
+                            await document.CheckpointAsync(stoppingToken).ConfigureAwait(false);
+                        }
                     }
 
                     // Ephemeral MemoryCrdtStorage lives inside the same RAM space as ShardVersionVectorManager and ClusterStateTracker.
@@ -207,5 +223,50 @@ public sealed class CrdtCheckpointService : BackgroundService
         }
 
         return hash;
+    }
+
+    private void PruneEvictedScopeDigests(IReadOnlyList<IDistributedCrdtScope> activeScopes)
+    {
+        var activeReplicaIds = new HashSet<string>(activeScopes.Count, StringComparer.Ordinal);
+        for (int i = 0; i < activeScopes.Count; i++)
+        {
+            activeReplicaIds.Add(activeScopes[i].ReplicaId);
+        }
+
+        List<string>? staleKeys = null;
+        foreach (var key in lastKnownMapDigestCache.Keys)
+        {
+            if (!activeReplicaIds.Contains(key))
+            {
+                staleKeys ??= new List<string>();
+                staleKeys.Add(key);
+            }
+        }
+
+        if (staleKeys != null)
+        {
+            for (int i = 0; i < staleKeys.Count; i++)
+            {
+                lastKnownMapDigestCache.Remove(staleKeys[i]);
+            }
+            staleKeys.Clear();
+        }
+
+        foreach (var key in lastKnownClusterStateDigestCache.Keys)
+        {
+            if (!activeReplicaIds.Contains(key))
+            {
+                staleKeys ??= new List<string>();
+                staleKeys.Add(key);
+            }
+        }
+
+        if (staleKeys != null)
+        {
+            for (int i = 0; i < staleKeys.Count; i++)
+            {
+                lastKnownClusterStateDigestCache.Remove(staleKeys[i]);
+            }
+        }
     }
 }

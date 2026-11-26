@@ -29,7 +29,9 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
     // To prevent the managed Connection Pool from thrashing and throwing "database is locked" errors during heavy Hammer tests,
     // we dedicate a single permanently open connection for all writes and protect it with an in-memory Semaphore.
     private readonly SqliteConnection writeConnection;
+    private readonly SqliteConnection readConnection;
     private readonly SemaphoreSlim writeLock = new(1, 1);
+    private readonly SemaphoreSlim readLock = new(1, 1);
     private bool disposed;
 
     public ShowCaseCrdtStorage(
@@ -49,21 +51,30 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         // Establish the dedicated write connection
         this.writeConnection = new SqliteConnection(connectionString);
         this.writeConnection.Open();
-        using var pragmaCmd = this.writeConnection.CreateCommand();
-        pragmaCmd.CommandText = "PRAGMA synchronous = OFF; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -8000; PRAGMA mmap_size = 0; PRAGMA journal_size_limit = 67108864;";
-        pragmaCmd.ExecuteNonQuery();
+        using (var pragmaCmd = this.writeConnection.CreateCommand())
+        {
+            pragmaCmd.CommandText = "PRAGMA synchronous = OFF; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -8000; PRAGMA mmap_size = 0; PRAGMA journal_size_limit = 67108864;";
+            pragmaCmd.ExecuteNonQuery();
+        }
+
+        // Establish a permanently open read connection so high-volume point lookups do not thrash SqliteConnection pool or re-parse schemas.
+        this.readConnection = new SqliteConnection(connectionString);
+        this.readConnection.Open();
+        using (var readPragmaCmd = this.readConnection.CreateCommand())
+        {
+            readPragmaCmd.CommandText = "PRAGMA synchronous = OFF; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -8000; PRAGMA mmap_size = 0;";
+            readPragmaCmd.ExecuteNonQuery();
+        }
     }
 
     public async Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new()
     {
         if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
 
+        await readLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            
-            using var command = connection.CreateCommand();
+            using var command = readConnection.CreateCommand();
             command.CommandText = "SELECT Payload FROM Documents WHERE ShardId = @ShardId AND DocumentId = @DocId";
             AddParameter(command, "@ShardId", shardId);
             AddParameter(command, "@DocId", documentId);
@@ -79,6 +90,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             logger.LogError(ex, "Failed to load document '{DocumentId}' from SQLite", documentId);
             throw;
         }
+        finally
+        {
+            readLock.Release();
+        }
 
         return null;
     }
@@ -87,12 +102,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
     {
         if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
 
+        await readLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-            using var command = connection.CreateCommand();
+            using var command = readConnection.CreateCommand();
             command.CommandText = "SELECT Payload FROM Documents WHERE DocumentId = @DocId LIMIT 1";
             AddParameter(command, "@DocId", documentId);
 
@@ -106,6 +119,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         {
             logger.LogError(ex, "Failed to load document '{DocumentId}' from any shard in SQLite", documentId);
             throw;
+        }
+        finally
+        {
+            readLock.Release();
         }
 
         return null;
@@ -797,6 +814,8 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         disposed = true;
         
         writeConnection.Dispose();
+        readConnection.Dispose();
         writeLock.Dispose();
+        readLock.Dispose();
     }
 }

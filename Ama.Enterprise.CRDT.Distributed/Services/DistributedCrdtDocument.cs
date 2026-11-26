@@ -52,6 +52,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     
     private readonly object syncRoot = new();
     private CrdtDocument<TState> currentDocument;
+    private int hasCompletedInitialStorageLoad;
     
     private readonly object debounceSyncRoot = new();
     private List<CrdtOperation>? debounceBuffer;
@@ -61,6 +62,9 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private volatile bool isDisposed;
 
     private CrdtAotContext[]? cachedAotContexts;
+
+    /// <inheritdoc />
+    public string ScopeReplicaId { get; }
 
     /// <inheritdoc />
     public string ShardId { get; }
@@ -139,6 +143,13 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         var metadata = metadataManager.Initialize(initialState);
         currentDocument = new CrdtDocument<TState>(initialState, metadata);
 
+        var scopeContext = serviceProvider.GetService<CrdtScopeContext>();
+        var replicaContext = serviceProvider.GetService<ReplicaContext>();
+        var resolvedScopeReplicaId = !string.IsNullOrEmpty(scopeContext?.ReplicaId)
+            ? scopeContext.ReplicaId
+            : (replicaContext?.ReplicaId ?? string.Empty);
+
+        ScopeReplicaId = this.stringPool.GetOrAdd(resolvedScopeReplicaId);
         DocumentId = this.stringPool.GetOrAdd(documentIdProvider.GetDocumentId(initialState).ToString() ?? string.Empty);
         TypeAlias = this.stringPool.GetOrAdd(ResolveTypeAlias(serviceProvider, typeAlias));
         ShardId = this.stringPool.GetOrAdd(initialState is CrdtRegistryState
@@ -701,6 +712,11 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
     private async Task ProcessInitializeInternalAsync(CancellationToken cancellationToken)
     {
+        if (Interlocked.Exchange(ref hasCompletedInitialStorageLoad, 1) != 0)
+        {
+            return;
+        }
+
         try
         {
             var isLocalShard = await distributionManager.IsShardLocalAsync(ShardId, cancellationToken).ConfigureAwait(false);
@@ -810,9 +826,18 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
         catch (Exception ex)
         {
+            Interlocked.Exchange(ref hasCompletedInitialStorageLoad, 0);
             logger.LogError(ex, "Failed to load initial state for document {DocumentId} ({TypeAlias}) from storage.", DocumentId, TypeAlias);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Marks the document as initialized for a newly created local document without issuing storage lookup queries.
+    /// </summary>
+    internal void MarkAsNewlyCreatedLocalDocument()
+    {
+        Interlocked.Exchange(ref hasCompletedInitialStorageLoad, 1);
     }
 
     private void MergeDocumentMetadataIntoShardVersionVector(CrdtDocument<TState> doc, bool forceMergeForSingleDocumentShard = false)
@@ -895,9 +920,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                     isDirty = true;
                 }
             }, cmd.CancellationToken).ConfigureAwait(false);
-
-            var storageDocKey = GetStorageDocumentKey();
-            await storage.AppendAsync(storageDocKey, generatedPatch.Operations!, cmd.CancellationToken).ConfigureAwait(false);
 
             telemetry.RecordDocumentPatchApplied(DocumentId);
             telemetry.RecordDocumentIntentApplied(DocumentId);
@@ -1619,6 +1641,12 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         if (typeof(TState) == typeof(CrdtRegistryState))
         {
             return Constants.SystemRegistryDocumentId;
+        }
+
+        var registry = sp.GetService<IDocumentFactoryRegistry>();
+        if (registry != null && registry.TryGetPrimaryAlias(typeof(TState), out var registeredAlias))
+        {
+            return registeredAlias;
         }
 
         foreach (var factory in sp.GetServices<IDocumentFactory>())

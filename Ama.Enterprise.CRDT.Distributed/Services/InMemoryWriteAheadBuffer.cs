@@ -1,21 +1,30 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
-using System.Threading.Channels;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// An in-memory write-ahead buffer backed by a bounded channel for batching journaled operations.
+/// An in-memory write-ahead buffer that stages <see cref="JournaledOperation"/> instances in a lock-free queue
+/// with a shared node-wide capacity semaphore for batched background flushing.
 /// </summary>
 public sealed class InMemoryWriteAheadBuffer : ICrdtWriteAheadBuffer
 {
-    private readonly Channel<JournaledOperation> channel;
+    private static readonly ConcurrentDictionary<int, SemaphoreSlim> SharedCapacitySemaphores = new();
+
+    private readonly ConcurrentQueue<JournaledOperation> queue = new();
+    private readonly SemaphoreSlim capacitySemaphore;
+    private readonly object signalLock = new();
+    private TaskCompletionSource<bool>? itemAvailableTcs;
+    private int pendingCount;
+    private volatile bool isCompleted;
+    private bool disposed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="InMemoryWriteAheadBuffer"/> class.
@@ -25,53 +34,70 @@ public sealed class InMemoryWriteAheadBuffer : ICrdtWriteAheadBuffer
     {
         ArgumentNullException.ThrowIfNull(options);
         var capacity = options.Value.WalChannelCapacity > 0 ? options.Value.WalChannelCapacity : 10_000;
-
-        this.channel = Channel.CreateBounded<JournaledOperation>(new BoundedChannelOptions(capacity)
-        {
-            FullMode = BoundedChannelFullMode.Wait,
-            SingleReader = true,
-            SingleWriter = false
-        });
+        this.capacitySemaphore = SharedCapacitySemaphores.GetOrAdd(capacity, static cap => new SemaphoreSlim(cap, cap));
     }
+
+    /// <inheritdoc />
+    public int PendingCount => Volatile.Read(ref this.pendingCount);
 
     /// <inheritdoc />
     public void Enqueue(IReadOnlyList<JournaledOperation> operations)
     {
         ArgumentNullException.ThrowIfNull(operations);
-        if (operations.Count == 0)
+        if (operations.Count == 0 || this.isCompleted)
         {
             return;
         }
 
-        var writer = this.channel.Writer;
         for (int i = 0; i < operations.Count; i++)
         {
-            var op = operations[i];
-            if (!writer.TryWrite(op))
+            if (this.isCompleted)
             {
-                EnqueueSlowSync(writer, op);
+                break;
             }
+
+            this.capacitySemaphore.Wait();
+            if (this.isCompleted)
+            {
+                this.capacitySemaphore.Release();
+                break;
+            }
+
+            this.queue.Enqueue(operations[i]);
+            Interlocked.Increment(ref this.pendingCount);
         }
+
+        this.SignalItemAvailable();
     }
 
     /// <inheritdoc />
     public async ValueTask EnqueueAsync(IReadOnlyList<JournaledOperation> operations, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(operations);
-        if (operations.Count == 0)
+        if (operations.Count == 0 || this.isCompleted)
         {
             return;
         }
 
-        var writer = this.channel.Writer;
         for (int i = 0; i < operations.Count; i++)
         {
-            var op = operations[i];
-            if (!writer.TryWrite(op))
+            if (this.isCompleted)
             {
-                await writer.WriteAsync(op, cancellationToken).ConfigureAwait(false);
+                break;
             }
+
+            await this.capacitySemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            if (this.isCompleted)
+            {
+                this.capacitySemaphore.Release();
+                break;
+            }
+
+            this.queue.Enqueue(operations[i]);
+            Interlocked.Increment(ref this.pendingCount);
         }
+
+        this.SignalItemAvailable();
     }
 
     /// <inheritdoc />
@@ -82,25 +108,21 @@ public sealed class InMemoryWriteAheadBuffer : ICrdtWriteAheadBuffer
             throw new ArgumentOutOfRangeException(nameof(maxBatchSize), "Max batch size must be greater than zero.");
         }
 
-        var reader = this.channel.Reader;
-        if (!await reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+        if (!await this.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
         {
             return Array.Empty<JournaledOperation>();
         }
 
         var batch = new List<JournaledOperation>(Math.Min(maxBatchSize, 64));
-        while (batch.Count < maxBatchSize && reader.TryRead(out var item))
-        {
-            batch.Add(item);
-        }
+        this.DrainUpTo(batch, maxBatchSize);
 
-        if (batch.Count >= maxBatchSize || maxWaitTime <= TimeSpan.Zero)
+        if (batch.Count >= maxBatchSize || maxWaitTime <= TimeSpan.Zero || this.isCompleted)
         {
             return batch;
         }
 
         var sw = Stopwatch.StartNew();
-        while (batch.Count < maxBatchSize)
+        while (batch.Count < maxBatchSize && !this.isCompleted)
         {
             var remaining = maxWaitTime - sw.Elapsed;
             if (remaining <= TimeSpan.Zero)
@@ -113,15 +135,12 @@ public sealed class InMemoryWriteAheadBuffer : ICrdtWriteAheadBuffer
 
             try
             {
-                if (!await reader.WaitToReadAsync(timeoutCts.Token).ConfigureAwait(false))
+                if (!await this.WaitToReadAsync(timeoutCts.Token).ConfigureAwait(false))
                 {
                     break;
                 }
 
-                while (batch.Count < maxBatchSize && reader.TryRead(out var item))
-                {
-                    batch.Add(item);
-                }
+                this.DrainUpTo(batch, maxBatchSize);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
@@ -149,24 +168,109 @@ public sealed class InMemoryWriteAheadBuffer : ICrdtWriteAheadBuffer
     /// <inheritdoc />
     public void Complete()
     {
-        this.channel.Writer.TryComplete();
+        this.isCompleted = true;
+        this.SignalItemAvailable();
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (this.disposed)
+        {
+            return;
+        }
+
+        this.disposed = true;
+        this.Complete();
+
+        int drained = 0;
+        while (this.queue.TryDequeue(out _))
+        {
+            drained++;
+        }
+
+        if (drained > 0)
+        {
+            Interlocked.Add(ref this.pendingCount, -drained);
+            this.capacitySemaphore.Release(drained);
+        }
     }
 
     /// <inheritdoc />
     public ValueTask DisposeAsync()
     {
-        this.Complete();
+        this.Dispose();
         return ValueTask.CompletedTask;
     }
 
-    private static void EnqueueSlowSync(ChannelWriter<JournaledOperation> writer, JournaledOperation operation)
+    private void DrainUpTo(List<JournaledOperation> batch, int maxBatchSize)
     {
-        while (writer.WaitToWriteAsync().AsTask().GetAwaiter().GetResult())
+        int dequeued = 0;
+        while (batch.Count < maxBatchSize && this.queue.TryDequeue(out var item))
         {
-            if (writer.TryWrite(operation))
+            batch.Add(item);
+            dequeued++;
+        }
+
+        if (dequeued > 0)
+        {
+            Interlocked.Add(ref this.pendingCount, -dequeued);
+            this.capacitySemaphore.Release(dequeued);
+        }
+    }
+
+    private ValueTask<bool> WaitToReadAsync(CancellationToken cancellationToken)
+    {
+        if (!this.queue.IsEmpty)
+        {
+            return new ValueTask<bool>(true);
+        }
+
+        if (this.isCompleted)
+        {
+            return new ValueTask<bool>(!this.queue.IsEmpty);
+        }
+
+        TaskCompletionSource<bool> tcs;
+        lock (this.signalLock)
+        {
+            if (!this.queue.IsEmpty)
             {
-                return;
+                return new ValueTask<bool>(true);
+            }
+
+            if (this.isCompleted)
+            {
+                return new ValueTask<bool>(false);
+            }
+
+            this.itemAvailableTcs ??= new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            tcs = this.itemAvailableTcs;
+        }
+
+        return this.WaitWithCancellationAsync(tcs, cancellationToken);
+    }
+
+    private async ValueTask<bool> WaitWithCancellationAsync(TaskCompletionSource<bool> tcs, CancellationToken cancellationToken)
+    {
+        await using var reg = cancellationToken.Register(static state => ((TaskCompletionSource<bool>)state!).TrySetResult(false), tcs);
+        await tcs.Task.ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return !this.queue.IsEmpty;
+    }
+
+    private void SignalItemAvailable()
+    {
+        TaskCompletionSource<bool>? tcs = null;
+        lock (this.signalLock)
+        {
+            if (this.itemAvailableTcs != null)
+            {
+                tcs = this.itemAvailableTcs;
+                this.itemAvailableTcs = null;
             }
         }
+
+        tcs?.TrySetResult(true);
     }
 }

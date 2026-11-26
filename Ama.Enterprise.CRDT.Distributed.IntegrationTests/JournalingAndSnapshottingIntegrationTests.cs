@@ -1046,4 +1046,181 @@ public sealed class JournalingAndSnapshottingIntegrationTests
             await init2.StopAsync(CancellationToken.None);
         }
     }
+
+    [IntegrationFact]
+    public async Task MultiScopeJournaling_WithDiskWalAndIdleEviction_FlushesPendingWalEntriesAndReleasesHandlesBeforeEviction()
+    {
+        // Arrange
+        var walDir = Path.Combine(Path.GetTempPath(), $"ama-multi-scope-wal-{Guid.NewGuid():N}");
+        var persistentBackings = new System.Collections.Concurrent.ConcurrentDictionary<string, MemoryCrdtStorage>(StringComparer.Ordinal);
+
+        try
+        {
+            var sp = BuildNode("HostWalNode", services =>
+            {
+                services.Configure<DistributedCrdtOptions>(opt =>
+                {
+                    opt.JournalMode = CrdtJournalMode.DiskWal;
+                    opt.WalDirectoryPath = walDir;
+                    opt.WalFlushIntervalMilliseconds = 25;
+                    opt.DynamicScopeIdleTtlSeconds = 1;
+                });
+
+                services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(provider =>
+                {
+                    var ctx = provider.GetRequiredService<CrdtScopeContext>();
+                    var backing = persistentBackings.GetOrAdd(ctx.ReplicaId, _ => new MemoryCrdtStorage());
+                    return new BufferedDistributedCrdtStorageDecorator(
+                        backing,
+                        provider.GetRequiredService<DiskWriteAheadBuffer>());
+                }));
+            });
+
+            var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+
+            // Act 1 - Initialize 10 dynamic user scopes concurrently and enqueue WAL mutations
+            var scopeIds = Enumerable.Range(1, 10).Select(i => $"wal-user-{i}").ToArray();
+            await Parallel.ForEachAsync(scopeIds, async (scopeId, ct) =>
+            {
+                var scope = await scopeManager.GetOrCreateScopeAsync(scopeId, "HostWalNode", ct);
+                await scope.Orchestrator.CreateDocumentAsync($"doc-{scopeId}", "journal-doc", ct);
+                await scope.Orchestrator.ApplyIntentAsync<JournalTestState>(
+                    $"doc-{scopeId}",
+                    new MapSetIntent("UserKey", $"Val-{scopeId}"),
+                    nameof(JournalTestState.DataMap),
+                    ct);
+            });
+
+            // Act 2 - Wait past the idle TTL and trigger dynamic scope eviction (which drains pending WAL batches before disposal)
+            await Task.Delay(150);
+            var evictedCount = await scopeManager.EvictIdleDynamicScopesAsync(TimeSpan.FromMilliseconds(50), CancellationToken.None);
+
+            // Assert - All 10 dynamic user scopes were evicted, their WAL buffers were flushed to backing storage, and WAL segment files were cleaned up
+            evictedCount.ShouldBe(10);
+
+            foreach (var scopeId in scopeIds)
+            {
+                var compositeId = $"HostWalNode@{scopeId}";
+                scopeManager.TryGetScope(scopeId, out _).ShouldBeFalse();
+                persistentBackings.TryGetValue(compositeId, out var backing).ShouldBeTrue();
+
+                var flushedOps = await backing!.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
+                flushedOps.ShouldNotBeEmpty();
+                flushedOps.Any(o => o.DocumentId.ToString()!.Contains($"doc-{scopeId}", StringComparison.Ordinal)).ShouldBeTrue();
+            }
+
+            var leftoverWalFiles = Directory.Exists(walDir) ? Directory.GetFiles(walDir, "*.log") : Array.Empty<string>();
+            leftoverWalFiles.ShouldBeEmpty();
+        }
+        finally
+        {
+            if (Directory.Exists(walDir))
+            {
+                try { Directory.Delete(walDir, recursive: true); } catch { }
+            }
+        }
+    }
+
+    [IntegrationFact]
+    public async Task StorageJournalForwarder_WhenHotOperationsRapidlyCrossSoftAndHardThresholdsWithLaggingPeerAndWal_AggressivelyTrimsJournalWithoutStarvation()
+    {
+        // Arrange - Simulate a hot operation burst (like gen-fleets / hammer) where:
+        // 1. Both soft (50) and hard (100) thresholds are configured and crossed in rapid succession via FireAndForget intents.
+        // 2. A known peer exists in ClusterStateTracker whose reported DVV lags behind at 0 (so GMVV is 0).
+        // 3. Buffered WAL storage is active with CrdtJournalFlushService flushing batches concurrently.
+        // 4. CrdtMaintenanceService is disabled (3600s) so ONLY StorageJournalForwarder can trim the journal.
+        var walDir = Path.Combine(Path.GetTempPath(), $"ama-hot-trim-wal-{Guid.NewGuid():N}");
+        var backingStorage = new MemoryCrdtStorage();
+
+        try
+        {
+            using var sp = (ServiceProvider)BuildNode("HotNodeA", services =>
+            {
+                services.Configure<DistributedCrdtOptions>(opt =>
+                {
+                    opt.JournalSoftTrimThreshold = 50;
+                    opt.JournalHardTrimThreshold = 100;
+                    opt.JournalMode = CrdtJournalMode.DiskWal;
+                    opt.WalDirectoryPath = walDir;
+                    opt.WalFlushIntervalMilliseconds = 10;
+                    opt.WalMaxBatchSize = 500;
+                    opt.MaintenanceIntervalSeconds = 3600;
+                    opt.CheckpointIntervalSeconds = 3600;
+                });
+
+                services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(provider =>
+                    new BufferedDistributedCrdtStorageDecorator(
+                        backingStorage,
+                        provider.GetRequiredService<DiskWriteAheadBuffer>())));
+            });
+
+            var scope = sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("HotNodeA");
+            var orchestrator = scope.Orchestrator;
+            await orchestrator.InitializeAsync(CancellationToken.None);
+
+            // Register a lagging remote peer at DVV clock 0 in ClusterStateTracker so GMVV across the cluster is 0
+            var laggingPeerMap = new ShardVersionVectorMap
+            {
+                ["default"] = new DottedVersionVector()
+            };
+            scope.ClusterTracker.UpdatePeerState("LaggingPeerNetId", "LaggingNodeB", laggingPeerMap);
+
+            var flushService = sp.GetServices<IHostedService>().OfType<CrdtJournalFlushService>().Single();
+            await flushService.StartAsync(CancellationToken.None);
+
+            await orchestrator.CreateDocumentAsync("hot-burst-doc", "journal-doc", IntentDeliveryMode.FireAndForget, CancellationToken.None);
+            await orchestrator.FlushAsync(CancellationToken.None);
+
+            // Act - Pump 300 hot FireAndForget operations in tight succession, crossing both Soft (50) and Hard (100) thresholds multiple times
+            const int totalHotOps = 300;
+            var fireTasks = new List<Task>(totalHotOps);
+            for (int i = 0; i < totalHotOps; i++)
+            {
+                var intent = new MapSetIntent($"hot-key-{i % 25}", $"hot-val-{i}");
+                fireTasks.Add(orchestrator.ApplyIntentAsync<JournalTestState>(
+                    "hot-burst-doc",
+                    intent,
+                    nameof(JournalTestState.DataMap),
+                    IntentDeliveryMode.FireAndForget,
+                    CancellationToken.None));
+            }
+
+            await Task.WhenAll(fireTasks);
+            await orchestrator.FlushAsync(CancellationToken.None);
+
+            // Wait for StorageJournalForwarder's background trim and WAL flush to settle
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            long currentJournalCount = long.MaxValue;
+            while (!cts.Token.IsCancellationRequested)
+            {
+                currentJournalCount = await scope.Storage.GetJournalCountAsync("default", CancellationToken.None);
+                var backingCount = await backingStorage.GetJournalCountAsync("default", CancellationToken.None);
+                if (currentJournalCount < 50 && backingCount < 50)
+                {
+                    break;
+                }
+
+                await Task.Delay(30);
+            }
+
+            await flushService.StopAsync(CancellationToken.None);
+
+            // Assert - StorageJournalForwarder was NOT starved by soft-to-hard threshold cancellation or blocked by lagging peer GMVV=0
+            var finalDecoratorCount = await scope.Storage.GetJournalCountAsync("default", CancellationToken.None);
+            var finalBackingCount = await backingStorage.GetJournalCountAsync("default", CancellationToken.None);
+
+            finalDecoratorCount.ShouldBeLessThan(50);
+            finalBackingCount.ShouldBeLessThan(50);
+
+            var finalDoc = await orchestrator.GetDocumentStateAsync<JournalTestState>("hot-burst-doc", CancellationToken.None);
+            finalDoc.Data.DataMap.Count.ShouldBe(25);
+        }
+        finally
+        {
+            if (Directory.Exists(walDir))
+            {
+                try { Directory.Delete(walDir, recursive: true); } catch { }
+            }
+        }
+    }
 }

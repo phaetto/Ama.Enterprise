@@ -29,6 +29,16 @@ public interface IDistributedCrdtScope : IDisposable
     string HostReplicaId { get; }
 
     /// <summary>
+    /// Gets a value indicating whether this scope is a statically pinned host replica scope rather than a dynamically created scope.
+    /// </summary>
+    bool IsPinnedHostScope { get; }
+
+    /// <summary>
+    /// Gets the high-resolution timestamp (from <see cref="System.Diagnostics.Stopwatch.GetTimestamp"/>) of the last recorded activity on this scope.
+    /// </summary>
+    long LastActivityTimestamp { get; }
+
+    /// <summary>
     /// Gets the document orchestrator scoped to this replica.
     /// </summary>
     ICrdtDocumentOrchestrator Orchestrator { get; }
@@ -52,4 +62,9 @@ public interface IDistributedCrdtScope : IDisposable
     /// Gets the inner scoped dependency injection service provider for this replica scope.
     /// </summary>
     IServiceProvider ServiceProvider { get; }
+
+    /// <summary>
+    /// Updates <see cref="LastActivityTimestamp"/> to the current high-resolution timestamp.
+    /// </summary>
+    void TouchActivity();
 }

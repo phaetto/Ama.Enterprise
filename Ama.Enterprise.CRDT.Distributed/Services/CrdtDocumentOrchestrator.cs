@@ -4,7 +4,6 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
-using System.Threading.Channels;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
 using Ama.CRDT.Models.Intents;
@@ -21,10 +20,8 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Centralized gateway that manages distributed CRDT documents and coordinates topology, remote proxy calls, anti-entropy, and Map/Reduce jobs.
 /// </summary>
-public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDisposable
+public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrchestratorCommandTarget, IDisposable
 {
-    private static readonly AsyncLocal<CrdtDocumentOrchestrator?> CurrentProcessingOrchestrator = new();
-
     private readonly IServiceProvider serviceProvider;
     private readonly IDistributedCrdtStorage storage;
     private readonly IAsyncCrdtPatcher patcher;
@@ -32,37 +29,37 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     private readonly ICrdtRemoteProxyClient remoteProxyClient;
     private readonly ICrdtMapReduceCoordinator mapReduceCoordinator;
     private readonly ICrdtAntiEntropyCoordinator antiEntropyCoordinator;
+    private readonly IDocumentFactoryRegistry documentFactoryRegistry;
+    private readonly IOrchestratorCommandStripePool stripePool;
+    private readonly bool ownsFallbackStripePool;
+    private readonly string scopeReplicaId;
+    private DistributedCrdtScopeManager? scopeManager;
     private readonly ICrdtOrchestratorObserver[] orchestratorObservers;
     private readonly ILogger<CrdtDocumentOrchestrator> logger;
     private readonly IDistributedCrdtTelemetry telemetry;
     private readonly ICrdtStringPool stringPool;
-    private readonly IDisposable telemetryRegistration;
     private readonly DistributedCrdtOptions options;
 
     private readonly ConcurrentDictionary<string, IDistributedCrdtDocument> activeDocuments = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> shardIdCache = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<Type, string> stateTypeAliases = new();
-    private readonly ConcurrentDictionary<Type, string[]> stateTypeAllAliases = new();
 
-    private readonly Channel<PooledOrchestratorCommand> commandChannel;
-    private readonly ConcurrentQueue<PooledOrchestratorCommand> commandPool = new();
-    private readonly CancellationTokenSource disposeCts = new();
-    private readonly Task processingTask;
     private int syncPending;
-    private int activeOrchestratorCommandCount;
+    private int scopePendingCommandCount;
+    private int disposed;
     private int initializationStage = (int)OrchestratorInitializationStage.NotStarted;
+
+    /// <inheritdoc />
+    string IOrchestratorCommandTarget.ScopeReplicaId => scopeReplicaId;
 
     /// <summary>
     /// Gets a value indicating whether the current execution context is already running inside this orchestrator's command processing loop.
     /// </summary>
-    public bool IsCurrentThreadOrchestratorProcessor => ReferenceEquals(CurrentProcessingOrchestrator.Value, this);
+    public bool IsCurrentThreadOrchestratorProcessor => stripePool.IsCurrentThreadProcessingTarget(this);
 
     /// <summary>
-    /// Gets the number of commands currently queued or executing in the orchestrator channel.
+    /// Gets the number of commands currently queued or executing for this orchestrator scope.
     /// </summary>
-    public int PendingCommandCount =>
-        (commandChannel.Reader.CanCount ? commandChannel.Reader.Count : 0) +
-        Volatile.Read(ref activeOrchestratorCommandCount);
+    public int PendingCommandCount => Math.Max(0, Volatile.Read(ref scopePendingCommandCount));
 
     /// <summary>
     /// Gets a value indicating whether an anti-entropy dispatch or incoming state sync response is currently active.
@@ -87,7 +84,9 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         ICrdtAntiEntropyCoordinator antiEntropyCoordinator,
         IEnumerable<ICrdtOrchestratorObserver> orchestratorObservers,
         IDistributedCrdtTelemetry telemetry,
-        ICrdtStringPool? stringPool = null)
+        IDocumentFactoryRegistry? documentFactoryRegistry = null,
+        ICrdtStringPool? stringPool = null,
+        IOrchestratorCommandStripePool? stripePool = null)
     {
         ArgumentNullException.ThrowIfNull(options);
 
@@ -103,55 +102,29 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
         this.telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         this.stringPool = stringPool ?? CrdtStringPool.Shared;
+        this.documentFactoryRegistry = documentFactoryRegistry
+            ?? this.serviceProvider.GetService<IDocumentFactoryRegistry>()
+            ?? new DocumentFactoryRegistry(this.serviceProvider.GetServices<IDocumentFactory>(), this.stringPool);
         this.options = options.Value;
 
-        var aliasesByType = new Dictionary<Type, List<string>>();
-        foreach (var factory in this.serviceProvider.GetServices<IDocumentFactory>())
+        var scopeContext = this.serviceProvider.GetService<CrdtScopeContext>();
+        var replicaContext = this.serviceProvider.GetService<ReplicaContext>();
+        var resolvedScopeReplicaId = !string.IsNullOrWhiteSpace(scopeContext?.ReplicaId)
+            ? scopeContext.ReplicaId
+            : (!string.IsNullOrWhiteSpace(replicaContext?.ReplicaId) ? replicaContext.ReplicaId : "default-scope");
+        this.scopeReplicaId = this.stringPool.GetOrAdd(resolvedScopeReplicaId);
+
+        var resolvedStripePool = stripePool ?? this.serviceProvider.GetService<IOrchestratorCommandStripePool>();
+        if (resolvedStripePool is null)
         {
-            var pooledAlias = this.stringPool.GetOrAdd(factory.TypeAlias);
-            this.stateTypeAliases.TryAdd(factory.StateType, pooledAlias);
-
-            if (!aliasesByType.TryGetValue(factory.StateType, out var list))
-            {
-                list = new List<string>(1);
-                aliasesByType[factory.StateType] = list;
-            }
-
-            if (!list.Contains(pooledAlias))
-            {
-                list.Add(pooledAlias);
-            }
+            var loggerFactory = this.serviceProvider.GetService<ILoggerFactory>();
+            var poolLogger = loggerFactory?.CreateLogger<OrchestratorCommandStripePool>()
+                ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<OrchestratorCommandStripePool>.Instance;
+            resolvedStripePool = new OrchestratorCommandStripePool(options, this.telemetry, poolLogger);
+            this.ownsFallbackStripePool = true;
         }
 
-        foreach (var kvp in aliasesByType)
-        {
-            this.stateTypeAllAliases[kvp.Key] = kvp.Value.ToArray();
-        }
-
-        var capacity = this.options.ChannelCapacity;
-        if (capacity > 0)
-        {
-            this.commandChannel = Channel.CreateBounded<PooledOrchestratorCommand>(new BoundedChannelOptions(capacity)
-            {
-                SingleReader = true,
-                SingleWriter = false,
-                FullMode = BoundedChannelFullMode.Wait
-            });
-        }
-        else
-        {
-            this.commandChannel = Channel.CreateUnbounded<PooledOrchestratorCommand>(new UnboundedChannelOptions
-            {
-                SingleReader = true,
-                SingleWriter = false
-            });
-        }
-
-        this.telemetryRegistration = this.telemetry.RegisterOrchestratorPipelineMetrics(
-            () => this.commandChannel.Reader.CanCount ? this.commandChannel.Reader.Count : 0,
-            () => this.commandPool.Count);
-
-        this.processingTask = Task.Run(ProcessChannelAsync);
+        this.stripePool = resolvedStripePool;
     }
 
     /// <inheritdoc />
@@ -163,19 +136,20 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             return;
         }
 
-        var cmd = GetCommand();
+        var cmd = stripePool.RentCommand();
+        cmd.Target = this;
         cmd.Type = OrchestratorCommandType.Initialize;
         cmd.CancellationToken = cancellationToken;
 
+        Interlocked.Increment(ref scopePendingCommandCount);
         try
         {
-            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
-            telemetry.RecordOrchestratorCommandEnqueued();
-            await cmd.ExecuteAsync().ConfigureAwait(false);
+            await stripePool.EnqueueAndWaitAsync(cmd, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            ReturnCommand(cmd);
+            Interlocked.Decrement(ref scopePendingCommandCount);
+            stripePool.ReturnCommand(cmd);
         }
     }
 
@@ -202,43 +176,56 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 return;
             }
 
-            var ffCmd = GetCommand();
+            var ffCmd = stripePool.RentCommand();
+            ffCmd.Target = this;
             ffCmd.Type = OrchestratorCommandType.ReevaluateTopology;
             ffCmd.IsFireAndForget = true;
             ffCmd.CancellationToken = CancellationToken.None;
 
-            if (commandChannel.Writer.TryWrite(ffCmd))
+            Interlocked.Increment(ref scopePendingCommandCount);
+            if (stripePool.TryEnqueueFireAndForget(ffCmd))
             {
-                telemetry.RecordOrchestratorCommandEnqueued();
                 return;
             }
 
             if (IsCurrentThreadOrchestratorProcessor)
             {
+                Interlocked.Decrement(ref scopePendingCommandCount);
                 Interlocked.Exchange(ref syncPending, 0);
-                ReturnCommand(ffCmd);
+                stripePool.ReturnCommand(ffCmd);
                 await ProcessSyncDocumentsInternalAsync(cancellationToken).ConfigureAwait(false);
                 return;
             }
 
-            await commandChannel.Writer.WriteAsync(ffCmd, cancellationToken).ConfigureAwait(false);
-            telemetry.RecordOrchestratorCommandEnqueued();
+            try
+            {
+                await stripePool.EnqueueFireAndForgetAsync(ffCmd, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                Interlocked.Decrement(ref scopePendingCommandCount);
+                Interlocked.Exchange(ref syncPending, 0);
+                stripePool.ReturnCommand(ffCmd);
+                throw;
+            }
+
             return;
         }
 
-        var cmd = GetCommand();
+        var cmd = stripePool.RentCommand();
+        cmd.Target = this;
         cmd.Type = OrchestratorCommandType.ReevaluateTopology;
         cmd.CancellationToken = cancellationToken;
 
+        Interlocked.Increment(ref scopePendingCommandCount);
         try
         {
-            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
-            telemetry.RecordOrchestratorCommandEnqueued();
-            await cmd.ExecuteAsync().ConfigureAwait(false);
+            await stripePool.EnqueueAndWaitAsync(cmd, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            ReturnCommand(cmd);
+            Interlocked.Decrement(ref scopePendingCommandCount);
+            stripePool.ReturnCommand(cmd);
         }
     }
 
@@ -273,9 +260,9 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             }
         }
 
-        if (stateTypeAllAliases.TryGetValue(typeof(TState), out var allAliases) && allAliases.Length > 1)
+        if (documentFactoryRegistry.TryGetAllAliases(typeof(TState), out var allAliases) && allAliases.Count > 1)
         {
-            for (int i = 0; i < allAliases.Length; i++)
+            for (int i = 0; i < allAliases.Count; i++)
             {
                 var candidateAlias = allAliases[i];
                 if (string.Equals(candidateAlias, typeAlias, StringComparison.Ordinal))
@@ -331,9 +318,9 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             }
         }
 
-        if (stateTypeAllAliases.TryGetValue(typeof(TState), out var allAliases) && allAliases.Length > 1)
+        if (documentFactoryRegistry.TryGetAllAliases(typeof(TState), out var allAliases) && allAliases.Count > 1)
         {
-            for (int i = 0; i < allAliases.Length; i++)
+            for (int i = 0; i < allAliases.Count; i++)
             {
                 var candidateAlias = allAliases[i];
                 if (string.Equals(candidateAlias, resolvedTypeAlias, StringComparison.Ordinal))
@@ -494,7 +481,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                         return new ValueTask<string?>((string?)null);
                     }
 
-                    var factory = serviceProvider.GetKeyedService<IDocumentFactory>(typeAlias);
+                    var factory = ResolveDocumentFactory(typeAlias);
                     if (factory != null)
                     {
                         var resolvedShardId = stringPool.GetOrAdd(factory.GetShardId(serviceProvider, documentId));
@@ -527,7 +514,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             var registryDoc = Registry.CurrentDocument;
             if (!TryFindRegistryEntry(registryDoc.Data.Documents, documentId, typeAlias, out var entry) && !string.IsNullOrWhiteSpace(typeAlias))
             {
-                var factory = serviceProvider.GetKeyedService<IDocumentFactory>(typeAlias);
+                var factory = ResolveDocumentFactory(typeAlias);
                 if (factory != null)
                 {
                     var resolvedShardId = stringPool.GetOrAdd(factory.GetShardId(serviceProvider, documentId));
@@ -537,7 +524,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             }
             else if (entry != null && !entry.IsDeleted)
             {
-                var factory = serviceProvider.GetKeyedService<IDocumentFactory>(entry.TypeAlias);
+                var factory = ResolveDocumentFactory(entry.TypeAlias);
                 if (factory != null)
                 {
                     var resolvedShardId = stringPool.GetOrAdd(factory.GetShardId(serviceProvider, entry.DocumentId));
@@ -622,8 +609,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                     TryFindRegistryEntry(registryDoc.Data.Documents, documentId, null, out var fallbackEntry) &&
                     fallbackEntry is { IsDeleted: false })
                 {
-                    var requestedFactory = serviceProvider.GetKeyedService<IDocumentFactory>(resolvedAlias);
-                    var actualFactory = serviceProvider.GetKeyedService<IDocumentFactory>(fallbackEntry.TypeAlias);
+                    var requestedFactory = ResolveDocumentFactory(resolvedAlias);
+                    var actualFactory = ResolveDocumentFactory(fallbackEntry.TypeAlias);
                     if (requestedFactory != null && actualFactory != null && requestedFactory.StateType == actualFactory.StateType)
                     {
                         resolvedAlias = fallbackEntry.TypeAlias;
@@ -644,7 +631,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             return alreadyActiveDoc;
         }
 
-        var factory = serviceProvider.GetKeyedService<IDocumentFactory>(resolvedAlias);
+        var factory = ResolveDocumentFactory(resolvedAlias);
         if (factory == null)
         {
             return null;
@@ -668,21 +655,22 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             return inlinePromotedDoc;
         }
 
-        var cmd = GetCommand();
+        var cmd = stripePool.RentCommand();
+        cmd.Target = this;
         cmd.Type = OrchestratorCommandType.CreateDocument;
         cmd.DocumentId = documentId;
         cmd.TypeAlias = resolvedAlias;
         cmd.CancellationToken = cancellationToken;
 
+        Interlocked.Increment(ref scopePendingCommandCount);
         try
         {
-            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
-            telemetry.RecordOrchestratorCommandEnqueued();
-            await cmd.ExecuteAsync().ConfigureAwait(false);
+            await stripePool.EnqueueAndWaitAsync(cmd, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            ReturnCommand(cmd);
+            Interlocked.Decrement(ref scopePendingCommandCount);
+            stripePool.ReturnCommand(cmd);
         }
 
         activeDocuments.TryGetValue(resolvedKey, out var promotedDoc);
@@ -697,7 +685,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     {
         if (deliveryMode == IntentDeliveryMode.FireAndForget && !string.IsNullOrWhiteSpace(typeAlias))
         {
-            return await EnsureLocalDocumentRegisteredForFireAndForgetAsync(documentId, typeAlias, cancellationToken).ConfigureAwait(false);
+            return await EnsureLocalDocumentRegisteredForFireAndForgetAsync(documentId, typeAlias, isBrandNewCreation: false, cancellationToken).ConfigureAwait(false);
         }
 
         return await ResolveOrPromoteLocalDocumentAsync(documentId, typeAlias, cancellationToken).ConfigureAwait(false);
@@ -706,6 +694,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     private async ValueTask<IDistributedCrdtDocument?> EnsureLocalDocumentRegisteredForFireAndForgetAsync(
         string documentId,
         string typeAlias,
+        bool isBrandNewCreation,
         CancellationToken cancellationToken)
     {
         documentId = stringPool.GetOrAdd(documentId);
@@ -717,18 +706,23 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             return existingDoc;
         }
 
+        var hadExistingRegistryEntry = false;
         if (Registry != null)
         {
             var registryMap = Registry.CurrentDocument.Data.Documents;
             if ((registryMap.TryGetValue(compositeKey, out var existingEntry) || registryMap.TryGetValue(documentId, out existingEntry))
-                && existingEntry != null
-                && existingEntry.IsDeleted)
+                && existingEntry != null)
             {
-                return null;
+                if (existingEntry.IsDeleted)
+                {
+                    return null;
+                }
+
+                hadExistingRegistryEntry = true;
             }
         }
 
-        var factory = serviceProvider.GetKeyedService<IDocumentFactory>(typeAlias);
+        var factory = ResolveDocumentFactory(typeAlias);
         if (factory == null)
         {
             return null;
@@ -750,7 +744,10 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             return existingDoc;
         }
 
-        var doc = factory.CreateDocument(serviceProvider, documentId);
+        var skipStorageLoad = isBrandNewCreation && !hadExistingRegistryEntry;
+        var doc = skipStorageLoad
+            ? factory.CreateNewlyCreatedLocalDocument(serviceProvider, documentId)
+            : factory.CreateDocument(serviceProvider, documentId);
         if (!activeDocuments.TryAdd(compositeKey, doc))
         {
             try
@@ -769,17 +766,20 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
         versionVectorManager.EnsureShardRegistered(doc.ShardId);
 
-        if (doc is IDocumentCommandTarget commandTarget)
+        if (!skipStorageLoad)
         {
-            var commandPipeline = serviceProvider.GetRequiredService<IDocumentCommandPipeline>();
-            var initCmd = commandPipeline.RentCommand();
-            initCmd.Target = commandTarget;
-            initCmd.Type = DocumentCommandType.Initialize;
-            await commandPipeline.EnqueueFireAndForgetAsync(initCmd, cancellationToken).ConfigureAwait(false);
-        }
-        else
-        {
-            await doc.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            if (doc is IDocumentCommandTarget commandTarget)
+            {
+                var commandPipeline = serviceProvider.GetRequiredService<IDocumentCommandPipeline>();
+                var initCmd = commandPipeline.RentCommand();
+                initCmd.Target = commandTarget;
+                initCmd.Type = DocumentCommandType.Initialize;
+                await commandPipeline.EnqueueFireAndForgetAsync(initCmd, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await doc.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            }
         }
 
         await NotifyTopologyChangedAsync(cancellationToken).ConfigureAwait(false);
@@ -831,7 +831,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
 
         resolvedAlias = stringPool.GetOrAdd(resolvedAlias);
-        var factory = serviceProvider.GetKeyedService<IDocumentFactory>(resolvedAlias);
+        var factory = ResolveDocumentFactory(resolvedAlias);
         if (factory == null)
         {
             return Array.Empty<byte>();
@@ -852,6 +852,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     {
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
 
+        TouchParentScopeActivity();
         documentId = stringPool.GetOrAdd(documentId);
 
         var localTypedDoc = TryGetLocalDocument<TState>(documentId);
@@ -888,6 +889,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
         ArgumentNullException.ThrowIfNull(intent);
 
+        TouchParentScopeActivity();
         documentId = stringPool.GetOrAdd(documentId);
         if (!string.IsNullOrEmpty(targetProperty))
         {
@@ -949,6 +951,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             return;
         }
 
+        TouchParentScopeActivity();
         documentId = stringPool.GetOrAdd(documentId);
 
         if (Registry != null && string.Equals(Registry.DocumentId, documentId, StringComparison.Ordinal) && Registry is IDistributedCrdtDocument<TState> registryTyped)
@@ -997,6 +1000,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
         if (string.IsNullOrWhiteSpace(typeAlias)) throw new ArgumentException("Type alias cannot be null or empty.", nameof(typeAlias));
 
+        TouchParentScopeActivity();
         documentId = stringPool.GetOrAdd(documentId);
         typeAlias = stringPool.GetOrAdd(typeAlias);
 
@@ -1006,14 +1010,15 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         if (Registry is IDistributedCrdtDocument<CrdtRegistryState> registryTyped)
         {
+            if (deliveryMode == IntentDeliveryMode.FireAndForget)
+            {
+                await EnsureLocalDocumentRegisteredForFireAndForgetAsync(documentId, typeAlias, isBrandNewCreation: true, cancellationToken).ConfigureAwait(false);
+            }
+
             var applied = await registryTyped.ApplyRemoteIntentAsync(intent, nameof(CrdtRegistryState.Documents), patcher, deliveryMode, cancellationToken).ConfigureAwait(false);
             if (applied)
             {
-                if (deliveryMode == IntentDeliveryMode.FireAndForget)
-                {
-                    await EnsureLocalDocumentRegisteredForFireAndForgetAsync(documentId, typeAlias, cancellationToken).ConfigureAwait(false);
-                }
-                else
+                if (deliveryMode != IntentDeliveryMode.FireAndForget)
                 {
                     await PromoteSingleDocumentAsync(documentId, typeAlias, deliveryMode, cancellationToken).ConfigureAwait(false);
                 }
@@ -1146,20 +1151,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         if (!IsCurrentThreadOrchestratorProcessor)
         {
-            var cmd = GetCommand();
-            cmd.Type = OrchestratorCommandType.FlushBarrier;
-            cmd.CancellationToken = cancellationToken;
-
-            try
-            {
-                await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
-                telemetry.RecordOrchestratorCommandEnqueued();
-                await cmd.ExecuteAsync().ConfigureAwait(false);
-            }
-            finally
-            {
-                ReturnCommand(cmd);
-            }
+            await stripePool.FlushScopeAsync(scopeReplicaId, cancellationToken).ConfigureAwait(false);
         }
 
         await ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, cancellationToken).ConfigureAwait(false);
@@ -1219,12 +1211,52 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     }
 
     /// <inheritdoc />
+    async Task IOrchestratorCommandTarget.ExecuteOrchestratorCommandInternalAsync(PooledOrchestratorCommand cmd)
+    {
+        try
+        {
+            if (Volatile.Read(ref disposed) != 0)
+            {
+                return;
+            }
+
+            switch (cmd.Type)
+            {
+                case OrchestratorCommandType.Initialize:
+                    await ProcessInitializeInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
+                    break;
+                case OrchestratorCommandType.CreateDocument:
+                    await ProcessPromoteDocumentInternalAsync(cmd.DocumentId!, cmd.TypeAlias!, cmd.CancellationToken).ConfigureAwait(false);
+                    break;
+                case OrchestratorCommandType.ReevaluateTopology:
+                    Interlocked.Exchange(ref syncPending, 0);
+                    await ProcessSyncDocumentsInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
+                    break;
+                case OrchestratorCommandType.FlushBarrier:
+                    break;
+            }
+        }
+        finally
+        {
+            if (cmd.IsFireAndForget)
+            {
+                Interlocked.Decrement(ref scopePendingCommandCount);
+            }
+        }
+    }
+
+    /// <inheritdoc />
     public void Dispose()
     {
-        telemetryRegistration.Dispose();
-        disposeCts.Cancel();
-        commandChannel?.Writer.TryComplete();
-        disposeCts.Dispose();
+        if (Interlocked.Exchange(ref disposed, 1) != 0)
+        {
+            return;
+        }
+
+        if (ownsFallbackStripePool && stripePool is IDisposable disposableStripePool)
+        {
+            disposableStripePool.Dispose();
+        }
 
         if (Registry is IDisposable rd)
         {
@@ -1255,97 +1287,6 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
     }
 
-    private PooledOrchestratorCommand GetCommand() => commandPool.TryDequeue(out var cmd) ? cmd : new PooledOrchestratorCommand();
-
-    private void ReturnCommand(PooledOrchestratorCommand cmd)
-    {
-        cmd.Reset();
-        commandPool.Enqueue(cmd);
-    }
-
-    private async Task ProcessChannelAsync()
-    {
-        try
-        {
-            await foreach (var cmd in commandChannel.Reader.ReadAllAsync(disposeCts.Token).ConfigureAwait(false))
-            {
-                Interlocked.Increment(ref activeOrchestratorCommandCount);
-                try
-                {
-                    cmd.CancellationToken.ThrowIfCancellationRequested();
-
-                    CurrentProcessingOrchestrator.Value = this;
-                    try
-                    {
-                        switch (cmd.Type)
-                        {
-                            case OrchestratorCommandType.Initialize:
-                                await ProcessInitializeInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
-                                break;
-                            case OrchestratorCommandType.CreateDocument:
-                                await ProcessPromoteDocumentInternalAsync(cmd.DocumentId!, cmd.TypeAlias!, cmd.CancellationToken).ConfigureAwait(false);
-                                break;
-                            case OrchestratorCommandType.ReevaluateTopology:
-                                Interlocked.Exchange(ref syncPending, 0);
-                                await ProcessSyncDocumentsInternalAsync(cmd.CancellationToken).ConfigureAwait(false);
-                                break;
-                            case OrchestratorCommandType.FlushBarrier:
-                                break;
-                        }
-                    }
-                    finally
-                    {
-                        CurrentProcessingOrchestrator.Value = null;
-                    }
-
-                    telemetry.RecordOrchestratorCommandProcessed();
-
-                    if (cmd.IsFireAndForget)
-                    {
-                        ReturnCommand(cmd);
-                    }
-                    else
-                    {
-                        cmd.SetResult();
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    if (cmd.IsFireAndForget)
-                    {
-                        ReturnCommand(cmd);
-                    }
-                    else
-                    {
-                        cmd.SetException(new OperationCanceledException("Orchestrator operation cancelled."));
-                    }
-                }
-                catch (Exception ex)
-                {
-                    telemetry.RecordOrchestratorCommandFailure();
-                    logger.LogError(ex, "Error executing orchestrator command {CommandType} for document {DocumentId}.", cmd.Type, cmd.DocumentId);
-                    if (cmd.IsFireAndForget)
-                    {
-                        ReturnCommand(cmd);
-                    }
-                    else
-                    {
-                        cmd.SetException(ex);
-                    }
-                }
-                finally
-                {
-                    Interlocked.Decrement(ref activeOrchestratorCommandCount);
-                }
-            }
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            logger.LogCritical(ex, "Orchestrator background channel failed.");
-        }
-    }
-
     private async Task ProcessInitializeInternalAsync(CancellationToken cancellationToken)
     {
         if (InitializationStage == OrchestratorInitializationStage.Initialized && Registry != null)
@@ -1368,7 +1309,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             }
 
             var registryState = new CrdtRegistryState();
-            Registry = ActivatorUtilities.CreateInstance<DistributedCrdtDocument<CrdtRegistryState>>(serviceProvider, registryState);
+            Registry = DocumentFactory<CrdtRegistryState>.CreateDocumentInstance(
+                serviceProvider,
+                registryState,
+                Constants.SystemRegistryDocumentId,
+                stringPool);
             shardIdCache.TryAdd(Registry.DocumentId, Registry.ShardId);
 
             await Registry.InitializeAsync(cancellationToken).ConfigureAwait(false);
@@ -1408,7 +1353,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             return;
         }
 
-        var factory = serviceProvider.GetKeyedService<IDocumentFactory>(typeAlias);
+        var factory = ResolveDocumentFactory(typeAlias);
         if (factory == null)
         {
             logger.LogWarning("Cannot find document factory for type alias: {TypeAlias}", typeAlias);
@@ -1457,7 +1402,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             return;
         }
 
-        var factory = serviceProvider.GetKeyedService<IDocumentFactory>(typeAlias);
+        var factory = ResolveDocumentFactory(typeAlias);
         if (factory == null)
         {
             return;
@@ -1482,47 +1427,59 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
 
         if (deliveryMode == IntentDeliveryMode.FireAndForget)
         {
-            var ffCmd = GetCommand();
+            var ffCmd = stripePool.RentCommand();
+            ffCmd.Target = this;
             ffCmd.Type = OrchestratorCommandType.CreateDocument;
             ffCmd.DocumentId = documentId;
             ffCmd.TypeAlias = typeAlias;
             ffCmd.IsFireAndForget = true;
             ffCmd.CancellationToken = CancellationToken.None;
 
-            if (commandChannel.Writer.TryWrite(ffCmd))
+            Interlocked.Increment(ref scopePendingCommandCount);
+            if (stripePool.TryEnqueueFireAndForget(ffCmd))
             {
-                telemetry.RecordOrchestratorCommandEnqueued();
                 return;
             }
 
             var pipeline = serviceProvider.GetService<IDocumentCommandPipeline>();
             if (pipeline != null && pipeline.IsCurrentThreadPipelineProcessor)
             {
-                ReturnCommand(ffCmd);
+                Interlocked.Decrement(ref scopePendingCommandCount);
+                stripePool.ReturnCommand(ffCmd);
                 _ = ReevaluateTopologyAsync(IntentDeliveryMode.FireAndForget, CancellationToken.None);
                 return;
             }
 
-            await commandChannel.Writer.WriteAsync(ffCmd, cancellationToken).ConfigureAwait(false);
-            telemetry.RecordOrchestratorCommandEnqueued();
+            try
+            {
+                await stripePool.EnqueueFireAndForgetAsync(ffCmd, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                Interlocked.Decrement(ref scopePendingCommandCount);
+                stripePool.ReturnCommand(ffCmd);
+                throw;
+            }
+
             return;
         }
 
-        var cmd = GetCommand();
+        var cmd = stripePool.RentCommand();
+        cmd.Target = this;
         cmd.Type = OrchestratorCommandType.CreateDocument;
         cmd.DocumentId = documentId;
         cmd.TypeAlias = typeAlias;
         cmd.CancellationToken = cancellationToken;
 
+        Interlocked.Increment(ref scopePendingCommandCount);
         try
         {
-            await commandChannel.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
-            telemetry.RecordOrchestratorCommandEnqueued();
-            await cmd.ExecuteAsync().ConfigureAwait(false);
+            await stripePool.EnqueueAndWaitAsync(cmd, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            ReturnCommand(cmd);
+            Interlocked.Decrement(ref scopePendingCommandCount);
+            stripePool.ReturnCommand(cmd);
         }
     }
 
@@ -1565,7 +1522,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 {
                     if (!activeDocuments.ContainsKey(compositeKey))
                     {
-                        var factory = serviceProvider.GetKeyedService<IDocumentFactory>(entry.TypeAlias);
+                        var factory = ResolveDocumentFactory(entry.TypeAlias);
                         if (factory != null)
                         {
                             if (!shardIdCache.TryGetValue(compositeKey, out var shardId))
@@ -1655,6 +1612,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                 await DemoteActiveDocumentsSafelyAsync(demotedDocs, cancellationToken).ConfigureAwait(false);
             }
 
+            PruneStaleShardsFromVersionVectorManager(registry, versionVectorManager);
+
             foreach (var compositeKey in toDelete)
             {
                 shardIdCache.TryRemove(compositeKey, out _);
@@ -1688,6 +1647,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
                         }
                     }
 
+                    if (!shardStillInUse)
+                    {
+                        versionVectorManager.RemoveShard(shardId);
+                    }
+
                     changed = true;
                     telemetry.RecordOrchestratorDocumentDeleted(doc.DocumentId);
                     logger.LogDebug("Deleted active CRDT document: {DocumentId} ({TypeAlias})", doc.DocumentId, doc.TypeAlias);
@@ -1710,6 +1674,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
     {
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
 
+        TouchParentScopeActivity();
         documentId = stringPool.GetOrAdd(documentId);
         if (!string.IsNullOrWhiteSpace(typeAlias))
         {
@@ -1855,6 +1820,16 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         return new ValueTask<string>(shardId);
     }
 
+    private IDocumentFactory? ResolveDocumentFactory(string typeAlias)
+    {
+        if (documentFactoryRegistry.TryGetFactory(typeAlias, out var factory))
+        {
+            return factory;
+        }
+
+        return serviceProvider.GetKeyedService<IDocumentFactory>(typeAlias);
+    }
+
     private string? GetTypeAlias<TState>()
     {
         if (typeof(TState) == typeof(CrdtRegistryState))
@@ -1862,7 +1837,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
             return stringPool.GetOrAdd(Constants.SystemRegistryDocumentId);
         }
 
-        return stateTypeAliases.TryGetValue(typeof(TState), out var alias) ? alias : null;
+        return documentFactoryRegistry.TryGetPrimaryAlias(typeof(TState), out var alias) ? alias : null;
     }
 
     private async Task DemoteActiveDocumentsSafelyAsync(IReadOnlyList<IDistributedCrdtDocument> docs, CancellationToken cancellationToken)
@@ -1917,6 +1892,35 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
     }
 
+    private void PruneStaleShardsFromVersionVectorManager(
+        IDistributedCrdtDocument<CrdtRegistryState> registry,
+        IShardVersionVectorManager versionVectorManager)
+    {
+        if (!options.EnableSharding || activeDocuments.IsEmpty)
+        {
+            return;
+        }
+
+        var activeShards = new HashSet<string>(StringComparer.Ordinal)
+        {
+            registry.ShardId
+        };
+
+        foreach (var remainingDoc in activeDocuments.Values)
+        {
+            activeShards.Add(remainingDoc.ShardId);
+        }
+
+        var currentSnapshot = versionVectorManager.GetFullSnapshot();
+        foreach (var shardId in currentSnapshot.Keys)
+        {
+            if (!activeShards.Contains(shardId))
+            {
+                versionVectorManager.RemoveShard(shardId);
+            }
+        }
+    }
+
     private async Task DemoteSingleDocumentCoreAsync(IDistributedCrdtDocument doc, CancellationToken cancellationToken)
     {
         try
@@ -1938,5 +1942,14 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IDispo
         }
 
         await remoteProxyClient.PushDemotedDocumentSnapshotToTargetPeersAsync(doc, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    private void TouchParentScopeActivity()
+    {
+        var manager = scopeManager ??= serviceProvider.GetService<DistributedCrdtScopeManager>();
+        if (manager != null && manager.TryGetScope(scopeReplicaId, out var parentScope) && parentScope != null)
+        {
+            parentScope.TouchActivity();
+        }
     }
 }

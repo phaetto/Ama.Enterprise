@@ -457,4 +457,85 @@ public class EvictionIntegrationTests
         doc.Metadata.VersionVector.ContainsKey("EvictedPeerFF").ShouldBeFalse();
         doc.Metadata.VersionVector["RetainedPeer"].ShouldBe(10);
     }
+
+    [IntegrationFact]
+    public async Task EvictIdleDynamicScopes_CheckpointsAndUnloadsIdleDynamicScope_WhileKeepingPinnedHostScope_AndRehydratesOnSubsequentAccess()
+    {
+        // Arrange - Register a shared singleton MemoryCrdtStorage so re-hydrated scopes read persisted state
+        var sharedStorage = new MemoryCrdtStorage();
+        var sp = BuildNode("NodeA", services =>
+        {
+            services.AddDistributedCrdtReplica("NodeA", "TestMesh");
+            services.AddSingleton<IDistributedCrdtStorage>(sharedStorage);
+        });
+
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+
+        // Ensure pinned host scope is initialized
+        var hostScope = await scopeManager.GetOrCreateScopeAsync("NodeA", cancellationToken: CancellationToken.None);
+        hostScope.IsPinnedHostScope.ShouldBeTrue();
+
+        // Create and mutate a dynamic user scope ("NodeA@user-42")
+        var dynamicScope = await scopeManager.GetOrCreateScopeAsync("user-42", "NodeA", CancellationToken.None);
+        dynamicScope.IsPinnedHostScope.ShouldBeFalse();
+        dynamicScope.ReplicaId.ShouldBe("NodeA@user-42");
+
+        await dynamicScope.Orchestrator.CreateDocumentAsync("user-42-doc", "test-doc", CancellationToken.None);
+        await dynamicScope.Orchestrator.ApplyIntentAsync<TestState>(
+            "user-42-doc",
+            new MapSetIntent("Theme", "Dark"),
+            nameof(TestState.DataMap),
+            CancellationToken.None);
+
+        // Wait briefly so the scope's activity age exceeds the idle TTL
+        await Task.Delay(50);
+
+        // Act 1 - Evict idle dynamic scopes
+        var evictedCount = await scopeManager.EvictIdleDynamicScopesAsync(TimeSpan.FromMilliseconds(20), CancellationToken.None);
+
+        // Assert 1 - Dynamic scope was evicted while pinned host scope remains active
+        evictedCount.ShouldBe(1);
+        scopeManager.TryGetScope("user-42", out _).ShouldBeFalse();
+        scopeManager.TryGetScope("NodeA@user-42", out _).ShouldBeFalse();
+        scopeManager.TryGetScope("NodeA", out var remainingHostScope).ShouldBeTrue();
+        remainingHostScope.ShouldBeSameAs(hostScope);
+
+        // Act 2 - Transparently re-hydrate the dynamic scope via an inbound P2P patch message
+        var serializer = sp.GetRequiredService<ICrdtSerializer>();
+        var handler = sp.GetRequiredKeyedService<IApplicationPayloadHandler>("TestMesh");
+
+        // Also generate a remote patch from a peer for the evicted scope
+        var rehydratedScope = await scopeManager.GetOrCreateScopeAsync("user-42", "NodeA", CancellationToken.None);
+        rehydratedScope.ShouldNotBeSameAs(dynamicScope);
+
+        var rehydratedDoc = await rehydratedScope.Orchestrator.GetDocumentStateAsync<TestState>("user-42-doc", CancellationToken.None);
+        rehydratedDoc.Data.DataMap.ContainsKey("Theme").ShouldBeTrue();
+        rehydratedDoc.Data.DataMap["Theme"].ShouldBe("Dark");
+
+        // Evict once more and verify inbound P2P message transparently re-hydrates the scope
+        await Task.Delay(50);
+        (await scopeManager.EvictIdleDynamicScopesAsync(TimeSpan.FromMilliseconds(20), CancellationToken.None)).ShouldBe(1);
+        scopeManager.TryGetScope("user-42", out _).ShouldBeFalse();
+
+        var syncMsg = new Models.CrdtStateSyncMessage("RemoteNode@user-42", new ShardVersionVectorMap());
+        var syncWrapper = new Models.CrdtMessageWrapper(
+            Constants.SystemRegistryDocumentId,
+            "CrdtSync",
+            serializer.SerializeToBytes(syncMsg),
+            "RemoteNode@user-42",
+            ScopeId: "user-42");
+
+        await handler.HandlePayloadAsync(
+            "TestMesh",
+            new P2p.Models.Core.PeerId(Guid.NewGuid()),
+            serializer.SerializeToBytes(syncWrapper),
+            CancellationToken.None);
+
+        // Assert 2 - Inbound payload re-hydrated the scope and touched its activity timestamp
+        scopeManager.TryGetScope("user-42", out var p2pRehydratedScope).ShouldBeTrue();
+        p2pRehydratedScope.ShouldNotBeNull();
+        p2pRehydratedScope!.Orchestrator.InitializationStage.ShouldBe(Models.OrchestratorInitializationStage.Initialized);
+        var docAfterP2pRehydrate = await p2pRehydratedScope.Orchestrator.GetDocumentStateAsync<TestState>("user-42-doc", CancellationToken.None);
+        docAfterP2pRehydrate.Data.DataMap["Theme"].ShouldBe("Dark");
+    }
 }

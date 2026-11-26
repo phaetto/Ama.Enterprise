@@ -3,13 +3,13 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 using System;
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
-using System.Threading.Channels;
 using System.Threading.Tasks;
 using Ama.CRDT.Models;
 using Ama.CRDT.Services;
@@ -20,23 +20,31 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// A disk-backed write-ahead log (WAL) buffer that appends serialized operations sequentially to local segment files
-/// before staging them in memory for batched background flushing.
+/// before staging them in memory for batched background flushing. Automatically closes idle file handles when all
+/// staged operations are acknowledged so high-cardinality scopes do not hold thousands of open file descriptors.
 /// </summary>
 public sealed class DiskWriteAheadBuffer : ICrdtWriteAheadBuffer
 {
+    private static readonly ConcurrentDictionary<int, SemaphoreSlim> SharedCapacitySemaphores = new();
+
     private readonly ReplicaContext replicaContext;
     private readonly ICrdtSerializer serializer;
     private readonly DistributedCrdtOptions options;
     private readonly ILogger<DiskWriteAheadBuffer> logger;
-    private readonly Channel<JournaledOperation> channel;
+    private readonly ConcurrentQueue<JournaledOperation> queue = new();
+    private readonly SemaphoreSlim capacitySemaphore;
     private readonly SemaphoreSlim fileLock = new(1, 1);
+    private readonly object signalLock = new();
     private readonly string walDirectory;
     private readonly string safeReplicaId;
 
+    private TaskCompletionSource<bool>? itemAvailableTcs;
     private FileStream? activeStream;
     private string? activeSegmentPath;
     private long currentSegmentId;
     private long unacknowledgedCount;
+    private int pendingCount;
+    private volatile bool isCompleted;
     private bool disposed;
 
     /// <summary>
@@ -66,19 +74,17 @@ public sealed class DiskWriteAheadBuffer : ICrdtWriteAheadBuffer
         Directory.CreateDirectory(this.walDirectory);
 
         var capacity = this.options.WalChannelCapacity > 0 ? this.options.WalChannelCapacity : 10_000;
-        this.channel = Channel.CreateBounded<JournaledOperation>(new BoundedChannelOptions(capacity)
-        {
-            FullMode = BoundedChannelFullMode.Wait,
-            SingleReader = true,
-            SingleWriter = false
-        });
+        this.capacitySemaphore = SharedCapacitySemaphores.GetOrAdd(capacity, static cap => new SemaphoreSlim(cap, cap));
     }
+
+    /// <inheritdoc />
+    public int PendingCount => Volatile.Read(ref this.pendingCount);
 
     /// <inheritdoc />
     public void Enqueue(IReadOnlyList<JournaledOperation> operations)
     {
         ArgumentNullException.ThrowIfNull(operations);
-        if (operations.Count == 0)
+        if (operations.Count == 0 || this.isCompleted)
         {
             return;
         }
@@ -111,22 +117,32 @@ public sealed class DiskWriteAheadBuffer : ICrdtWriteAheadBuffer
             this.fileLock.Release();
         }
 
-        var writer = this.channel.Writer;
         for (int i = 0; i < operations.Count; i++)
         {
-            var op = operations[i];
-            if (!writer.TryWrite(op))
+            if (this.isCompleted)
             {
-                EnqueueSlowSync(writer, op);
+                break;
             }
+
+            this.capacitySemaphore.Wait();
+            if (this.isCompleted)
+            {
+                this.capacitySemaphore.Release();
+                break;
+            }
+
+            this.queue.Enqueue(operations[i]);
+            Interlocked.Increment(ref this.pendingCount);
         }
+
+        this.SignalItemAvailable();
     }
 
     /// <inheritdoc />
     public async ValueTask EnqueueAsync(IReadOnlyList<JournaledOperation> operations, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(operations);
-        if (operations.Count == 0)
+        if (operations.Count == 0 || this.isCompleted)
         {
             return;
         }
@@ -159,15 +175,25 @@ public sealed class DiskWriteAheadBuffer : ICrdtWriteAheadBuffer
             this.fileLock.Release();
         }
 
-        var writer = this.channel.Writer;
         for (int i = 0; i < operations.Count; i++)
         {
-            var op = operations[i];
-            if (!writer.TryWrite(op))
+            if (this.isCompleted)
             {
-                await writer.WriteAsync(op, cancellationToken).ConfigureAwait(false);
+                break;
             }
+
+            await this.capacitySemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            if (this.isCompleted)
+            {
+                this.capacitySemaphore.Release();
+                break;
+            }
+
+            this.queue.Enqueue(operations[i]);
+            Interlocked.Increment(ref this.pendingCount);
         }
+
+        this.SignalItemAvailable();
     }
 
     /// <inheritdoc />
@@ -178,25 +204,21 @@ public sealed class DiskWriteAheadBuffer : ICrdtWriteAheadBuffer
             throw new ArgumentOutOfRangeException(nameof(maxBatchSize), "Max batch size must be greater than zero.");
         }
 
-        var reader = this.channel.Reader;
-        if (!await reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+        if (!await this.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
         {
             return Array.Empty<JournaledOperation>();
         }
 
         var batch = new List<JournaledOperation>(Math.Min(maxBatchSize, 64));
-        while (batch.Count < maxBatchSize && reader.TryRead(out var item))
-        {
-            batch.Add(item);
-        }
+        this.DrainUpTo(batch, maxBatchSize);
 
-        if (batch.Count >= maxBatchSize || maxWaitTime <= TimeSpan.Zero)
+        if (batch.Count >= maxBatchSize || maxWaitTime <= TimeSpan.Zero || this.isCompleted)
         {
             return batch;
         }
 
         var sw = Stopwatch.StartNew();
-        while (batch.Count < maxBatchSize)
+        while (batch.Count < maxBatchSize && !this.isCompleted)
         {
             var remaining = maxWaitTime - sw.Elapsed;
             if (remaining <= TimeSpan.Zero)
@@ -209,15 +231,12 @@ public sealed class DiskWriteAheadBuffer : ICrdtWriteAheadBuffer
 
             try
             {
-                if (!await reader.WaitToReadAsync(timeoutCts.Token).ConfigureAwait(false))
+                if (!await this.WaitToReadAsync(timeoutCts.Token).ConfigureAwait(false))
                 {
                     break;
                 }
 
-                while (batch.Count < maxBatchSize && reader.TryRead(out var item))
-                {
-                    batch.Add(item);
-                }
+                this.DrainUpTo(batch, maxBatchSize);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
@@ -243,8 +262,22 @@ public sealed class DiskWriteAheadBuffer : ICrdtWriteAheadBuffer
             this.unacknowledgedCount = Math.Max(0, this.unacknowledgedCount - flushedOperations.Count);
             if (this.unacknowledgedCount == 0 && this.activeStream != null)
             {
-                this.activeStream.SetLength(0);
-                await this.activeStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                var pathToDelete = this.activeSegmentPath;
+                await this.activeStream.DisposeAsync().ConfigureAwait(false);
+                this.activeStream = null;
+                this.activeSegmentPath = null;
+
+                if (!string.IsNullOrEmpty(pathToDelete) && File.Exists(pathToDelete))
+                {
+                    try
+                    {
+                        File.Delete(pathToDelete);
+                    }
+                    catch
+                    {
+                        // Ignore cleanup errors if file is temporarily locked
+                    }
+                }
             }
         }
         finally
@@ -365,7 +398,14 @@ public sealed class DiskWriteAheadBuffer : ICrdtWriteAheadBuffer
     /// <inheritdoc />
     public void Complete()
     {
-        this.channel.Writer.TryComplete();
+        this.isCompleted = true;
+        this.SignalItemAvailable();
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        this.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
     /// <inheritdoc />
@@ -378,6 +418,18 @@ public sealed class DiskWriteAheadBuffer : ICrdtWriteAheadBuffer
 
         this.disposed = true;
         this.Complete();
+
+        int drained = 0;
+        while (this.queue.TryDequeue(out _))
+        {
+            drained++;
+        }
+
+        if (drained > 0)
+        {
+            Interlocked.Add(ref this.pendingCount, -drained);
+            this.capacitySemaphore.Release(drained);
+        }
 
         await this.fileLock.WaitAsync().ConfigureAwait(false);
         try
@@ -432,6 +484,77 @@ public sealed class DiskWriteAheadBuffer : ICrdtWriteAheadBuffer
         this.activeStream.Seek(0, SeekOrigin.End);
     }
 
+    private void DrainUpTo(List<JournaledOperation> batch, int maxBatchSize)
+    {
+        int dequeued = 0;
+        while (batch.Count < maxBatchSize && this.queue.TryDequeue(out var item))
+        {
+            batch.Add(item);
+            dequeued++;
+        }
+
+        if (dequeued > 0)
+        {
+            Interlocked.Add(ref this.pendingCount, -dequeued);
+            this.capacitySemaphore.Release(dequeued);
+        }
+    }
+
+    private ValueTask<bool> WaitToReadAsync(CancellationToken cancellationToken)
+    {
+        if (!this.queue.IsEmpty)
+        {
+            return new ValueTask<bool>(true);
+        }
+
+        if (this.isCompleted)
+        {
+            return new ValueTask<bool>(!this.queue.IsEmpty);
+        }
+
+        TaskCompletionSource<bool> tcs;
+        lock (this.signalLock)
+        {
+            if (!this.queue.IsEmpty)
+            {
+                return new ValueTask<bool>(true);
+            }
+
+            if (this.isCompleted)
+            {
+                return new ValueTask<bool>(false);
+            }
+
+            this.itemAvailableTcs ??= new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            tcs = this.itemAvailableTcs;
+        }
+
+        return this.WaitWithCancellationAsync(tcs, cancellationToken);
+    }
+
+    private async ValueTask<bool> WaitWithCancellationAsync(TaskCompletionSource<bool> tcs, CancellationToken cancellationToken)
+    {
+        await using var reg = cancellationToken.Register(static state => ((TaskCompletionSource<bool>)state!).TrySetResult(false), tcs);
+        await tcs.Task.ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return !this.queue.IsEmpty;
+    }
+
+    private void SignalItemAvailable()
+    {
+        TaskCompletionSource<bool>? tcs = null;
+        lock (this.signalLock)
+        {
+            if (this.itemAvailableTcs != null)
+            {
+                tcs = this.itemAvailableTcs;
+                this.itemAvailableTcs = null;
+            }
+        }
+
+        tcs?.TrySetResult(true);
+    }
+
     private static async ValueTask<int> ReadExactAsync(Stream stream, Memory<byte> buffer, CancellationToken cancellationToken)
     {
         int totalRead = 0;
@@ -453,16 +576,5 @@ public sealed class DiskWriteAheadBuffer : ICrdtWriteAheadBuffer
     {
         var invalidChars = Path.GetInvalidFileNameChars();
         return new string(name.Select(ch => invalidChars.Contains(ch) ? '_' : ch).ToArray());
-    }
-
-    private static void EnqueueSlowSync(ChannelWriter<JournaledOperation> writer, JournaledOperation operation)
-    {
-        while (writer.WaitToWriteAsync().AsTask().GetAwaiter().GetResult())
-        {
-            if (writer.TryWrite(operation))
-            {
-                return;
-            }
-        }
     }
 }

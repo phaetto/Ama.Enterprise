@@ -10,15 +10,15 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Background hosted service that drains buffered operations from <see cref="BufferedDistributedCrdtStorageDecorator"/>
-/// across all active replica scopes and flushes them in batches to the underlying <see cref="IDistributedCrdtStorage"/>.
+/// Background hosted service that multiplexes WAL flushing across all active replica scopes with pending
+/// <see cref="BufferedDistributedCrdtStorageDecorator"/> operations, avoiding one persistent background loop per idle scope.
 /// </summary>
 public sealed class CrdtJournalFlushService : BackgroundService
 {
     private readonly DistributedCrdtScopeManager scopeManager;
     private readonly IOptions<DistributedCrdtOptions> options;
     private readonly ILogger<CrdtJournalFlushService> logger;
-    private readonly ConcurrentDictionary<string, Task> scopeLoops = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Task> activeScopeFlushes = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CrdtJournalFlushService"/> class.
@@ -41,11 +41,11 @@ public sealed class CrdtJournalFlushService : BackgroundService
     {
         await base.StopAsync(cancellationToken).ConfigureAwait(false);
 
-        if (this.scopeLoops.Count > 0)
+        if (!this.activeScopeFlushes.IsEmpty)
         {
             try
             {
-                await Task.WhenAll(this.scopeLoops.Values).ConfigureAwait(false);
+                await Task.WhenAll(this.activeScopeFlushes.Values).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -78,21 +78,26 @@ public sealed class CrdtJournalFlushService : BackgroundService
             return;
         }
 
-        var pollInterval = TimeSpan.FromMilliseconds(Math.Max(10, this.options.Value.WalFlushIntervalMilliseconds));
+        var maxBatchSize = this.options.Value.WalMaxBatchSize > 0 ? this.options.Value.WalMaxBatchSize : 500;
+        var flushInterval = TimeSpan.FromMilliseconds(Math.Max(1, this.options.Value.WalFlushIntervalMilliseconds));
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            foreach (var scope in this.scopeManager.GetActiveScopes())
+            var scopes = this.scopeManager.GetActiveScopes();
+            for (int i = 0; i < scopes.Count; i++)
             {
-                if (scope.Storage is BufferedDistributedCrdtStorageDecorator decorator)
+                var scope = scopes[i];
+                if (scope.Storage is BufferedDistributedCrdtStorageDecorator decorator &&
+                    decorator.WriteAheadBuffer.PendingCount > 0 &&
+                    !this.activeScopeFlushes.ContainsKey(scope.ReplicaId))
                 {
-                    this.scopeLoops.GetOrAdd(scope.ReplicaId, _ => this.RunScopeFlushLoopAsync(scope.ReplicaId, decorator, stoppingToken));
+                    this.StartScopeDrainTask(scope.ReplicaId, decorator, maxBatchSize, flushInterval, stoppingToken);
                 }
             }
 
             try
             {
-                await Task.Delay(pollInterval, stoppingToken).ConfigureAwait(false);
+                await Task.Delay(flushInterval, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -101,40 +106,49 @@ public sealed class CrdtJournalFlushService : BackgroundService
         }
     }
 
-    private async Task RunScopeFlushLoopAsync(
+    private void StartScopeDrainTask(
         string replicaId,
         BufferedDistributedCrdtStorageDecorator decorator,
+        int maxBatchSize,
+        TimeSpan flushInterval,
         CancellationToken stoppingToken)
     {
-        var maxBatchSize = this.options.Value.WalMaxBatchSize > 0 ? this.options.Value.WalMaxBatchSize : 500;
-        var flushInterval = TimeSpan.FromMilliseconds(Math.Max(1, this.options.Value.WalFlushIntervalMilliseconds));
+        this.activeScopeFlushes.GetOrAdd(
+            replicaId,
+            id => this.DrainPendingScopeBatchesAsync(id, decorator, maxBatchSize, flushInterval, stoppingToken));
+    }
 
-        while (!stoppingToken.IsCancellationRequested)
+    private async Task DrainPendingScopeBatchesAsync(
+        string replicaId,
+        BufferedDistributedCrdtStorageDecorator decorator,
+        int maxBatchSize,
+        TimeSpan flushInterval,
+        CancellationToken stoppingToken)
+    {
+        await Task.Yield();
+
+        try
         {
-            try
+            while (!stoppingToken.IsCancellationRequested && decorator.WriteAheadBuffer.PendingCount > 0)
             {
                 var flushed = await decorator.FlushNextBatchAsync(maxBatchSize, flushInterval, stoppingToken).ConfigureAwait(false);
                 if (flushed == 0)
                 {
-                    await Task.Delay(flushInterval, stoppingToken).ConfigureAwait(false);
-                }
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                this.logger.LogError(ex, "Error flushing WAL batch to storage for replica '{ReplicaId}'.", replicaId);
-                try
-                {
-                    await Task.Delay(flushInterval, stoppingToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
                     break;
                 }
             }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Graceful stop
+        }
+        catch (Exception ex)
+        {
+            this.logger.LogError(ex, "Error flushing WAL batch to storage for replica '{ReplicaId}'.", replicaId);
+        }
+        finally
+        {
+            this.activeScopeFlushes.TryRemove(replicaId, out _);
         }
     }
 }

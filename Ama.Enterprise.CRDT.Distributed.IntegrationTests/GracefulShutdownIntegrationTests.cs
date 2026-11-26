@@ -591,6 +591,64 @@ public sealed class GracefulShutdownIntegrationTests
         savedDvvReplicas.ShouldContain("ReplicaHealthy");
     }
 
+    [IntegrationFact]
+    public async Task DistributedCrdtScopeManager_ConcurrentGetOrCreateScopeAsync_InitializesHundredsOfDynamicScopesInParallel_AndTracksPinnedAndActivityState()
+    {
+        // Arrange
+        var sp = BuildNode("HostNodeParallel");
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+
+        var hostScope = scopeManager.GetOrCreateScope("HostNodeParallel");
+        hostScope.IsPinnedHostScope.ShouldBeTrue();
+        var initialTimestamp = hostScope.LastActivityTimestamp;
+        initialTimestamp.ShouldBeGreaterThan(0);
+
+        const int dynamicScopeCount = 200;
+        const int callersPerScope = 4;
+
+        // Act - Launch 800 concurrent GetOrCreateScopeAsync calls across 200 distinct dynamic user scopes
+        var tasks = new List<Task<IDistributedCrdtScope>>(dynamicScopeCount * callersPerScope);
+        for (var i = 0; i < dynamicScopeCount; i++)
+        {
+            var userScopeId = $"user-scope-{i}";
+            for (var c = 0; c < callersPerScope; c++)
+            {
+                tasks.Add(scopeManager.GetOrCreateScopeAsync(userScopeId, cancellationToken: CancellationToken.None).AsTask());
+            }
+        }
+
+        var resolvedScopes = await Task.WhenAll(tasks);
+
+        // Assert
+        resolvedScopes.Length.ShouldBe(dynamicScopeCount * callersPerScope);
+
+        for (var i = 0; i < dynamicScopeCount; i++)
+        {
+            var userScopeId = $"user-scope-{i}";
+            scopeManager.TryGetScope(userScopeId, out var activeScope).ShouldBeTrue();
+            activeScope.ShouldNotBeNull();
+            activeScope!.ScopeId.ShouldBe(userScopeId);
+            activeScope.HostReplicaId.ShouldBe("HostNodeParallel");
+            activeScope.ReplicaId.ShouldBe($"HostNodeParallel@{userScopeId}");
+            activeScope.IsPinnedHostScope.ShouldBeFalse();
+            activeScope.Orchestrator.InitializationStage.ShouldBe(OrchestratorInitializationStage.Initialized);
+
+            var beforeTouch = activeScope.LastActivityTimestamp;
+            activeScope.TouchActivity();
+            activeScope.LastActivityTimestamp.ShouldBeGreaterThanOrEqualTo(beforeTouch);
+        }
+
+        // Verify all callers for the same scope received the exact same singleton scope instance
+        for (var i = 0; i < dynamicScopeCount; i++)
+        {
+            var firstInstance = resolvedScopes[i * callersPerScope];
+            for (var c = 1; c < callersPerScope; c++)
+            {
+                resolvedScopes[(i * callersPerScope) + c].ShouldBeSameAs(firstInstance);
+            }
+        }
+    }
+
     private static IServiceProvider BuildNode(
         string replicaId,
         Action<DistributedCrdtOptions>? configureOptions = null,

@@ -1,5 +1,7 @@
 namespace Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 
+using Ama.CRDT.Attributes.Strategies;
+using Ama.CRDT.Models.Collections;
 using System.Collections.Generic;
 
 /// <summary>
@@ -15,5 +17,6 @@ public sealed class FleetState
     /// <summary>
     /// Gets or sets the mapped sequence tracking device statuses.
     /// </summary>
-    public Dictionary<string, DeviceStatus> Devices { get; set; } = new(StringComparer.Ordinal);
+    [CrdtOrMapStrategy]
+    public IDictionary<string, DeviceStatus> Devices { get; set; } = new CompactDictionary<string, DeviceStatus>(StringComparer.Ordinal);
 }

@@ -1295,9 +1295,11 @@ public static class Program
         long totalStateBytes = 0;
         long totalWholeObjectBytes = 0;
         long totalGlobalStateBytes = 0;
+        int activeDocsCount = 0;
 
         foreach (var doc in docs)
         {
+            activeDocsCount++;
             var footprint = await doc.EstimateMemoryFootprintAsync(cancellationToken).ConfigureAwait(false);
             var dataBytes = footprint.DataBytes;
             var metadataBytes = footprint.MetadataBytes;
@@ -1310,28 +1312,39 @@ public static class Program
                 ReusableShardDvvBytesCache[doc.ShardId] = globalStateBytes;
             }
 
-            var docType = string.Equals(doc.DocumentId, orchestrator.Registry.DocumentId, StringComparison.Ordinal)
-                ? "Registry"
-                : doc switch
-                {
-                    IDistributedCrdtDocument<TaskListState> => "TaskList",
-                    IDistributedCrdtDocument<FleetState> => "FleetList",
-                    _ => "Document"
-                };
+            if (totalGlobalStateBytes == 0 && globalStateBytes > 0)
+            {
+                totalGlobalStateBytes = globalStateBytes;
+            }
 
             totalDataBytes += dataBytes;
             totalMetadataBytes += metadataBytes;
             totalStateBytes += stateBytes;
             totalWholeObjectBytes += wholeObjectBytes;
-            totalGlobalStateBytes += globalStateBytes;
 
-            ReusableMemoryStatsList.Add(new DocumentMemoryStatsDto(doc.DocumentId, doc.ShardId, docType, dataBytes, metadataBytes, stateBytes, wholeObjectBytes, globalStateBytes));
+            if (showDetails)
+            {
+                var docType = string.Equals(doc.DocumentId, orchestrator.Registry.DocumentId, StringComparison.Ordinal)
+                    ? "Registry"
+                    : doc switch
+                    {
+                        IDistributedCrdtDocument<TaskListState> => "TaskList",
+                        IDistributedCrdtDocument<FleetState> => "FleetList",
+                        _ => "Document"
+                    };
+
+                ReusableMemoryStatsList.Add(new DocumentMemoryStatsDto(doc.DocumentId, doc.ShardId, docType, dataBytes, metadataBytes, stateBytes, wholeObjectBytes, globalStateBytes));
+            }
         }
 
         if (showDetails)
         {
             ReusableMemoryStatsList.Sort(MemoryStatsComparison);
         }
+
+        long statsListBytes = 32L + 24L + ((long)ReusableMemoryStatsList.Capacity * 64L);
+        long shardDvvCacheBytes = 80L + ((long)ReusableShardDvvBytesCache.Count * 32L);
+        long reportBuffersBytes = statsListBytes + shardDvvCacheBytes;
 
         lock (ConsoleLock)
         {
@@ -1350,17 +1363,24 @@ public static class Program
                 Console.WriteLine(TableSeparatorLine);
             }
 
-            Console.WriteLine($" Total Active Documents : {ReusableMemoryStatsList.Count} (1 Registry + {Math.Max(0, ReusableMemoryStatsList.Count - 1)} Active)");
+            Console.WriteLine($" Total Active Documents : {activeDocsCount} (1 Registry + {Math.Max(0, activeDocsCount - 1)} Active)");
             Console.WriteLine($" Total Actual Data Est. : {FormatBytes(totalDataBytes)} ({totalDataBytes:N0} B)");
             Console.WriteLine($" Total CRDT Meta Est.   : {FormatBytes(totalMetadataBytes)} ({totalMetadataBytes:N0} B)");
             Console.WriteLine($" Total Data + Meta Est. : {FormatBytes(totalStateBytes)} ({totalStateBytes:N0} B)");
             Console.WriteLine($" Total Whole Doc Objs   : {FormatBytes(totalWholeObjectBytes)} ({totalWholeObjectBytes:N0} B)");
             Console.WriteLine($" Total Shard DVV Est.   : {FormatBytes(totalGlobalStateBytes)} ({totalGlobalStateBytes:N0} B)");
+            Console.WriteLine($" Mem Report Buffers Est.: {FormatBytes(reportBuffersBytes)} ({reportBuffersBytes:N0} B) [StatsList Cap={ReusableMemoryStatsList.Capacity:N0}: {FormatBytes(statsListBytes)}]");
             Console.WriteLine($" Total Managed GC Heap  : {FormatBytes(gcAllocatedBytes)} ({gcAllocatedBytes:N0} B)");
             Console.WriteLine($" Total GC Committed     : {FormatBytes(gcCommittedBytes)} ({gcCommittedBytes:N0} B)");
             Console.WriteLine($" Process Private Bytes  : {FormatBytes(privateBytes)} ({privateBytes:N0} B)");
             Console.WriteLine($" Process Working Set    : {FormatBytes(workingSetBytes)} ({workingSetBytes:N0} B)");
             Console.WriteLine("------------------------------------\n> ");
+        }
+
+        if (ReusableMemoryStatsList.Capacity > 32)
+        {
+            ReusableMemoryStatsList.Clear();
+            ReusableMemoryStatsList.TrimExcess();
         }
     }
 

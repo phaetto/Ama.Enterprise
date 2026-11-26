@@ -69,6 +69,8 @@ public static class ServiceCollectionExtensions
                 "PeerEvictionTtlSeconds must be at least 3 times the AntiEntropyIntervalSeconds to prevent peer topology oscillation.")
             .Validate(options => options.PeerEvictionTtlSeconds == 0 || options.PeerEvictionTtlSeconds >= options.MaintenanceIntervalSeconds, 
                 "PeerEvictionTtlSeconds must be greater than or equal to the MaintenanceIntervalSeconds as evictions are processed during maintenance cycles.")
+            .Validate(options => options.DynamicScopeIdleTtlSeconds >= 0,
+                "DynamicScopeIdleTtlSeconds cannot be negative.")
             .Validate(options => options.JournalSoftTrimThreshold >= 0,
                 "JournalSoftTrimThreshold cannot be negative.")
             .Validate(options => options.JournalHardTrimThreshold >= 0,
@@ -127,14 +129,21 @@ public static class ServiceCollectionExtensions
         });
 
         services.TryAddSingleton<IDistributedCrdtTelemetry, DistributedCrdtTelemetry>();
+        services.TryAddSingleton<IDocumentFactoryRegistry, DocumentFactoryRegistry>();
+        services.TryAddSingleton<IDocumentCommandStripePool, DocumentCommandStripePool>();
+        services.TryAddSingleton<IOrchestratorCommandStripePool, OrchestratorCommandStripePool>();
         services.TryAddSingleton<IDistributedCrdtScopeFactory, DistributedCrdtScopeFactory>();
         services.TryAddSingleton<DistributedCrdtScopeManager>();
         services.TryAddSingleton<ICrdtShutdownCoordinator, CrdtShutdownCoordinator>();
         services.TryAddSingleton<ICrdtMemoryEstimator, CrdtMemoryEstimator>();
+        services.TryAddSingleton<ICrdtRpcPayloadProcessor, CrdtRpcPayloadProcessor>();
+        services.TryAddSingleton<ICrdtStateSyncPayloadProcessor, CrdtStateSyncPayloadProcessor>();
 
         services.TryAddScoped<CrdtScopeContext>();
         services.TryAddScoped<IScopeTopologyProvider, DefaultScopeTopologyProvider>();
         services.TryAddScoped<IDocumentCommandPipeline, DocumentCommandPipeline>();
+        services.TryAddScoped<InMemoryWriteAheadBuffer>();
+        services.TryAddScoped<DiskWriteAheadBuffer>();
         
         // Register Consistent Hashing Distribution mappings
         services.TryAddScoped<IShardDistributionManager, ConsistentHashShardDistributionManager>();
@@ -143,8 +152,6 @@ public static class ServiceCollectionExtensions
         services.TryAddScoped<ICrdtRemoteProxyClient, CrdtRemoteProxyClient>();
         services.TryAddScoped<ICrdtMapReduceCoordinator, CrdtMapReduceCoordinator>();
         services.TryAddScoped<ICrdtAntiEntropyCoordinator, CrdtAntiEntropyCoordinator>();
-        services.TryAddScoped<ICrdtRpcPayloadProcessor, CrdtRpcPayloadProcessor>();
-        services.TryAddScoped<ICrdtStateSyncPayloadProcessor, CrdtStateSyncPayloadProcessor>();
 
         services.AddScoped<ICrdtDocumentOrchestrator, CrdtDocumentOrchestrator>();
         services.AddScoped<IClusterStateTracker, ClusterStateTracker>();
@@ -456,10 +463,10 @@ public static class ServiceCollectionExtensions
             CrdtJournalMode.InMemoryBuffer when innerStorage is MemoryCrdtStorage => innerStorage,
             CrdtJournalMode.InMemoryBuffer => new BufferedDistributedCrdtStorageDecorator(
                 innerStorage,
-                ActivatorUtilities.CreateInstance<InMemoryWriteAheadBuffer>(sp)),
+                sp.GetRequiredService<InMemoryWriteAheadBuffer>()),
             CrdtJournalMode.DiskWal => new BufferedDistributedCrdtStorageDecorator(
                 innerStorage,
-                ActivatorUtilities.CreateInstance<DiskWriteAheadBuffer>(sp)),
+                sp.GetRequiredService<DiskWriteAheadBuffer>()),
             _ => innerStorage
         };
     }
@@ -542,38 +549,6 @@ public static class ServiceCollectionExtensions
                         ?? new SystemRegistryDocumentIdProviderDecorator(inner);
                 },
                 docIdProviderDescriptor.Lifetime));
-        }
-
-        for (int i = 0; i < services.Count; i++)
-        {
-            var descriptor = services[i];
-            if (descriptor.IsKeyedService ||
-                descriptor.ServiceType == typeof(IShardIdProvider) ||
-                descriptor.ServiceType == typeof(IDocumentIdProvider) ||
-                descriptor.ServiceType.IsGenericTypeDefinition ||
-                descriptor.ImplementationInstance != null ||
-                descriptor.ServiceType.Namespace == null ||
-                !descriptor.ServiceType.Namespace.StartsWith("Ama.", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            if (descriptor.ImplementationFactory != null)
-            {
-                var originalFactory = descriptor.ImplementationFactory;
-                services[i] = ServiceDescriptor.Describe(
-                    descriptor.ServiceType,
-                    sp => originalFactory(new SystemRegistryServiceProvider(sp)),
-                    descriptor.Lifetime);
-            }
-            else if (descriptor.ImplementationType != null)
-            {
-                var implementationType = descriptor.ImplementationType;
-                services[i] = ServiceDescriptor.Describe(
-                    descriptor.ServiceType,
-                    sp => ActivatorUtilities.CreateInstance(new SystemRegistryServiceProvider(sp), implementationType),
-                    descriptor.Lifetime);
-            }
         }
     }
 }

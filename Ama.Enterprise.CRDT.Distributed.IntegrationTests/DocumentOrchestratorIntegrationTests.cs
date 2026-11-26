@@ -625,4 +625,66 @@ public sealed class DocumentOrchestratorIntegrationTests
         await orchestrator.ApplyIntentAsync<DynamicTestState>(docId, new Ama.CRDT.Models.Intents.SetIntent(123), nameof(DynamicTestState.Value), CancellationToken.None);
         (await orchestrator.GetDocumentStateAsync<DynamicTestState>(docId, CancellationToken.None)).Data.Value.ShouldBe(123);
     }
+
+    [IntegrationFact]
+    public async Task OrchestratorCommandStripePool_ShouldMultiplexConcurrentScopes_AndFlushCleanly()
+    {
+        // Arrange
+        var sp = BuildNode();
+        var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
+        var stripePool = sp.GetRequiredService<IOrchestratorCommandStripePool>();
+
+        stripePool.StripeCount.ShouldBeGreaterThanOrEqualTo(4);
+
+        const int scopeCount = 24;
+        var tasks = new Task[scopeCount];
+
+        // Act - Concurrently initialize, create documents, re-evaluate topology, and flush across 24 scopes sharing the striped pool
+        for (int i = 0; i < scopeCount; i++)
+        {
+            var scopeIndex = i;
+            tasks[i] = Task.Run(async () =>
+            {
+                var scopeId = $"user-scope-{scopeIndex}";
+                var scope = await scopeManager.GetOrCreateScopeAsync(scopeId, "ReplicaA", CancellationToken.None);
+                var orchestrator = scope.Orchestrator;
+
+                await orchestrator.CreateDocumentAsync($"doc-{scopeIndex}-a", "dynamic-type", CancellationToken.None);
+                await orchestrator.CreateDocumentAsync($"doc-{scopeIndex}-b", "dynamic-type", IntentDeliveryMode.FireAndForget, CancellationToken.None);
+                await orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.FireAndForget, CancellationToken.None);
+                await orchestrator.FlushAsync(CancellationToken.None);
+
+                await orchestrator.ApplyIntentAsync<DynamicTestState>(
+                    $"doc-{scopeIndex}-a",
+                    new Ama.CRDT.Models.Intents.SetIntent(scopeIndex * 10),
+                    nameof(DynamicTestState.Value),
+                    CancellationToken.None);
+
+                await orchestrator.FlushAsync(CancellationToken.None);
+            });
+        }
+
+        await Task.WhenAll(tasks);
+
+        // Assert
+        stripePool.PendingCommandCount.ShouldBe(0);
+
+        for (int i = 0; i < scopeCount; i++)
+        {
+            var scopeId = $"user-scope-{i}";
+            scopeManager.TryGetScope(scopeId, out var scope).ShouldBeTrue();
+            scope.ShouldNotBeNull();
+
+            var orchestrator = scope!.Orchestrator;
+            orchestrator.InitializationStage.ShouldBe(OrchestratorInitializationStage.Initialized);
+
+            var docA = orchestrator.TryGetLocalDocument<DynamicTestState>($"doc-{i}-a");
+            var docB = orchestrator.TryGetLocalDocument<DynamicTestState>($"doc-{i}-b");
+            docA.ShouldNotBeNull();
+            docB.ShouldNotBeNull();
+
+            var stateA = await orchestrator.GetDocumentStateAsync<DynamicTestState>($"doc-{i}-a", CancellationToken.None);
+            stateA.Data.Value.ShouldBe(i * 10);
+        }
+    }
 }

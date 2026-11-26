@@ -63,6 +63,30 @@ public sealed class CrdtMaintenanceService : BackgroundService
                 break;
             }
 
+            if (options.Value.DynamicScopeIdleTtlSeconds > 0)
+            {
+                try
+                {
+                    var idleTtl = TimeSpan.FromSeconds(options.Value.DynamicScopeIdleTtlSeconds);
+                    var evictedScopes = await scopeManager.EvictIdleDynamicScopesAsync(idleTtl, stoppingToken).ConfigureAwait(false);
+                    if (evictedScopes > 0)
+                    {
+                        logger.LogInformation(
+                            "Evicted {Count} idle dynamic CRDT scope(s) exceeding idle TTL of {TtlSeconds} seconds.",
+                            evictedScopes,
+                            options.Value.DynamicScopeIdleTtlSeconds);
+                    }
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "An error occurred while evicting idle dynamic CRDT scopes.");
+                }
+            }
+
             var scopes = scopeManager.GetActiveScopes();
 
             foreach (var scope in scopes)
@@ -98,19 +122,31 @@ public sealed class CrdtMaintenanceService : BackgroundService
                     var softThreshold = options.Value.JournalSoftTrimThreshold;
                     var hardThreshold = options.Value.JournalHardTrimThreshold;
 
+                    long totalScopeJournalCount = 0;
+                    var shardJournalCounts = new Dictionary<string, long>(safelyPersistedMap.Count, StringComparer.Ordinal);
+
+                    if (softThreshold > 0 || hardThreshold > 0)
+                    {
+                        foreach (var shardKvp in safelyPersistedMap)
+                        {
+                            var count = await scope.Storage.GetJournalCountAsync(shardKvp.Key, stoppingToken).ConfigureAwait(false);
+                            shardJournalCounts[shardKvp.Key] = count;
+                            totalScopeJournalCount += count;
+                        }
+                    }
+
+                    var scopeThresholdExceeded = (softThreshold > 0 && totalScopeJournalCount >= softThreshold) ||
+                                                 (hardThreshold > 0 && totalScopeJournalCount >= hardThreshold);
+
                     foreach (var shardKvp in safelyPersistedMap)
                     {
                         var shardId = shardKvp.Key;
                         var shardDvv = shardKvp.Value;
-                        long journalCount = 0;
-
-                        if (softThreshold > 0 || hardThreshold > 0)
-                        {
-                            journalCount = await scope.Storage.GetJournalCountAsync(shardId, stoppingToken).ConfigureAwait(false);
-                        }
+                        shardJournalCounts.TryGetValue(shardId, out var journalCount);
 
                         bool trimThresholdExceeded = (softThreshold > 0 && journalCount >= softThreshold) ||
-                                                     (hardThreshold > 0 && journalCount >= hardThreshold);
+                                                     (hardThreshold > 0 && journalCount >= hardThreshold) ||
+                                                     (scopeThresholdExceeded && journalCount > 0);
 
                         if (trimThresholdExceeded)
                         {
@@ -123,8 +159,8 @@ public sealed class CrdtMaintenanceService : BackgroundService
                                     await scope.Storage.TrimAsync(shardId, shardDvv.Versions.ToDictionary(k => k.Key, k => k.Value), stoppingToken).ConfigureAwait(false);
                                     trimmedJournalsCounter.Add(1, tag);
                                     
-                                    var exceededThreshold = (softThreshold > 0 && journalCount >= softThreshold) ? softThreshold : hardThreshold;
-                                    logger.LogWarning("[{ReplicaId}] Journal size ({Count}) for shard '{ShardId}' exceeded threshold ({Threshold}). Forced an aggressive journal trim up to the local logical bounds.", scope.ReplicaId, journalCount, shardId, exceededThreshold);
+                                    var exceededThreshold = (softThreshold > 0 && totalScopeJournalCount >= softThreshold) ? softThreshold : hardThreshold;
+                                    logger.LogWarning("[{ReplicaId}] Journal size (Shard: {Count}, Total: {TotalCount}) for shard '{ShardId}' exceeded threshold ({Threshold}). Forced an aggressive journal trim up to the local logical bounds.", scope.ReplicaId, journalCount, totalScopeJournalCount, shardId, exceededThreshold);
                                 }
                                 finally
                                 {

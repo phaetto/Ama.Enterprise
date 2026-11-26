@@ -116,6 +116,8 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             scope = await scopeManager.GetOrCreateScopeAsync(targetScopeId, replicaId, cancellationToken).ConfigureAwait(false);
         }
 
+        scope.TouchActivity();
+
         messagesProcessedCounter.Add(1, new KeyValuePair<string, object?>("message_type", wrapper.MessageType));
 
         if (wrapper.MessageType == "CrdtReadReq" || wrapper.MessageType == "CrdtReadRes" ||

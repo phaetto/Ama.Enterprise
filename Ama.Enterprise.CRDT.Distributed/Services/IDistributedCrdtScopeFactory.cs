@@ -5,7 +5,7 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 /// </summary>
 /// <example>
 /// <code>
-/// var scope = scopeFactory.CreateScope("eu-user", "node-8100");
+/// var scope = scopeFactory.CreateScope("eu-user", "node-8100", isPinnedHostScope: false);
 /// </code>
 /// </example>
 public interface IDistributedCrdtScopeFactory
@@ -22,6 +22,7 @@ public interface IDistributedCrdtScopeFactory
     /// </summary>
     /// <param name="scopeId">The logical scope identifier.</param>
     /// <param name="hostReplicaId">The physical host replica identifier bound to P2P meshes.</param>
+    /// <param name="isPinnedHostScope">A value indicating whether this scope is a statically pinned host replica scope.</param>
     /// <returns>The created distributed CRDT scope.</returns>
-    IDistributedCrdtScope CreateScope(string scopeId, string hostReplicaId);
+    IDistributedCrdtScope CreateScope(string scopeId, string hostReplicaId, bool isPinnedHostScope = false);
 }

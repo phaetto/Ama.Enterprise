@@ -156,8 +156,6 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
 
         if (isHard)
         {
-            this.CancelSoftTrim();
-
             if (Volatile.Read(ref this.activeHardTrims) == 0 && Interlocked.CompareExchange(ref this.isTrimming, 1, 0) == 0)
             {
                 if (Volatile.Read(ref this.activeHardTrims) > 0)
@@ -166,6 +164,7 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
                 }
                 else
                 {
+                    this.CancelSoftTrim();
                     this.StartBackgroundHardTrim();
                 }
             }
@@ -175,66 +174,6 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
             // Intentionally bypassing GlobalTrimLock wait here to prevent cyclic deadlocks with the single-reader channel.
             // Blocking the active reader thread blocks CheckpointAsync operations required by the trimmer to complete,
             // resulting in a complete standstill. Natural channel capacity throttling is sufficient backpressure.
-        }
-        else if (isSoft)
-        {
-            // If a hard trim is actively running or queued to run, do not queue a new soft trim
-            if (Volatile.Read(ref this.activeHardTrims) > 0)
-            {
-                return;
-            }
-
-            if (Interlocked.CompareExchange(ref this.isTrimming, 1, 0) == 0)
-            {
-                // Double check active hard trims after taking soft trim assignment lock
-                if (Volatile.Read(ref this.activeHardTrims) > 0)
-                {
-                    Interlocked.Exchange(ref this.isTrimming, 0);
-                    return;
-                }
-                
-                this.StartBackgroundSoftTrim();
-            }
-        }
-    }
-
-    private async ValueTask EvaluateTriggersAndApplyBackpressureAsync(int count, CancellationToken cancellationToken)
-    {
-        var softThreshold = this.options.Value.JournalSoftTrimThreshold;
-        var hardThreshold = this.options.Value.JournalHardTrimThreshold;
-        
-        if (softThreshold <= 0 && hardThreshold <= 0)
-        {
-            return;
-        }
-
-        var newCount = Interlocked.Add(ref this.estimatedJournalCount, count);
-        
-        bool isHard = hardThreshold > 0 && newCount >= hardThreshold;
-        bool isSoft = softThreshold > 0 && newCount >= softThreshold;
-
-        if (isHard)
-        {
-            this.CancelSoftTrim();
-
-            if (Volatile.Read(ref this.activeHardTrims) == 0 && Interlocked.CompareExchange(ref this.isTrimming, 1, 0) == 0)
-            {
-                if (Volatile.Read(ref this.activeHardTrims) > 0)
-                {
-                    Interlocked.Exchange(ref this.isTrimming, 0);
-                }
-                else
-                {
-                    this.StartBackgroundHardTrim();
-                }
-            }
-
-            this.backpressureBlocksCounter.Add(1);
-            
-            // Yield the caller to allow background tasks to initialize gracefully without deadlocking the pipeline natively.
-            // We strictly avoid awaiting the GlobalTrimLock here because this thread is the active channel reader,
-            // and the trim requires this reader to process CheckpointAsync channel commands to proceed, creating a cyclic deadlock.
-            await Task.Yield();
         }
         else if (isSoft)
         {
@@ -277,21 +216,7 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
 
     private void StartBackgroundHardTrim()
     {
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await this.ExecuteHardTrimInlineAsync(CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                this.logger.LogWarning(ex, "Background hard trim encountered an exception executing constraints.");
-            }
-            finally
-            {
-                Interlocked.Exchange(ref this.isTrimming, 0);
-            }
-        });
+        this.ExecuteHardTrimInlineAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
     private async Task ExecuteHardTrimInlineAsync(CancellationToken cancellationToken)
@@ -385,8 +310,47 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
                 {
                     cts.Dispose();
                 }
+
+                this.ReevaluateThresholdAfterTrimCompletion();
             }
         }, CancellationToken.None);
+    }
+
+    private void ReevaluateThresholdAfterTrimCompletion()
+    {
+        var softThreshold = this.options.Value.JournalSoftTrimThreshold;
+        var hardThreshold = this.options.Value.JournalHardTrimThreshold;
+        var currentCount = Volatile.Read(ref this.estimatedJournalCount);
+
+        if (hardThreshold > 0 && currentCount >= hardThreshold)
+        {
+            if (Volatile.Read(ref this.activeHardTrims) == 0 && Interlocked.CompareExchange(ref this.isTrimming, 1, 0) == 0)
+            {
+                if (Volatile.Read(ref this.activeHardTrims) > 0)
+                {
+                    Interlocked.Exchange(ref this.isTrimming, 0);
+                }
+                else
+                {
+                    this.CancelSoftTrim();
+                    this.StartBackgroundHardTrim();
+                }
+            }
+        }
+        else if (softThreshold > 0 && currentCount >= softThreshold && Volatile.Read(ref this.activeHardTrims) == 0)
+        {
+            if (Interlocked.CompareExchange(ref this.isTrimming, 1, 0) == 0)
+            {
+                if (Volatile.Read(ref this.activeHardTrims) > 0)
+                {
+                    Interlocked.Exchange(ref this.isTrimming, 0);
+                }
+                else
+                {
+                    this.StartBackgroundSoftTrim();
+                }
+            }
+        }
     }
 
     private async Task ExecuteAggressiveTrimAsync(CancellationToken cancellationToken)
@@ -403,6 +367,11 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         foreach (var shardGroup in documents.GroupBy(d => d.ShardId, StringComparer.Ordinal))
         {
             var shardId = shardGroup.Key;
+            foreach (var document in shardGroup)
+            {
+                await document.CheckpointAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             if (!string.IsNullOrEmpty(shardId))
             {
                 var freshShardSnapshot = versionVectorManager.GetShardSnapshot(shardId);
@@ -411,19 +380,16 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
                     safelyPersistedMap[shardId] = freshDvv;
                 }
             }
-
-            foreach (var document in shardGroup)
-            {
-                await document.CheckpointAsync(cancellationToken).ConfigureAwait(false);
-            }
         }
 
         await this.storage.SaveShardVersionVectorMapAsync(replicaContext.ReplicaId, safelyPersistedMap, cancellationToken).ConfigureAwait(false);
 
         var clusterStates = clusterTracker?.GetClusterStates();
         var countBeforeUpdate = Volatile.Read(ref this.estimatedJournalCount);
+        var softThreshold = this.options.Value.JournalSoftTrimThreshold;
         var hardThreshold = this.options.Value.JournalHardTrimThreshold;
-        var isHardEmergency = hardThreshold > 0 && countBeforeUpdate >= hardThreshold;
+        var isThresholdExceeded = (softThreshold > 0 && countBeforeUpdate >= softThreshold) ||
+                                  (hardThreshold > 0 && countBeforeUpdate >= hardThreshold);
 
         long remainingCount = 0;
         foreach (var shardKvp in safelyPersistedMap)
@@ -452,24 +418,35 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
             await this.storage.TrimAsync(shardKvp.Key, trimVector, cancellationToken).ConfigureAwait(false);
             var shardJournalCount = await this.storage.GetJournalCountAsync(shardKvp.Key, cancellationToken).ConfigureAwait(false);
 
-            // If we hit the hard threshold and lagging peers prevented GMVV from freeing sufficient journal space,
-            // fall back to trimming up to the local checkpointed version vector to protect node memory/storage bounds.
-            if (isHardEmergency && shardJournalCount > 0)
-            {
-                await this.storage.TrimAsync(shardKvp.Key, shardKvp.Value.Versions.AsReadOnly(), cancellationToken).ConfigureAwait(false);
-                shardJournalCount = await this.storage.GetJournalCountAsync(shardKvp.Key, cancellationToken).ConfigureAwait(false);
-            }
-
             remainingCount += shardJournalCount;
+        }
+
+        // If the total journal size across all shards still exceeds the configured soft or hard threshold after GMVV trimming
+        // (for example, under hot operation bursts where peer DVV gossip lags behind local checkpointing),
+        // force a trim up to the local checkpointed version vectors so the journal does not stay permanently above threshold.
+        if (isThresholdExceeded &&
+            ((softThreshold > 0 && remainingCount >= softThreshold) ||
+             (hardThreshold > 0 && remainingCount >= hardThreshold)))
+        {
+            remainingCount = 0;
+            foreach (var shardKvp in safelyPersistedMap)
+            {
+                if (shardKvp.Value.Versions.Count > 0)
+                {
+                    await this.storage.TrimAsync(shardKvp.Key, shardKvp.Value.Versions.AsReadOnly(), cancellationToken).ConfigureAwait(false);
+                }
+
+                remainingCount += await this.storage.GetJournalCountAsync(shardKvp.Key, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         Interlocked.Exchange(ref this.estimatedJournalCount, remainingCount);
         
         this.aggressiveTrimsCounter.Add(1, new KeyValuePair<string, object?>("replica_id", replicaContext.ReplicaId));
 
-        var thresholdUsed = (this.options.Value.JournalSoftTrimThreshold > 0 && countBeforeUpdate >= this.options.Value.JournalSoftTrimThreshold) 
-            ? this.options.Value.JournalSoftTrimThreshold 
-            : this.options.Value.JournalHardTrimThreshold;
+        var thresholdUsed = (softThreshold > 0 && countBeforeUpdate >= softThreshold) 
+            ? softThreshold 
+            : hardThreshold;
 
         this.logger.LogWarning("[{ReplicaId}] Journal dynamically crossed real-time threshold ({Threshold}). Reactively executed immediate aggressive trim explicitly offloading constraints to snapshots.", replicaContext.ReplicaId, thresholdUsed);
     }

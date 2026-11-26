@@ -265,7 +265,7 @@ public sealed class ConcurrencyIntegrationTests
 
         // Assert - Specific invocation correctly throws
         exception.ShouldNotBeNull();
-        exception.ShouldBeOfType<TaskCanceledException>();
+        exception.ShouldBeAssignableTo<OperationCanceledException>();
 
         // Act - Prove the overarching long-lived channel processor loop did NOT crash
         await orchestrator.CreateDocumentAsync("success-doc", "concurrent-doc", CancellationToken.None);
@@ -628,5 +628,79 @@ public sealed class ConcurrencyIntegrationTests
 
         // Total active documents = DocumentBurstCount + 1 (for system-document-registry)
         orchestrator.GetActiveDocuments().Count.ShouldBe(DocumentBurstCount + 1);
+    }
+
+    [IntegrationFact]
+    public async Task DocumentCommandStripePool_ConcurrentMultiScopeDocumentMutations_RoutesDeterministicallyAndFlushesAcrossStripes()
+    {
+        // Arrange
+        var serviceProvider = BuildNode("Replica1");
+        var scopeManager = serviceProvider.GetRequiredService<DistributedCrdtScopeManager>();
+        var stripePool = serviceProvider.GetRequiredService<IDocumentCommandStripePool>();
+
+        stripePool.StripeCount.ShouldBeGreaterThanOrEqualTo(4);
+
+        const int ScopeCount = 12;
+        const int DocsPerScope = 6;
+        const int OpsPerDoc = 15;
+
+        var scopes = new IDistributedCrdtScope[ScopeCount];
+        for (int s = 0; s < ScopeCount; s++)
+        {
+            scopes[s] = await scopeManager.GetOrCreateScopeAsync($"user-stripe-{s}", "Replica1", CancellationToken.None);
+            var orchestrator = scopes[s].ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+            for (int d = 0; d < DocsPerScope; d++)
+            {
+                await orchestrator.CreateDocumentAsync($"doc-{d}", "concurrent-doc", CancellationToken.None);
+            }
+        }
+
+        // Act - Fire concurrent Acknowledged and FireAndForget mutations across all dynamic user scopes and documents
+        var mutationTasks = new List<Task>(ScopeCount * DocsPerScope * OpsPerDoc);
+        for (int s = 0; s < ScopeCount; s++)
+        {
+            var currentScope = scopes[s];
+            var orchestrator = currentScope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
+
+            for (int d = 0; d < DocsPerScope; d++)
+            {
+                var docId = $"doc-{d}";
+                for (int op = 0; op < OpsPerDoc; op++)
+                {
+                    var currentOp = op;
+                    mutationTasks.Add(Task.Run(async () =>
+                    {
+                        var mode = currentOp % 2 == 0
+                            ? Models.IntentDeliveryMode.FireAndForget
+                            : Models.IntentDeliveryMode.Acknowledged;
+
+                        await orchestrator.ApplyIntentAsync<ConcurrencyTestState>(
+                            docId,
+                            new SetIntent($"ScopeVal_{currentOp}"),
+                            nameof(ConcurrencyTestState.Data),
+                            mode,
+                            CancellationToken.None);
+                    }));
+                }
+            }
+        }
+
+        await Task.WhenAll(mutationTasks);
+
+        // Flush all scopes concurrently through the shared stripe pool
+        await Task.WhenAll(scopes.Select(s =>
+            s.ServiceProvider.GetRequiredService<IDocumentCommandPipeline>().FlushAsync(CancellationToken.None)));
+
+        // Assert - Each scope's shard clock reflects every single operation across its documents with zero gaps
+        var expectedOpsPerScope = DocsPerScope * OpsPerDoc;
+        for (int s = 0; s < ScopeCount; s++)
+        {
+            var dvvManager = scopes[s].ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+            var snapshot = await dvvManager.GetFullSnapshotAsync(CancellationToken.None);
+
+            snapshot.ShouldContainKey("default");
+            snapshot["default"].Versions[scopes[s].ReplicaId].ShouldBe(expectedOpsPerScope);
+            (snapshot["default"].Dots.TryGetValue(scopes[s].ReplicaId, out var dots) ? dots.Count : 0).ShouldBe(0);
+        }
     }
 }

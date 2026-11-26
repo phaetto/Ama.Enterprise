@@ -3,12 +3,14 @@ namespace Ama.Enterprise.CRDT.Distributed.Services;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services.Pooling;
 using Ama.Enterprise.CRDT.Distributed.Models;
+using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
 /// Singleton manager tracking active CRDT replica scopes and dynamically creating isolated causal compartments on demand.
@@ -20,10 +22,11 @@ public sealed class DistributedCrdtScopeManager : IDisposable
     private readonly HashSet<string> registeredReplicaIds = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, IDistributedCrdtScope> activeScopes = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, IDistributedCrdtScope> scopesByCompositeId = new(StringComparer.Ordinal);
-    private readonly SemaphoreSlim initLock = new(1, 1);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> fallbackInitLocks = new(StringComparer.Ordinal);
 
     private readonly Meter meter;
     private readonly Counter<long> scopesCreatedCounter;
+    private readonly Counter<long> scopesEvictedCounter;
 
     /// <summary>
     /// Gets the primary host replica identifier registered at startup.
@@ -39,6 +42,7 @@ public sealed class DistributedCrdtScopeManager : IDisposable
 
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.DistributedCrdtScopeManager") ?? new Meter("Ama.Enterprise.CRDT.Distributed.DistributedCrdtScopeManager");
         this.scopesCreatedCounter = this.meter.CreateCounter<long>("crdt.scope.manager_allocations", "scopes", "Total managed CRDT scope allocations");
+        this.scopesEvictedCounter = this.meter.CreateCounter<long>("crdt.scope.manager_evictions", "scopes", "Total idle dynamic CRDT scopes evicted");
 
         var firstHost = string.Empty;
         if (registrations != null)
@@ -82,11 +86,13 @@ public sealed class DistributedCrdtScopeManager : IDisposable
 
         if (activeScopes.TryGetValue(scopeOrReplicaId, out var existing))
         {
+            existing.TouchActivity();
             return existing;
         }
 
         if (scopesByCompositeId.TryGetValue(scopeOrReplicaId, out var existingComposite))
         {
+            existingComposite.TouchActivity();
             return existingComposite;
         }
 
@@ -96,10 +102,12 @@ public sealed class DistributedCrdtScopeManager : IDisposable
         var scope = activeScopes.GetOrAdd(normalizedScopeId, id =>
         {
             scopesCreatedCounter.Add(1, new KeyValuePair<string, object?>("replica_id", id));
-            return scopeFactory.CreateScope(id, resolvedHost);
+            var isPinned = registeredReplicaIds.Contains(id) && string.Equals(id, resolvedHost, StringComparison.Ordinal);
+            return scopeFactory.CreateScope(id, resolvedHost, isPinned);
         });
 
         scopesByCompositeId.TryAdd(scope.ReplicaId, scope);
+        scope.TouchActivity();
         return scope;
     }
 
@@ -121,7 +129,14 @@ public sealed class DistributedCrdtScopeManager : IDisposable
             return scope;
         }
 
-        await initLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (scope is DistributedCrdtScope concreteScope)
+        {
+            await concreteScope.EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+            return scope;
+        }
+
+        var scopeLock = fallbackInitLocks.GetOrAdd(scope.ReplicaId, _ => new SemaphoreSlim(1, 1));
+        await scopeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (scope.Orchestrator.InitializationStage != OrchestratorInitializationStage.Initialized)
@@ -131,7 +146,7 @@ public sealed class DistributedCrdtScopeManager : IDisposable
         }
         finally
         {
-            initLock.Release();
+            scopeLock.Release();
         }
 
         return scope;
@@ -153,11 +168,13 @@ public sealed class DistributedCrdtScopeManager : IDisposable
 
         if (activeScopes.TryGetValue(scopeOrReplicaId, out scope))
         {
+            scope.TouchActivity();
             return true;
         }
 
         if (scopesByCompositeId.TryGetValue(scopeOrReplicaId, out scope))
         {
+            scope.TouchActivity();
             return true;
         }
 
@@ -167,6 +184,7 @@ public sealed class DistributedCrdtScopeManager : IDisposable
             var extractedScopeId = scopeOrReplicaId[(atIdx + 1)..];
             if (activeScopes.TryGetValue(extractedScopeId, out scope))
             {
+                scope.TouchActivity();
                 return true;
             }
         }
@@ -183,6 +201,119 @@ public sealed class DistributedCrdtScopeManager : IDisposable
         return activeScopes.Values.ToList();
     }
 
+    /// <summary>
+    /// Flushes, checkpoints, removes, and disposes dynamic (non-pinned) CRDT scopes whose last activity timestamp is older than <paramref name="idleTtl"/>.
+    /// </summary>
+    /// <param name="idleTtl">The minimum idle duration before a dynamic scope is eligible for eviction.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>The number of dynamic scopes evicted during this pass.</returns>
+    public async ValueTask<int> EvictIdleDynamicScopesAsync(TimeSpan idleTtl, CancellationToken cancellationToken = default)
+    {
+        if (idleTtl <= TimeSpan.Zero)
+        {
+            return 0;
+        }
+
+        int evictedCount = 0;
+
+        foreach (var kvp in activeScopes)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var scopeKey = kvp.Key;
+            var scope = kvp.Value;
+
+            if (scope.IsPinnedHostScope)
+            {
+                continue;
+            }
+
+            var lastActivity = scope.LastActivityTimestamp;
+            if (Stopwatch.GetElapsedTime(lastActivity) < idleTtl)
+            {
+                continue;
+            }
+
+            if (scope.Orchestrator is CrdtDocumentOrchestrator concreteOrchestrator &&
+                (concreteOrchestrator.PendingCommandCount > 0 || concreteOrchestrator.IsAntiEntropyBusy))
+            {
+                continue;
+            }
+
+            var docPipeline = scope.ServiceProvider.GetService<IDocumentCommandPipeline>();
+            if (docPipeline != null && docPipeline.PendingCommandCount > 0)
+            {
+                continue;
+            }
+
+            try
+            {
+                if (scope.Orchestrator.InitializationStage == OrchestratorInitializationStage.Initialized)
+                {
+                    await scope.Orchestrator.FlushAsync(cancellationToken).ConfigureAwait(false);
+
+                    var documents = scope.Orchestrator.GetActiveDocuments();
+                    for (int i = 0; i < documents.Count; i++)
+                    {
+                        await documents[i].CheckpointAsync(cancellationToken).ConfigureAwait(false);
+                    }
+
+                    var isMemoryStorage = scope.Storage is MemoryCrdtStorage
+                        || (scope.Storage is BufferedDistributedCrdtStorageDecorator decorator && decorator.InnerStorage is MemoryCrdtStorage);
+
+                    if (!isMemoryStorage)
+                    {
+                        var versionVectorManager = scope.ServiceProvider.GetService<IShardVersionVectorManager>();
+                        if (versionVectorManager != null)
+                        {
+                            var safelyPersistedMap = versionVectorManager.GetFullSnapshot();
+                            await scope.Storage.SaveShardVersionVectorMapAsync(scope.ReplicaId, safelyPersistedMap, cancellationToken).ConfigureAwait(false);
+                        }
+
+                        var exportedClusterState = scope.ClusterTracker.ExportState();
+                        await scope.Storage.SaveClusterStateAsync(scope.ReplicaId, exportedClusterState, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    if (scope.Storage is BufferedDistributedCrdtStorageDecorator bufferedStorage)
+                    {
+                        await bufferedStorage.DrainAsync(500, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                continue;
+            }
+
+            // Re-verify that the scope remained idle while the asynchronous flush and checkpoint completed.
+            if (Stopwatch.GetElapsedTime(scope.LastActivityTimestamp) < idleTtl)
+            {
+                continue;
+            }
+
+            if (!activeScopes.TryRemove(new KeyValuePair<string, IDistributedCrdtScope>(scopeKey, scope)))
+            {
+                continue;
+            }
+
+            scopesByCompositeId.TryRemove(new KeyValuePair<string, IDistributedCrdtScope>(scope.ReplicaId, scope));
+            if (fallbackInitLocks.TryRemove(scope.ReplicaId, out var initSem))
+            {
+                initSem.Dispose();
+            }
+
+            scope.Dispose();
+            scopesEvictedCounter.Add(1, new KeyValuePair<string, object?>("replica_id", scope.ReplicaId));
+            evictedCount++;
+        }
+
+        return evictedCount;
+    }
+
     public void Dispose()
     {
         foreach (var scope in activeScopes.Values)
@@ -191,7 +322,13 @@ public sealed class DistributedCrdtScopeManager : IDisposable
         }
         activeScopes.Clear();
         scopesByCompositeId.Clear();
-        initLock.Dispose();
+
+        foreach (var sem in fallbackInitLocks.Values)
+        {
+            sem.Dispose();
+        }
+        fallbackInitLocks.Clear();
+
         meter.Dispose();
     }
 

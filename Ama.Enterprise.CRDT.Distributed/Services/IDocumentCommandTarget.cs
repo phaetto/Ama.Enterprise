@@ -14,6 +14,11 @@ using Ama.Enterprise.CRDT.Distributed.Models;
 public interface IDocumentCommandTarget
 {
     /// <summary>
+    /// Gets the composite replica identifier of the scope owning this document.
+    /// </summary>
+    string ScopeReplicaId { get; }
+
+    /// <summary>
     /// Gets the unique identifier of the document.
     /// </summary>
     string DocumentId { get; }

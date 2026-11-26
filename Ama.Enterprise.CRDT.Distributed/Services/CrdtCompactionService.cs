@@ -91,15 +91,35 @@ public sealed class CrdtCompactionService : BackgroundService
                 {
                     compactionCyclesCounter.Add(1, tag);
 
-                    var documents = scope.Orchestrator.GetActiveDocuments();
-                    foreach (var document in documents)
+                    var compactedCount = 0;
+                    if (scope.Orchestrator is CrdtDocumentOrchestrator concreteOrchestrator)
                     {
                         stoppingToken.ThrowIfCancellationRequested();
-                        await document.CompactMetadataAsync(IntentDeliveryMode.Acknowledged, stoppingToken).ConfigureAwait(false);
+                        await concreteOrchestrator.Registry.CompactMetadataAsync(IntentDeliveryMode.Acknowledged, stoppingToken).ConfigureAwait(false);
                         documentsCompactedCounter.Add(1, tag);
+                        compactedCount++;
+
+                        foreach (var document in concreteOrchestrator.EnumerateActiveDocuments())
+                        {
+                            stoppingToken.ThrowIfCancellationRequested();
+                            await document.CompactMetadataAsync(IntentDeliveryMode.Acknowledged, stoppingToken).ConfigureAwait(false);
+                            documentsCompactedCounter.Add(1, tag);
+                            compactedCount++;
+                        }
+                    }
+                    else
+                    {
+                        var documents = scope.Orchestrator.GetActiveDocuments();
+                        foreach (var document in documents)
+                        {
+                            stoppingToken.ThrowIfCancellationRequested();
+                            await document.CompactMetadataAsync(IntentDeliveryMode.Acknowledged, stoppingToken).ConfigureAwait(false);
+                            documentsCompactedCounter.Add(1, tag);
+                            compactedCount++;
+                        }
                     }
 
-                    logger.LogTrace("[{ReplicaId}] Completed scheduled CRDT metadata compaction across {Count} active documents.", scope.ReplicaId, documents.Count);
+                    logger.LogTrace("[{ReplicaId}] Completed scheduled CRDT metadata compaction across {Count} active documents.", scope.ReplicaId, compactedCount);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {

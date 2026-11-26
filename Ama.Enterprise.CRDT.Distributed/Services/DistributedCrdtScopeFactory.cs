@@ -20,10 +20,10 @@ internal sealed class DistributedCrdtScopeFactory : IDistributedCrdtScopeFactory
     public IDistributedCrdtScope CreateScope(string replicaId)
     {
         if (string.IsNullOrWhiteSpace(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
-        return CreateScope(replicaId, replicaId);
+        return CreateScope(replicaId, replicaId, isPinnedHostScope: false);
     }
 
-    public IDistributedCrdtScope CreateScope(string scopeId, string hostReplicaId)
+    public IDistributedCrdtScope CreateScope(string scopeId, string hostReplicaId, bool isPinnedHostScope = false)
     {
         if (string.IsNullOrWhiteSpace(scopeId)) throw new ArgumentException("Scope ID cannot be null or empty.", nameof(scopeId));
         if (string.IsNullOrWhiteSpace(hostReplicaId)) throw new ArgumentException("Host Replica ID cannot be null or empty.", nameof(hostReplicaId));
@@ -61,37 +61,77 @@ internal sealed class DistributedCrdtScopeFactory : IDistributedCrdtScopeFactory
         }
 
         telemetry.RecordScopeGenerated(compositeReplicaId);
-        return new DistributedCrdtScope(scope, compositeReplicaId, scopeId, hostReplicaId);
+        return new DistributedCrdtScope(scope, compositeReplicaId, scopeId, hostReplicaId, isPinnedHostScope);
     }
 }
 
 internal sealed class DistributedCrdtScope : IDistributedCrdtScope
 {
     private readonly IServiceScope innerScope;
+    private readonly SemaphoreSlim initializationLock = new(1, 1);
+    private long lastActivityTimestamp;
 
     public string ReplicaId { get; }
     public string ScopeId { get; }
     public string HostReplicaId { get; }
+    public bool IsPinnedHostScope { get; }
+    public long LastActivityTimestamp => Volatile.Read(ref lastActivityTimestamp);
     public ICrdtDocumentOrchestrator Orchestrator { get; }
     public IClusterStateTracker ClusterTracker { get; }
     public IDistributedCrdtStorage Storage { get; }
     public ICrdtEvictionService EvictionService { get; }
     public IServiceProvider ServiceProvider => innerScope.ServiceProvider;
 
-    public DistributedCrdtScope(IServiceScope innerScope, string replicaId, string scopeId, string hostReplicaId)
+    public DistributedCrdtScope(
+        IServiceScope innerScope,
+        string replicaId,
+        string scopeId,
+        string hostReplicaId,
+        bool isPinnedHostScope)
     {
         this.innerScope = innerScope ?? throw new ArgumentNullException(nameof(innerScope));
         ReplicaId = replicaId;
         ScopeId = scopeId;
         HostReplicaId = hostReplicaId;
+        IsPinnedHostScope = isPinnedHostScope;
+        lastActivityTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
         Orchestrator = innerScope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
         ClusterTracker = innerScope.ServiceProvider.GetRequiredService<IClusterStateTracker>();
         Storage = innerScope.ServiceProvider.GetRequiredService<IDistributedCrdtStorage>();
         EvictionService = innerScope.ServiceProvider.GetRequiredService<ICrdtEvictionService>();
     }
 
+    public void TouchActivity()
+    {
+        Volatile.Write(ref lastActivityTimestamp, System.Diagnostics.Stopwatch.GetTimestamp());
+    }
+
+    public async ValueTask EnsureInitializedAsync(CancellationToken cancellationToken)
+    {
+        TouchActivity();
+
+        if (Orchestrator.InitializationStage == OrchestratorInitializationStage.Initialized)
+        {
+            return;
+        }
+
+        await initializationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (Orchestrator.InitializationStage != OrchestratorInitializationStage.Initialized)
+            {
+                await Orchestrator.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            initializationLock.Release();
+        }
+    }
+
     public void Dispose()
     {
+        initializationLock.Dispose();
         innerScope.Dispose();
     }
 }
