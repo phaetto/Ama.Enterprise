@@ -158,6 +158,15 @@ public interface IShardVersionVectorManager
     void Clear();
 
     /// <summary>
+    /// Gets a value indicating whether the current asynchronous execution context is holding any shard lock.
+    /// </summary>
+    /// <returns><c>true</c> if the current execution context is inside an active <see cref="ExecuteShardLockedAsync"/> scope; otherwise, <c>false</c>.</returns>
+    bool IsCurrentContextHoldingAnyShardLock()
+    {
+        return false;
+    }
+
+    /// <summary>
     /// Executes an asynchronous action while holding the exclusive operation lock for the specified shard.
     /// Ensures that intent generation, DVV mutation, and journal persistence execute atomically per shard.
     /// </summary>

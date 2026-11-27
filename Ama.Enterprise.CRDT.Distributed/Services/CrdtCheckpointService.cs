@@ -81,22 +81,7 @@ public sealed class CrdtCheckpointService : BackgroundService
                     var tag = new KeyValuePair<string, object?>("replica_id", scope.ReplicaId);
                     checkpointCyclesCounter.Add(1, tag);
 
-                    if (orchestrator is CrdtDocumentOrchestrator concreteOrchestrator)
-                    {
-                        await concreteOrchestrator.Registry.CheckpointAsync(stoppingToken).ConfigureAwait(false);
-                        foreach (var document in concreteOrchestrator.EnumerateActiveDocuments())
-                        {
-                            await document.CheckpointAsync(stoppingToken).ConfigureAwait(false);
-                        }
-                    }
-                    else
-                    {
-                        var documents = orchestrator.GetActiveDocuments();
-                        foreach (var document in documents)
-                        {
-                            await document.CheckpointAsync(stoppingToken).ConfigureAwait(false);
-                        }
-                    }
+                    await CheckpointActiveDocumentsInBatchesAsync(scope.Storage, orchestrator, stoppingToken).ConfigureAwait(false);
 
                     // Ephemeral MemoryCrdtStorage lives inside the same RAM space as ShardVersionVectorManager and ClusterStateTracker.
                     // Deep-cloning 100K+ ShardVersionVectors and ClusterState snapshots every few seconds into MemoryCrdtStorage
@@ -158,6 +143,147 @@ public sealed class CrdtCheckpointService : BackgroundService
     {
         meter.Dispose();
         base.Dispose();
+    }
+
+    internal static async Task CheckpointActiveDocumentsInBatchesAsync(
+        IDistributedCrdtStorage storage,
+        ICrdtDocumentOrchestrator orchestrator,
+        CancellationToken cancellationToken,
+        ShardVersionVectorMap? safelyPersistedMapToMergeRegistry = null)
+    {
+        const int MaxBatchSize = 2048;
+        List<SerializedDocumentCheckpointDto>? batchPayload = null;
+        List<IDistributedCrdtDocument>? batchDocs = null;
+
+        async Task FlushBatchAsync()
+        {
+            if (batchPayload == null || batchPayload.Count == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                await storage.SaveSerializedDocumentBatchAsync(batchPayload, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                if (batchDocs != null)
+                {
+                    for (int i = 0; i < batchDocs.Count; i++)
+                    {
+                        batchDocs[i].RestoreDirtyAfterFailedCheckpoint();
+                    }
+                }
+
+                throw;
+            }
+            finally
+            {
+                batchPayload.Clear();
+                batchDocs?.Clear();
+            }
+        }
+
+        void CollectDocument(IDistributedCrdtDocument doc)
+        {
+            if (doc.TryPrepareCheckpoint(out var checkpoint))
+            {
+                batchPayload ??= new List<SerializedDocumentCheckpointDto>(256);
+                batchDocs ??= new List<IDistributedCrdtDocument>(256);
+                batchPayload.Add(checkpoint);
+                batchDocs.Add(doc);
+            }
+        }
+
+        if (orchestrator is CrdtDocumentOrchestrator concreteOrchestrator)
+        {
+            CollectDocument(concreteOrchestrator.Registry);
+            if (safelyPersistedMapToMergeRegistry != null)
+            {
+                MergeRegistryVersionVector(concreteOrchestrator.Registry, safelyPersistedMapToMergeRegistry);
+            }
+
+            foreach (var document in concreteOrchestrator.EnumerateActiveDocuments())
+            {
+                CollectDocument(document);
+                if (batchPayload is { Count: >= MaxBatchSize })
+                {
+                    await FlushBatchAsync().ConfigureAwait(false);
+                }
+            }
+
+            await FlushBatchAsync().ConfigureAwait(false);
+        }
+        else
+        {
+            var documents = orchestrator.GetActiveDocuments();
+            for (int i = 0; i < documents.Count; i++)
+            {
+                var document = documents[i];
+                if (document is DistributedCrdtDocument<CrdtRegistryState>)
+                {
+                    CollectDocument(document);
+                }
+                else if (document.TryPrepareCheckpoint(out var checkpoint))
+                {
+                    batchPayload ??= new List<SerializedDocumentCheckpointDto>(256);
+                    batchDocs ??= new List<IDistributedCrdtDocument>(256);
+                    batchPayload.Add(checkpoint);
+                    batchDocs.Add(document);
+                }
+                else
+                {
+                    await document.CheckpointAsync(cancellationToken).ConfigureAwait(false);
+                }
+
+                if (safelyPersistedMapToMergeRegistry != null && document is IDistributedCrdtDocument<CrdtRegistryState> registryDoc)
+                {
+                    MergeRegistryVersionVector(registryDoc, safelyPersistedMapToMergeRegistry);
+                }
+
+                if (batchPayload is { Count: >= MaxBatchSize })
+                {
+                    await FlushBatchAsync().ConfigureAwait(false);
+                }
+            }
+
+            await FlushBatchAsync().ConfigureAwait(false);
+        }
+    }
+
+    internal static void MergeRegistryVersionVector(
+        IDistributedCrdtDocument<CrdtRegistryState> registryDoc,
+        ShardVersionVectorMap safelyPersistedMap)
+    {
+        if (string.IsNullOrWhiteSpace(registryDoc.ShardId))
+        {
+            return;
+        }
+
+        var fullRegistryDoc = registryDoc.ReadFullDocument();
+        if (fullRegistryDoc.Metadata?.VersionVector == null || fullRegistryDoc.Metadata.VersionVector.Count == 0)
+        {
+            return;
+        }
+
+        var regDvv = safelyPersistedMap.TryGetValue(registryDoc.ShardId, out var existingRegDvv)
+            ? existingRegDvv
+            : new DottedVersionVector();
+
+        foreach (var kvp in fullRegistryDoc.Metadata.VersionVector)
+        {
+            if (kvp.Value > 0 &&
+                (!regDvv.Versions.TryGetValue(kvp.Key, out var currentVer) || kvp.Value > currentVer))
+            {
+                regDvv.Versions[kvp.Key] = kvp.Value;
+            }
+        }
+
+        if (regDvv.Versions.Count > 0)
+        {
+            safelyPersistedMap[registryDoc.ShardId] = regDvv;
+        }
     }
 
     private static int ComputeMapDigest(ShardVersionVectorMap? map)

@@ -81,6 +81,8 @@ public enum DocumentCommandType
 public sealed class PooledDocumentCommand : IValueTaskSource
 {
     private ManualResetValueTaskSourceCore<bool> core;
+    private short capturedVersion;
+    private int pendingLifecycleRefs;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PooledDocumentCommand"/> class.
@@ -174,10 +176,25 @@ public sealed class PooledDocumentCommand : IValueTaskSource
     public ShardVersionVectorMap? ResultGlobalState { get; set; }
 
     /// <summary>
+    /// Captures the current <see cref="IValueTaskSource"/> version token and initializes lifecycle reference tracking before enqueuing the command to a background worker.
+    /// </summary>
+    internal void PrepareExecution()
+    {
+        capturedVersion = core.Version;
+        Volatile.Write(ref pendingLifecycleRefs, 2);
+    }
+
+    /// <summary>
     /// Resets the command state before returning it to the pool.
     /// </summary>
     public void Reset()
     {
+        if (Interlocked.Decrement(ref pendingLifecycleRefs) > 0)
+        {
+            return;
+        }
+
+        Volatile.Write(ref pendingLifecycleRefs, 0);
         core.Reset();
         Target = null;
         Type = default;
@@ -202,12 +219,16 @@ public sealed class PooledDocumentCommand : IValueTaskSource
     /// Returns a <see cref="ValueTask"/> backed by this pooled command instance.
     /// </summary>
     /// <returns>A <see cref="ValueTask"/> representing the asynchronous execution.</returns>
-    public ValueTask ExecuteAsync() => new ValueTask(this, core.Version);
+    public ValueTask ExecuteAsync() => new ValueTask(this, capturedVersion);
 
     /// <summary>
     /// Signals that the command completed.
     /// </summary>
-    public void SetResult() => core.SetResult(true);
+    public void SetResult()
+    {
+        core.SetResult(true);
+        Reset();
+    }
 
     /// <summary>
     /// Signals that the command faulted with an exception.
@@ -217,6 +238,7 @@ public sealed class PooledDocumentCommand : IValueTaskSource
     {
         ArgumentNullException.ThrowIfNull(ex);
         core.SetException(ex);
+        Reset();
     }
 
     /// <inheritdoc />

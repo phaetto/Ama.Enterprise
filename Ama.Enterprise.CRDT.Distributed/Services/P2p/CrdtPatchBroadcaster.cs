@@ -41,6 +41,7 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
     private readonly Counter<long> broadcastBytesCounter;
     private readonly Counter<long> patchesBroadcastedCounter;
     private readonly Counter<long> broadcastFailuresCounter;
+    private int disposed;
 
     public CrdtPatchBroadcaster(
         IServiceProvider serviceProvider,
@@ -125,7 +126,19 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
 
     public void Dispose()
     {
-        disposeCts.Cancel();
+        if (Interlocked.Exchange(ref disposed, 1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            disposeCts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
         broadcastChannel.Writer.TryComplete();
         disposeCts.Dispose();
         meter.Dispose();

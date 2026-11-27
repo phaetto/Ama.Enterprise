@@ -424,6 +424,30 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     }
 
     /// <inheritdoc />
+    public Task SaveSerializedDocumentBatchAsync(IReadOnlyList<SerializedDocumentCheckpointDto> checkpoints, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(checkpoints);
+        if (checkpoints.Count == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        lock (syncRoot)
+        {
+            for (int i = 0; i < checkpoints.Count; i++)
+            {
+                var item = checkpoints[i];
+                var key = $"{item.ShardId}_{item.DocumentId}";
+                var copy = new byte[item.SerializedDocument.Length];
+                Buffer.BlockCopy(item.SerializedDocument, 0, copy, 0, item.SerializedDocument.Length);
+                serializedDocuments[key] = copy;
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
     public Task DeleteDocumentAsync(string shardId, string documentId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(documentId)) return Task.CompletedTask;

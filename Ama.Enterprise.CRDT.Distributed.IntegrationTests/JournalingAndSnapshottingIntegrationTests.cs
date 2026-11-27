@@ -157,7 +157,21 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     public async Task CrdtCheckpointService_Executes_SavingBounds()
     {
         // Arrange
+        var savedDocumentIds = new List<string>();
         var mockStorage = new Mock<IDistributedCrdtStorage>();
+        mockStorage.Setup(s => s.SaveSerializedDocumentBatchAsync(It.IsAny<IReadOnlyList<SerializedDocumentCheckpointDto>>(), It.IsAny<CancellationToken>()))
+            .Callback<IReadOnlyList<SerializedDocumentCheckpointDto>, CancellationToken>((items, _) =>
+            {
+                lock (savedDocumentIds)
+                {
+                    foreach (var item in items)
+                    {
+                        savedDocumentIds.Add(item.DocumentId);
+                    }
+                }
+            })
+            .Returns(Task.CompletedTask);
+
         var sp = BuildNode("Replica1", services =>
         {
             services.Configure<DistributedCrdtOptions>(opt =>
@@ -186,7 +200,10 @@ public sealed class JournalingAndSnapshottingIntegrationTests
 
         // Assert
         mockStorage.Verify(s => s.SaveShardVersionVectorMapAsync(It.IsAny<string>(), It.IsAny<ShardVersionVectorMap>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
-        mockStorage.Verify(s => s.SaveSerializedDocumentAsync<JournalTestState>(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        mockStorage.Verify(s => s.SaveSerializedDocumentBatchAsync(
+            It.IsAny<IReadOnlyList<SerializedDocumentCheckpointDto>>(),
+            It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        savedDocumentIds.Any(id => id.Contains("journal-doc", StringComparison.Ordinal)).ShouldBeTrue();
     }
 
     [IntegrationFact]
@@ -894,6 +911,20 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         mockStorage.Setup(s => s.GetJournalCountAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns((string shardId, CancellationToken ct) => innerStorage.GetJournalCountAsync(shardId, ct));
 
+        mockStorage.Setup(s => s.SaveSerializedDocumentBatchAsync(It.IsAny<IReadOnlyList<SerializedDocumentCheckpointDto>>(), It.IsAny<CancellationToken>()))
+            .Callback<IReadOnlyList<SerializedDocumentCheckpointDto>, CancellationToken>((items, _) =>
+            {
+                lock (savedDocumentKeys)
+                {
+                    foreach (var item in items)
+                    {
+                        savedDocumentKeys.Add(item.DocumentId);
+                    }
+                }
+            })
+            .Returns((IReadOnlyList<SerializedDocumentCheckpointDto> items, CancellationToken ct) =>
+                innerStorage.SaveSerializedDocumentBatchAsync(items, ct));
+
         mockStorage.Setup(s => s.SaveSerializedDocumentAsync<JournalTestState>(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<CancellationToken>()))
             .Callback<string, string, byte[], CancellationToken>((_, docKey, _, _) =>
             {
@@ -1239,5 +1270,213 @@ public sealed class JournalingAndSnapshottingIntegrationTests
                 try { Directory.Delete(walDir, recursive: true); } catch { }
             }
         }
+    }
+
+    public sealed class CustomTenShardIdProvider : Ama.CRDT.Services.Providers.IShardIdProvider
+    {
+        public string GetShardId<T>(CrdtDocument<T> document) where T : class => "custom-shard-0";
+
+        public string GetShardId<T>(IComparable documentId) where T : class => "custom-shard-0";
+
+        public string GetShardId(IComparable documentId, Type documentType) => "custom-shard-0";
+    }
+
+    [IntegrationFact]
+    public async Task ShardingEnabled_WithCustomShardIdProviderRegisteredAfterAddDistributedCrdtCore_TrimsSystemRegistryShardJournal()
+    {
+        // Arrange - Simulate the Showcase DI registration order where AddCrdtShardIdProvider<CustomShardIdProvider>()
+        // is called AFTER AddDistributedCrdtCore() with EnableSharding = true.
+        var sp = BuildNode("ShardedNode1", services =>
+        {
+            services.Configure<DistributedCrdtOptions>(opt =>
+            {
+                opt.EnableSharding = true;
+                opt.JournalSoftTrimThreshold = 5;
+                opt.JournalHardTrimThreshold = 10;
+                opt.MaintenanceIntervalSeconds = 3600;
+            });
+
+            // Registered AFTER AddDistributedCrdtCore (just like ShowCase/Program.cs)
+            services.AddCrdtShardIdProvider<CustomTenShardIdProvider>();
+
+            services.AddSingleton<MemoryCrdtStorage>();
+            services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(provider => provider.GetRequiredService<MemoryCrdtStorage>()));
+        });
+
+        var sharedStorage = sp.GetRequiredService<MemoryCrdtStorage>();
+        var scope = sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ShardedNode1");
+        var orchestrator = scope.Orchestrator;
+
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        // Act - Create 15 documents so the system registry shard ("system-document-registry") generates 15 journaled operations,
+        // crossing both the soft (5) and hard (10) trim thresholds.
+        for (int i = 0; i < 15; i++)
+        {
+            await orchestrator.CreateDocumentAsync($"sharded-doc-{i}", "journal-doc", CancellationToken.None);
+        }
+
+        // Wait for StorageJournalForwarder's background trim to complete
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (!cts.Token.IsCancellationRequested)
+        {
+            var regCount = await sharedStorage.GetJournalCountAsync(Constants.SystemRegistryDocumentId, CancellationToken.None);
+            var customShardCount = await sharedStorage.GetJournalCountAsync("custom-shard-0", CancellationToken.None);
+            if (regCount < 5 && customShardCount == 0)
+            {
+                break;
+            }
+            await Task.Delay(30);
+        }
+
+        // Assert - The system registry operations were assigned to Constants.SystemRegistryDocumentId (NOT "custom-shard-0")
+        // and the system registry journal was trimmed down below the threshold.
+        var finalRegistryJournalCount = await sharedStorage.GetJournalCountAsync(Constants.SystemRegistryDocumentId, CancellationToken.None);
+        var finalCustomShardJournalCount = await sharedStorage.GetJournalCountAsync("custom-shard-0", CancellationToken.None);
+
+        finalRegistryJournalCount.ShouldBeLessThan(5);
+        finalCustomShardJournalCount.ShouldBe(0);
+    }
+
+    public sealed class DeterministicHashTenShardIdProvider : Ama.CRDT.Services.Providers.IShardIdProvider
+    {
+        public string GetShardId<T>(CrdtDocument<T> document) where T : class
+        {
+            if (document.Data is JournalTestState state && !string.IsNullOrWhiteSpace(state.Id))
+            {
+                return ComputeShardId(state.Id);
+            }
+            return "shard-0";
+        }
+
+        public string GetShardId<T>(IComparable documentId) where T : class => ComputeShardId(documentId?.ToString());
+
+        public string GetShardId(IComparable documentId, Type documentType) => ComputeShardId(documentId?.ToString());
+
+        private static string ComputeShardId(string? id)
+        {
+            if (string.IsNullOrWhiteSpace(id)) return "shard-0";
+            uint hash = 2166136261u;
+            for (int i = 0; i < id.Length; i++)
+            {
+                hash ^= id[i];
+                hash *= 16777619u;
+            }
+            return $"shard-{hash % 10}";
+        }
+    }
+
+    [IntegrationFact]
+    public async Task ShardingEnabled_WithHashBasedShardIdProviderAndRemotePatches_RoutesOperationsToConsistentShardAndTrimsJournal()
+    {
+        // Arrange - Verify that when a hash-based IShardIdProvider (like ShowCaseShardIdProvider) is used:
+        // 1. IAsyncCrdtPatcher resolved from scope.ServiceProvider (which receives property type Dictionary<string, CrdtRegistryEntry>
+        //    or composite document IDs) still routes system-document-registry to Constants.SystemRegistryDocumentId
+        //    and domain documents to the exact same shard as DocumentFactory.GetShardId(rawDocId).
+        // 2. Remote patches applied via ProcessApplyRemotePatchInternalAsync go through ICrdtOperationJournal (StorageJournalForwarder)
+        //    and trigger reactive journal trimming when crossing thresholds.
+        var sp = BuildNode("HashShardNode1", services =>
+        {
+            services.Configure<DistributedCrdtOptions>(opt =>
+            {
+                opt.EnableSharding = true;
+                opt.JournalSoftTrimThreshold = 5;
+                opt.JournalHardTrimThreshold = 10;
+                opt.MaintenanceIntervalSeconds = 3600;
+            });
+
+            services.AddCrdtShardIdProvider<DeterministicHashTenShardIdProvider>();
+
+            services.AddSingleton<MemoryCrdtStorage>();
+            services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(provider => provider.GetRequiredService<MemoryCrdtStorage>()));
+        });
+
+        var sharedStorage = sp.GetRequiredService<MemoryCrdtStorage>();
+        var scope = sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("HashShardNode1");
+        var orchestrator = scope.Orchestrator;
+
+        await orchestrator.InitializeAsync(CancellationToken.None);
+
+        await orchestrator.CreateDocumentAsync("auto-fleet-1", "journal-doc", CancellationToken.None);
+        var localDoc = orchestrator.TryGetLocalDocument<JournalTestState>("auto-fleet-1");
+        localDoc.ShouldNotBeNull();
+
+        // Simulate 15 remote patch operations arriving on the document to cross the hard threshold (10)
+        for (int i = 1; i <= 15; i++)
+        {
+            var remoteOp = default(CrdtOperation) with
+            {
+                Id = Guid.NewGuid(),
+                ReplicaId = "RemotePeerB",
+                Clock = i,
+                ShardClock = i,
+                ShardId = localDoc!.ShardId,
+                Type = OperationType.Upsert,
+                JsonPath = $"$.dataMap['dev-{i}']",
+                Value = $"online-{i}"
+            };
+
+            await localDoc.ApplyRemotePatchAsync(new CrdtPatch([remoteOp]), CancellationToken.None);
+        }
+
+        // Wait for StorageJournalForwarder's reactive background trim to complete
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (!cts.Token.IsCancellationRequested)
+        {
+            var allOps = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
+            if (allOps.Count < 5)
+            {
+                break;
+            }
+            await Task.Delay(30);
+        }
+
+        // Assert - Every shard in storage (including system-document-registry and the document's hash shard) was trimmed
+        var remainingOps = await sharedStorage.GetAllJournaledOperationsAsync(CancellationToken.None).ToListAsync();
+        remainingOps.Count.ShouldBeLessThan(5);
+    }
+
+    [IntegrationFact]
+    public async Task StorageJournalForwarder_WhenHardThresholdExceededOnSingleReaderChannel_ExecutesInlineHardTrimSynchronouslyWithoutDeadlock()
+    {
+        // Arrange - Configure hard trim threshold = 5 (with soft threshold = 0) so only hard trim triggers.
+        // Because hard trim is now decoupled from single-reader channels and shard locks,
+        // the 5th acknowledged operation must block inline on the document stripe worker until the trim completes,
+        // meaning the journal count is ALREADY < 5 immediately when the 5th ApplyIntentAsync returns (zero polling needed).
+        var sp = BuildNode("InlineHardTrimNode", services =>
+        {
+            services.Configure<DistributedCrdtOptions>(opt =>
+            {
+                opt.JournalSoftTrimThreshold = 0;
+                opt.JournalHardTrimThreshold = 5;
+                opt.MaintenanceIntervalSeconds = 3600;
+                opt.CheckpointIntervalSeconds = 3600;
+            });
+
+            services.AddSingleton<MemoryCrdtStorage>();
+            services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(provider => provider.GetRequiredService<MemoryCrdtStorage>()));
+        });
+
+        var sharedStorage = sp.GetRequiredService<MemoryCrdtStorage>();
+        var scope = sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("InlineHardTrimNode");
+        var orchestrator = scope.Orchestrator;
+
+        await orchestrator.InitializeAsync(CancellationToken.None);
+        await orchestrator.CreateDocumentAsync("inline-hard-doc", "journal-doc", CancellationToken.None);
+
+        // Act - Apply 6 operations sequentially (1 registry op + 5 document ops >= hard threshold 5)
+        for (int i = 0; i < 6; i++)
+        {
+            await orchestrator.ApplyIntentAsync<JournalTestState>(
+                "inline-hard-doc",
+                new MapSetIntent($"inline-k-{i}", $"inline-v-{i}"),
+                nameof(JournalTestState.DataMap),
+                IntentDeliveryMode.Acknowledged,
+                CancellationToken.None);
+        }
+
+        // Assert - Without any Task.Delay or polling loop, the journal has already been trimmed inline
+        var countImmediatelyAfterWrite = await sharedStorage.GetJournalCountAsync("default", CancellationToken.None);
+        countImmediatelyAfterWrite.ShouldBeLessThan(5);
     }
 }

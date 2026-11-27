@@ -116,6 +116,7 @@ public static class Program
             options.MaintenanceIntervalSeconds = 5 * 60;
             options.CompactionTtlSeconds = 5 * 60;
             options.DefaultDocumentResidencyMode = CrdtDocumentResidencyMode.PackedMetadata;
+            options.JournalHardTrimThreshold = 50000;
             options.ShardReplicationFactor = 2;
             options.EnableSharding = true;
             options.JournalMode = CrdtJournalMode.DiskWal;

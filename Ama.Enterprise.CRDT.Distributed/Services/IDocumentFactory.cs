@@ -9,7 +9,6 @@ using Ama.CRDT.Services;
 using Ama.CRDT.Services.Pooling;
 using Ama.CRDT.Services.Providers;
 using Ama.CRDT.Services.Serialization;
-using Ama.CRDT.Services.Versioning;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,50 +16,32 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Internal factory interface enabling AOT-friendly document creation for registered types.
+/// Internal factory interface for instantiating generic <see cref="IDistributedCrdtDocument"/> instances without reflection.
 /// </summary>
 /// <example>
 /// <code>
-/// var doc = factory.CreateDocument(serviceProvider, "doc-1");
+/// public sealed class CustomDocumentFactory : IDocumentFactory
+/// {
+///     public string TypeAlias => "custom-doc";
+///     public Type StateType => typeof(CustomState);
+///     // Implementation details...
+/// }
 /// </code>
 /// </example>
 public interface IDocumentFactory
 {
     /// <summary>
-    /// Gets the type alias that identifies the document state type.
+    /// Gets the unique type alias for the document state.
     /// </summary>
     string TypeAlias { get; }
 
     /// <summary>
-    /// Gets the CLR type of the underlying CRDT document state.
+    /// Gets the underlying CLR type of the document state.
     /// </summary>
     Type StateType { get; }
 
     /// <summary>
-    /// Gets the optional per-document-type residency mode override.
-    /// When <see langword="null"/>, <see cref="DistributedCrdtOptions.DefaultDocumentResidencyMode"/> is used.
-    /// </summary>
-    CrdtDocumentResidencyMode? ResidencyMode => null;
-
-    /// <summary>
-    /// Creates an initialized distributed CRDT document instance for the specified document identifier.
-    /// </summary>
-    /// <param name="serviceProvider">The scoped service provider.</param>
-    /// <param name="documentId">The document identifier.</param>
-    /// <returns>The created distributed CRDT document instance.</returns>
-    IDistributedCrdtDocument CreateDocument(IServiceProvider serviceProvider, string documentId);
-
-    /// <summary>
-    /// Creates a newly created local distributed CRDT document instance without scheduling a storage load.
-    /// </summary>
-    /// <param name="serviceProvider">The scoped service provider.</param>
-    /// <param name="documentId">The document identifier.</param>
-    /// <returns>The created distributed CRDT document instance.</returns>
-    IDistributedCrdtDocument CreateNewlyCreatedLocalDocument(IServiceProvider serviceProvider, string documentId)
-        => CreateDocument(serviceProvider, documentId);
-
-    /// <summary>
-    /// Computes the shard identifier for the specified document identifier without instantiating the full document pipeline.
+    /// Resolves the shard identifier for the specified document identifier.
     /// </summary>
     /// <param name="serviceProvider">The scoped service provider.</param>
     /// <param name="documentId">The document identifier.</param>
@@ -68,13 +49,30 @@ public interface IDocumentFactory
     string GetShardId(IServiceProvider serviceProvider, string documentId);
 
     /// <summary>
-    /// Attempts to load a persisted document from storage and returns its serialized snapshot bytes without promoting it into active memory.
+    /// Creates a new distributed CRDT document instance for the specified document identifier.
     /// </summary>
     /// <param name="serviceProvider">The scoped service provider.</param>
-    /// <param name="shardId">The shard identifier.</param>
+    /// <param name="documentId">The document identifier.</param>
+    /// <returns>The created distributed CRDT document.</returns>
+    IDistributedCrdtDocument CreateDocument(IServiceProvider serviceProvider, string documentId);
+
+    /// <summary>
+    /// Creates a new distributed CRDT document instance for a brand-new locally created document, skipping redundant initial storage load queries.
+    /// </summary>
+    /// <param name="serviceProvider">The scoped service provider.</param>
+    /// <param name="documentId">The document identifier.</param>
+    /// <returns>The created distributed CRDT document marked as initialized.</returns>
+    IDistributedCrdtDocument CreateNewlyCreatedLocalDocument(IServiceProvider serviceProvider, string documentId)
+        => CreateDocument(serviceProvider, documentId);
+
+    /// <summary>
+    /// Attempts to load a document directly from storage and serialize it into a snapshot payload without promoting it into active memory.
+    /// </summary>
+    /// <param name="serviceProvider">The scoped service provider.</param>
+    /// <param name="shardId">The target shard identifier.</param>
     /// <param name="documentId">The document identifier.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The serialized snapshot bytes if found in storage; otherwise an empty byte array.</returns>
+    /// <returns>The serialized <see cref="CrdtDocument{TState}"/> byte array, or an empty array if not found in storage.</returns>
     ValueTask<byte[]> TryLoadSerializedDocumentFromStorageAsync(
         IServiceProvider serviceProvider,
         string shardId,
@@ -83,90 +81,131 @@ public interface IDocumentFactory
 }
 
 /// <summary>
-/// Generic implementation of <see cref="IDocumentFactory"/> for a specific <typeparamref name="TState"/>.
+/// AOT-friendly generic implementation of <see cref="IDocumentFactory"/>.
 /// </summary>
-/// <typeparam name="TState">The CRDT state model type.</typeparam>
-public sealed class DocumentFactory<TState> : IDocumentFactory where TState : class, new()
+/// <typeparam name="TState">The CRDT document state type.</typeparam>
+internal sealed class DocumentFactory<TState> : IDocumentFactory where TState : class, new()
 {
-    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<IServiceProvider, ScopeDocumentDependencies> ScopeDependenciesCache = new();
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<IServiceProvider, ScopedDocumentDependencies> ScopedCache = new();
 
-    private sealed class ScopeDocumentDependencies(IServiceProvider sp)
-    {
-        public IShardVersionVectorManager VersionVectorManager { get; } = sp.GetRequiredService<IShardVersionVectorManager>();
-        public IAsyncCrdtApplicator Applicator { get; } = sp.GetRequiredService<IAsyncCrdtApplicator>();
-        public ICrdtApplicator SyncApplicator { get; } = sp.GetRequiredService<ICrdtApplicator>();
-        public IAsyncCrdtMerger Merger { get; } = sp.GetRequiredService<IAsyncCrdtMerger>();
-        public ICrdtMetadataManager MetadataManager { get; } = sp.GetRequiredService<ICrdtMetadataManager>();
-        public IOptions<DistributedCrdtOptions> Options { get; } = sp.GetRequiredService<IOptions<DistributedCrdtOptions>>();
-        public ICrdtSerializer Serializer { get; } = sp.GetRequiredService<ICrdtSerializer>();
-        public IDistributedCrdtStorage Storage { get; } = sp.GetRequiredService<IDistributedCrdtStorage>();
-        public ILogger<DistributedCrdtDocument<TState>> Logger { get; } = sp.GetRequiredService<ILogger<DistributedCrdtDocument<TState>>>();
-        public IDocumentIdProvider DocumentIdProvider { get; } = sp.GetRequiredService<IDocumentIdProvider>();
-        public IShardIdProvider ShardIdProvider { get; } = sp.GetRequiredService<IShardIdProvider>();
-        public IShardDistributionManager DistributionManager { get; } = sp.GetRequiredService<IShardDistributionManager>();
-        public IDocumentCommandPipeline CommandPipeline { get; } = sp.GetRequiredService<IDocumentCommandPipeline>();
-        public IDistributedCrdtTelemetry Telemetry { get; } = sp.GetRequiredService<IDistributedCrdtTelemetry>();
-        public IDocumentStateObserver<TState>[] StateObservers { get; } = new List<IDocumentStateObserver<TState>>(sp.GetServices<IDocumentStateObserver<TState>>()).ToArray();
-        public IDocumentPatchObserver[] PatchObservers { get; } = new List<IDocumentPatchObserver>(sp.GetServices<IDocumentPatchObserver>()).ToArray();
-    }
+    private readonly CrdtDocumentResidencyMode? residencyModeOverride;
 
-    /// <inheritdoc />
     public string TypeAlias { get; }
 
-    /// <inheritdoc />
     public Type StateType => typeof(TState);
 
-    /// <inheritdoc />
-    public CrdtDocumentResidencyMode? ResidencyMode { get; }
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="DocumentFactory{TState}"/> class.
-    /// </summary>
-    /// <param name="typeAlias">The string alias mapped to <typeparamref name="TState"/>.</param>
-    /// <param name="residencyMode">An optional residency mode override for documents created by this factory.</param>
-    public DocumentFactory(string typeAlias, CrdtDocumentResidencyMode? residencyMode = null)
+    public DocumentFactory(string typeAlias, CrdtDocumentResidencyMode? residencyModeOverride = null)
     {
-        if (string.IsNullOrWhiteSpace(typeAlias)) throw new ArgumentException("Type alias cannot be null or empty.", nameof(typeAlias));
+        if (string.IsNullOrWhiteSpace(typeAlias))
+        {
+            throw new ArgumentException("Type alias cannot be null or empty.", nameof(typeAlias));
+        }
+
         TypeAlias = CrdtStringPool.Shared.GetOrAdd(typeAlias);
-        ResidencyMode = residencyMode;
+        this.residencyModeOverride = residencyModeOverride;
     }
 
-    /// <inheritdoc />
-    public IDistributedCrdtDocument CreateDocument(IServiceProvider serviceProvider, string documentId)
+    public string GetShardId(IServiceProvider serviceProvider, string documentId)
     {
         ArgumentNullException.ThrowIfNull(serviceProvider);
-        if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
+        if (string.IsNullOrWhiteSpace(documentId))
+        {
+            throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
+        }
 
-        var stringPool = serviceProvider.GetService<ICrdtStringPool>() ?? CrdtStringPool.Shared;
-        documentId = stringPool.GetOrAdd(documentId);
+        if (typeof(TState) == typeof(CrdtRegistryState) ||
+            string.Equals(documentId, Constants.SystemRegistryDocumentId, StringComparison.Ordinal))
+        {
+            return Constants.SystemRegistryDocumentId;
+        }
 
-        var deps = ScopeDependenciesCache.GetValue(serviceProvider, static sp => new ScopeDocumentDependencies(sp));
-        var state = deps.DocumentIdProvider.CreateDocumentWithId<TState>(documentId);
-        return CreateDocumentInstance(serviceProvider, state, TypeAlias, stringPool, ResidencyMode);
+        var deps = GetOrCreateDependencies(serviceProvider);
+        return deps.ShardIdProvider.GetShardId<TState>(documentId) ?? documentId;
     }
 
-    /// <inheritdoc />
+    public IDistributedCrdtDocument CreateDocument(IServiceProvider serviceProvider, string documentId)
+    {
+        return CreateTypedDocument(serviceProvider, documentId);
+    }
+
     public IDistributedCrdtDocument CreateNewlyCreatedLocalDocument(IServiceProvider serviceProvider, string documentId)
     {
-        var doc = (DistributedCrdtDocument<TState>)CreateDocument(serviceProvider, documentId);
+        var doc = CreateTypedDocument(serviceProvider, documentId);
         doc.MarkAsNewlyCreatedLocalDocument();
         return doc;
     }
 
-    /// <summary>
-    /// Directly constructs a <see cref="DistributedCrdtDocument{TState}"/> using pre-registered services without reflection or <see cref="ActivatorUtilities"/> overhead.
-    /// </summary>
+    public async ValueTask<byte[]> TryLoadSerializedDocumentFromStorageAsync(
+        IServiceProvider serviceProvider,
+        string shardId,
+        string documentId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(serviceProvider);
+        if (string.IsNullOrWhiteSpace(documentId))
+        {
+            return Array.Empty<byte>();
+        }
+
+        var deps = GetOrCreateDependencies(serviceProvider);
+        var compositeKey = string.IsNullOrWhiteSpace(TypeAlias) || typeof(TState) == typeof(CrdtRegistryState)
+            ? documentId
+            : CrdtRegistryEntry.GetRegistryKey(TypeAlias, documentId);
+
+        var rawBytes = await deps.Storage.LoadSerializedDocumentAsync(shardId, compositeKey, cancellationToken).ConfigureAwait(false);
+        if ((rawBytes == null || rawBytes.Length == 0) && !string.Equals(compositeKey, documentId, StringComparison.Ordinal))
+        {
+            rawBytes = await deps.Storage.LoadSerializedDocumentAsync(shardId, documentId, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (rawBytes == null || rawBytes.Length == 0)
+        {
+            rawBytes = await deps.Storage.LoadSerializedDocumentFromAnyShardAsync(compositeKey, cancellationToken).ConfigureAwait(false);
+            if ((rawBytes == null || rawBytes.Length == 0) && !string.Equals(compositeKey, documentId, StringComparison.Ordinal))
+            {
+                rawBytes = await deps.Storage.LoadSerializedDocumentFromAnyShardAsync(documentId, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        if (rawBytes is { Length: > 0 })
+        {
+            return rawBytes;
+        }
+
+        var loaded = await deps.Storage.LoadDocumentAsync<TState>(shardId, compositeKey, cancellationToken).ConfigureAwait(false);
+        if (loaded == null && !string.Equals(compositeKey, documentId, StringComparison.Ordinal))
+        {
+            loaded = await deps.Storage.LoadDocumentAsync<TState>(shardId, documentId, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (loaded == null)
+        {
+            loaded = await deps.Storage.LoadDocumentFromAnyShardAsync<TState>(compositeKey, cancellationToken).ConfigureAwait(false);
+            if (loaded == null && !string.Equals(compositeKey, documentId, StringComparison.Ordinal))
+            {
+                loaded = await deps.Storage.LoadDocumentFromAnyShardAsync<TState>(documentId, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        if (loaded == null)
+        {
+            return Array.Empty<byte>();
+        }
+
+        return deps.Serializer.SerializeToBytes(loaded.Value);
+    }
+
     internal static DistributedCrdtDocument<TState> CreateDocumentInstance(
         IServiceProvider serviceProvider,
-        TState state,
-        string? typeAlias = null,
+        TState initialState,
+        string typeAlias,
         ICrdtStringPool? stringPool = null,
         CrdtDocumentResidencyMode? residencyMode = null)
     {
-        var deps = ScopeDependenciesCache.GetValue(serviceProvider, static sp => new ScopeDocumentDependencies(sp));
+        var deps = GetOrCreateDependencies(serviceProvider);
         return new DistributedCrdtDocument<TState>(
-            state,
-            serviceProvider,
+            initialState,
+            deps.DecoratedServiceProvider,
             deps.VersionVectorManager,
             deps.Applicator,
             deps.SyncApplicator,
@@ -184,96 +223,104 @@ public sealed class DocumentFactory<TState> : IDocumentFactory where TState : cl
             deps.StateObservers,
             deps.PatchObservers,
             typeAlias,
-            stringPool,
+            stringPool ?? deps.StringPool,
             residencyMode);
     }
 
-    /// <inheritdoc />
-    public string GetShardId(IServiceProvider serviceProvider, string documentId)
+    private DistributedCrdtDocument<TState> CreateTypedDocument(IServiceProvider serviceProvider, string documentId)
     {
         ArgumentNullException.ThrowIfNull(serviceProvider);
-        if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
-
-        var stringPool = serviceProvider.GetService<ICrdtStringPool>() ?? CrdtStringPool.Shared;
-        documentId = stringPool.GetOrAdd(documentId);
-
-        if (typeof(TState) == typeof(CrdtRegistryState))
+        if (string.IsNullOrWhiteSpace(documentId))
         {
-            return documentId;
+            throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
         }
 
-        var shardIdProvider = serviceProvider.GetRequiredService<IShardIdProvider>();
-        return stringPool.GetOrAdd(shardIdProvider.GetShardId<TState>(documentId) ?? string.Empty);
+        var deps = GetOrCreateDependencies(serviceProvider);
+        documentId = deps.StringPool.GetOrAdd(documentId);
+        var state = deps.DocumentIdProvider.CreateDocumentWithId<TState>(documentId);
+
+        return new DistributedCrdtDocument<TState>(
+            state,
+            deps.DecoratedServiceProvider,
+            deps.VersionVectorManager,
+            deps.Applicator,
+            deps.SyncApplicator,
+            deps.Merger,
+            deps.MetadataManager,
+            deps.Options,
+            deps.Serializer,
+            deps.Storage,
+            deps.Logger,
+            deps.DocumentIdProvider,
+            deps.ShardIdProvider,
+            deps.DistributionManager,
+            deps.CommandPipeline,
+            deps.Telemetry,
+            deps.StateObservers,
+            deps.PatchObservers,
+            TypeAlias,
+            deps.StringPool,
+            residencyModeOverride);
     }
 
-    /// <inheritdoc />
-    public async ValueTask<byte[]> TryLoadSerializedDocumentFromStorageAsync(
-        IServiceProvider serviceProvider,
-        string shardId,
-        string documentId,
-        CancellationToken cancellationToken = default)
+    private static ScopedDocumentDependencies GetOrCreateDependencies(IServiceProvider serviceProvider)
     {
-        ArgumentNullException.ThrowIfNull(serviceProvider);
-        if (string.IsNullOrWhiteSpace(shardId) || string.IsNullOrWhiteSpace(documentId))
+        return ScopedCache.GetValue(serviceProvider, static sp => new ScopedDocumentDependencies(sp));
+    }
+
+    private sealed class ScopedDocumentDependencies
+    {
+        public IServiceProvider DecoratedServiceProvider { get; }
+        public IShardVersionVectorManager VersionVectorManager { get; }
+        public IAsyncCrdtApplicator Applicator { get; }
+        public ICrdtApplicator SyncApplicator { get; }
+        public IAsyncCrdtMerger Merger { get; }
+        public ICrdtMetadataManager MetadataManager { get; }
+        public IOptions<DistributedCrdtOptions> Options { get; }
+        public ICrdtSerializer Serializer { get; }
+        public IDistributedCrdtStorage Storage { get; }
+        public ILogger<DistributedCrdtDocument<TState>> Logger { get; }
+        public IDocumentIdProvider DocumentIdProvider { get; }
+        public IShardIdProvider ShardIdProvider { get; }
+        public IShardDistributionManager DistributionManager { get; }
+        public IDocumentCommandPipeline CommandPipeline { get; }
+        public IDistributedCrdtTelemetry Telemetry { get; }
+        public IDocumentStateObserver<TState>[] StateObservers { get; }
+        public IDocumentPatchObserver[] PatchObservers { get; }
+        public ICrdtStringPool StringPool { get; }
+
+        public ScopedDocumentDependencies(IServiceProvider sp)
         {
-            return Array.Empty<byte>();
+            DecoratedServiceProvider = sp is SystemRegistryServiceProvider ? sp : new SystemRegistryServiceProvider(sp);
+            VersionVectorManager = DecoratedServiceProvider.GetRequiredService<IShardVersionVectorManager>();
+            Applicator = DecoratedServiceProvider.GetRequiredService<IAsyncCrdtApplicator>();
+            SyncApplicator = DecoratedServiceProvider.GetRequiredService<ICrdtApplicator>();
+            Merger = DecoratedServiceProvider.GetRequiredService<IAsyncCrdtMerger>();
+            MetadataManager = DecoratedServiceProvider.GetRequiredService<ICrdtMetadataManager>();
+            Options = DecoratedServiceProvider.GetRequiredService<IOptions<DistributedCrdtOptions>>();
+            Serializer = DecoratedServiceProvider.GetRequiredService<ICrdtSerializer>();
+            Storage = DecoratedServiceProvider.GetRequiredService<IDistributedCrdtStorage>();
+            Logger = DecoratedServiceProvider.GetRequiredService<ILogger<DistributedCrdtDocument<TState>>>();
+
+            var rawDocIdProvider = DecoratedServiceProvider.GetRequiredService<IDocumentIdProvider>();
+            DocumentIdProvider = rawDocIdProvider as SystemRegistryDocumentIdProviderDecorator
+                ?? new SystemRegistryDocumentIdProviderDecorator(rawDocIdProvider);
+
+            var rawShardIdProvider = DecoratedServiceProvider.GetRequiredService<IShardIdProvider>();
+            ShardIdProvider = rawShardIdProvider as SystemRegistryShardIdProviderDecorator
+                ?? new SystemRegistryShardIdProviderDecorator(rawShardIdProvider);
+
+            DistributionManager = DecoratedServiceProvider.GetRequiredService<IShardDistributionManager>();
+            CommandPipeline = DecoratedServiceProvider.GetRequiredService<IDocumentCommandPipeline>();
+            Telemetry = DecoratedServiceProvider.GetRequiredService<IDistributedCrdtTelemetry>();
+
+            var stateObs = DecoratedServiceProvider.GetServices<IDocumentStateObserver<TState>>();
+            StateObservers = stateObs as IDocumentStateObserver<TState>[] ?? new List<IDocumentStateObserver<TState>>(stateObs).ToArray();
+
+            var patchObs = DecoratedServiceProvider.GetServices<IDocumentPatchObserver>();
+            PatchObservers = patchObs as IDocumentPatchObserver[] ?? new List<IDocumentPatchObserver>(patchObs).ToArray();
+
+            StringPool = DecoratedServiceProvider.GetService<ICrdtStringPool>() ?? CrdtStringPool.Shared;
         }
-
-        var storage = serviceProvider.GetRequiredService<IDistributedCrdtStorage>();
-        var compositeKey = typeof(TState) == typeof(CrdtRegistryState)
-            ? documentId
-            : CrdtRegistryEntry.GetRegistryKey(TypeAlias, documentId);
-
-        var rawBytes = await storage.LoadSerializedDocumentAsync(shardId, compositeKey, cancellationToken).ConfigureAwait(false);
-        if ((rawBytes == null || rawBytes.Length == 0) && !string.Equals(compositeKey, documentId, StringComparison.Ordinal))
-        {
-            rawBytes = await storage.LoadSerializedDocumentAsync(shardId, documentId, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (rawBytes == null || rawBytes.Length == 0)
-        {
-            rawBytes = await storage.LoadSerializedDocumentFromAnyShardAsync(compositeKey, cancellationToken).ConfigureAwait(false);
-            if ((rawBytes == null || rawBytes.Length == 0) && !string.Equals(compositeKey, documentId, StringComparison.Ordinal))
-            {
-                rawBytes = await storage.LoadSerializedDocumentFromAnyShardAsync(documentId, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        if (rawBytes is { Length: > 0 })
-        {
-            return rawBytes;
-        }
-
-        var loaded = await storage.LoadDocumentAsync<TState>(shardId, compositeKey, cancellationToken).ConfigureAwait(false);
-        if (loaded == null && !string.Equals(compositeKey, documentId, StringComparison.Ordinal))
-        {
-            loaded = await storage.LoadDocumentAsync<TState>(shardId, documentId, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (loaded == null)
-        {
-            loaded = await storage.LoadDocumentFromAnyShardAsync<TState>(compositeKey, cancellationToken).ConfigureAwait(false);
-            if (loaded == null && !string.Equals(compositeKey, documentId, StringComparison.Ordinal))
-            {
-                loaded = await storage.LoadDocumentFromAnyShardAsync<TState>(documentId, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        if (loaded == null)
-        {
-            loaded = await storage.LoadOrphanedDocumentAsync<TState>(shardId, compositeKey, cancellationToken).ConfigureAwait(false);
-            if (loaded == null && !string.Equals(compositeKey, documentId, StringComparison.Ordinal))
-            {
-                loaded = await storage.LoadOrphanedDocumentAsync<TState>(shardId, documentId, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        if (loaded == null)
-        {
-            return Array.Empty<byte>();
-        }
-
-        var serializer = serviceProvider.GetRequiredService<ICrdtSerializer>();
-        return serializer.SerializeToBytes(loaded.Value);
     }
 }

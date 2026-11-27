@@ -25,7 +25,7 @@ public sealed class CrdtStateSyncPayloadProcessor : ICrdtStateSyncPayloadProcess
 {
     private readonly ICrdtSerializer serializer;
     private readonly ILogger<CrdtStateSyncPayloadProcessor> logger;
-    private readonly ConcurrentDictionary<(string PeerReplicaId, string ShardId), SnapshotDispatchState> recentSnapshotDispatches = new();
+    private readonly ConcurrentDictionary<(string ScopeReplicaId, string PeerReplicaId, string ShardId), SnapshotDispatchState> recentSnapshotDispatches = new();
 
     private readonly record struct SnapshotDispatchState(long DispatchedAtTicks, long CooldownMs, DottedVersionVector DispatchedDvv);
 
@@ -302,7 +302,7 @@ public sealed class CrdtStateSyncPayloadProcessor : ICrdtStateSyncPayloadProcess
 
                 shardsRequiringSnapshot.RemoveWhere(shardId =>
                 {
-                    var key = (syncMsg.ReplicaId, shardId);
+                    var key = (scope.ReplicaId, syncMsg.ReplicaId, shardId);
                     if (!recentSnapshotDispatches.TryGetValue(key, out var prevDispatch))
                     {
                         return false;
@@ -463,7 +463,7 @@ public sealed class CrdtStateSyncPayloadProcessor : ICrdtStateSyncPayloadProcess
                         {
                             consistentShardState = new ShardVersionVectorMap { [shardId] = shardDvv };
                             dispatchedShardState[shardId] = shardDvv;
-                            recentSnapshotDispatches[(syncMsg.ReplicaId, shardId)] = new SnapshotDispatchState(Environment.TickCount64, dynamicCooldownMs, shardDvv);
+                            recentSnapshotDispatches[(scope.ReplicaId, syncMsg.ReplicaId, shardId)] = new SnapshotDispatchState(Environment.TickCount64, dynamicCooldownMs, shardDvv);
                         }
 
                         for (int i = 0; i < docsInShard.Count; i++)
@@ -503,7 +503,7 @@ public sealed class CrdtStateSyncPayloadProcessor : ICrdtStateSyncPayloadProcess
 
                             if (consistentShardState != null && (i + 1) % 25 == 0 && consistentShardState.TryGetValue(shardId, out var refreshedDvv))
                             {
-                                recentSnapshotDispatches[(syncMsg.ReplicaId, shardId)] = new SnapshotDispatchState(Environment.TickCount64, dynamicCooldownMs, refreshedDvv);
+                                recentSnapshotDispatches[(scope.ReplicaId, syncMsg.ReplicaId, shardId)] = new SnapshotDispatchState(Environment.TickCount64, dynamicCooldownMs, refreshedDvv);
                             }
                         }
                     }
@@ -530,7 +530,7 @@ public sealed class CrdtStateSyncPayloadProcessor : ICrdtStateSyncPayloadProcess
                 foreach (var shardOpKvp in opsByShard)
                 {
                     var shardId = shardOpKvp.Key;
-                    var key = (syncMsg.ReplicaId, shardId);
+                    var key = (scope.ReplicaId, syncMsg.ReplicaId, shardId);
                     if (recentSnapshotDispatches.TryGetValue(key, out var prevDispatch) &&
                         nowTicks - prevDispatch.DispatchedAtTicks < prevDispatch.CooldownMs &&
                         safeLocalState.TryGetValue(shardId, out var currentLocalDvv))

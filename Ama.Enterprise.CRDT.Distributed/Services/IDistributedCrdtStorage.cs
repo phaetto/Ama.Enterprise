@@ -137,6 +137,31 @@ public interface IDistributedCrdtStorage : ICrdtOperationJournal
     Task SaveSerializedDocumentAsync<TState>(string shardId, string documentId, byte[] serializedDocument, CancellationToken cancellationToken = default) where TState : class, new();
 
     /// <summary>
+    /// Persists a batch of pre-serialized CRDT document snapshots in a single storage operation or transaction.
+    /// </summary>
+    /// <param name="checkpoints">The list of serialized document checkpoints to persist.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous batch save operation.</returns>
+    /// <example>
+    /// <code>
+    /// await storage.SaveSerializedDocumentBatchAsync(checkpoints, cancellationToken);
+    /// </code>
+    /// </example>
+    async Task SaveSerializedDocumentBatchAsync(IReadOnlyList<SerializedDocumentCheckpointDto> checkpoints, CancellationToken cancellationToken = default)
+    {
+        if (checkpoints == null || checkpoints.Count == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < checkpoints.Count; i++)
+        {
+            var item = checkpoints[i];
+            await SaveSerializedDocumentAsync<object>(item.ShardId, item.DocumentId, item.SerializedDocument, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
     /// Permanently deletes the document state and unloads its specific journal operations.
     /// </summary>
     /// <param name="shardId">The shard identifier isolating document bounds.</param>

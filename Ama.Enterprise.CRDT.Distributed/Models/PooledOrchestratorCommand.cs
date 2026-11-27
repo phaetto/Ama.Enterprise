@@ -22,6 +22,8 @@ public enum OrchestratorCommandType
 internal sealed class PooledOrchestratorCommand : IValueTaskSource
 {
     private ManualResetValueTaskSourceCore<bool> core;
+    private short capturedVersion;
+    private int pendingLifecycleRefs;
 
     public PooledOrchestratorCommand()
     {
@@ -39,8 +41,20 @@ internal sealed class PooledOrchestratorCommand : IValueTaskSource
     public bool IsFireAndForget { get; set; }
     public CancellationToken CancellationToken { get; set; }
 
+    public void PrepareExecution()
+    {
+        capturedVersion = core.Version;
+        Volatile.Write(ref pendingLifecycleRefs, 2);
+    }
+
     public void Reset()
     {
+        if (Interlocked.Decrement(ref pendingLifecycleRefs) > 0)
+        {
+            return;
+        }
+
+        Volatile.Write(ref pendingLifecycleRefs, 0);
         core.Reset();
         Target = null;
         Type = default;
@@ -51,10 +65,20 @@ internal sealed class PooledOrchestratorCommand : IValueTaskSource
         CancellationToken = default;
     }
 
-    public ValueTask ExecuteAsync() => new ValueTask(this, core.Version);
+    public ValueTask ExecuteAsync() => new ValueTask(this, capturedVersion);
 
-    public void SetResult() => core.SetResult(true);
-    public void SetException(Exception ex) => core.SetException(ex);
+    public void SetResult()
+    {
+        core.SetResult(true);
+        Reset();
+    }
+
+    public void SetException(Exception ex)
+    {
+        ArgumentNullException.ThrowIfNull(ex);
+        core.SetException(ex);
+        Reset();
+    }
 
     public void GetResult(short token) => core.GetResult(token);
     public ValueTaskSourceStatus GetStatus(short token) => core.GetStatus(token);

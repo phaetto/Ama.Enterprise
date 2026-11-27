@@ -116,6 +116,25 @@ public interface IDistributedCrdtDocument
     Task CheckpointAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Attempts to extract a dirty checkpoint payload from memory and marks the document clean so the caller can persist multiple documents in a single storage batch.
+    /// If the batch save fails, the caller must invoke <see cref="RestoreDirtyAfterFailedCheckpoint"/>.
+    /// </summary>
+    /// <param name="checkpoint">When this method returns <c>true</c>, contains the serialized document checkpoint DTO.</param>
+    /// <returns><c>true</c> if the document had pending changes to checkpoint; otherwise, <c>false</c>.</returns>
+    bool TryPrepareCheckpoint(out SerializedDocumentCheckpointDto checkpoint)
+    {
+        checkpoint = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Restores the document's dirty flag if a batch checkpoint persistence operation fails.
+    /// </summary>
+    void RestoreDirtyAfterFailedCheckpoint()
+    {
+    }
+
+    /// <summary>
     /// Evicts the state and metadata of a specific peer replica from this document's internal tracker.
     /// </summary>
     /// <param name="replicaId">The identifier of the remote replica to evict.</param>

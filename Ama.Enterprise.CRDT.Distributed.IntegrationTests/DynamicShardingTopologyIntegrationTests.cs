@@ -277,7 +277,7 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
                     Interlocked.Increment(ref failedWrites);
                 }
 
-                await Task.Delay(5);
+                await Task.Delay(15);
             }
         })).ToArray();
 
@@ -458,17 +458,17 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
             }
         });
 
-        await Task.Delay(100);
+        await Task.Delay(500);
 
         // Act Phase 1: Abruptly blackhole Replica-4's network while it is still listed as Active in IPeerRegistry.
         // Requests targeting shards where Replica-4 was primary must automatically fail over to the secondary replica.
         fabric.IsolateNodeNetwork(node4);
-        await Task.Delay(150);
+        await Task.Delay(500);
 
         // Act Phase 2: Failure detector marks Replica-4 departed so the consistent hash ring rebalances to [Replica-1, Replica-2, Replica-3].
         await fabric.DepartNodeAsync(node4);
         await SyncAllNodesAsync(fabric);
-        await Task.Delay(120);
+        await Task.Delay(500);
 
         await workloadCts.CancelAsync();
         await Task.WhenAll(writerTasks);

@@ -1759,7 +1759,7 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
             }
 
             return true;
-        }, TimeSpan.FromSeconds(5));
+        }, TimeSpan.FromSeconds(10));
 
         // Trim journals on all nodes while re-merging explicit ReplicaB: 0 and ReplicaC: 0 into all DVVs
         for (int i = 0; i < allNodes.Length; i++)

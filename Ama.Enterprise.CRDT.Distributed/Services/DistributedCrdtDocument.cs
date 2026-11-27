@@ -468,6 +468,50 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     }
 
     /// <inheritdoc />
+    public bool TryPrepareCheckpoint(out SerializedDocumentCheckpointDto checkpoint)
+    {
+        checkpoint = default;
+        if (isDisposed)
+        {
+            return false;
+        }
+
+        if (avoidBlindWrites && !isDirty)
+        {
+            return false;
+        }
+
+        byte[] snapshotBytes;
+        lock (syncRoot)
+        {
+            if (avoidBlindWrites && !isDirty)
+            {
+                return false;
+            }
+
+            snapshotBytes = documentBuffer.GetSerializedBytes();
+            isDirty = false;
+        }
+
+        checkpoint = new SerializedDocumentCheckpointDto(ShardId, GetStorageDocumentKey(), snapshotBytes);
+        return true;
+    }
+
+    /// <inheritdoc />
+    public void RestoreDirtyAfterFailedCheckpoint()
+    {
+        if (isDisposed)
+        {
+            return;
+        }
+
+        lock (syncRoot)
+        {
+            isDirty = true;
+        }
+    }
+
+    /// <inheritdoc />
     public Task EvictReplicaAsync(string replicaId, CancellationToken cancellationToken = default)
     {
         return EvictReplicaAsync(replicaId, IntentDeliveryMode.Acknowledged, cancellationToken);
@@ -1056,6 +1100,12 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 }
             }, cmd.CancellationToken).ConfigureAwait(false);
 
+            var journal = serviceProvider.GetService<Ama.CRDT.Services.Journaling.ICrdtOperationJournal>() as StorageJournalForwarder;
+            if (journal != null && generatedPatch.Operations != null && generatedPatch.Operations.Count > 0)
+            {
+                await journal.WaitIfHardThresholdExceededAsync(generatedPatch.Operations.Count, cmd.CancellationToken).ConfigureAwait(false);
+            }
+
             telemetry.RecordDocumentPatchApplied(DocumentId);
             telemetry.RecordDocumentIntentApplied(DocumentId);
 
@@ -1095,7 +1145,15 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             if (patchToApply.Operations != null && patchToApply.Operations.Count > 0)
             {
                 var storageDocKey = GetStorageDocumentKey();
-                await storage.AppendAsync(storageDocKey, patchToApply.Operations, cmd.CancellationToken).ConfigureAwait(false);
+                var journal = serviceProvider.GetService<Ama.CRDT.Services.Journaling.ICrdtOperationJournal>();
+                if (journal != null)
+                {
+                    await journal.AppendAsync(storageDocKey, patchToApply.Operations, cmd.CancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await storage.AppendAsync(storageDocKey, patchToApply.Operations, cmd.CancellationToken).ConfigureAwait(false);
+                }
             }
 
             telemetry.RecordDocumentPatchApplied(DocumentId);
@@ -1249,6 +1307,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 }
             }
 
+            patchToApply = NormalizePatchShardId(patchToApply);
+
             await versionVectorManager.ExecuteShardLockedAsync(ShardId, () =>
             {
                 CrdtDocument<TState> currentDoc;
@@ -1266,7 +1326,15 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             }, cmd.CancellationToken).ConfigureAwait(false);
 
             var storageDocKey = GetStorageDocumentKey();
-            await storage.AppendAsync(storageDocKey, patchToApply.Operations!, cmd.CancellationToken).ConfigureAwait(false);
+            var journal = serviceProvider.GetService<Ama.CRDT.Services.Journaling.ICrdtOperationJournal>();
+            if (journal != null)
+            {
+                await journal.AppendAsync(storageDocKey, patchToApply.Operations!, cmd.CancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await storage.AppendAsync(storageDocKey, patchToApply.Operations!, cmd.CancellationToken).ConfigureAwait(false);
+            }
 
             telemetry.RecordDocumentPatchApplied(DocumentId);
             await NotifyStateChangedAsync(cmd.CancellationToken).ConfigureAwait(false);
@@ -1276,6 +1344,40 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             logger.LogError(ex, "Failed to apply remote patch to document {DocumentId}.", DocumentId);
             throw;
         }
+    }
+
+    private CrdtPatch NormalizePatchShardId(CrdtPatch patch)
+    {
+        var ops = patch.Operations;
+        if (ops == null || ops.Count == 0 || string.IsNullOrEmpty(ShardId))
+        {
+            return patch;
+        }
+
+        List<CrdtOperation>? normalized = null;
+        for (int i = 0; i < ops.Count; i++)
+        {
+            var op = ops[i];
+            if (!string.Equals(op.ShardId, ShardId, StringComparison.Ordinal))
+            {
+                if (normalized == null)
+                {
+                    normalized = new List<CrdtOperation>(ops.Count);
+                    for (int j = 0; j < i; j++)
+                    {
+                        normalized.Add(ops[j]);
+                    }
+                }
+
+                normalized.Add(op with { ShardId = ShardId });
+            }
+            else if (normalized != null)
+            {
+                normalized.Add(op);
+            }
+        }
+
+        return normalized != null ? new CrdtPatch(normalized) : patch;
     }
 
     private async Task ProcessApplyJournaledPatchInternalAsync(PooledDocumentCommand cmd)

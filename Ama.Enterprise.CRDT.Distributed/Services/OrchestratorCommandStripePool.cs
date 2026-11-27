@@ -137,8 +137,18 @@ public sealed class OrchestratorCommandStripePool : IOrchestratorCommandStripePo
         cancellationToken.ThrowIfCancellationRequested();
         command.CancellationToken.ThrowIfCancellationRequested();
 
+        command.PrepareExecution();
         var stripeIndex = ComputeStripeIndex(target.ScopeReplicaId);
-        await stripes[stripeIndex].Writer.WriteAsync(command, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await stripes[stripeIndex].Writer.WriteAsync(command, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            command.Reset();
+            throw;
+        }
+
         telemetry.RecordOrchestratorCommandEnqueued();
         await command.ExecuteAsync().ConfigureAwait(false);
     }
@@ -226,13 +236,20 @@ public sealed class OrchestratorCommandStripePool : IOrchestratorCommandStripePo
         var cmd = RentCommand();
         cmd.Type = OrchestratorCommandType.FlushBarrier;
         cmd.CancellationToken = cancellationToken;
+        cmd.PrepareExecution();
 
+        var written = false;
         try
         {
             var stripe = stripes[stripeIndex];
-            if (!stripe.Writer.TryWrite(cmd))
+            if (stripe.Writer.TryWrite(cmd))
+            {
+                written = true;
+            }
+            else
             {
                 await stripe.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+                written = true;
             }
 
             telemetry.RecordOrchestratorCommandEnqueued();
@@ -240,6 +257,19 @@ public sealed class OrchestratorCommandStripePool : IOrchestratorCommandStripePo
         }
         catch (ChannelClosedException)
         {
+            if (!written)
+            {
+                cmd.Reset();
+            }
+        }
+        catch
+        {
+            if (!written)
+            {
+                cmd.Reset();
+            }
+
+            throw;
         }
         finally
         {

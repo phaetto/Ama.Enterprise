@@ -359,6 +359,10 @@ public sealed class BufferedDistributedCrdtStorageDecorator : IDistributedCrdtSt
     public Task SaveSerializedDocumentAsync<TState>(string shardId, string documentId, byte[] serializedDocument, CancellationToken cancellationToken = default) where TState : class, new()
         => this.innerStorage.SaveSerializedDocumentAsync<TState>(shardId, documentId, serializedDocument, cancellationToken);
 
+    /// <inheritdoc />
+    public Task SaveSerializedDocumentBatchAsync(IReadOnlyList<SerializedDocumentCheckpointDto> checkpoints, CancellationToken cancellationToken = default)
+        => this.innerStorage.SaveSerializedDocumentBatchAsync(checkpoints, cancellationToken);
+
     /// <summary>
     /// Flushes a single batch of buffered operations to the inner storage if any are available.
     /// </summary>

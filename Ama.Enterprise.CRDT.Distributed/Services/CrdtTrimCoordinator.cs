@@ -1,15 +1,38 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services;
 
+using System;
 using System.Threading;
+using System.Threading.Tasks;
 
 /// <summary>
-/// Coordinates trimming operations across the entire node to ensure only one aggressive 
-/// or maintenance trim runs at a time, preventing IO and memory saturation.
+/// Scoped service that coordinates trimming operations within a node or DI container to ensure only one
+/// aggressive or maintenance trim runs at a time per node without blocking independent nodes or parallel tests.
 /// </summary>
-internal static class CrdtTrimCoordinator
+public sealed class CrdtTrimCoordinator : IDisposable
 {
+    private readonly SemaphoreSlim trimLock = new(1, 1);
+
     /// <summary>
-    /// A global semaphore ensuring single-threaded execution of CRDT journal trims across all replicas and scopes.
+    /// Asynchronously waits to enter the node-wide journal trim lock.
     /// </summary>
-    public static readonly SemaphoreSlim GlobalTrimLock = new SemaphoreSlim(1, 1);
+    /// <param name="cancellationToken">A cancellation token to observe while waiting for the lock.</param>
+    /// <returns>A task that completes when the lock has been acquired.</returns>
+    public Task WaitAsync(CancellationToken cancellationToken = default)
+    {
+        return trimLock.WaitAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Releases the node-wide journal trim lock.
+    /// </summary>
+    public void Release()
+    {
+        trimLock.Release();
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        trimLock.Dispose();
+    }
 }

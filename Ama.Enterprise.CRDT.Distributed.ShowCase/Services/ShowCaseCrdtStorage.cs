@@ -44,7 +44,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         var safeReplicaId = SanitizeFileName(replicaContext.ReplicaId);
-        this.connectionString = $"Data Source=showcase_crdt_{safeReplicaId}.db;Pooling=True;";
+        this.connectionString = $"Data Source=showcase_crdt_{safeReplicaId}.db;Pooling=True;Default Timeout=60;";
         
         InitializeDatabase();
 
@@ -53,7 +53,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         this.writeConnection.Open();
         using (var pragmaCmd = this.writeConnection.CreateCommand())
         {
-            pragmaCmd.CommandText = "PRAGMA synchronous = OFF; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -8000; PRAGMA mmap_size = 0; PRAGMA journal_size_limit = 67108864;";
+            pragmaCmd.CommandText = "PRAGMA busy_timeout = 60000; PRAGMA synchronous = OFF; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -32000; PRAGMA mmap_size = 0; PRAGMA journal_size_limit = 67108864;";
             pragmaCmd.ExecuteNonQuery();
         }
 
@@ -62,7 +62,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         this.readConnection.Open();
         using (var readPragmaCmd = this.readConnection.CreateCommand())
         {
-            readPragmaCmd.CommandText = "PRAGMA synchronous = OFF; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -8000; PRAGMA mmap_size = 0;";
+            readPragmaCmd.CommandText = "PRAGMA busy_timeout = 60000; PRAGMA synchronous = OFF; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -32000; PRAGMA mmap_size = 0;";
             readPragmaCmd.ExecuteNonQuery();
         }
     }
@@ -192,6 +192,57 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         }
     }
 
+    public async Task SaveSerializedDocumentBatchAsync(IReadOnlyList<SerializedDocumentCheckpointDto> checkpoints, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(checkpoints);
+        if (checkpoints.Count == 0)
+        {
+            return;
+        }
+
+        await writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var transaction = writeConnection.BeginTransaction();
+            using var command = writeConnection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "INSERT OR REPLACE INTO Documents (DocumentId, ShardId, Payload) VALUES (@DocId, @ShardId, @Payload)";
+
+            var pDocId = command.CreateParameter();
+            pDocId.ParameterName = "@DocId";
+            command.Parameters.Add(pDocId);
+
+            var pShardId = command.CreateParameter();
+            pShardId.ParameterName = "@ShardId";
+            command.Parameters.Add(pShardId);
+
+            var pPayload = command.CreateParameter();
+            pPayload.ParameterName = "@Payload";
+            command.Parameters.Add(pPayload);
+
+            for (int i = 0; i < checkpoints.Count; i++)
+            {
+                var item = checkpoints[i];
+                pDocId.Value = item.DocumentId;
+                pShardId.Value = item.ShardId;
+                pPayload.Value = item.SerializedDocument;
+                await command.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+
+            await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to save batch of {Count} documents to SQLite", checkpoints.Count);
+            throw;
+        }
+        finally
+        {
+            writeLock.Release();
+        }
+    }
+
     public async Task DeleteDocumentAsync(string shardId, string documentId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(documentId)) return;
@@ -235,12 +286,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
     {
         if (string.IsNullOrEmpty(replicaId)) throw new ArgumentException("Value cannot be null or empty.", nameof(replicaId));
 
+        await readLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            
-            using var command = connection.CreateCommand();
+            using var command = readConnection.CreateCommand();
             command.CommandText = "SELECT Payload FROM GlobalDvv WHERE ReplicaId = @RepId";
             AddParameter(command, "@RepId", replicaId);
 
@@ -254,6 +303,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         {
             logger.LogError(ex, "Failed to load global DVV for '{ReplicaId}' from SQLite", replicaId);
             throw;
+        }
+        finally
+        {
+            readLock.Release();
         }
 
         return null;
@@ -291,12 +344,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
     {
         if (string.IsNullOrEmpty(replicaId)) throw new ArgumentException("Value cannot be null or empty.", nameof(replicaId));
 
+        await readLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            
-            using var command = connection.CreateCommand();
+            using var command = readConnection.CreateCommand();
             command.CommandText = "SELECT Payload FROM ClusterState WHERE ReplicaId = @RepId";
             AddParameter(command, "@RepId", replicaId);
 
@@ -310,6 +361,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         {
             logger.LogError(ex, "Failed to load explicit overarching cluster states structurally resolving amnesia limits safely natively.");
             throw;
+        }
+        finally
+        {
+            readLock.Release();
         }
 
         return null;
@@ -587,12 +642,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
     {
         ArgumentException.ThrowIfNullOrEmpty(shardId);
 
+        await readLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            
-            using var command = connection.CreateCommand();
+            using var command = readConnection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM Journal WHERE ShardId = @ShardId";
             AddParameter(command, "@ShardId", shardId);
 
@@ -603,6 +656,10 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         {
             logger.LogError(ex, "Failed to get SQLite journal count");
             throw;
+        }
+        finally
+        {
+            readLock.Release();
         }
     }
 

@@ -1,9 +1,13 @@
 namespace Ama.Enterprise.CRDT.Distributed.Services;
 
 using System;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.Threading;
 using Ama.CRDT.Models;
 using Ama.CRDT.Services.Providers;
 using Ama.Enterprise.CRDT.Distributed.Models;
+using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
 /// Decorator for <see cref="IShardIdProvider"/> that isolates the system document registry
@@ -12,7 +16,8 @@ using Ama.Enterprise.CRDT.Distributed.Models;
 /// </summary>
 public sealed class SystemRegistryShardIdProviderDecorator : IShardIdProvider
 {
-    private readonly IShardIdProvider inner;
+    private readonly ServiceDescriptor? innerDescriptor;
+    private IShardIdProvider? inner;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SystemRegistryShardIdProviderDecorator"/> class.
@@ -23,6 +28,35 @@ public sealed class SystemRegistryShardIdProviderDecorator : IShardIdProvider
         this.inner = inner ?? throw new ArgumentNullException(nameof(inner));
     }
 
+    internal SystemRegistryShardIdProviderDecorator(ServiceDescriptor innerDescriptor)
+    {
+        this.innerDescriptor = innerDescriptor ?? throw new ArgumentNullException(nameof(innerDescriptor));
+    }
+
+    [UnconditionalSuppressMessage("Trimming", "IL2067", Justification = "Target types are already registered in the DI container with preserved constructors.")]
+    internal void EnsureInnerResolved(IServiceProvider serviceProvider)
+    {
+        ArgumentNullException.ThrowIfNull(serviceProvider);
+
+        if (Volatile.Read(ref inner) != null || innerDescriptor == null)
+        {
+            return;
+        }
+
+        var resolved = innerDescriptor.ImplementationInstance as IShardIdProvider
+            ?? (innerDescriptor.ImplementationFactory != null
+                ? (IShardIdProvider)innerDescriptor.ImplementationFactory(serviceProvider)
+                : (IShardIdProvider)ActivatorUtilities.CreateInstance(serviceProvider, innerDescriptor.ImplementationType!));
+
+        if (resolved is SystemRegistryShardIdProviderDecorator nested)
+        {
+            nested.EnsureInnerResolved(serviceProvider);
+            resolved = nested.inner ?? nested;
+        }
+
+        Interlocked.CompareExchange(ref inner, resolved, null);
+    }
+
     /// <inheritdoc />
     public string GetShardId<T>(CrdtDocument<T> document) where T : class
     {
@@ -31,7 +65,7 @@ public sealed class SystemRegistryShardIdProviderDecorator : IShardIdProvider
             return Constants.SystemRegistryDocumentId;
         }
 
-        return inner.GetShardId(document);
+        return GetResolvedInner().GetShardId(document);
     }
 
     /// <inheritdoc />
@@ -44,7 +78,7 @@ public sealed class SystemRegistryShardIdProviderDecorator : IShardIdProvider
             return Constants.SystemRegistryDocumentId;
         }
 
-        return inner.GetShardId<T>(documentId);
+        return GetResolvedInner().GetShardId<T>(documentId);
     }
 
     /// <inheritdoc />
@@ -53,11 +87,20 @@ public sealed class SystemRegistryShardIdProviderDecorator : IShardIdProvider
         ArgumentNullException.ThrowIfNull(documentId);
         ArgumentNullException.ThrowIfNull(documentType);
 
-        if (documentType == typeof(CrdtRegistryState) || string.Equals(documentId.ToString(), Constants.SystemRegistryDocumentId, StringComparison.Ordinal))
+        if (documentType == typeof(CrdtRegistryState) ||
+            documentType == typeof(CrdtRegistryEntry) ||
+            typeof(IDictionary<string, CrdtRegistryEntry>).IsAssignableFrom(documentType) ||
+            string.Equals(documentId.ToString(), Constants.SystemRegistryDocumentId, StringComparison.Ordinal))
         {
             return Constants.SystemRegistryDocumentId;
         }
 
-        return inner.GetShardId(documentId, documentType);
+        return GetResolvedInner().GetShardId(documentId, documentType);
+    }
+
+    private IShardIdProvider GetResolvedInner()
+    {
+        return Volatile.Read(ref inner)
+            ?? throw new InvalidOperationException("The inner IShardIdProvider has not been resolved yet.");
     }
 }

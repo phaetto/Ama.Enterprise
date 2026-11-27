@@ -138,6 +138,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ICrdtMemoryEstimator, CrdtMemoryEstimator>();
         services.TryAddSingleton<ICrdtRpcPayloadProcessor, CrdtRpcPayloadProcessor>();
         services.TryAddSingleton<ICrdtStateSyncPayloadProcessor, CrdtStateSyncPayloadProcessor>();
+        services.TryAddSingleton<CrdtTrimCoordinator>();
 
         services.TryAddScoped<CrdtScopeContext>();
         services.TryAddScoped<IScopeTopologyProvider, DefaultScopeTopologyProvider>();
@@ -189,6 +190,8 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         if (string.IsNullOrWhiteSpace(replicaId)) throw new ArgumentException("Replica ID cannot be null or empty.", nameof(replicaId));
         ArgumentNullException.ThrowIfNull(meshIds);
+
+        DecorateSystemRegistryProviders(services);
 
         replicaId = CrdtStringPool.Shared.GetOrAdd(replicaId);
 
@@ -245,6 +248,8 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         if (string.IsNullOrWhiteSpace(typeAlias)) throw new ArgumentException("Type alias cannot be null or empty.", nameof(typeAlias));
 
+        DecorateSystemRegistryProviders(services);
+
         typeAlias = CrdtStringPool.Shared.GetOrAdd(typeAlias);
         var factory = new DocumentFactory<TState>(typeAlias, residencyMode);
         services.AddKeyedSingleton<IDocumentFactory>(typeAlias, factory);
@@ -260,6 +265,8 @@ public static class ServiceCollectionExtensions
         where TImplementation : class, TService
     {
         ArgumentNullException.ThrowIfNull(services);
+
+        DecorateSystemRegistryProviders(services);
 
         services.AddScoped<TService, TImplementation>();
 
@@ -371,6 +378,8 @@ public static class ServiceCollectionExtensions
         where TStorage : class, IDistributedCrdtStorage
     {
         ArgumentNullException.ThrowIfNull(services);
+
+        DecorateSystemRegistryProviders(services);
 
         services.RemoveAll(typeof(IDistributedCrdtStorage));
         services.TryAddScoped<TStorage>();
@@ -533,43 +542,20 @@ public static class ServiceCollectionExtensions
         }
     }
 
-    [UnconditionalSuppressMessage("Trimming", "IL2067", Justification = "Target types are already registered in the DI container with preserved constructors.")]
     private static void DecorateSystemRegistryProviders(IServiceCollection services)
     {
         var shardProviderDescriptor = services.LastOrDefault(d => d.ServiceType == typeof(IShardIdProvider));
-        if (shardProviderDescriptor != null)
+        if (shardProviderDescriptor != null && shardProviderDescriptor.ImplementationInstance is not SystemRegistryShardIdProviderDecorator)
         {
             services.Remove(shardProviderDescriptor);
-            services.Add(ServiceDescriptor.Describe(
-                typeof(IShardIdProvider),
-                sp =>
-                {
-                    var inner = shardProviderDescriptor.ImplementationInstance as IShardIdProvider
-                        ?? (shardProviderDescriptor.ImplementationFactory != null
-                            ? (IShardIdProvider)shardProviderDescriptor.ImplementationFactory(sp)
-                            : (IShardIdProvider)ActivatorUtilities.CreateInstance(sp, shardProviderDescriptor.ImplementationType!));
-                    return inner as SystemRegistryShardIdProviderDecorator
-                        ?? new SystemRegistryShardIdProviderDecorator(inner);
-                },
-                shardProviderDescriptor.Lifetime));
+            services.Add(ServiceDescriptor.Singleton<IShardIdProvider>(new SystemRegistryShardIdProviderDecorator(shardProviderDescriptor)));
         }
 
         var docIdProviderDescriptor = services.LastOrDefault(d => d.ServiceType == typeof(IDocumentIdProvider));
-        if (docIdProviderDescriptor != null)
+        if (docIdProviderDescriptor != null && docIdProviderDescriptor.ImplementationInstance is not SystemRegistryDocumentIdProviderDecorator)
         {
             services.Remove(docIdProviderDescriptor);
-            services.Add(ServiceDescriptor.Describe(
-                typeof(IDocumentIdProvider),
-                sp =>
-                {
-                    var inner = docIdProviderDescriptor.ImplementationInstance as IDocumentIdProvider
-                        ?? (docIdProviderDescriptor.ImplementationFactory != null
-                            ? (IDocumentIdProvider)docIdProviderDescriptor.ImplementationFactory(sp)
-                            : (IDocumentIdProvider)ActivatorUtilities.CreateInstance(sp, docIdProviderDescriptor.ImplementationType!));
-                    return inner as SystemRegistryDocumentIdProviderDecorator
-                        ?? new SystemRegistryDocumentIdProviderDecorator(inner);
-                },
-                docIdProviderDescriptor.Lifetime));
+            services.Add(ServiceDescriptor.Singleton<IDocumentIdProvider>(new SystemRegistryDocumentIdProviderDecorator(docIdProviderDescriptor)));
         }
     }
 }

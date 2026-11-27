@@ -129,7 +129,7 @@ public sealed class DistributedCrdtScopeManager : IDisposable
             return scope;
         }
 
-        if (scope is DistributedCrdtScope concreteScope)
+        if (scope is DistributedCrdtScopeFactory.DistributedCrdtScope concreteScope)
         {
             await concreteScope.EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
             return scope;

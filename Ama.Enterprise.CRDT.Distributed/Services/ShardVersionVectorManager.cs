@@ -23,6 +23,7 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
     private readonly ConcurrentDictionary<string, long> pendingShardLastActivityTicks = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, long> lastShardSnapshotMergeTicks = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim[] stripedShardLocks;
+    private readonly AsyncLocal<int> activeShardLockDepth = new();
     private long lastSnapshotMergeTicks;
 
     public ShardVersionVectorManager(
@@ -482,6 +483,12 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
     }
 
     /// <inheritdoc />
+    public bool IsCurrentContextHoldingAnyShardLock()
+    {
+        return activeShardLockDepth.Value > 0;
+    }
+
+    /// <inheritdoc />
     public async Task ExecuteShardLockedAsync(string shardId, Func<Task> action, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(shardId))
@@ -493,12 +500,15 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
         shardId = stringPool.GetOrAdd(shardId);
         var sem = GetShardSemaphore(shardId);
         await sem.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var previousDepth = activeShardLockDepth.Value;
+        activeShardLockDepth.Value = previousDepth + 1;
         try
         {
             await action().ConfigureAwait(false);
         }
         finally
         {
+            activeShardLockDepth.Value = previousDepth;
             sem.Release();
         }
     }

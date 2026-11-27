@@ -143,10 +143,23 @@ public sealed class DocumentCommandStripePool : IDocumentCommandStripePool, IDis
             }
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
+        command.CancellationToken.ThrowIfCancellationRequested();
+
+        command.PrepareExecution();
         var stripeIndex = ComputeStripeIndex(target);
         var documentId = target.DocumentId;
 
-        await stripes[stripeIndex].Writer.WriteAsync(command, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await stripes[stripeIndex].Writer.WriteAsync(command, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            command.Reset();
+            throw;
+        }
+
         telemetry.RecordDocumentCommandEnqueued(documentId);
         await command.ExecuteAsync().ConfigureAwait(false);
     }
@@ -211,29 +224,16 @@ public sealed class DocumentCommandStripePool : IDocumentCommandStripePool, IDis
         var barriers = new PooledDocumentCommand[StripeCount];
         var tasks = new Task[StripeCount];
 
-        try
+        for (int i = 0; i < StripeCount; i++)
         {
-            for (int i = 0; i < StripeCount; i++)
-            {
-                var cmd = RentCommand();
-                cmd.Type = DocumentCommandType.FlushBarrier;
-                cmd.CancellationToken = cancellationToken;
-                barriers[i] = cmd;
-                tasks[i] = FlushStripeAsync(stripes[i], cmd, cancellationToken);
-            }
+            var cmd = RentCommand();
+            cmd.Type = DocumentCommandType.FlushBarrier;
+            cmd.CancellationToken = cancellationToken;
+            barriers[i] = cmd;
+            tasks[i] = FlushStripeAsync(stripes[i], cmd, cancellationToken);
+        }
 
-            await Task.WhenAll(tasks).ConfigureAwait(false);
-        }
-        finally
-        {
-            for (int i = 0; i < StripeCount; i++)
-            {
-                if (barriers[i] is not null)
-                {
-                    ReturnCommand(barriers[i]);
-                }
-            }
-        }
+        await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -255,17 +255,37 @@ public sealed class DocumentCommandStripePool : IDocumentCommandStripePool, IDis
         PooledDocumentCommand cmd,
         CancellationToken cancellationToken)
     {
+        cmd.PrepareExecution();
+        var written = false;
         try
         {
-            if (!stripe.Writer.TryWrite(cmd))
+            if (stripe.Writer.TryWrite(cmd))
+            {
+                written = true;
+            }
+            else
             {
                 await stripe.Writer.WriteAsync(cmd, cancellationToken).ConfigureAwait(false);
+                written = true;
             }
 
             await cmd.ExecuteAsync().ConfigureAwait(false);
         }
         catch (ChannelClosedException)
         {
+            if (!written)
+            {
+                cmd.Reset();
+            }
+        }
+        catch
+        {
+            if (!written)
+            {
+                cmd.Reset();
+            }
+
+            throw;
         }
     }
 

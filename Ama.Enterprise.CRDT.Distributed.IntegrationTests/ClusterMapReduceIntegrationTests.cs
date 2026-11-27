@@ -946,6 +946,27 @@ public sealed class ClusterMapReduceIntegrationTests : IAsyncDisposable
                     return Task.CompletedTask;
                 });
 
+            node.SenderMock
+                .Setup(s => s.SendDirectAsync(It.IsAny<string>(), It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()))
+                .Returns((string meshId, PeerId targetPeerId, ReadOnlyMemory<byte> payload, CancellationToken _) =>
+                {
+                    if (isDisposed || isolatedPeers.ContainsKey(node.PeerId) || isolatedPeers.ContainsKey(targetPeerId))
+                    {
+                        return Task.CompletedTask;
+                    }
+
+                    var copy = payload.ToArray();
+                    inFlightPackets.Add(Task.Run(async () =>
+                    {
+                        if (!isDisposed && activeNodes.TryGetValue(targetPeerId, out var targetNode) && !isolatedPeers.ContainsKey(targetPeerId))
+                        {
+                            await targetNode.PayloadHandler.HandlePayloadAsync(meshId, node.PeerId, copy, CancellationToken.None).ConfigureAwait(false);
+                        }
+                    }));
+
+                    return Task.CompletedTask;
+                });
+
             node.GossipMock
                 .Setup(g => g.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()))
                 .Returns((ReadOnlyMemory<byte> payload, CancellationToken _) =>

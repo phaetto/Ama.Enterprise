@@ -22,6 +22,7 @@ public sealed class CrdtMaintenanceService : BackgroundService
     private readonly DistributedCrdtScopeManager scopeManager;
     private readonly IOptions<DistributedCrdtOptions> options;
     private readonly ILogger<CrdtMaintenanceService> logger;
+    private readonly CrdtTrimCoordinator trimCoordinator;
 
     private readonly Meter meter;
     private readonly Counter<long> maintenanceCyclesCounter;
@@ -32,11 +33,13 @@ public sealed class CrdtMaintenanceService : BackgroundService
         DistributedCrdtScopeManager scopeManager,
         IOptions<DistributedCrdtOptions> options,
         ILogger<CrdtMaintenanceService> logger,
-        IMeterFactory? meterFactory = null)
+        IMeterFactory? meterFactory = null,
+        CrdtTrimCoordinator? trimCoordinator = null)
     {
         this.scopeManager = scopeManager ?? throw new ArgumentNullException(nameof(scopeManager));
         this.options = options ?? throw new ArgumentNullException(nameof(options));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        this.trimCoordinator = trimCoordinator ?? new CrdtTrimCoordinator();
 
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.CrdtMaintenanceService") ?? new Meter("Ama.Enterprise.CRDT.Distributed.CrdtMaintenanceService");
         this.maintenanceCyclesCounter = this.meter.CreateCounter<long>("crdt.maintenance.cycles", "cycles", "Total background maintenance cycles executed");
@@ -118,6 +121,15 @@ public sealed class CrdtMaintenanceService : BackgroundService
                     }
 
                     var safelyPersistedMap = versionVectorManager.GetFullSnapshot();
+                    await EnsureActiveDocumentShardsCheckpointedAndPresentAsync(scope.Storage, scope.Orchestrator, safelyPersistedMap, stoppingToken).ConfigureAwait(false);
+
+                    var isMemoryStorage = scope.Storage is MemoryCrdtStorage
+                        || (scope.Storage is BufferedDistributedCrdtStorageDecorator decorator && decorator.InnerStorage is MemoryCrdtStorage);
+                    if (!isMemoryStorage)
+                    {
+                        await scope.Storage.SaveShardVersionVectorMapAsync(scope.ReplicaId, safelyPersistedMap, stoppingToken).ConfigureAwait(false);
+                    }
+
                     var exportedClusterState = scope.ClusterTracker.ExportState();
                     var softThreshold = options.Value.JournalSoftTrimThreshold;
                     var hardThreshold = options.Value.JournalHardTrimThreshold;
@@ -153,7 +165,7 @@ public sealed class CrdtMaintenanceService : BackgroundService
                             // Force a journal trim up to the local logical bounds, intentionally dropping lagging peers to fallback snapshots
                             if (shardDvv.Versions.Count > 0)
                             {
-                                await CrdtTrimCoordinator.GlobalTrimLock.WaitAsync(stoppingToken).ConfigureAwait(false);
+                                await trimCoordinator.WaitAsync(stoppingToken).ConfigureAwait(false);
                                 try
                                 {
                                     await scope.Storage.TrimAsync(shardId, shardDvv.Versions.ToDictionary(k => k.Key, k => k.Value), stoppingToken).ConfigureAwait(false);
@@ -164,7 +176,7 @@ public sealed class CrdtMaintenanceService : BackgroundService
                                 }
                                 finally
                                 {
-                                    CrdtTrimCoordinator.GlobalTrimLock.Release();
+                                    trimCoordinator.Release();
                                 }
                             }
                         }
@@ -195,7 +207,7 @@ public sealed class CrdtMaintenanceService : BackgroundService
 
                                 if (gmvv.Count > 0)
                                 {
-                                    await CrdtTrimCoordinator.GlobalTrimLock.WaitAsync(stoppingToken).ConfigureAwait(false);
+                                    await trimCoordinator.WaitAsync(stoppingToken).ConfigureAwait(false);
                                     try
                                     {
                                         await scope.Storage.TrimAsync(shardId, gmvv.ToDictionary(k => k.Key, k => k.Value), stoppingToken).ConfigureAwait(false);
@@ -204,7 +216,7 @@ public sealed class CrdtMaintenanceService : BackgroundService
                                     }
                                     finally
                                     {
-                                        CrdtTrimCoordinator.GlobalTrimLock.Release();
+                                        trimCoordinator.Release();
                                     }
                                 }
                             }
@@ -223,5 +235,25 @@ public sealed class CrdtMaintenanceService : BackgroundService
     {
         meter.Dispose();
         base.Dispose();
+    }
+
+    private static async Task EnsureActiveDocumentShardsCheckpointedAndPresentAsync(
+        IDistributedCrdtStorage storage,
+        ICrdtDocumentOrchestrator orchestrator,
+        ShardVersionVectorMap safelyPersistedMap,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await CrdtCheckpointService.CheckpointActiveDocumentsInBatchesAsync(
+                storage,
+                orchestrator,
+                cancellationToken,
+                safelyPersistedMap).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException)
+        {
+            // Orchestrator not yet initialized
+        }
     }
 }

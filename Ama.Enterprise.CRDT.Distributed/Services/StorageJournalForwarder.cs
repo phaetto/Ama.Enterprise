@@ -26,6 +26,7 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
     private readonly IOptions<DistributedCrdtOptions> options;
     private readonly IServiceProvider serviceProvider;
     private readonly ILogger<StorageJournalForwarder> logger;
+    private readonly CrdtTrimCoordinator trimCoordinator;
     
     private readonly Meter meter;
     private readonly Counter<long> appendedOperationsCounter;
@@ -43,12 +44,14 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         IOptions<DistributedCrdtOptions> options,
         IServiceProvider serviceProvider,
         ILogger<StorageJournalForwarder> logger,
-        IMeterFactory? meterFactory = null)
+        IMeterFactory? meterFactory = null,
+        CrdtTrimCoordinator? trimCoordinator = null)
     {
         this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
         this.options = options ?? throw new ArgumentNullException(nameof(options));
         this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        this.trimCoordinator = trimCoordinator ?? this.serviceProvider.GetService<CrdtTrimCoordinator>() ?? new CrdtTrimCoordinator();
         
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.StorageJournalForwarder") ?? new Meter("Ama.Enterprise.CRDT.Distributed.StorageJournalForwarder");
         this.appendedOperationsCounter = this.meter.CreateCounter<long>("crdt.journal.forwarded_operations", "operations", "Total operations effectively forwarded towards explicit backend configurations naturally");
@@ -100,7 +103,7 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         this.storage.Append(documentId, operations);
         this.appendedOperationsCounter.Add(operations.Count, new KeyValuePair<string, object?>("document_id", docIdString));
         
-        this.EvaluateTriggersAndApplyBackpressureSync(operations.Count);
+        this.EvaluateTriggersSync(operations.Count);
     }
 
     public async Task AppendAsync(IComparable documentId, IReadOnlyList<CrdtOperation> operations, CancellationToken cancellationToken = default)
@@ -124,7 +127,30 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         await this.storage.AppendAsync(documentId, operations, cancellationToken).ConfigureAwait(false);
         this.appendedOperationsCounter.Add(operations.Count, new KeyValuePair<string, object?>("document_id", docIdString));
         
-        this.EvaluateTriggersAndApplyBackpressureSync(operations.Count);
+        var shouldInlineHardTrim = this.EvaluateTriggers(operations.Count);
+        if (shouldInlineHardTrim && !this.IsHoldingAnyShardLock())
+        {
+            this.backpressureBlocksCounter.Add(1);
+            await this.ExecuteHardTrimInlineAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Evaluates whether the hard journal threshold has been reached after a shard lock is released and executes an inline hard trim to apply synchronous backpressure on the command stripe worker.
+    /// </summary>
+    internal async Task WaitIfHardThresholdExceededAsync(int appendedCount, CancellationToken cancellationToken = default)
+    {
+        var hardThreshold = this.options.Value.JournalHardTrimThreshold;
+        if (hardThreshold <= 0)
+        {
+            return;
+        }
+
+        if (Volatile.Read(ref this.estimatedJournalCount) >= hardThreshold && !this.IsHoldingAnyShardLock())
+        {
+            this.backpressureBlocksCounter.Add(1);
+            await this.ExecuteHardTrimInlineAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
     public IAsyncEnumerable<JournaledOperation> GetOperationsByRangeAsync(string shardId, string originReplicaId, long minShardClock, long maxShardClock, CancellationToken cancellationToken = default) 
@@ -139,14 +165,31 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         this.CancelSoftTrim();
     }
 
-    private void EvaluateTriggersAndApplyBackpressureSync(int count)
+    private void EvaluateTriggersSync(int count)
+    {
+        var shouldHardTrim = this.EvaluateTriggers(count);
+        if (shouldHardTrim)
+        {
+            this.backpressureBlocksCounter.Add(1);
+            if (!this.IsHoldingAnyShardLock())
+            {
+                this.ExecuteHardTrimInlineAsync(CancellationToken.None).GetAwaiter().GetResult();
+            }
+            else
+            {
+                this.TryScheduleBackgroundHardTrim();
+            }
+        }
+    }
+
+    private bool EvaluateTriggers(int count)
     {
         var softThreshold = this.options.Value.JournalSoftTrimThreshold;
         var hardThreshold = this.options.Value.JournalHardTrimThreshold;
         
         if (softThreshold <= 0 && hardThreshold <= 0)
         {
-            return;
+            return false;
         }
 
         var newCount = Interlocked.Add(ref this.estimatedJournalCount, count);
@@ -156,31 +199,23 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
 
         if (isHard)
         {
-            if (Volatile.Read(ref this.activeHardTrims) == 0 && Interlocked.CompareExchange(ref this.isTrimming, 1, 0) == 0)
+            this.CancelSoftTrim();
+
+            if (this.IsHoldingAnyShardLock())
             {
-                if (Volatile.Read(ref this.activeHardTrims) > 0)
-                {
-                    Interlocked.Exchange(ref this.isTrimming, 0);
-                }
-                else
-                {
-                    this.CancelSoftTrim();
-                    this.StartBackgroundHardTrim();
-                }
+                this.TryScheduleBackgroundHardTrim();
+                return false;
             }
 
-            this.backpressureBlocksCounter.Add(1);
-            
-            // Intentionally bypassing GlobalTrimLock wait here to prevent cyclic deadlocks with the single-reader channel.
-            // Blocking the active reader thread blocks CheckpointAsync operations required by the trimmer to complete,
-            // resulting in a complete standstill. Natural channel capacity throttling is sufficient backpressure.
+            return true;
         }
-        else if (isSoft)
+
+        if (isSoft)
         {
             // If a hard trim is actively running or queued to run, do not queue a new soft trim
             if (Volatile.Read(ref this.activeHardTrims) > 0)
             {
-                return;
+                return false;
             }
 
             if (Interlocked.CompareExchange(ref this.isTrimming, 1, 0) == 0)
@@ -189,10 +224,34 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
                 if (Volatile.Read(ref this.activeHardTrims) > 0)
                 {
                     Interlocked.Exchange(ref this.isTrimming, 0);
-                    return;
+                    return false;
                 }
                 
                 this.StartBackgroundSoftTrim();
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsHoldingAnyShardLock()
+    {
+        var vvm = this.serviceProvider.GetService<IShardVersionVectorManager>();
+        return vvm != null && vvm.IsCurrentContextHoldingAnyShardLock();
+    }
+
+    private void TryScheduleBackgroundHardTrim()
+    {
+        if (Volatile.Read(ref this.activeHardTrims) == 0 && Interlocked.CompareExchange(ref this.isTrimming, 1, 0) == 0)
+        {
+            if (Volatile.Read(ref this.activeHardTrims) > 0)
+            {
+                Interlocked.Exchange(ref this.isTrimming, 0);
+            }
+            else
+            {
+                this.CancelSoftTrim();
+                this.StartBackgroundHardTrim();
             }
         }
     }
@@ -237,8 +296,8 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         {
             this.CancelSoftTrim();
 
-            // Wait on the global lock to ensure only one hard trim happens at a time across all active threads
-            await CrdtTrimCoordinator.GlobalTrimLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            // Wait on the node-wide lock to ensure only one hard trim happens at a time across all active threads on this node
+            await this.trimCoordinator.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 var hardThreshold = this.options.Value.JournalHardTrimThreshold;
@@ -264,12 +323,13 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
             }
             finally
             {
-                CrdtTrimCoordinator.GlobalTrimLock.Release();
+                this.trimCoordinator.Release();
             }
         }
         finally
         {
             Interlocked.Decrement(ref this.activeHardTrims);
+            this.ReevaluateThresholdAfterTrimCompletion();
         }
     }
 
@@ -282,8 +342,8 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         {
             try
             {
-                // Wait for global lock, but respect cancellation if a hard trim preempts us and needs to jump the queue
-                await CrdtTrimCoordinator.GlobalTrimLock.WaitAsync(cts.Token).ConfigureAwait(false);
+                // Wait for node-wide lock, but respect cancellation if a hard trim preempts us and needs to jump the queue
+                await this.trimCoordinator.WaitAsync(cts.Token).ConfigureAwait(false);
                 try
                 {
                     if (cts.Token.IsCancellationRequested)
@@ -295,7 +355,7 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
                 }
                 finally
                 {
-                    CrdtTrimCoordinator.GlobalTrimLock.Release();
+                    this.trimCoordinator.Release();
                 }
             }
             catch (OperationCanceledException)
@@ -372,28 +432,33 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
         var clusterTracker = this.serviceProvider.GetService<IClusterStateTracker>();
         var syncService = this.serviceProvider.GetService<IVersionVectorSyncService>();
 
-        var documents = orchestrator.GetActiveDocuments();
         var safelyPersistedMap = versionVectorManager.GetFullSnapshot();
 
-        foreach (var shardGroup in documents.GroupBy(d => d.ShardId, StringComparer.Ordinal))
-        {
-            var shardId = shardGroup.Key;
-            foreach (var document in shardGroup)
-            {
-                await document.CheckpointAsync(cancellationToken).ConfigureAwait(false);
-            }
+        await CrdtCheckpointService.CheckpointActiveDocumentsInBatchesAsync(
+            this.storage,
+            orchestrator,
+            cancellationToken,
+            safelyPersistedMap).ConfigureAwait(false);
 
-            if (!string.IsNullOrEmpty(shardId))
+        if (this.storage is BufferedDistributedCrdtStorageDecorator bufferedDecorator)
+        {
+            var maxBatchSize = this.options.Value.WalMaxBatchSize > 0 ? this.options.Value.WalMaxBatchSize : 10000;
+            while (bufferedDecorator.WriteAheadBuffer.PendingCount > 0 && !cancellationToken.IsCancellationRequested)
             {
-                var freshShardSnapshot = versionVectorManager.GetShardSnapshot(shardId);
-                if (freshShardSnapshot.TryGetValue(shardId, out var freshDvv))
+                var flushed = await bufferedDecorator.FlushNextBatchAsync(maxBatchSize, TimeSpan.Zero, cancellationToken).ConfigureAwait(false);
+                if (flushed == 0)
                 {
-                    safelyPersistedMap[shardId] = freshDvv;
+                    break;
                 }
             }
         }
 
-        await this.storage.SaveShardVersionVectorMapAsync(replicaContext.ReplicaId, safelyPersistedMap, cancellationToken).ConfigureAwait(false);
+        var isMemoryStorage = this.storage is MemoryCrdtStorage
+            || (this.storage is BufferedDistributedCrdtStorageDecorator decorator && decorator.InnerStorage is MemoryCrdtStorage);
+        if (!isMemoryStorage)
+        {
+            await this.storage.SaveShardVersionVectorMapAsync(replicaContext.ReplicaId, safelyPersistedMap, cancellationToken).ConfigureAwait(false);
+        }
 
         var clusterStates = clusterTracker?.GetClusterStates();
         var countBeforeUpdate = Volatile.Read(ref this.estimatedJournalCount);
@@ -460,6 +525,41 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
             : hardThreshold;
 
         this.logger.LogWarning("[{ReplicaId}] Journal dynamically crossed real-time threshold ({Threshold}). Reactively executed immediate aggressive trim explicitly offloading constraints to snapshots.", replicaContext.ReplicaId, thresholdUsed);
+    }
+
+    private static void MergeRegistryVersionVector(
+        IDistributedCrdtDocument<CrdtRegistryState> registryDoc,
+        ShardVersionVectorMap safelyPersistedMap)
+    {
+        var shardId = registryDoc.ShardId;
+        if (string.IsNullOrWhiteSpace(shardId))
+        {
+            return;
+        }
+
+        var fullRegistryDoc = registryDoc.ReadFullDocument();
+        if (fullRegistryDoc.Metadata?.VersionVector == null || fullRegistryDoc.Metadata.VersionVector.Count == 0)
+        {
+            return;
+        }
+
+        var mergedDvv = safelyPersistedMap.TryGetValue(shardId, out var existing)
+            ? existing
+            : new DottedVersionVector();
+
+        foreach (var kvp in fullRegistryDoc.Metadata.VersionVector)
+        {
+            if (kvp.Value > 0 &&
+                (!mergedDvv.Versions.TryGetValue(kvp.Key, out var currentVer) || kvp.Value > currentVer))
+            {
+                mergedDvv.Versions[kvp.Key] = kvp.Value;
+            }
+        }
+
+        if (mergedDvv.Versions.Count > 0)
+        {
+            safelyPersistedMap[shardId] = mergedDvv;
+        }
     }
 
     private void TrackTrimFailure()
