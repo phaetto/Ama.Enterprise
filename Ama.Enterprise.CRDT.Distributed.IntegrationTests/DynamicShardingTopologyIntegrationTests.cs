@@ -16,6 +16,7 @@ using Ama.CRDT.Services.Providers;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
+using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.Services.Core;
@@ -850,6 +851,17 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
     private static async Task SyncAllNodesAsync(DynamicMeshFabric fabric)
     {
         var currentNodes = fabric.GetActiveNodes();
+        foreach (var node in currentNodes)
+        {
+            await node.Orchestrator.FlushAsync(CancellationToken.None);
+            foreach (var patchObserver in node.Scope.ServiceProvider.GetServices<IDocumentPatchObserver>())
+            {
+                await patchObserver.FlushAsync(CancellationToken.None);
+            }
+        }
+
+        await fabric.DrainNetworkAsync();
+
         for (int round = 0; round < 2; round++)
         {
             foreach (var source in currentNodes)
@@ -968,29 +980,35 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
 
         private void WireNodeTransport(ShardedTestNode node)
         {
+            Func<PeerId, ReadOnlyMemory<byte>, CancellationToken, Task> sendDirectHandler = (PeerId targetPeerId, ReadOnlyMemory<byte> payload, CancellationToken _) =>
+            {
+                if (isDisposed ||
+                    networkIsolatedPeers.ContainsKey(node.PeerId) ||
+                    networkIsolatedPeers.ContainsKey(targetPeerId))
+                {
+                    return Task.CompletedTask;
+                }
+
+                var copy = payload.ToArray();
+                TrackPacket(async () =>
+                {
+                    if (activeNodes.TryGetValue(targetPeerId, out var targetNode) &&
+                        !networkIsolatedPeers.ContainsKey(targetPeerId))
+                    {
+                        await targetNode.PayloadHandler.HandlePayloadAsync(MeshId, node.PeerId, copy, CancellationToken.None).ConfigureAwait(false);
+                    }
+                });
+
+                return Task.CompletedTask;
+            };
+
             node.SenderMock
                 .Setup(s => s.SendDirectAsync(It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()))
-                .Returns((PeerId targetPeerId, ReadOnlyMemory<byte> payload, CancellationToken _) =>
-                {
-                    if (isDisposed ||
-                        networkIsolatedPeers.ContainsKey(node.PeerId) ||
-                        networkIsolatedPeers.ContainsKey(targetPeerId))
-                    {
-                        return Task.CompletedTask;
-                    }
+                .Returns(sendDirectHandler);
 
-                    var copy = payload.ToArray();
-                    TrackPacket(async () =>
-                    {
-                        if (activeNodes.TryGetValue(targetPeerId, out var targetNode) &&
-                            !networkIsolatedPeers.ContainsKey(targetPeerId))
-                        {
-                            await targetNode.PayloadHandler.HandlePayloadAsync(MeshId, node.PeerId, copy, CancellationToken.None).ConfigureAwait(false);
-                        }
-                    });
-
-                    return Task.CompletedTask;
-                });
+            node.SenderMock
+                .Setup(s => s.SendDirectAsync(It.IsAny<string>(), It.IsAny<PeerId>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()))
+                .Returns((string _, PeerId targetPeerId, ReadOnlyMemory<byte> payload, CancellationToken ct) => sendDirectHandler(targetPeerId, payload, ct));
 
             node.GossipMock
                 .Setup(g => g.BroadcastAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()))

@@ -34,6 +34,8 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
     private readonly Channel<OutboundPatchItem> broadcastChannel;
     private readonly CancellationTokenSource disposeCts = new();
     private readonly Task processingTask;
+    private readonly Dictionary<(string DocumentId, string? DocumentTypeAlias), List<CrdtOperation>> coalesceBuffer = new();
+    private readonly List<TaskCompletionSource> pendingFlushBarriers = new();
 
     private readonly Meter meter;
     private readonly Counter<long> broadcastBytesCounter;
@@ -55,7 +57,7 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
         this.serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        var capacity = options?.Value.ChannelCapacity ?? 0;
+        var capacity = options?.Value.ChannelCapacity is > 0 ? options.Value.ChannelCapacity : 32_768;
         if (capacity > 0)
         {
             this.broadcastChannel = Channel.CreateBounded<OutboundPatchItem>(new BoundedChannelOptions(capacity)
@@ -131,73 +133,61 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
 
     private async Task ProcessBroadcastChannelAsync()
     {
+        var reader = broadcastChannel.Reader;
         try
         {
-            await foreach (var item in broadcastChannel.Reader.ReadAllAsync(disposeCts.Token).ConfigureAwait(false))
+            while (await reader.WaitToReadAsync(disposeCts.Token).ConfigureAwait(false))
             {
-                if (item.FlushBarrier is not null)
-                {
-                    item.FlushBarrier.TrySetResult();
-                    continue;
-                }
+                coalesceBuffer.Clear();
+                pendingFlushBarriers.Clear();
 
-                try
+                int drainedCount = 0;
+                while (drainedCount < 4096 && reader.TryRead(out var item))
                 {
-                    var documentTypeAlias = item.DocumentTypeAlias;
-                    if (string.IsNullOrWhiteSpace(documentTypeAlias))
+                    if (item.FlushBarrier is not null)
                     {
-                        var orchestrator = serviceProvider.GetService<ICrdtDocumentOrchestrator>();
-                        if (orchestrator?.Registry != null && !string.Equals(item.DocumentId, orchestrator.Registry.DocumentId, StringComparison.Ordinal))
-                        {
-                            var registryDoc = await orchestrator.Registry.GetDocumentAsync(disposeCts.Token).ConfigureAwait(false);
-                            foreach (var entry in registryDoc.Data.Documents.Values)
-                            {
-                                if (string.Equals(entry.DocumentId, item.DocumentId, StringComparison.Ordinal) && !entry.IsDeleted)
-                                {
-                                    documentTypeAlias = entry.TypeAlias;
-                                    break;
-                                }
-                            }
-                        }
+                        pendingFlushBarriers.Add(item.FlushBarrier);
+                        break;
                     }
 
-                    var patchMsg = new CrdtPatchMessage(replicaContext.ReplicaId, item.Patch);
-                    var payload = serializer.SerializeToBytes(patchMsg);
-                    var scopeContext = serviceProvider.GetService<CrdtScopeContext>();
-                    var hasExplicitScope = !string.IsNullOrWhiteSpace(scopeContext?.ScopeId) &&
-                                           !string.Equals(scopeContext.ScopeId, scopeContext.HostReplicaId, StringComparison.Ordinal);
-                    var logicalScopeId = !string.IsNullOrWhiteSpace(scopeContext?.ScopeId)
-                        ? scopeContext.ScopeId
-                        : replicaContext.ReplicaId;
-
-                    var wrapper = new CrdtMessageWrapper(
-                        item.DocumentId,
-                        "CrdtPatch",
-                        payload,
-                        replicaContext.ReplicaId,
-                        documentTypeAlias,
-                        hasExplicitScope ? logicalScopeId : null);
-                    var finalBytes = serializer.SerializeToBytes(wrapper);
-
-                    broadcastBytesCounter.Add(finalBytes.Length, new KeyValuePair<string, object?>("document_id", item.DocumentId));
-
-                    var sentViaDirect = await TryDispatchToScopeAuthorizedPeersAsync(logicalScopeId, finalBytes, disposeCts.Token).ConfigureAwait(false);
-                    if (!sentViaDirect)
+                    drainedCount++;
+                    var ops = item.Patch.Operations;
+                    if (ops == null || ops.Count == 0)
                     {
-                        await p2pAlgorithm.BroadcastAsync(finalBytes, disposeCts.Token).ConfigureAwait(false);
+                        continue;
                     }
-                    
-                    patchesBroadcastedCounter.Add(1, new KeyValuePair<string, object?>("document_id", item.DocumentId));
-                    logger.LogTrace("Broadcasted patch for document {DocumentId} in scope {ScopeId}.", item.DocumentId, logicalScopeId);
+
+                    var key = (item.DocumentId, item.DocumentTypeAlias);
+                    if (!coalesceBuffer.TryGetValue(key, out var list))
+                    {
+                        list = new List<CrdtOperation>(ops.Count);
+                        coalesceBuffer[key] = list;
+                    }
+
+                    list.AddRange(ops);
                 }
-                catch (OperationCanceledException) when (disposeCts.IsCancellationRequested)
+
+                if (coalesceBuffer.Count > 0)
                 {
-                    break;
+                    foreach (var kvp in coalesceBuffer)
+                    {
+                        var docId = kvp.Key.DocumentId;
+                        var docTypeAlias = kvp.Key.DocumentTypeAlias;
+                        var coalescedOps = kvp.Value;
+
+                        await BroadcastSinglePatchAsync(docId, docTypeAlias, new CrdtPatch(coalescedOps)).ConfigureAwait(false);
+                    }
                 }
-                catch (Exception ex)
+
+                for (int i = 0; i < pendingFlushBarriers.Count; i++)
                 {
-                    broadcastFailuresCounter.Add(1, new KeyValuePair<string, object?>("document_id", item.DocumentId));
-                    logger.LogError(ex, "Failed to broadcast patch for document {DocumentId}.", item.DocumentId);
+                    pendingFlushBarriers[i].TrySetResult();
+                }
+
+                if (coalesceBuffer.Count > 256)
+                {
+                    coalesceBuffer.Clear();
+                    coalesceBuffer.TrimExcess();
                 }
             }
         }
@@ -206,6 +196,66 @@ public sealed class CrdtPatchBroadcaster : IDocumentPatchObserver, IDisposable
         catch (Exception ex)
         {
             logger.LogCritical(ex, "Broadcast background channel failed.");
+        }
+    }
+
+    private async Task BroadcastSinglePatchAsync(string documentId, string? documentTypeAlias, CrdtPatch patch)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(documentTypeAlias))
+            {
+                var orchestrator = serviceProvider.GetService<ICrdtDocumentOrchestrator>();
+                if (orchestrator?.Registry != null && !string.Equals(documentId, orchestrator.Registry.DocumentId, StringComparison.Ordinal))
+                {
+                    var registryData = orchestrator.Registry.ReadData();
+                    foreach (var entry in registryData.Documents.Values)
+                    {
+                        if (string.Equals(entry.DocumentId, documentId, StringComparison.Ordinal) && !entry.IsDeleted)
+                        {
+                            documentTypeAlias = entry.TypeAlias;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            var patchMsg = new CrdtPatchMessage(replicaContext.ReplicaId, patch);
+            var payload = serializer.SerializeToBytes(patchMsg);
+            var scopeContext = serviceProvider.GetService<CrdtScopeContext>();
+            var hasExplicitScope = !string.IsNullOrWhiteSpace(scopeContext?.ScopeId) &&
+                                   !string.Equals(scopeContext.ScopeId, scopeContext.HostReplicaId, StringComparison.Ordinal);
+            var logicalScopeId = !string.IsNullOrWhiteSpace(scopeContext?.ScopeId)
+                ? scopeContext.ScopeId
+                : replicaContext.ReplicaId;
+
+            var wrapper = new CrdtMessageWrapper(
+                documentId,
+                "CrdtPatch",
+                payload,
+                replicaContext.ReplicaId,
+                documentTypeAlias,
+                hasExplicitScope ? logicalScopeId : null);
+            var finalBytes = serializer.SerializeToBytes(wrapper);
+
+            broadcastBytesCounter.Add(finalBytes.Length, new KeyValuePair<string, object?>("document_id", documentId));
+
+            var sentViaDirect = await TryDispatchToScopeAuthorizedPeersAsync(logicalScopeId, finalBytes, disposeCts.Token).ConfigureAwait(false);
+            if (!sentViaDirect)
+            {
+                await p2pAlgorithm.BroadcastAsync(finalBytes, disposeCts.Token).ConfigureAwait(false);
+            }
+
+            patchesBroadcastedCounter.Add(1, new KeyValuePair<string, object?>("document_id", documentId));
+            logger.LogTrace("Broadcasted patch for document {DocumentId} in scope {ScopeId}.", documentId, logicalScopeId);
+        }
+        catch (OperationCanceledException) when (disposeCts.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            broadcastFailuresCounter.Add(1, new KeyValuePair<string, object?>("document_id", documentId));
+            logger.LogError(ex, "Failed to broadcast patch for document {DocumentId}.", documentId);
         }
     }
 

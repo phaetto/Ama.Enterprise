@@ -109,13 +109,14 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
                 foreach (var incomingShardKvp in globalState)
                 {
                     var pooledShardKey = stringPool.GetOrAdd(incomingShardKvp.Key);
+                    var sanitizedIncomingDvv = CloneDvv(incomingShardKvp.Value);
                     if (targetState.TryGetValue(pooledShardKey, out var existingDvv))
                     {
-                        existingDvv.Merge(incomingShardKvp.Value);
+                        existingDvv.Merge(sanitizedIncomingDvv);
                     }
                     else
                     {
-                        targetState[pooledShardKey] = CloneDvv(incomingShardKvp.Value);
+                        targetState[pooledShardKey] = sanitizedIncomingDvv;
                     }
                 }
             }
@@ -481,7 +482,10 @@ public sealed class ClusterStateTracker : IClusterStateTracker, IDisposable
         {
             foreach (var kvp in dvv.Versions!)
             {
-                safeVersions[stringPool.GetOrAdd(kvp.Key)] = kvp.Value;
+                if (kvp.Value > 0)
+                {
+                    safeVersions[stringPool.GetOrAdd(kvp.Key)] = kvp.Value;
+                }
             }
         }
 

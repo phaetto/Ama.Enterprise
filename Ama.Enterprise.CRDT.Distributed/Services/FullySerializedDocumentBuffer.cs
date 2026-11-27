@@ -113,7 +113,8 @@ public sealed class FullySerializedDocumentBuffer<TState> : ICrdtDocumentBuffer<
             documentId,
             shardId,
             debounceBufferCapacity,
-            shardDvv);
+            shardDvv,
+            rentedDocumentBuffer?.Length ?? 0);
     }
 
     /// <inheritdoc />

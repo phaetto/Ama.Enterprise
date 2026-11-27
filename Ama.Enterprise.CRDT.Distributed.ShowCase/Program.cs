@@ -115,10 +115,10 @@ public static class Program
             options.AntiEntropyIntervalSeconds = 5;
             options.MaintenanceIntervalSeconds = 5 * 60;
             options.CompactionTtlSeconds = 5 * 60;
-            options.DefaultDocumentResidencyMode = CrdtDocumentResidencyMode.Unpacked;
+            options.DefaultDocumentResidencyMode = CrdtDocumentResidencyMode.PackedMetadata;
             options.ShardReplicationFactor = 2;
             options.EnableSharding = true;
-            options.JournalMode = CrdtJournalMode.Direct;
+            options.JournalMode = CrdtJournalMode.DiskWal;
             options.WalChannelCapacity = 100000;
             options.WalMaxBatchSize = 10000;
             options.WalDirectoryPath = AppContext.BaseDirectory;
@@ -149,7 +149,7 @@ public static class Program
         services.AddDistributedCrdtQuery<FleetState, PurgeOfflineDevicesCommand, PurgeOfflineDevicesSummaryDto, PurgeOfflineDevicesMapReduce>("fleet-purge-offline");
 
         // Register Showcase file-based CRDT storage overriding memory fallbacks for all documents
-        //services.AddDistributedCrdtStorage<ShowCaseCrdtStorage>();
+        services.AddDistributedCrdtStorage<ShowCaseCrdtStorage>();
 
         // Register the background multi-document orchestration and route inbound intents from the network
         services.AddDistributedCrdtReplica(replicaId, "internal");
@@ -1277,7 +1277,8 @@ public static class Program
         ArgumentNullException.ThrowIfNull(replicaId);
         ArgumentNullException.ThrowIfNull(orchestrator);
 
-        var gcAllocatedBytes = GC.GetTotalMemory(forceFullCollection: false);
+        var gcBeforeCollectBytes = GC.GetTotalMemory(forceFullCollection: false);
+        var gcAllocatedBytes = GC.GetTotalMemory(forceFullCollection: true);
         var gcInfo = GC.GetGCMemoryInfo();
         var gcCommittedBytes = gcInfo.TotalCommittedBytes;
         using var currentProcess = Process.GetCurrentProcess();
@@ -1344,6 +1345,8 @@ public static class Program
         long statsListBytes = 32L + 24L + ((long)ReusableMemoryStatsList.Capacity * 64L);
         long shardDvvCacheBytes = 80L + ((long)ReusableShardDvvBytesCache.Count * 32L);
         long reportBuffersBytes = statsListBytes + shardDvvCacheBytes;
+        long orchestratorMapsBytes = (long)activeDocsCount * 224L;
+        long reclaimableGarbageBytes = Math.Max(0L, gcBeforeCollectBytes - gcAllocatedBytes);
 
         lock (ConsoleLock)
         {
@@ -1367,9 +1370,10 @@ public static class Program
             Console.WriteLine($" Total CRDT Meta Est.   : {FormatBytes(totalMetadataBytes)} ({totalMetadataBytes:N0} B)");
             Console.WriteLine($" Total Data + Meta Est. : {FormatBytes(totalStateBytes)} ({totalStateBytes:N0} B)");
             Console.WriteLine($" Total Whole Doc Objs   : {FormatBytes(totalWholeObjectBytes)} ({totalWholeObjectBytes:N0} B)");
+            Console.WriteLine($" Orchestrator & Pools   : {FormatBytes(orchestratorMapsBytes)} ({orchestratorMapsBytes:N0} B)");
             Console.WriteLine($" Total Shard DVV Est.   : {FormatBytes(totalGlobalStateBytes)} ({totalGlobalStateBytes:N0} B)");
             Console.WriteLine($" Mem Report Buffers Est.: {FormatBytes(reportBuffersBytes)} ({reportBuffersBytes:N0} B) [StatsList Cap={ReusableMemoryStatsList.Capacity:N0}: {FormatBytes(statsListBytes)}]");
-            Console.WriteLine($" Total Managed GC Heap  : {FormatBytes(gcAllocatedBytes)} ({gcAllocatedBytes:N0} B)");
+            Console.WriteLine($" Total Live GC Heap     : {FormatBytes(gcAllocatedBytes)} ({gcAllocatedBytes:N0} B) [Reclaimed Garbage: {FormatBytes(reclaimableGarbageBytes)}]");
             Console.WriteLine($" Total GC Committed     : {FormatBytes(gcCommittedBytes)} ({gcCommittedBytes:N0} B)");
             Console.WriteLine($" Process Private Bytes  : {FormatBytes(privateBytes)} ({privateBytes:N0} B)");
             Console.WriteLine($" Process Working Set    : {FormatBytes(workingSetBytes)} ({workingSetBytes:N0} B)");

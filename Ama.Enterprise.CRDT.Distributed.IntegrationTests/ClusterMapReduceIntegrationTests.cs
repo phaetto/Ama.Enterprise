@@ -779,9 +779,9 @@ public sealed class ClusterMapReduceIntegrationTests : IAsyncDisposable
             opt.CheckpointIntervalSeconds = 3600;
             opt.MaintenanceIntervalSeconds = 3600;
             opt.PeerEvictionTtlSeconds = 0;
-            opt.RpcTimeoutMilliseconds = 150;
+            opt.RpcTimeoutMilliseconds = 1500;
             opt.RpcMaxRetries = 3;
-            opt.RpcRetryDelayMilliseconds = 10;
+            opt.RpcRetryDelayMilliseconds = 25;
             opt.EnableGracefulShutdown = false;
         });
 

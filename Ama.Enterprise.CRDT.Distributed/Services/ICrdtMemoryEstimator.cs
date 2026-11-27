@@ -42,12 +42,13 @@ public interface ICrdtMemoryEstimator
     /// </summary>
     /// <typeparam name="TState">The document data state type.</typeparam>
     /// <param name="data">The materialized domain data model.</param>
-    /// <param name="metadataByteLength">The byte length of the packed CRDT metadata.</param>
+    /// <param name="metadataByteLength">The logical byte length of the packed CRDT metadata.</param>
     /// <param name="documentId">The document identifier.</param>
     /// <param name="shardId">The shard identifier.</param>
     /// <param name="debounceBufferCapacity">The current capacity of the document's active-sync debounce buffer.</param>
     /// <param name="globalState">The local shard version vector map.</param>
     /// <param name="aotContexts">The registered AOT reflection contexts used to inspect properties without runtime reflection.</param>
+    /// <param name="allocatedMetadataBufferCapacity">The actual allocated capacity of the underlying pooled metadata byte array.</param>
     /// <returns>A <see cref="DocumentMemoryFootprintDto"/> detailing data, metadata, whole document, and shard version vector byte sizes.</returns>
     DocumentMemoryFootprintDto EstimatePackedMetadataDocumentFootprint<TState>(
         TState data,
@@ -56,22 +57,25 @@ public interface ICrdtMemoryEstimator
         string shardId,
         int debounceBufferCapacity,
         ShardVersionVectorMap globalState,
-        IReadOnlyList<CrdtAotContext> aotContexts)
+        IReadOnlyList<CrdtAotContext> aotContexts,
+        int allocatedMetadataBufferCapacity = 0)
         where TState : class, new();
 
     /// <summary>
     /// Computes the detailed memory footprint breakdown for a fully serialized CRDT document and its local shard version vector in O(1) time.
     /// </summary>
-    /// <param name="serializedDocumentByteLength">The total byte length of the serialized document.</param>
+    /// <param name="serializedDocumentByteLength">The logical byte length of the serialized document.</param>
     /// <param name="documentId">The document identifier.</param>
     /// <param name="shardId">The shard identifier.</param>
     /// <param name="debounceBufferCapacity">The current capacity of the document's active-sync debounce buffer.</param>
     /// <param name="globalState">The local shard version vector map.</param>
+    /// <param name="allocatedBufferCapacity">The actual allocated capacity of the underlying pooled document byte array.</param>
     /// <returns>A <see cref="DocumentMemoryFootprintDto"/> detailing whole document and shard version vector byte sizes.</returns>
     DocumentMemoryFootprintDto EstimateFullySerializedDocumentFootprint(
         int serializedDocumentByteLength,
         string documentId,
         string shardId,
         int debounceBufferCapacity,
-        ShardVersionVectorMap globalState);
+        ShardVersionVectorMap globalState,
+        int allocatedBufferCapacity = 0);
 }

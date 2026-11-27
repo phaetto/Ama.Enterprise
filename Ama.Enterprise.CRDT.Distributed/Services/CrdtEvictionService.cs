@@ -90,9 +90,9 @@ public sealed class CrdtEvictionService : ICrdtEvictionService, IDisposable
         
         versionVectorManager.Clear();
 
-        foreach (var doc in documents)
+        for (var i = 0; i < documents.Count; i++)
         {
-            await doc.ResetLocalStateAsync(currentId, cancellationToken).ConfigureAwait(false);
+            versionVectorManager.EnsureShardRegistered(documents[i].ShardId);
         }
         
         await orchestrator.DispatchAntiEntropyStateAsync(cancellationToken).ConfigureAwait(false);

@@ -88,6 +88,28 @@ public interface IDocumentFactory
 /// <typeparam name="TState">The CRDT state model type.</typeparam>
 public sealed class DocumentFactory<TState> : IDocumentFactory where TState : class, new()
 {
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<IServiceProvider, ScopeDocumentDependencies> ScopeDependenciesCache = new();
+
+    private sealed class ScopeDocumentDependencies(IServiceProvider sp)
+    {
+        public IShardVersionVectorManager VersionVectorManager { get; } = sp.GetRequiredService<IShardVersionVectorManager>();
+        public IAsyncCrdtApplicator Applicator { get; } = sp.GetRequiredService<IAsyncCrdtApplicator>();
+        public ICrdtApplicator SyncApplicator { get; } = sp.GetRequiredService<ICrdtApplicator>();
+        public IAsyncCrdtMerger Merger { get; } = sp.GetRequiredService<IAsyncCrdtMerger>();
+        public ICrdtMetadataManager MetadataManager { get; } = sp.GetRequiredService<ICrdtMetadataManager>();
+        public IOptions<DistributedCrdtOptions> Options { get; } = sp.GetRequiredService<IOptions<DistributedCrdtOptions>>();
+        public ICrdtSerializer Serializer { get; } = sp.GetRequiredService<ICrdtSerializer>();
+        public IDistributedCrdtStorage Storage { get; } = sp.GetRequiredService<IDistributedCrdtStorage>();
+        public ILogger<DistributedCrdtDocument<TState>> Logger { get; } = sp.GetRequiredService<ILogger<DistributedCrdtDocument<TState>>>();
+        public IDocumentIdProvider DocumentIdProvider { get; } = sp.GetRequiredService<IDocumentIdProvider>();
+        public IShardIdProvider ShardIdProvider { get; } = sp.GetRequiredService<IShardIdProvider>();
+        public IShardDistributionManager DistributionManager { get; } = sp.GetRequiredService<IShardDistributionManager>();
+        public IDocumentCommandPipeline CommandPipeline { get; } = sp.GetRequiredService<IDocumentCommandPipeline>();
+        public IDistributedCrdtTelemetry Telemetry { get; } = sp.GetRequiredService<IDistributedCrdtTelemetry>();
+        public IDocumentStateObserver<TState>[] StateObservers { get; } = new List<IDocumentStateObserver<TState>>(sp.GetServices<IDocumentStateObserver<TState>>()).ToArray();
+        public IDocumentPatchObserver[] PatchObservers { get; } = new List<IDocumentPatchObserver>(sp.GetServices<IDocumentPatchObserver>()).ToArray();
+    }
+
     /// <inheritdoc />
     public string TypeAlias { get; }
 
@@ -118,8 +140,8 @@ public sealed class DocumentFactory<TState> : IDocumentFactory where TState : cl
         var stringPool = serviceProvider.GetService<ICrdtStringPool>() ?? CrdtStringPool.Shared;
         documentId = stringPool.GetOrAdd(documentId);
 
-        var idProvider = serviceProvider.GetRequiredService<IDocumentIdProvider>();
-        var state = idProvider.CreateDocumentWithId<TState>(documentId);
+        var deps = ScopeDependenciesCache.GetValue(serviceProvider, static sp => new ScopeDocumentDependencies(sp));
+        var state = deps.DocumentIdProvider.CreateDocumentWithId<TState>(documentId);
         return CreateDocumentInstance(serviceProvider, state, TypeAlias, stringPool, ResidencyMode);
     }
 
@@ -141,25 +163,26 @@ public sealed class DocumentFactory<TState> : IDocumentFactory where TState : cl
         ICrdtStringPool? stringPool = null,
         CrdtDocumentResidencyMode? residencyMode = null)
     {
+        var deps = ScopeDependenciesCache.GetValue(serviceProvider, static sp => new ScopeDocumentDependencies(sp));
         return new DistributedCrdtDocument<TState>(
             state,
             serviceProvider,
-            serviceProvider.GetRequiredService<IShardVersionVectorManager>(),
-            serviceProvider.GetRequiredService<IAsyncCrdtApplicator>(),
-            serviceProvider.GetRequiredService<ICrdtApplicator>(),
-            serviceProvider.GetRequiredService<IAsyncCrdtMerger>(),
-            serviceProvider.GetRequiredService<ICrdtMetadataManager>(),
-            serviceProvider.GetRequiredService<IOptions<DistributedCrdtOptions>>(),
-            serviceProvider.GetRequiredService<ICrdtSerializer>(),
-            serviceProvider.GetRequiredService<IDistributedCrdtStorage>(),
-            serviceProvider.GetRequiredService<ILogger<DistributedCrdtDocument<TState>>>(),
-            serviceProvider.GetRequiredService<IDocumentIdProvider>(),
-            serviceProvider.GetRequiredService<IShardIdProvider>(),
-            serviceProvider.GetRequiredService<IShardDistributionManager>(),
-            serviceProvider.GetRequiredService<IDocumentCommandPipeline>(),
-            serviceProvider.GetRequiredService<IDistributedCrdtTelemetry>(),
-            serviceProvider.GetServices<IDocumentStateObserver<TState>>(),
-            serviceProvider.GetServices<IDocumentPatchObserver>(),
+            deps.VersionVectorManager,
+            deps.Applicator,
+            deps.SyncApplicator,
+            deps.Merger,
+            deps.MetadataManager,
+            deps.Options,
+            deps.Serializer,
+            deps.Storage,
+            deps.Logger,
+            deps.DocumentIdProvider,
+            deps.ShardIdProvider,
+            deps.DistributionManager,
+            deps.CommandPipeline,
+            deps.Telemetry,
+            deps.StateObservers,
+            deps.PatchObservers,
             typeAlias,
             stringPool,
             residencyMode);

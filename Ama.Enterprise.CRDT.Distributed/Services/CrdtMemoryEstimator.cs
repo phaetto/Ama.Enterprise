@@ -43,7 +43,7 @@ public sealed class CrdtMemoryEstimator : ICrdtMemoryEstimator
             metadataBytes = EstimateGraphSize(document.Metadata, visitedSet, aotContexts);
             dataAndMetaBytes = 32L + dataBytes + metadataBytes;
 
-            long managerOverheadBytes = 256;
+            long managerOverheadBytes = 416;
             managerOverheadBytes += EstimateStringSize(documentId, visitedSet);
             managerOverheadBytes += EstimateStringSize(shardId, visitedSet);
 
@@ -70,7 +70,8 @@ public sealed class CrdtMemoryEstimator : ICrdtMemoryEstimator
         string shardId,
         int debounceBufferCapacity,
         ShardVersionVectorMap globalState,
-        IReadOnlyList<CrdtAotContext> aotContexts)
+        IReadOnlyList<CrdtAotContext> aotContexts,
+        int allocatedMetadataBufferCapacity = 0)
         where TState : class, new()
     {
         ArgumentNullException.ThrowIfNull(data);
@@ -80,7 +81,9 @@ public sealed class CrdtMemoryEstimator : ICrdtMemoryEstimator
         ArgumentNullException.ThrowIfNull(aotContexts);
 
         long dataBytes;
+        int effectiveMetaCapacity = Math.Max(metadataByteLength, allocatedMetadataBufferCapacity);
         long metadataBytes = Math.Max(0, metadataByteLength) > 0 ? 24L + metadataByteLength : 0L;
+        long allocatedMetadataBytes = Math.Max(0, effectiveMetaCapacity) > 0 ? 24L + effectiveMetaCapacity : 0L;
         long dataAndMetaBytes;
         long wholeObjectBytes;
 
@@ -91,7 +94,7 @@ public sealed class CrdtMemoryEstimator : ICrdtMemoryEstimator
             dataBytes = EstimateGraphSize(data, visitedSet, aotContexts);
             dataAndMetaBytes = 32L + dataBytes + metadataBytes;
 
-            long managerOverheadBytes = 256;
+            long managerOverheadBytes = 416;
             managerOverheadBytes += EstimateStringSize(documentId, visitedSet);
             managerOverheadBytes += EstimateStringSize(shardId, visitedSet);
 
@@ -100,7 +103,7 @@ public sealed class CrdtMemoryEstimator : ICrdtMemoryEstimator
                 managerOverheadBytes += 160 + (debounceBufferCapacity * 64L);
             }
 
-            wholeObjectBytes = managerOverheadBytes + dataAndMetaBytes;
+            wholeObjectBytes = managerOverheadBytes + 32L + dataBytes + allocatedMetadataBytes;
 
             visitedSet.Clear();
             visitedSet.TrimExcess(64);
@@ -116,16 +119,19 @@ public sealed class CrdtMemoryEstimator : ICrdtMemoryEstimator
         string documentId,
         string shardId,
         int debounceBufferCapacity,
-        ShardVersionVectorMap globalState)
+        ShardVersionVectorMap globalState,
+        int allocatedBufferCapacity = 0)
     {
         ArgumentNullException.ThrowIfNull(documentId);
         ArgumentNullException.ThrowIfNull(shardId);
         ArgumentNullException.ThrowIfNull(globalState);
 
         long byteLength = Math.Max(0, serializedDocumentByteLength);
+        long effectiveAllocatedLength = Math.Max(byteLength, allocatedBufferCapacity);
         long dataAndMetaBytes = byteLength > 0 ? 24L + byteLength : 0L;
+        long allocatedBufferBytes = effectiveAllocatedLength > 0 ? 24L + effectiveAllocatedLength : 0L;
 
-        long managerOverheadBytes = 256;
+        long managerOverheadBytes = 416;
         managerOverheadBytes += EstimateRawStringSize(documentId);
         managerOverheadBytes += EstimateRawStringSize(shardId);
 
@@ -134,7 +140,7 @@ public sealed class CrdtMemoryEstimator : ICrdtMemoryEstimator
             managerOverheadBytes += 160 + (debounceBufferCapacity * 64L);
         }
 
-        long wholeObjectBytes = managerOverheadBytes + dataAndMetaBytes;
+        long wholeObjectBytes = managerOverheadBytes + allocatedBufferBytes;
         var shardDvvBytes = EstimateShardVersionVectorSize(globalState, shardId);
 
         return new DocumentMemoryFootprintDto(byteLength, 0L, dataAndMetaBytes, wholeObjectBytes, shardDvvBytes);
@@ -244,7 +250,8 @@ public sealed class CrdtMemoryEstimator : ICrdtMemoryEstimator
 
         if (obj is IDictionary dict)
         {
-            long dictSize = 80L + (dict.Count * 48L);
+            // Account for internal Dictionary/ConcurrentDictionary prime-sized bucket and entry arrays (~72 bytes per entry slot with load factor slack).
+            long dictSize = 96L + (dict.Count * 72L);
             foreach (DictionaryEntry entry in dict)
             {
                 dictSize += EstimateGraphSize(entry.Key, visited, aotContexts);

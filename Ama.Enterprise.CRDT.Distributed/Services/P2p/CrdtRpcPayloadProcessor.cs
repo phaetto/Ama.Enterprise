@@ -9,6 +9,7 @@ using Ama.CRDT.Models.Intents;
 using Ama.CRDT.Services;
 using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Models;
+using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Services.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -124,6 +125,14 @@ public sealed class CrdtRpcPayloadProcessor : ICrdtRpcPayloadProcessor
                         var patcher = scope.ServiceProvider.GetRequiredService<IAsyncCrdtPatcher>();
 
                         isSuccess = await targetDoc.ApplyRemoteIntentAsync(intent, req.TargetProperty, patcher, deliveryMode, cancellationToken).ConfigureAwait(false);
+                        if (isSuccess && !isFireAndForget)
+                        {
+                            await targetDoc.FlushAsync(cancellationToken).ConfigureAwait(false);
+                            foreach (var patchObserver in scope.ServiceProvider.GetServices<IDocumentPatchObserver>())
+                            {
+                                await patchObserver.FlushAsync(cancellationToken).ConfigureAwait(false);
+                            }
+                        }
                     }
                     catch (Exception ex)
                     {

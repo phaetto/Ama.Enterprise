@@ -103,6 +103,11 @@ public sealed class CrdtInitializationService : IHostedService, IDisposable
                     lastException);
             }
         }
+
+        // Reclaim temporary deserialization buffers, unpacked document states, and WAL replay allocations
+        // before the node begins processing live P2P network traffic.
+        System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
         
         logger.LogInformation("Distributed CRDT replica matrices initialized.");
     }

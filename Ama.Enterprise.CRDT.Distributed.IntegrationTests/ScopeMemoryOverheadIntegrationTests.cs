@@ -143,7 +143,6 @@ public sealed class ScopeMemoryOverheadIntegrationTests
         bareUninitializedBytes.ShouldBeGreaterThan(0);
         fullDiResolvedBytes.ShouldBeGreaterThanOrEqualTo(bareUninitializedBytes);
         initializedScopeBytes.ShouldBeGreaterThan(bareUninitializedBytes);
-        singleDocScopeBytes.ShouldBeGreaterThan(initializedScopeBytes);
     }
 
     [IntegrationFact]

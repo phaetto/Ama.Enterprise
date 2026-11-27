@@ -68,7 +68,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
         CrdtMessageWrapper wrapper;
         try
         {
-            wrapper = serializer.DeserializeFromBytes<CrdtMessageWrapper>(payload.ToArray());
+            wrapper = serializer.DeserializeFromBytes<CrdtMessageWrapper>(payload.Span);
         }
         catch (Exception)
         {

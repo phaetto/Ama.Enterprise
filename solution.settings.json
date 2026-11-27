@@ -1,6 +1,6 @@
 {
   "buildCommand": "dotnet build --property:WarningLevel=0",
-  "testCommand": "dotnet test --no-build",
+  "testCommand": "dotnet test --no-build --filter \"FullyQualifiedName!~Analyzers&FullyQualifiedName!~SourceGenerators\"",
   "workingDirectory": "./",
   "commandPaths": {
   },

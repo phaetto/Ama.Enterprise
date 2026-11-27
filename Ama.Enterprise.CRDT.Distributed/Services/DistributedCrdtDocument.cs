@@ -27,6 +27,7 @@ using Microsoft.Extensions.Options;
 public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<TState>, IDocumentCommandTarget, IDisposable where TState : class, new()
 {
     private static readonly ConcurrentDictionary<string, Expression<Func<TState, object>>> PropertySelectorCache = new(StringComparer.Ordinal);
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<IServiceProvider, CrdtAotContext[]> AotContextsCache = new();
 
     private readonly IServiceProvider serviceProvider;
     private readonly IShardVersionVectorManager versionVectorManager;
@@ -48,7 +49,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly bool activeSyncEnabled;
     private readonly int activeSyncDebounceMs;
     private readonly bool avoidBlindWrites;
-    private readonly TState initialState;
     
     private readonly object syncRoot = new();
     private readonly ICrdtDocumentBuffer<TState> documentBuffer;
@@ -60,8 +60,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
     private volatile bool isDirty;
     private volatile bool isDisposed;
-
-    private CrdtAotContext[]? cachedAotContexts;
 
     /// <inheritdoc />
     public string ScopeReplicaId { get; }
@@ -133,7 +131,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         this.activeSyncEnabled = options.Value.ActiveSyncEnabled;
         this.activeSyncDebounceMs = options.Value.ActiveSyncDebounceMilliseconds;
         this.avoidBlindWrites = options.Value.AvoidBlindCheckpointWrites;
-        this.initialState = initialState;
 
         var metadata = metadataManager.Initialize(initialState);
         var initialDocument = new CrdtDocument<TState>(initialState, metadata);
@@ -1692,8 +1689,12 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         {
             lock (syncRoot)
             {
-                var metadata = metadataManager.Initialize(initialState);
-                var resetDoc = new CrdtDocument<TState>(initialState, metadata);
+                var documentIdProvider = serviceProvider.GetService<IDocumentIdProvider>();
+                var freshInitialState = documentIdProvider != null
+                    ? documentIdProvider.CreateDocumentWithId<TState>(DocumentId)
+                    : new TState();
+                var metadata = metadataManager.Initialize(freshInitialState);
+                var resetDoc = new CrdtDocument<TState>(freshInitialState, metadata);
                 documentBuffer.StoreFullDocument(resetDoc);
                 isDirty = true;
             }
@@ -1747,20 +1748,17 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
     private CrdtAotContext[] GetAotContexts()
     {
-        if (cachedAotContexts != null)
+        return AotContextsCache.GetValue(serviceProvider, static sp =>
         {
-            return cachedAotContexts;
-        }
+            var resolved = sp.GetServices<CrdtAotContext>();
+            var list = new List<CrdtAotContext>();
+            foreach (var ctx in resolved)
+            {
+                list.Add(ctx);
+            }
 
-        var resolved = serviceProvider.GetServices<CrdtAotContext>();
-        var list = new List<CrdtAotContext>();
-        foreach (var ctx in resolved)
-        {
-            list.Add(ctx);
-        }
-
-        cachedAotContexts = list.ToArray();
-        return cachedAotContexts;
+            return list.ToArray();
+        });
     }
 
     private static string ResolveTypeAlias(IServiceProvider sp, string? explicitTypeAlias)

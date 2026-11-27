@@ -116,7 +116,8 @@ public sealed class PackedMetadataDocumentBuffer<TState> : ICrdtDocumentBuffer<T
             shardId,
             debounceBufferCapacity,
             shardDvv,
-            aotContexts);
+            aotContexts,
+            rentedMetadataBuffer?.Length ?? 0);
     }
 
     /// <inheritdoc />

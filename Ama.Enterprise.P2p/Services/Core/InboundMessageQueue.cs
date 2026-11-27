@@ -7,12 +7,20 @@ using System.Threading.Tasks;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>
-/// Channel-backed implementation of the inbound message queue, decoupling network IO from protocol logic.
+/// Channel-backed implementation of the inbound message queue, decoupling network IO from protocol logic
+/// while applying TCP socket backpressure when inbound application processing lags behind network reception.
 /// </summary>
 /// <typeparam name="TMessage">The type of the message.</typeparam>
 public sealed class InboundMessageQueue<TMessage> : IInboundMessageQueue<TMessage> where TMessage : IMeshMessage
 {
-    private readonly Channel<TMessage> channel = Channel.CreateUnbounded<TMessage>();
+    private const int DefaultMaxInboundQueueCapacity = 8_192;
+
+    private readonly Channel<TMessage> channel = Channel.CreateBounded<TMessage>(new BoundedChannelOptions(DefaultMaxInboundQueueCapacity)
+    {
+        SingleReader = false,
+        SingleWriter = false,
+        FullMode = BoundedChannelFullMode.Wait
+    });
 
     /// <inheritdoc />
     public int PendingCount => channel.Reader.CanCount ? channel.Reader.Count : 0;
@@ -20,6 +28,11 @@ public sealed class InboundMessageQueue<TMessage> : IInboundMessageQueue<TMessag
     /// <inheritdoc />
     public ValueTask WriteAsync(TMessage message, CancellationToken cancellationToken)
     {
+        if (channel.Writer.TryWrite(message))
+        {
+            return ValueTask.CompletedTask;
+        }
+
         return channel.Writer.WriteAsync(message, cancellationToken);
     }
 

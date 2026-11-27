@@ -236,44 +236,44 @@ public sealed class CrdtStateSyncPayloadProcessor : ICrdtStateSyncPayloadProcess
                     missingOpsStreams.Add(journalManager.GetMissingOperationsAsync(shardId, req, cancellationToken));
                 }
 
-                if (!req.IsBehind && IsVersionVectorEmpty(sourceVector))
-                {
-                    var registryDocInstance = scope.Orchestrator.Registry;
-                    if (syncMsg.IsTopologyAnnouncementOnly &&
-                        registryDocInstance != null &&
-                        string.Equals(shardId, registryDocInstance.ShardId, StringComparison.Ordinal))
+                    if (!req.IsBehind && IsVersionVectorEmpty(sourceVector))
                     {
-                        var localRegistryDoc = await registryDocInstance.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-                        if (localRegistryDoc.Data?.Documents is { Count: > 0 })
+                        var registryDocInstance = scope.Orchestrator.Registry;
+                        if (syncMsg.IsTopologyAnnouncementOnly &&
+                            registryDocInstance != null &&
+                            string.Equals(shardId, registryDocInstance.ShardId, StringComparison.Ordinal))
                         {
-                            shardsWithNoCausalOverlap.Add(shardId);
-                        }
-                    }
-                    else if (!syncMsg.IsTopologyAnnouncementOnly
-                         && !(IsVersionVectorEmpty(sourceVector) && IsVersionVectorEmpty(targetVector)))
-                    {
-                        var shouldIncludeShard = !shardingEnabled;
-                        if (shardingEnabled)
-                        {
-                            var targetNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
-                            shouldIncludeShard = targetNodes.Contains(syncMsg.ReplicaId, StringComparer.Ordinal);
-                        }
-
-                        if (shouldIncludeShard)
-                        {
-                            for (int d = 0; d < documents.Count; d++)
+                            var localRegistryData = registryDocInstance.ReadData();
+                            if (localRegistryData?.Documents is { Count: > 0 })
                             {
-                                if (string.Equals(documents[d].ShardId, shardId, StringComparison.Ordinal) &&
-                                    !string.Equals(documents[d].DocumentId, scope.Orchestrator.Registry.DocumentId, StringComparison.Ordinal))
+                                shardsWithNoCausalOverlap.Add(shardId);
+                            }
+                        }
+                        else if (!syncMsg.IsTopologyAnnouncementOnly
+                             && !(IsVersionVectorEmpty(sourceVector) && IsVersionVectorEmpty(targetVector)))
+                        {
+                            var shouldIncludeShard = !shardingEnabled;
+                            if (shardingEnabled)
+                            {
+                                var targetNodes = await distributionManager.GetTargetNodesForShardAsync(shardId, cancellationToken).ConfigureAwait(false);
+                                shouldIncludeShard = targetNodes.Contains(syncMsg.ReplicaId, StringComparer.Ordinal);
+                            }
+
+                            if (shouldIncludeShard)
+                            {
+                                for (int d = 0; d < documents.Count; d++)
                                 {
-                                    shardsWithNoCausalOverlap.Add(shardId);
-                                    break;
+                                    if (string.Equals(documents[d].ShardId, shardId, StringComparison.Ordinal) &&
+                                        !string.Equals(documents[d].DocumentId, scope.Orchestrator.Registry.DocumentId, StringComparison.Ordinal))
+                                    {
+                                        shardsWithNoCausalOverlap.Add(shardId);
+                                        break;
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
 
             if (requirements.Count == 0 && shardsWithNoCausalOverlap.Count == 0)
             {
@@ -385,8 +385,8 @@ public sealed class CrdtStateSyncPayloadProcessor : ICrdtStateSyncPayloadProcess
                         }
                     }
 
-                    var registryDoc = await scope.Orchestrator.Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-                    foreach (var entry in registryDoc.Data.Documents.Values)
+                    var registryData = scope.Orchestrator.Registry.ReadData();
+                    foreach (var entry in registryData.Documents.Values)
                     {
                         if (entry.IsDeleted)
                         {

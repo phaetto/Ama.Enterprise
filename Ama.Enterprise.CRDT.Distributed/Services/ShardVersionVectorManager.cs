@@ -579,7 +579,10 @@ public sealed class ShardVersionVectorManager : IShardVersionVectorManager, IDis
             {
                 foreach (var kvp in dvv.Versions!)
                 {
-                    copiedVersions[stringPool.GetOrAdd(kvp.Key)] = kvp.Value;
+                    if (kvp.Value > 0)
+                    {
+                        copiedVersions[stringPool.GetOrAdd(kvp.Key)] = kvp.Value;
+                    }
                 }
             }
 
