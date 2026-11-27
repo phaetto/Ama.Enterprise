@@ -31,10 +31,10 @@ public sealed class FleetManager : IFleetManager
             return new ReadOnlyDictionary<string, DeviceStatus>(new Dictionary<string, DeviceStatus>());
         }
 
-        var crdtDoc = await orchestrator.GetDocumentStateAsync<FleetState>(documentId, cancellationToken).ConfigureAwait(false);
-        if (crdtDoc.Data != null && crdtDoc.Data.Devices != null)
+        var fleetData = await orchestrator.GetDocumentDataAsync<FleetState>(documentId, cancellationToken).ConfigureAwait(false);
+        if (fleetData != null && fleetData.Devices != null)
         {
-            return new ReadOnlyDictionary<string, DeviceStatus>(crdtDoc.Data.Devices);
+            return new ReadOnlyDictionary<string, DeviceStatus>(fleetData.Devices);
         }
         
         return new ReadOnlyDictionary<string, DeviceStatus>(new Dictionary<string, DeviceStatus>());

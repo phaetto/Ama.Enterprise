@@ -844,8 +844,7 @@ public static class Program
             var shardDistributionManager = scope.ServiceProvider.GetRequiredService<IShardDistributionManager>();
             var shardIdProvider = scope.ServiceProvider.GetRequiredService<IShardIdProvider>();
 
-            var regDoc = await orchestrator.Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-            var regState = regDoc.Data ?? new CrdtRegistryState();
+            var regState = await orchestrator.Registry.GetDataAsync(cancellationToken).ConfigureAwait(false) ?? new CrdtRegistryState();
 
             var shardDocCounts = new Dictionary<string, int>(StringComparer.Ordinal)
             {

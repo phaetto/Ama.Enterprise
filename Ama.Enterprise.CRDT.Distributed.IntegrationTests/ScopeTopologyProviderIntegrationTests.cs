@@ -142,10 +142,10 @@ public sealed class ScopeTopologyProviderIntegrationTests
         var expectedPeerGuid = Guid.NewGuid();
         topologyProvider.ExpectedPeers.Add(expectedPeerGuid.ToString());
 
-        var sharedStorage = new MemoryCrdtStorage();
         var sp = BuildNode("Replica1", topologyProvider, services =>
         {
-            services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(s => sharedStorage));
+            services.AddSingleton<MemoryCrdtStorage>();
+            services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(s => s.GetRequiredService<MemoryCrdtStorage>()));
         });
 
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
@@ -237,12 +237,13 @@ public sealed class ScopeTopologyProviderIntegrationTests
         
         topologyProvider.ExpectedPeers.Add(expectedPeerGuid.ToString());
 
-        var sharedStorage = new MemoryCrdtStorage();
-
         var sp = BuildNode("Replica1", topologyProvider, services =>
         {
-            services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(s => sharedStorage));
+            services.AddSingleton<MemoryCrdtStorage>();
+            services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(s => s.GetRequiredService<MemoryCrdtStorage>()));
         });
+
+        var sharedStorage = sp.GetRequiredService<MemoryCrdtStorage>();
 
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
         var scope = scopeManager.GetOrCreateScope("Replica1");

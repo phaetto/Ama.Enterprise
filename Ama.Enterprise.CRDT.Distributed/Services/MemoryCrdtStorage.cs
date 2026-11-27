@@ -22,17 +22,18 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     private readonly Dictionary<string, HashSet<Guid>> shardedOperationIds = new();
     private readonly Dictionary<string, ClusterStateSnapshotDto> clusterStates = new();
     private readonly Dictionary<string, ShardVersionVectorMap> globalVersionVectors = new();
-    private readonly Dictionary<string, object> documents = new();
     private readonly Dictionary<string, byte[]> serializedDocuments = new();
     private readonly object syncRoot = new();
 
-    private readonly ICrdtSerializer? serializer;
+    private readonly ICrdtSerializer serializer;
     private readonly Meter meter;
     private readonly Counter<long> appendedOperationsCounter;
     private readonly Counter<long> trimsExecutedCounter;
 
-    public MemoryCrdtStorage(IMeterFactory? meterFactory = null, ICrdtSerializer? serializer = null)
+    public MemoryCrdtStorage(ICrdtSerializer serializer, IMeterFactory? meterFactory = null)
     {
+        ArgumentNullException.ThrowIfNull(serializer);
+
         this.serializer = serializer;
         this.meter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.MemoryCrdtStorage") ?? new Meter("Ama.Enterprise.CRDT.Distributed.MemoryCrdtStorage");
         this.appendedOperationsCounter = this.meter.CreateCounter<long>("crdt.storage.memory.operations_appended", "operations", "Total operations saved natively into ephemeral memory structures");
@@ -297,18 +298,13 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
 
         lock (syncRoot)
         {
-            if (documents.TryGetValue(key, out var doc) && doc is CrdtDocument<TState> typedDoc)
-            {
-                return Task.FromResult<CrdtDocument<TState>?>(typedDoc);
-            }
-
             if (serializedDocuments.TryGetValue(key, out var bytes))
             {
                 rawBytes = bytes;
             }
         }
 
-        if (rawBytes is { Length: > 0 } && serializer is not null)
+        if (rawBytes is { Length: > 0 })
         {
             var deserializedDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(rawBytes);
             return Task.FromResult<CrdtDocument<TState>?>(deserializedDoc);
@@ -330,14 +326,6 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
 
         lock (syncRoot)
         {
-            foreach (var kvp in documents)
-            {
-                if (kvp.Key.EndsWith(suffix, StringComparison.Ordinal) && kvp.Value is CrdtDocument<TState> typedDoc)
-                {
-                    return Task.FromResult<CrdtDocument<TState>?>(typedDoc);
-                }
-            }
-
             foreach (var kvp in serializedDocuments)
             {
                 if (kvp.Key.EndsWith(suffix, StringComparison.Ordinal))
@@ -348,13 +336,60 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
             }
         }
 
-        if (rawBytes is { Length: > 0 } && serializer is not null)
+        if (rawBytes is { Length: > 0 })
         {
             var deserializedDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(rawBytes);
             return Task.FromResult<CrdtDocument<TState>?>(deserializedDoc);
         }
 
         return Task.FromResult<CrdtDocument<TState>?>(null);
+    }
+
+    /// <inheritdoc />
+    public Task<byte[]?> LoadSerializedDocumentAsync(string shardId, string documentId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(documentId))
+        {
+            return Task.FromResult<byte[]?>(null);
+        }
+
+        var key = $"{shardId}_{documentId}";
+        lock (syncRoot)
+        {
+            if (serializedDocuments.TryGetValue(key, out var bytes))
+            {
+                var copy = new byte[bytes.Length];
+                Buffer.BlockCopy(bytes, 0, copy, 0, bytes.Length);
+                return Task.FromResult<byte[]?>(copy);
+            }
+        }
+
+        return Task.FromResult<byte[]?>(null);
+    }
+
+    /// <inheritdoc />
+    public Task<byte[]?> LoadSerializedDocumentFromAnyShardAsync(string documentId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(documentId))
+        {
+            return Task.FromResult<byte[]?>(null);
+        }
+
+        var suffix = $"_{documentId}";
+        lock (syncRoot)
+        {
+            foreach (var kvp in serializedDocuments)
+            {
+                if (kvp.Key.EndsWith(suffix, StringComparison.Ordinal))
+                {
+                    var copy = new byte[kvp.Value.Length];
+                    Buffer.BlockCopy(kvp.Value, 0, copy, 0, kvp.Value.Length);
+                    return Task.FromResult<byte[]?>(copy);
+                }
+            }
+        }
+
+        return Task.FromResult<byte[]?>(null);
     }
 
     /// <inheritdoc />
@@ -368,13 +403,8 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
     /// <inheritdoc />
     public Task SaveDocumentAsync<TState>(string shardId, string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new()
     {
-        var key = $"{shardId}_{documentId}";
-        lock (syncRoot)
-        {
-            documents[key] = document;
-            serializedDocuments.Remove(key);
-        }
-        return Task.CompletedTask;
+        var serializedDocument = serializer.SerializeToBytes(document);
+        return SaveSerializedDocumentAsync<TState>(shardId, documentId, serializedDocument, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -383,10 +413,12 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
         ArgumentNullException.ThrowIfNull(serializedDocument);
 
         var key = $"{shardId}_{documentId}";
+        var copy = new byte[serializedDocument.Length];
+        Buffer.BlockCopy(serializedDocument, 0, copy, 0, serializedDocument.Length);
+
         lock (syncRoot)
         {
-            serializedDocuments[key] = serializedDocument;
-            documents.Remove(key);
+            serializedDocuments[key] = copy;
         }
         return Task.CompletedTask;
     }
@@ -439,7 +471,6 @@ public sealed class MemoryCrdtStorage : IDistributedCrdtStorage, IDisposable
                 }
             }
 
-            documents.Remove(key);
             serializedDocuments.Remove(key);
         }
 

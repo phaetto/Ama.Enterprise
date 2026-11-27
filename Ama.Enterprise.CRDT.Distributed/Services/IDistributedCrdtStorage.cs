@@ -71,6 +71,39 @@ public interface IDistributedCrdtStorage : ICrdtOperationJournal
     }
 
     /// <summary>
+    /// Loads the raw serialized CRDT document snapshot bytes directly from storage without deserializing into a <see cref="CrdtDocument{TState}"/>.
+    /// </summary>
+    /// <param name="shardId">The shard identifier isolating document bounds.</param>
+    /// <param name="documentId">The globally unique identifier for this document type (Topic).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The stored serialized document bytes, or null if no previous state exists.</returns>
+    /// <example>
+    /// <code>
+    /// byte[]? rawBytes = await storage.LoadSerializedDocumentAsync("shard-0", "doc-123", cancellationToken);
+    /// </code>
+    /// </example>
+    Task<byte[]?> LoadSerializedDocumentAsync(string shardId, string documentId, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult<byte[]?>(null);
+    }
+
+    /// <summary>
+    /// Attempts to load the raw serialized CRDT document snapshot bytes regardless of its persisted shard identifier.
+    /// </summary>
+    /// <param name="documentId">The globally unique identifier for this document type (Topic).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The stored serialized document bytes, or null if no previous state exists under any shard.</returns>
+    /// <example>
+    /// <code>
+    /// byte[]? rawBytes = await storage.LoadSerializedDocumentFromAnyShardAsync("doc-123", cancellationToken);
+    /// </code>
+    /// </example>
+    Task<byte[]?> LoadSerializedDocumentFromAnyShardAsync(string documentId, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult<byte[]?>(null);
+    }
+
+    /// <summary>
     /// Attempts to load an orphaned document state from previous replica identities. 
     /// Used as a fallback during initialization to prevent state loss when dynamic node scaling occurs.
     /// </summary>

@@ -219,13 +219,34 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Registers a specific AOT-compliant CRDT document type avoiding reflection.
     /// </summary>
+    /// <typeparam name="TState">The CRDT document state type.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <param name="typeAlias">The unique string alias identifying this document type.</param>
+    /// <returns>The updated service collection.</returns>
     public static IServiceCollection AddDistributedDocumentType<TState>(this IServiceCollection services, string typeAlias) where TState : class, new()
+    {
+        return services.AddDistributedDocumentType<TState>(typeAlias, residencyMode: null);
+    }
+
+    /// <summary>
+    /// Registers a specific AOT-compliant CRDT document type with an explicit in-memory residency mode override.
+    /// </summary>
+    /// <typeparam name="TState">The CRDT document state type.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <param name="typeAlias">The unique string alias identifying this document type.</param>
+    /// <param name="residencyMode">The explicit residency mode override for this document type, or <see langword="null"/> to use <see cref="DistributedCrdtOptions.DefaultDocumentResidencyMode"/>.</param>
+    /// <returns>The updated service collection.</returns>
+    public static IServiceCollection AddDistributedDocumentType<TState>(
+        this IServiceCollection services,
+        string typeAlias,
+        CrdtDocumentResidencyMode? residencyMode)
+        where TState : class, new()
     {
         ArgumentNullException.ThrowIfNull(services);
         if (string.IsNullOrWhiteSpace(typeAlias)) throw new ArgumentException("Type alias cannot be null or empty.", nameof(typeAlias));
 
         typeAlias = CrdtStringPool.Shared.GetOrAdd(typeAlias);
-        var factory = new DocumentFactory<TState>(typeAlias);
+        var factory = new DocumentFactory<TState>(typeAlias, residencyMode);
         services.AddKeyedSingleton<IDocumentFactory>(typeAlias, factory);
         services.AddSingleton<IDocumentFactory>(factory);
         return services;

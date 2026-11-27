@@ -109,6 +109,21 @@ public interface ICrdtDocumentOrchestrator
     ValueTask<byte[]> TryLoadStoredDocumentSnapshotBytesAsync(string documentId, string? typeAlias = null, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Retrieves the materialized domain data (<typeparamref name="TState"/>) routing across local memory channels or out-of-bound RPC network fetches.
+    /// In <see cref="CrdtDocumentResidencyMode.PackedMetadata"/> mode, local reads return the materialized state without unpacking CRDT metadata.
+    /// </summary>
+    /// <typeparam name="TState">The CRDT document state type.</typeparam>
+    /// <param name="documentId">The unique document identifier.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The materialized domain data for the document.</returns>
+    /// <example>
+    /// <code>
+    /// var data = await orchestrator.GetDocumentDataAsync&lt;MyState&gt;("doc-1", cancellationToken);
+    /// </code>
+    /// </example>
+    ValueTask<TState> GetDocumentDataAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new();
+
+    /// <summary>
     /// Retrieves the materialized document state routing across local memory channels or out-of-bound RPC network fetches.
     /// </summary>
     ValueTask<CrdtDocument<TState>> GetDocumentStateAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new();

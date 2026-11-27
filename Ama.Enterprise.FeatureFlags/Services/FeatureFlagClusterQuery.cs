@@ -22,7 +22,7 @@ public sealed class FeatureFlagClusterQuery : ICrdtClusterQuery<FeatureFlagState
         ArgumentNullException.ThrowIfNull(input);
 
         var result = new FeatureFlagQueryResultDto();
-        var data = context.Document.Data;
+        var data = context.Data;
         if (data?.Flags == null || data.Flags.Count == 0)
         {
             return new ValueTask<FeatureFlagQueryResultDto>(result);

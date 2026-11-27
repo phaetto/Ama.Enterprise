@@ -37,6 +37,12 @@ public interface IDocumentFactory
     Type StateType { get; }
 
     /// <summary>
+    /// Gets the optional per-document-type residency mode override.
+    /// When <see langword="null"/>, <see cref="DistributedCrdtOptions.DefaultDocumentResidencyMode"/> is used.
+    /// </summary>
+    CrdtDocumentResidencyMode? ResidencyMode => null;
+
+    /// <summary>
     /// Creates an initialized distributed CRDT document instance for the specified document identifier.
     /// </summary>
     /// <param name="serviceProvider">The scoped service provider.</param>
@@ -88,14 +94,19 @@ public sealed class DocumentFactory<TState> : IDocumentFactory where TState : cl
     /// <inheritdoc />
     public Type StateType => typeof(TState);
 
+    /// <inheritdoc />
+    public CrdtDocumentResidencyMode? ResidencyMode { get; }
+
     /// <summary>
     /// Initializes a new instance of the <see cref="DocumentFactory{TState}"/> class.
     /// </summary>
     /// <param name="typeAlias">The string alias mapped to <typeparamref name="TState"/>.</param>
-    public DocumentFactory(string typeAlias)
+    /// <param name="residencyMode">An optional residency mode override for documents created by this factory.</param>
+    public DocumentFactory(string typeAlias, CrdtDocumentResidencyMode? residencyMode = null)
     {
         if (string.IsNullOrWhiteSpace(typeAlias)) throw new ArgumentException("Type alias cannot be null or empty.", nameof(typeAlias));
         TypeAlias = CrdtStringPool.Shared.GetOrAdd(typeAlias);
+        ResidencyMode = residencyMode;
     }
 
     /// <inheritdoc />
@@ -109,7 +120,7 @@ public sealed class DocumentFactory<TState> : IDocumentFactory where TState : cl
 
         var idProvider = serviceProvider.GetRequiredService<IDocumentIdProvider>();
         var state = idProvider.CreateDocumentWithId<TState>(documentId);
-        return CreateDocumentInstance(serviceProvider, state, TypeAlias, stringPool);
+        return CreateDocumentInstance(serviceProvider, state, TypeAlias, stringPool, ResidencyMode);
     }
 
     /// <inheritdoc />
@@ -127,7 +138,8 @@ public sealed class DocumentFactory<TState> : IDocumentFactory where TState : cl
         IServiceProvider serviceProvider,
         TState state,
         string? typeAlias = null,
-        ICrdtStringPool? stringPool = null)
+        ICrdtStringPool? stringPool = null,
+        CrdtDocumentResidencyMode? residencyMode = null)
     {
         return new DistributedCrdtDocument<TState>(
             state,
@@ -149,7 +161,8 @@ public sealed class DocumentFactory<TState> : IDocumentFactory where TState : cl
             serviceProvider.GetServices<IDocumentStateObserver<TState>>(),
             serviceProvider.GetServices<IDocumentPatchObserver>(),
             typeAlias,
-            stringPool);
+            stringPool,
+            residencyMode);
     }
 
     /// <inheritdoc />
@@ -187,6 +200,26 @@ public sealed class DocumentFactory<TState> : IDocumentFactory where TState : cl
         var compositeKey = typeof(TState) == typeof(CrdtRegistryState)
             ? documentId
             : CrdtRegistryEntry.GetRegistryKey(TypeAlias, documentId);
+
+        var rawBytes = await storage.LoadSerializedDocumentAsync(shardId, compositeKey, cancellationToken).ConfigureAwait(false);
+        if ((rawBytes == null || rawBytes.Length == 0) && !string.Equals(compositeKey, documentId, StringComparison.Ordinal))
+        {
+            rawBytes = await storage.LoadSerializedDocumentAsync(shardId, documentId, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (rawBytes == null || rawBytes.Length == 0)
+        {
+            rawBytes = await storage.LoadSerializedDocumentFromAnyShardAsync(compositeKey, cancellationToken).ConfigureAwait(false);
+            if ((rawBytes == null || rawBytes.Length == 0) && !string.Equals(compositeKey, documentId, StringComparison.Ordinal))
+            {
+                rawBytes = await storage.LoadSerializedDocumentFromAnyShardAsync(documentId, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        if (rawBytes is { Length: > 0 })
+        {
+            return rawBytes;
+        }
 
         var loaded = await storage.LoadDocumentAsync<TState>(shardId, compositeKey, cancellationToken).ConfigureAwait(false);
         if (loaded == null && !string.Equals(compositeKey, documentId, StringComparison.Ordinal))

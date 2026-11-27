@@ -20,7 +20,7 @@ public sealed class FleetBatteryAnalyticsMapReduce
         FleetBatteryStatsInput input,
         CancellationToken cancellationToken = default)
     {
-        var devices = context.Document.Data?.Devices;
+        var devices = context.Data?.Devices;
         if (devices is null || devices.Count == 0)
         {
             return new ValueTask<FleetBatteryStatsAccumulatorDto>(

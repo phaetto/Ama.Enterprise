@@ -101,7 +101,6 @@ public sealed class GracefulShutdownIntegrationTests
     public async Task CrdtShutdownCoordinator_FlushModeJournalOnly_DrainsPipelinesDebouncedPatchesAndWal_WithoutSavingCheckpoints()
     {
         // Arrange
-        var innerStorage = new MemoryCrdtStorage();
         var capturedBroadcasts = new List<ReadOnlyMemory<byte>>();
         var mockP2p = new Mock<IP2pAlgorithm>();
         mockP2p.Setup(p => p.BroadcastAsync(Capture.In(capturedBroadcasts), It.IsAny<CancellationToken>()))
@@ -116,12 +115,15 @@ public sealed class GracefulShutdownIntegrationTests
             opt.WalFlushIntervalMilliseconds = 60_000;
         }, services =>
         {
+            services.AddSingleton<MemoryCrdtStorage>();
             services.Replace(ServiceDescriptor.Singleton(mockP2p.Object));
             services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(provider =>
                 new BufferedDistributedCrdtStorageDecorator(
-                    innerStorage,
+                    provider.GetRequiredService<MemoryCrdtStorage>(),
                     ActivatorUtilities.CreateInstance<InMemoryWriteAheadBuffer>(provider))));
         });
+
+        var innerStorage = sp.GetRequiredService<MemoryCrdtStorage>();
 
         var scope = sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaJournalOnly");
         await scope.Orchestrator.InitializeAsync(CancellationToken.None);
@@ -154,7 +156,6 @@ public sealed class GracefulShutdownIntegrationTests
     public async Task CrdtShutdownCoordinator_FlushModeJournalAndCheckpoints_SavesDocumentsDvvAndClusterState_WithoutAntiEntropyDispatch()
     {
         // Arrange
-        var innerStorage = new MemoryCrdtStorage();
         var mockSender = new Mock<IDirectMessageSender>();
 
         var sp = BuildNode("ReplicaCheckpoints", opt =>
@@ -163,12 +164,15 @@ public sealed class GracefulShutdownIntegrationTests
             opt.JournalMode = CrdtJournalMode.InMemoryBuffer;
         }, services =>
         {
+            services.AddSingleton<MemoryCrdtStorage>();
             services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
             services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(provider =>
                 new BufferedDistributedCrdtStorageDecorator(
-                    innerStorage,
+                    provider.GetRequiredService<MemoryCrdtStorage>(),
                     ActivatorUtilities.CreateInstance<InMemoryWriteAheadBuffer>(provider))));
         });
+
+        var innerStorage = sp.GetRequiredService<MemoryCrdtStorage>();
 
         var peerRegistry = sp.GetRequiredService<IPeerRegistry>();
         var peerNode = new PeerNode(new PeerId(Guid.NewGuid()), new TcpPeerEndpoint("127.0.0.1", 5050));
@@ -212,7 +216,6 @@ public sealed class GracefulShutdownIntegrationTests
     public async Task CrdtShutdownCoordinator_FlushModeFullSyncAndCheckpoint_DispatchesFinalAntiEntropyAndSavesAllState()
     {
         // Arrange
-        var innerStorage = new MemoryCrdtStorage();
         var capturedSends = new List<ReadOnlyMemory<byte>>();
         var mockSender = new Mock<IDirectMessageSender>();
         mockSender.Setup(s => s.SendDirectAsync(It.IsAny<PeerId>(), Capture.In(capturedSends), It.IsAny<CancellationToken>()))
@@ -223,9 +226,12 @@ public sealed class GracefulShutdownIntegrationTests
             opt.FlushModeOnShutdown = CrdtShutdownFlushMode.FullSyncAndCheckpoint;
         }, services =>
         {
+            services.AddSingleton<MemoryCrdtStorage>();
             services.Replace(ServiceDescriptor.Singleton(mockSender.Object));
-            services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(_ => innerStorage));
+            services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(provider => provider.GetRequiredService<MemoryCrdtStorage>()));
         });
+
+        var innerStorage = sp.GetRequiredService<MemoryCrdtStorage>();
 
         var peerRegistry = sp.GetRequiredService<IPeerRegistry>();
         var peerId = new PeerId(Guid.NewGuid());
@@ -429,7 +435,6 @@ public sealed class GracefulShutdownIntegrationTests
             var mockLifetime = new Mock<IHostApplicationLifetime>();
             mockLifetime.Setup(l => l.StopApplication()).Callback(() => tcsStopped.TrySetResult());
 
-            var innerStorage = new MemoryCrdtStorage();
             var sp = BuildNode("ReplicaAzureSentinel", opt =>
             {
                 opt.FlushModeOnShutdown = CrdtShutdownFlushMode.JournalAndCheckpoints;
@@ -437,9 +442,12 @@ public sealed class GracefulShutdownIntegrationTests
                 opt.ShutdownPosixSignals = [];
             }, services =>
             {
-                services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(_ => innerStorage));
+                services.AddSingleton<MemoryCrdtStorage>();
+                services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(provider => provider.GetRequiredService<MemoryCrdtStorage>()));
                 services.AddSingleton(mockLifetime.Object);
             });
+
+            var innerStorage = sp.GetRequiredService<MemoryCrdtStorage>();
 
             var scope = sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaAzureSentinel");
             await scope.Orchestrator.InitializeAsync(CancellationToken.None);

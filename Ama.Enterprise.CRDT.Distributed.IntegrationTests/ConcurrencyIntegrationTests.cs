@@ -84,7 +84,9 @@ public sealed class ConcurrencyIntegrationTests
     public async Task MemoryCrdtStorage_ConcurrentAppends_ShouldIsolateShards_WithoutMixing()
     {
         // Arrange
-        var storage = new MemoryCrdtStorage();
+        var serviceProvider = BuildNode("Replica1");
+        var scope = serviceProvider.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("Replica1");
+        var storage = scope.ServiceProvider.GetRequiredService<MemoryCrdtStorage>();
         const int TaskCount = 100;
         const string ShardA = "shard-A";
         const string ShardB = "shard-B";

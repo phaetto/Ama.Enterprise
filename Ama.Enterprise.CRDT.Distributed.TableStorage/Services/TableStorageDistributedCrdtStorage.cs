@@ -236,85 +236,40 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
     {
         ArgumentException.ThrowIfNullOrEmpty(documentId);
 
-        try
-        {
-            var response = await this.tableClient.GetEntityAsync<TableEntity>(this.GetDocumentStatePartitionKey(shardId), documentId, cancellationToken: cancellationToken).ConfigureAwait(false);
-            if (response?.Value != null)
-            {
-                var tags = new KeyValuePair<string, object?>[] { new("type", "document") };
-                this.operationsReadCounter.Add(1, tags);
-
-                var payload = CrdtTableEntity.GetPayload(response.Value);
-                if (payload != null)
-                {
-                    this.payloadBytesHistogram.Record(payload.Length, tags);
-                }
-
-                return this.serializer.DeserializeFromBytes<CrdtDocument<TState>>(payload);
-            }
-        }
-        catch (RequestFailedException ex) when (ex.Status == 404 && ex.ErrorCode != "TableNotFound")
-        {
-            return null;
-        }
-        catch (Exception ex)
-        {
-            this.logger.LogError(ex, "Storage connection failed during LoadDocumentAsync. Failing fast to prevent state corruption.");
-            throw;
-        }
-
-        return null;
+        var payload = await this.LoadRawPayloadAsync(shardId, documentId, cancellationToken).ConfigureAwait(false);
+        return payload is { Length: > 0 } ? this.serializer.DeserializeFromBytes<CrdtDocument<TState>>(payload) : null;
     }
 
     public async Task<CrdtDocument<TState>?> LoadDocumentFromAnyShardAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
     {
         ArgumentException.ThrowIfNullOrEmpty(documentId);
 
-        try
-        {
-            var localReplicaId = this.GetLocalReplicaId();
-            var localPrefix = localReplicaId != null
-                ? $"{localReplicaId}_{DocumentStatePartitionKey}_"
-                : $"{DocumentStatePartitionKey}_";
-            var localPrefixEnd = $"{localPrefix}~";
+        var payload = await this.LoadRawPayloadFromAnyShardAsync(documentId, cancellationToken).ConfigureAwait(false);
+        return payload is { Length: > 0 } ? this.serializer.DeserializeFromBytes<CrdtDocument<TState>>(payload) : null;
+    }
 
-            var filter = TableClient.CreateQueryFilter($"PartitionKey ge {localPrefix} and PartitionKey le {localPrefixEnd} and RowKey eq {documentId}");
-            var query = this.tableClient.QueryAsync<TableEntity>(filter, cancellationToken: cancellationToken);
+    public async Task<byte[]?> LoadSerializedDocumentAsync(string shardId, string documentId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(documentId);
 
-            TableEntity? latestEntity = null;
-            await foreach (var entity in query.WithCancellation(cancellationToken).ConfigureAwait(false))
-            {
-                if (latestEntity == null || Nullable.Compare(entity.Timestamp, latestEntity.Timestamp) > 0)
-                {
-                    latestEntity = entity;
-                }
-            }
-
-            if (latestEntity != null)
-            {
-                var tags = new KeyValuePair<string, object?>[] { new("type", "document") };
-                this.operationsReadCounter.Add(1, tags);
-
-                var payload = CrdtTableEntity.GetPayload(latestEntity);
-                if (payload != null)
-                {
-                    this.payloadBytesHistogram.Record(payload.Length, tags);
-                }
-
-                return this.serializer.DeserializeFromBytes<CrdtDocument<TState>>(payload);
-            }
-        }
-        catch (RequestFailedException ex) when (ex.Status == 404 && ex.ErrorCode != "TableNotFound")
+        if (!this.useBinarySerialization)
         {
             return null;
         }
-        catch (Exception ex)
+
+        return await this.LoadRawPayloadAsync(shardId, documentId, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<byte[]?> LoadSerializedDocumentFromAnyShardAsync(string documentId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(documentId);
+
+        if (!this.useBinarySerialization)
         {
-            this.logger.LogError(ex, "Storage connection failed during LoadDocumentFromAnyShardAsync. Failing fast to prevent state corruption.");
-            throw;
+            return null;
         }
 
-        return null;
+        return await this.LoadRawPayloadFromAnyShardAsync(documentId, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new()
@@ -913,6 +868,87 @@ public sealed class TableStorageDistributedCrdtStorage : IDistributedCrdtStorage
         {
             return null;
         }
+    }
+
+    private async Task<byte[]?> LoadRawPayloadAsync(string shardId, string documentId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await this.tableClient.GetEntityAsync<TableEntity>(this.GetDocumentStatePartitionKey(shardId), documentId, cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (response?.Value != null)
+            {
+                var tags = new KeyValuePair<string, object?>[] { new("type", "document") };
+                this.operationsReadCounter.Add(1, tags);
+
+                var payload = CrdtTableEntity.GetPayload(response.Value);
+                if (payload != null)
+                {
+                    this.payloadBytesHistogram.Record(payload.Length, tags);
+                }
+
+                return payload;
+            }
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404 && ex.ErrorCode != "TableNotFound")
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            this.logger.LogError(ex, "Storage connection failed during LoadDocumentAsync. Failing fast to prevent state corruption.");
+            throw;
+        }
+
+        return null;
+    }
+
+    private async Task<byte[]?> LoadRawPayloadFromAnyShardAsync(string documentId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var localReplicaId = this.GetLocalReplicaId();
+            var localPrefix = localReplicaId != null
+                ? $"{localReplicaId}_{DocumentStatePartitionKey}_"
+                : $"{DocumentStatePartitionKey}_";
+            var localPrefixEnd = $"{localPrefix}~";
+
+            var filter = TableClient.CreateQueryFilter($"PartitionKey ge {localPrefix} and PartitionKey le {localPrefixEnd} and RowKey eq {documentId}");
+            var query = this.tableClient.QueryAsync<TableEntity>(filter, cancellationToken: cancellationToken);
+
+            TableEntity? latestEntity = null;
+            await foreach (var entity in query.WithCancellation(cancellationToken).ConfigureAwait(false))
+            {
+                if (latestEntity == null || Nullable.Compare(entity.Timestamp, latestEntity.Timestamp) > 0)
+                {
+                    latestEntity = entity;
+                }
+            }
+
+            if (latestEntity != null)
+            {
+                var tags = new KeyValuePair<string, object?>[] { new("type", "document") };
+                this.operationsReadCounter.Add(1, tags);
+
+                var payload = CrdtTableEntity.GetPayload(latestEntity);
+                if (payload != null)
+                {
+                    this.payloadBytesHistogram.Record(payload.Length, tags);
+                }
+
+                return payload;
+            }
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404 && ex.ErrorCode != "TableNotFound")
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            this.logger.LogError(ex, "Storage connection failed during LoadDocumentFromAnyShardAsync. Failing fast to prevent state corruption.");
+            throw;
+        }
+
+        return null;
     }
     
     private static string GetJournalRowKey(long shardClock, string replicaId) => $"{shardClock.ToString("D20", CultureInfo.InvariantCulture)}_{replicaId}";

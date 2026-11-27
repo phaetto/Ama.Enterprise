@@ -216,7 +216,18 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
 
     private void StartBackgroundHardTrim()
     {
-        this.ExecuteHardTrimInlineAsync(CancellationToken.None).ConfigureAwait(false);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await this.ExecuteHardTrimInlineAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref this.isTrimming, 0);
+                this.ReevaluateThresholdAfterTrimCompletion();
+            }
+        }, CancellationToken.None);
     }
 
     private async Task ExecuteHardTrimInlineAsync(CancellationToken cancellationToken)

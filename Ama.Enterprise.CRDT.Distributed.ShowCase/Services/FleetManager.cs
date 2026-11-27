@@ -42,10 +42,10 @@ public sealed class FleetManager :
             return new ReadOnlyDictionary<string, DeviceStatus>(new Dictionary<string, DeviceStatus>());
         }
 
-        var crdtDoc = await orchestrator.GetDocumentStateAsync<FleetState>(documentId, cancellationToken).ConfigureAwait(false);
-        if (crdtDoc.Data != null && crdtDoc.Data.Devices != null)
+        var fleetData = await orchestrator.GetDocumentDataAsync<FleetState>(documentId, cancellationToken).ConfigureAwait(false);
+        if (fleetData != null && fleetData.Devices != null)
         {
-            return new ReadOnlyDictionary<string, DeviceStatus>(crdtDoc.Data.Devices);
+            return new ReadOnlyDictionary<string, DeviceStatus>(fleetData.Devices);
         }
         
         return new ReadOnlyDictionary<string, DeviceStatus>(new Dictionary<string, DeviceStatus>());
@@ -141,7 +141,7 @@ public sealed class FleetManager :
         CancellationToken cancellationToken = default)
     {
         var matches = new List<LowBatteryDeviceMatchDto>();
-        var devices = context.Document.Data?.Devices;
+        var devices = context.Data?.Devices;
 
         if (devices is not null)
         {

@@ -62,6 +62,84 @@ public sealed class CrdtMemoryEstimator : ICrdtMemoryEstimator
         return new DocumentMemoryFootprintDto(dataBytes, metadataBytes, dataAndMetaBytes, wholeObjectBytes, shardDvvBytes);
     }
 
+    /// <inheritdoc />
+    public DocumentMemoryFootprintDto EstimatePackedMetadataDocumentFootprint<TState>(
+        TState data,
+        int metadataByteLength,
+        string documentId,
+        string shardId,
+        int debounceBufferCapacity,
+        ShardVersionVectorMap globalState,
+        IReadOnlyList<CrdtAotContext> aotContexts)
+        where TState : class, new()
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        ArgumentNullException.ThrowIfNull(documentId);
+        ArgumentNullException.ThrowIfNull(shardId);
+        ArgumentNullException.ThrowIfNull(globalState);
+        ArgumentNullException.ThrowIfNull(aotContexts);
+
+        long dataBytes;
+        long metadataBytes = Math.Max(0, metadataByteLength) > 0 ? 24L + metadataByteLength : 0L;
+        long dataAndMetaBytes;
+        long wholeObjectBytes;
+
+        lock (syncRoot)
+        {
+            visitedSet.Clear();
+
+            dataBytes = EstimateGraphSize(data, visitedSet, aotContexts);
+            dataAndMetaBytes = 32L + dataBytes + metadataBytes;
+
+            long managerOverheadBytes = 256;
+            managerOverheadBytes += EstimateStringSize(documentId, visitedSet);
+            managerOverheadBytes += EstimateStringSize(shardId, visitedSet);
+
+            if (debounceBufferCapacity >= 0)
+            {
+                managerOverheadBytes += 160 + (debounceBufferCapacity * 64L);
+            }
+
+            wholeObjectBytes = managerOverheadBytes + dataAndMetaBytes;
+
+            visitedSet.Clear();
+            visitedSet.TrimExcess(64);
+        }
+
+        var shardDvvBytes = EstimateShardVersionVectorSize(globalState, shardId);
+        return new DocumentMemoryFootprintDto(dataBytes, metadataBytes, dataAndMetaBytes, wholeObjectBytes, shardDvvBytes);
+    }
+
+    /// <inheritdoc />
+    public DocumentMemoryFootprintDto EstimateFullySerializedDocumentFootprint(
+        int serializedDocumentByteLength,
+        string documentId,
+        string shardId,
+        int debounceBufferCapacity,
+        ShardVersionVectorMap globalState)
+    {
+        ArgumentNullException.ThrowIfNull(documentId);
+        ArgumentNullException.ThrowIfNull(shardId);
+        ArgumentNullException.ThrowIfNull(globalState);
+
+        long byteLength = Math.Max(0, serializedDocumentByteLength);
+        long dataAndMetaBytes = byteLength > 0 ? 24L + byteLength : 0L;
+
+        long managerOverheadBytes = 256;
+        managerOverheadBytes += EstimateRawStringSize(documentId);
+        managerOverheadBytes += EstimateRawStringSize(shardId);
+
+        if (debounceBufferCapacity >= 0)
+        {
+            managerOverheadBytes += 160 + (debounceBufferCapacity * 64L);
+        }
+
+        long wholeObjectBytes = managerOverheadBytes + dataAndMetaBytes;
+        var shardDvvBytes = EstimateShardVersionVectorSize(globalState, shardId);
+
+        return new DocumentMemoryFootprintDto(byteLength, 0L, dataAndMetaBytes, wholeObjectBytes, shardDvvBytes);
+    }
+
     private static long EstimateShardVersionVectorSize(ShardVersionVectorMap globalState, string shardId)
     {
         long size = 128;

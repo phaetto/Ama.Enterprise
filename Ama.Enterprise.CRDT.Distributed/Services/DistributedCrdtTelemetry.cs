@@ -55,7 +55,7 @@ public sealed class DistributedCrdtTelemetry : IDistributedCrdtTelemetry, IDispo
     /// <summary>
     /// Initializes a new instance of the <see cref="DistributedCrdtTelemetry"/> class.
     /// </summary>
-    /// <param name="meterFactory">Optional meter factory provided by dependency injection.</param>
+    /// <param name="meterFactory">The optional meter factory provided by dependency injection.</param>
     public DistributedCrdtTelemetry(IMeterFactory? meterFactory = null)
     {
         this.scopeMeter = meterFactory?.Create("Ama.Enterprise.CRDT.Distributed.DistributedCrdtScopeFactory")

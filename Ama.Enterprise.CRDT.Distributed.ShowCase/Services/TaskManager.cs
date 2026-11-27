@@ -40,10 +40,10 @@ public sealed class TaskManager : ITaskManager
             return new ReadOnlyDictionary<string, TaskItem>(new Dictionary<string, TaskItem>());
         }
 
-        var crdtDoc = await orchestrator.GetDocumentStateAsync<TaskListState>(documentId, cancellationToken).ConfigureAwait(false);
-        if (crdtDoc.Data != null && crdtDoc.Data.Tasks != null)
+        var taskListData = await orchestrator.GetDocumentDataAsync<TaskListState>(documentId, cancellationToken).ConfigureAwait(false);
+        if (taskListData != null && taskListData.Tasks != null)
         {
-            return new ReadOnlyDictionary<string, TaskItem>(crdtDoc.Data.Tasks);
+            return new ReadOnlyDictionary<string, TaskItem>(taskListData.Tasks);
         }
         
         return new ReadOnlyDictionary<string, TaskItem>(new Dictionary<string, TaskItem>());

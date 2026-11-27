@@ -83,7 +83,8 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     public async Task MemoryCrdtStorage_ShouldAppendRetrieveAndTrim()
     {
         // Arrange
-        var storage = new MemoryCrdtStorage();
+        var sp = BuildNode("ReplicaA");
+        var storage = ActivatorUtilities.CreateInstance<MemoryCrdtStorage>(sp);
         var op1Id = Guid.NewGuid();
         var op2Id = Guid.NewGuid();
         var op3Id = Guid.NewGuid();
@@ -121,7 +122,8 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     public async Task MemoryCrdtStorage_TrimAsync_ShouldOnlyTrimTargetShard_WithoutMixing()
     {
         // Arrange
-        var storage = new MemoryCrdtStorage();
+        var sp = BuildNode("ReplicaA");
+        var storage = ActivatorUtilities.CreateInstance<MemoryCrdtStorage>(sp);
         var op1Id = Guid.NewGuid();
         var op2Id = Guid.NewGuid();
 
@@ -429,12 +431,13 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     public async Task CrdtInitializationService_ShouldReplayJournaledOperations_OnStartup()
     {
         // Arrange - Node 1
-        var sharedStorage = new MemoryCrdtStorage();
-
         var sp1 = BuildNode("Replica1", services =>
         {
-            services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(sharedStorage));
+            services.AddSingleton<MemoryCrdtStorage>();
+            services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(provider => provider.GetRequiredService<MemoryCrdtStorage>()));
         });
+
+        var sharedStorage = sp1.GetRequiredService<MemoryCrdtStorage>();
 
         var scopeManager1 = sp1.GetRequiredService<DistributedCrdtScopeManager>();
         var scope1 = scopeManager1.GetOrCreateScope("Replica1");
@@ -477,8 +480,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     public async Task CrdtCheckpointService_ShouldAggressivelyTrimJournal_WhenThresholdIsExceeded()
     {
         // Arrange
-        var sharedStorage = new MemoryCrdtStorage();
-
         var sp = BuildNode("Replica1", services =>
         {
             services.Configure<DistributedCrdtOptions>(opt =>
@@ -488,8 +489,11 @@ public sealed class JournalingAndSnapshottingIntegrationTests
                 // Keep soft threshold disabled during initial setup so StorageJournalForwarder does not reactively trim during the loop
                 opt.JournalSoftTrimThreshold = 0;
             });
-            services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(sharedStorage));
+            services.AddSingleton<MemoryCrdtStorage>();
+            services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(provider => provider.GetRequiredService<MemoryCrdtStorage>()));
         });
+
+        var sharedStorage = sp.GetRequiredService<MemoryCrdtStorage>();
 
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
         var scope = scopeManager.GetOrCreateScope("Replica1");
@@ -529,8 +533,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     public async Task StorageJournalForwarder_WhenHardThresholdExceededDuringBurst_TriggersImmediateBackgroundAggressiveTrim()
     {
         // Arrange
-        var sharedStorage = new MemoryCrdtStorage();
-
         var sp = BuildNode("Replica1", services =>
         {
             services.Configure<DistributedCrdtOptions>(opt =>
@@ -538,8 +540,11 @@ public sealed class JournalingAndSnapshottingIntegrationTests
                 opt.JournalHardTrimThreshold = 5;
                 opt.MaintenanceIntervalSeconds = 3600; // Disable periodic maintenance so only StorageJournalForwarder can trim
             });
-            services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(sharedStorage));
+            services.AddSingleton<MemoryCrdtStorage>();
+            services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(provider => provider.GetRequiredService<MemoryCrdtStorage>()));
         });
+
+        var sharedStorage = sp.GetRequiredService<MemoryCrdtStorage>();
 
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
         var scope = scopeManager.GetOrCreateScope("Replica1");
@@ -655,12 +660,13 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     public async Task CrdtInitializationService_WhenZeroDocumentCheckpointsSaved_ReconstructsRegistryAndChildDocumentsSolelyFromWalJournal()
     {
         // Arrange - Node 1 applies registry creation and document mutations, but NEVER runs CrdtCheckpointService
-        var walOnlyStorage = new MemoryCrdtStorage();
-
         var sp1 = BuildNode("ReplicaWal", services =>
         {
-            services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(walOnlyStorage));
+            services.AddSingleton<MemoryCrdtStorage>();
+            services.Replace(ServiceDescriptor.Singleton<IDistributedCrdtStorage>(provider => provider.GetRequiredService<MemoryCrdtStorage>()));
         });
+
+        var walOnlyStorage = sp1.GetRequiredService<MemoryCrdtStorage>();
 
         var scope1 = sp1.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaWal");
         var orch1 = scope1.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
@@ -697,7 +703,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     public async Task BufferedStorageDecorator_InMemoryBuffer_SupportsReadYourOwnWritesBeforeFlush_AndFlushesInBackground()
     {
         // Arrange
-        var innerStorage = new MemoryCrdtStorage();
         var sp = BuildNode("ReplicaBuf", services =>
         {
             services.Configure<DistributedCrdtOptions>(opt =>
@@ -706,11 +711,14 @@ public sealed class JournalingAndSnapshottingIntegrationTests
                 opt.WalFlushIntervalMilliseconds = 50;
                 opt.WalMaxBatchSize = 100;
             });
+            services.AddSingleton<MemoryCrdtStorage>();
             services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(provider =>
                 new BufferedDistributedCrdtStorageDecorator(
-                    innerStorage,
+                    provider.GetRequiredService<MemoryCrdtStorage>(),
                     ActivatorUtilities.CreateInstance<InMemoryWriteAheadBuffer>(provider))));
         });
+
+        var innerStorage = sp.GetRequiredService<MemoryCrdtStorage>();
 
         var scope = sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaBuf");
         var orch = scope.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
@@ -755,18 +763,20 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     public async Task BufferedStorageDecorator_TrimBeforeFlush_DropsTrimmedOperationsFromFlushBatch()
     {
         // Arrange
-        var innerStorage = new MemoryCrdtStorage();
         var sp = BuildNode("ReplicaTrimRace", services =>
         {
             services.Configure<DistributedCrdtOptions>(opt =>
             {
                 opt.JournalMode = CrdtJournalMode.InMemoryBuffer;
             });
+            services.AddSingleton<MemoryCrdtStorage>();
             services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(provider =>
                 new BufferedDistributedCrdtStorageDecorator(
-                    innerStorage,
+                    provider.GetRequiredService<MemoryCrdtStorage>(),
                     ActivatorUtilities.CreateInstance<InMemoryWriteAheadBuffer>(provider))));
         });
+
+        var innerStorage = sp.GetRequiredService<MemoryCrdtStorage>();
 
         var scope = sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaTrimRace");
         var decorator = (BufferedDistributedCrdtStorageDecorator)scope.Storage;
@@ -791,8 +801,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
     {
         // Arrange
         var walDir = Path.Combine(Path.GetTempPath(), $"ama-wal-test-{Guid.NewGuid():N}");
-        var crashedInnerStorage = new MemoryCrdtStorage();
-        var recoveredInnerStorage = new MemoryCrdtStorage();
 
         try
         {
@@ -803,11 +811,14 @@ public sealed class JournalingAndSnapshottingIntegrationTests
                     opt.JournalMode = CrdtJournalMode.DiskWal;
                     opt.WalDirectoryPath = walDir;
                 });
+                services.AddSingleton<MemoryCrdtStorage>();
                 services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(provider =>
                     new BufferedDistributedCrdtStorageDecorator(
-                        crashedInnerStorage,
+                        provider.GetRequiredService<MemoryCrdtStorage>(),
                         ActivatorUtilities.CreateInstance<DiskWriteAheadBuffer>(provider))));
             });
+
+            var crashedInnerStorage = sp1.GetRequiredService<MemoryCrdtStorage>();
 
             var scope1 = sp1.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("ReplicaDiskWal");
             var orch1 = scope1.ServiceProvider.GetRequiredService<ICrdtDocumentOrchestrator>();
@@ -829,11 +840,14 @@ public sealed class JournalingAndSnapshottingIntegrationTests
                     opt.JournalMode = CrdtJournalMode.DiskWal;
                     opt.WalDirectoryPath = walDir;
                 });
+                services.AddSingleton<MemoryCrdtStorage>();
                 services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(provider =>
                     new BufferedDistributedCrdtStorageDecorator(
-                        recoveredInnerStorage,
+                        provider.GetRequiredService<MemoryCrdtStorage>(),
                         ActivatorUtilities.CreateInstance<DiskWriteAheadBuffer>(provider))));
             });
+
+            var recoveredInnerStorage = sp2.GetRequiredService<MemoryCrdtStorage>();
 
             var initService = sp2.GetServices<IHostedService>().OfType<CrdtInitializationService>().Single();
             await initService.StartAsync(CancellationToken.None);
@@ -870,7 +884,8 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         var dvvSavedBeforeTrim = false;
         var docsSavedCountBeforeTrim = 0;
 
-        var innerStorage = new MemoryCrdtStorage();
+        var helperSp = BuildNode("ReplicaOrderHelper");
+        var innerStorage = ActivatorUtilities.CreateInstance<MemoryCrdtStorage>(helperSp);
         var mockStorage = new Mock<IDistributedCrdtStorage>();
 
         mockStorage.Setup(s => s.AppendAsync(It.IsAny<string>(), It.IsAny<IReadOnlyList<CrdtOperation>>(), It.IsAny<CancellationToken>()))
@@ -963,7 +978,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         const string sharedShardId = "default";
 
         var serializerSp = BuildNode(replicaId);
-        var sharedStorage = new MemoryCrdtStorage(Mock.Of<IMeterFactory>(), serializerSp.GetRequiredService<ICrdtSerializer>());
+        var sharedStorage = ActivatorUtilities.CreateInstance<MemoryCrdtStorage>(serializerSp);
 
         // Phase 1: Boot node, create 2 documents in the same shard, apply 3 intents to each (ShardClock 1..6, DocA Clock 1..3, DocB Clock 1..3),
         // and gracefully shut down (persisting checkpoints and GlobalDvv while leaving journal operations intact).
@@ -1069,7 +1084,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
                 services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(provider =>
                 {
                     var ctx = provider.GetRequiredService<CrdtScopeContext>();
-                    var backing = persistentBackings.GetOrAdd(ctx.ReplicaId, _ => new MemoryCrdtStorage());
+                    var backing = persistentBackings.GetOrAdd(ctx.ReplicaId, _ => ActivatorUtilities.CreateInstance<MemoryCrdtStorage>(provider));
                     return new BufferedDistributedCrdtStorageDecorator(
                         backing,
                         provider.GetRequiredService<DiskWriteAheadBuffer>());
@@ -1130,7 +1145,6 @@ public sealed class JournalingAndSnapshottingIntegrationTests
         // 3. Buffered WAL storage is active with CrdtJournalFlushService flushing batches concurrently.
         // 4. CrdtMaintenanceService is disabled (3600s) so ONLY StorageJournalForwarder can trim the journal.
         var walDir = Path.Combine(Path.GetTempPath(), $"ama-hot-trim-wal-{Guid.NewGuid():N}");
-        var backingStorage = new MemoryCrdtStorage();
 
         try
         {
@@ -1148,11 +1162,14 @@ public sealed class JournalingAndSnapshottingIntegrationTests
                     opt.CheckpointIntervalSeconds = 3600;
                 });
 
+                services.AddSingleton<MemoryCrdtStorage>();
                 services.Replace(ServiceDescriptor.Scoped<IDistributedCrdtStorage>(provider =>
                     new BufferedDistributedCrdtStorageDecorator(
-                        backingStorage,
+                        provider.GetRequiredService<MemoryCrdtStorage>(),
                         provider.GetRequiredService<DiskWriteAheadBuffer>())));
             });
+
+            var backingStorage = sp.GetRequiredService<MemoryCrdtStorage>();
 
             var scope = sp.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope("HotNodeA");
             var orchestrator = scope.Orchestrator;

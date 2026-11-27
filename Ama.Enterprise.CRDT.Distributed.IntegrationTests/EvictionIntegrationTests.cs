@@ -462,11 +462,11 @@ public class EvictionIntegrationTests
     public async Task EvictIdleDynamicScopes_CheckpointsAndUnloadsIdleDynamicScope_WhileKeepingPinnedHostScope_AndRehydratesOnSubsequentAccess()
     {
         // Arrange - Register a shared singleton MemoryCrdtStorage so re-hydrated scopes read persisted state
-        var sharedStorage = new MemoryCrdtStorage();
         var sp = BuildNode("NodeA", services =>
         {
             services.AddDistributedCrdtReplica("NodeA", "TestMesh");
-            services.AddSingleton<IDistributedCrdtStorage>(sharedStorage);
+            services.AddSingleton<MemoryCrdtStorage>();
+            services.AddSingleton<IDistributedCrdtStorage>(provider => provider.GetRequiredService<MemoryCrdtStorage>());
         });
 
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();

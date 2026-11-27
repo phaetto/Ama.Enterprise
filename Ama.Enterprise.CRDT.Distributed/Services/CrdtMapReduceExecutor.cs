@@ -99,12 +99,12 @@ internal sealed class CrdtMapReduceExecutor<TState, TInput, TAccumulate, TResult
 
             if (liveDoc is not null)
             {
-                var crdtDoc = liveDoc.CurrentDocument;
+                var docData = liveDoc.ReadData();
                 var context = new CrdtMapContext<TState>(
                     docId,
                     liveDoc.ShardId,
                     replicaContext.ReplicaId,
-                    crdtDoc,
+                    docData,
                     liveDoc);
 
                 var mapValueTask = handler.MapDocumentAsync(context, input, cancellationToken);
@@ -149,7 +149,7 @@ internal sealed class CrdtMapReduceExecutor<TState, TInput, TAccumulate, TResult
                             shardId,
                             replicaContext.ReplicaId,
                             storedDoc,
-                            LiveDocumentHandle: null);
+                            liveDocumentHandle: null);
 
                         var mapValueTask = handler.MapDocumentAsync(demotedContext, input, cancellationToken);
                         var acc = mapValueTask.IsCompletedSuccessfully

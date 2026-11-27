@@ -398,12 +398,12 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
 
                 if (liveDoc is not null)
                 {
-                    var crdtDoc = liveDoc.CurrentDocument;
+                    var docData = liveDoc.ReadData();
                     var context = new CrdtMapContext<TState>(
                         docId,
                         liveDoc.ShardId,
                         replicaContext.ReplicaId,
-                        crdtDoc,
+                        docData,
                         liveDoc);
 
                     var mapValueTask = handler.MapDocumentAsync(context, input, cancellationToken);
@@ -435,7 +435,7 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
                             shardId,
                             replicaContext.ReplicaId,
                             storedDoc,
-                            LiveDocumentHandle: null);
+                            liveDocumentHandle: null);
 
                         var mapValueTask = handler.MapDocumentAsync(demotedContext, input, cancellationToken);
                         var acc = mapValueTask.IsCompletedSuccessfully
@@ -784,8 +784,8 @@ public sealed class CrdtMapReduceCoordinator : ICrdtMapReduceCoordinator
         where TState : class, new()
     {
         var registry = orchestrator.Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
-        var registryDoc = registry.CurrentDocument;
-        var registryMap = registryDoc.Data.Documents;
+        var registryData = registry.ReadData();
+        var registryMap = registryData.Documents;
         var concreteOrchestrator = orchestrator as CrdtDocumentOrchestrator;
 
         var initialCapacity = scope.TargetDocumentIds is { Count: > 0 }

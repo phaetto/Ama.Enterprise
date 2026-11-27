@@ -72,10 +72,10 @@ public sealed class FeatureFlagCrdtManager : IFeatureFlagCrdtManager
 
         if (await orchestrator.DocumentExistsAsync<FeatureFlagState>(targetDocumentId, cancellationToken).ConfigureAwait(false))
         {
-            var crdtDoc = await orchestrator.GetDocumentStateAsync<FeatureFlagState>(targetDocumentId, cancellationToken).ConfigureAwait(false);
-            if (crdtDoc.Data?.Flags != null)
+            var docData = await orchestrator.GetDocumentDataAsync<FeatureFlagState>(targetDocumentId, cancellationToken).ConfigureAwait(false);
+            if (docData?.Flags != null)
             {
-                hasExisting = crdtDoc.Data.Flags.TryGetValue(name, out existingFlag!);
+                hasExisting = docData.Flags.TryGetValue(name, out existingFlag!);
             }
         }
         else
@@ -140,10 +140,10 @@ public sealed class FeatureFlagCrdtManager : IFeatureFlagCrdtManager
             return new ReadOnlyDictionary<string, FeatureFlag>(new Dictionary<string, FeatureFlag>());
         }
 
-        var crdtDoc = await orchestrator.GetDocumentStateAsync<FeatureFlagState>(documentId, cancellationToken).ConfigureAwait(false);
-        if (crdtDoc.Data?.Flags != null)
+        var docData = await orchestrator.GetDocumentDataAsync<FeatureFlagState>(documentId, cancellationToken).ConfigureAwait(false);
+        if (docData?.Flags != null)
         {
-            return new ReadOnlyDictionary<string, FeatureFlag>(crdtDoc.Data.Flags);
+            return new ReadOnlyDictionary<string, FeatureFlag>(docData.Flags);
         }
 
         return new ReadOnlyDictionary<string, FeatureFlag>(new Dictionary<string, FeatureFlag>());
@@ -156,8 +156,7 @@ public sealed class FeatureFlagCrdtManager : IFeatureFlagCrdtManager
             return Array.Empty<string>();
         }
 
-        var registryDocument = await orchestrator.Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-        var registryData = registryDocument.Data;
+        var registryData = await orchestrator.Registry.GetDataAsync(cancellationToken).ConfigureAwait(false);
         if (registryData?.Documents == null || registryData.Documents.Count == 0)
         {
             return Array.Empty<string>();

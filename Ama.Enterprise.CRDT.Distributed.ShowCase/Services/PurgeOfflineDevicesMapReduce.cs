@@ -27,7 +27,7 @@ public sealed class PurgeOfflineDevicesMapReduce
             return new PurgeOfflineDevicesSummaryDto(0, 0);
         }
 
-        var devices = context.Document.Data?.Devices;
+        var devices = context.Data?.Devices;
         if (devices is null || devices.Count == 0)
         {
             return new PurgeOfflineDevicesSummaryDto(0, 0);

@@ -166,6 +166,12 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
         public Task<CrdtDocument<TState>?> LoadDocumentFromAnyShardAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
             => inner.LoadDocumentFromAnyShardAsync<TState>(documentId, cancellationToken);
 
+        public Task<byte[]?> LoadSerializedDocumentAsync(string shardId, string documentId, CancellationToken cancellationToken = default)
+            => inner.LoadSerializedDocumentAsync(shardId, documentId, cancellationToken);
+
+        public Task<byte[]?> LoadSerializedDocumentFromAnyShardAsync(string documentId, CancellationToken cancellationToken = default)
+            => inner.LoadSerializedDocumentFromAnyShardAsync(documentId, cancellationToken);
+
         public Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new()
             => inner.LoadOrphanedDocumentAsync<TState>(shardId, documentId, cancellationToken);
 
@@ -601,15 +607,16 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
     {
         // Arrange - Simulate Deployment V1 using LegacyBucketShardProvider ("legacy-bucket-0", "legacy-bucket-1")
         // persisting both checkpoints and uncheckpointed journal operations into storage.
-        var sharedStorage = new SharedPersistentCrdtStorage(new MemoryCrdtStorage());
         const string ReplicaId = "Upgrade-Replica-1";
         var docIds = new[] { "upgrade-doc-1", "upgrade-doc-2", "upgrade-doc-3", "upgrade-doc-4" };
+        SharedPersistentCrdtStorage sharedStorage;
 
         {
             await using var spV1 = await CreateAndStartNodeWithCustomProviderAsync<LegacyBucketShardProvider>(
                 ReplicaId,
-                sharedStorage);
+                existingSharedStorage: null);
 
+            sharedStorage = spV1.GetRequiredService<SharedPersistentCrdtStorage>();
             var scopeV1 = spV1.GetRequiredService<DistributedCrdtScopeManager>().GetOrCreateScope(ReplicaId);
             var dvvManagerV1 = scopeV1.ServiceProvider.GetRequiredService<IShardVersionVectorManager>();
 
@@ -784,7 +791,7 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
 
     private static async Task<ServiceProvider> CreateAndStartNodeWithCustomProviderAsync<TShardProvider>(
         string replicaId,
-        IDistributedCrdtStorage sharedStorage)
+        SharedPersistentCrdtStorage? existingSharedStorage)
         where TShardProvider : class, IShardIdProvider
     {
         var senderMock = new Mock<IDirectMessageSender>();
@@ -813,7 +820,16 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
                 .AddCrdtJsonTypeInfoResolver(DynamicShardingTestJsonContext.Default)
                 .AddCrdtShardIdProvider<TShardProvider>();
 
-        services.AddSingleton((SharedPersistentCrdtStorage)sharedStorage);
+        if (existingSharedStorage is not null)
+        {
+            services.AddSingleton(existingSharedStorage);
+        }
+        else
+        {
+            services.AddSingleton(sp => new SharedPersistentCrdtStorage(
+                ActivatorUtilities.CreateInstance<MemoryCrdtStorage>(sp)));
+        }
+
         services.AddDistributedCrdtStorage<SharedPersistentCrdtStorage>();
         services.AddDistributedDocumentType<ShardedDocState>(DocTypeAlias);
         services.AddDistributedCrdtReplica(replicaId, MeshId);

@@ -30,10 +30,10 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager
     /// <inheritdoc />
     public async ValueTask<IReadOnlyDictionary<string, long>> GetJoinIntentsAsync(string? documentId = null, CancellationToken cancellationToken = default)
     {
-        var crdtDoc = await orchestrator.GetDocumentStateAsync<CrdtSignalingState>(ResolveDocumentId(documentId), cancellationToken).ConfigureAwait(false);
-        if (crdtDoc.Data != null && crdtDoc.Data.JoinIntents != null)
+        var signalingData = await orchestrator.GetDocumentDataAsync<CrdtSignalingState>(ResolveDocumentId(documentId), cancellationToken).ConfigureAwait(false);
+        if (signalingData != null && signalingData.JoinIntents != null)
         {
-            return new ReadOnlyDictionary<string, long>(crdtDoc.Data.JoinIntents);
+            return new ReadOnlyDictionary<string, long>(signalingData.JoinIntents);
         }
         
         return new ReadOnlyDictionary<string, long>(new Dictionary<string, long>());
@@ -72,10 +72,10 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager
     /// <inheritdoc />
     public async ValueTask<IReadOnlyDictionary<string, WebRtcInvitationOffer>> GetOffersAsync(string? documentId = null, CancellationToken cancellationToken = default)
     {
-        var crdtDoc = await orchestrator.GetDocumentStateAsync<CrdtSignalingState>(ResolveDocumentId(documentId), cancellationToken).ConfigureAwait(false);
-        if (crdtDoc.Data != null && crdtDoc.Data.Offers != null)
+        var signalingData = await orchestrator.GetDocumentDataAsync<CrdtSignalingState>(ResolveDocumentId(documentId), cancellationToken).ConfigureAwait(false);
+        if (signalingData != null && signalingData.Offers != null)
         {
-            return new ReadOnlyDictionary<string, WebRtcInvitationOffer>(crdtDoc.Data.Offers);
+            return new ReadOnlyDictionary<string, WebRtcInvitationOffer>(signalingData.Offers);
         }
         
         return new ReadOnlyDictionary<string, WebRtcInvitationOffer>(new Dictionary<string, WebRtcInvitationOffer>());
@@ -84,10 +84,10 @@ public sealed class CrdtSignalingManager : ICrdtSignalingManager
     /// <inheritdoc />
     public async ValueTask<IReadOnlyDictionary<string, WebRtcInvitationAnswer>> GetAnswersAsync(string? documentId = null, CancellationToken cancellationToken = default)
     {
-        var crdtDoc = await orchestrator.GetDocumentStateAsync<CrdtSignalingState>(ResolveDocumentId(documentId), cancellationToken).ConfigureAwait(false);
-        if (crdtDoc.Data != null && crdtDoc.Data.Answers != null)
+        var signalingData = await orchestrator.GetDocumentDataAsync<CrdtSignalingState>(ResolveDocumentId(documentId), cancellationToken).ConfigureAwait(false);
+        if (signalingData != null && signalingData.Answers != null)
         {
-            return new ReadOnlyDictionary<string, WebRtcInvitationAnswer>(crdtDoc.Data.Answers);
+            return new ReadOnlyDictionary<string, WebRtcInvitationAnswer>(signalingData.Answers);
         }
         
         return new ReadOnlyDictionary<string, WebRtcInvitationAnswer>(new Dictionary<string, WebRtcInvitationAnswer>());

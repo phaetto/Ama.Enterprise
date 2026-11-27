@@ -393,8 +393,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
 
         if (Registry != null)
         {
-            var registryDoc = Registry.CurrentDocument;
-            if (TryFindRegistryEntry(registryDoc.Data.Documents, documentId, typeAlias, out var entry) && entry != null)
+            var registryData = Registry.ReadData();
+            if (TryFindRegistryEntry(registryData.Documents, documentId, typeAlias, out var entry) && entry != null)
             {
                 return new ValueTask<bool>(!entry.IsDeleted);
             }
@@ -470,9 +470,9 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
 
             if (Registry != null)
             {
-                var registryDoc = Registry.CurrentDocument;
-                if ((registryDoc.Data.Documents.TryGetValue(cacheKey, out var entry) ||
-                     (registryDoc.Data.Documents.TryGetValue(documentId, out entry) &&
+                var registryData = Registry.ReadData();
+                if ((registryData.Documents.TryGetValue(cacheKey, out var entry) ||
+                     (registryData.Documents.TryGetValue(documentId, out entry) &&
                       string.Equals(entry?.TypeAlias, typeAlias, StringComparison.Ordinal))) &&
                     entry != null)
                 {
@@ -511,8 +511,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
 
         if (Registry != null)
         {
-            var registryDoc = Registry.CurrentDocument;
-            if (!TryFindRegistryEntry(registryDoc.Data.Documents, documentId, typeAlias, out var entry) && !string.IsNullOrWhiteSpace(typeAlias))
+            var registryData = Registry.ReadData();
+            if (!TryFindRegistryEntry(registryData.Documents, documentId, typeAlias, out var entry) && !string.IsNullOrWhiteSpace(typeAlias))
             {
                 var factory = ResolveDocumentFactory(typeAlias);
                 if (factory != null)
@@ -581,10 +581,10 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
         var resolvedAlias = typeAlias;
         if (Registry != null)
         {
-            var registryDoc = Registry.CurrentDocument;
+            var registryData = Registry.ReadData();
             if (string.IsNullOrWhiteSpace(resolvedAlias))
             {
-                if (TryFindRegistryEntry(registryDoc.Data.Documents, documentId, null, out var entry) && entry != null)
+                if (TryFindRegistryEntry(registryData.Documents, documentId, null, out var entry) && entry != null)
                 {
                     if (entry.IsDeleted)
                     {
@@ -597,8 +597,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
             else
             {
                 var compositeLookupKey = CrdtRegistryEntry.GetRegistryKey(resolvedAlias, documentId);
-                if ((registryDoc.Data.Documents.TryGetValue(compositeLookupKey, out var entry) ||
-                     (registryDoc.Data.Documents.TryGetValue(documentId, out entry) &&
+                if ((registryData.Documents.TryGetValue(compositeLookupKey, out var entry) ||
+                     (registryData.Documents.TryGetValue(documentId, out entry) &&
                       string.Equals(entry?.TypeAlias, resolvedAlias, StringComparison.Ordinal))) &&
                     entry is { IsDeleted: true })
                 {
@@ -606,7 +606,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
                 }
 
                 if (entry == null &&
-                    TryFindRegistryEntry(registryDoc.Data.Documents, documentId, null, out var fallbackEntry) &&
+                    TryFindRegistryEntry(registryData.Documents, documentId, null, out var fallbackEntry) &&
                     fallbackEntry is { IsDeleted: false })
                 {
                     var requestedFactory = ResolveDocumentFactory(resolvedAlias);
@@ -709,7 +709,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
         var hadExistingRegistryEntry = false;
         if (Registry != null)
         {
-            var registryMap = Registry.CurrentDocument.Data.Documents;
+            var registryMap = Registry.ReadData().Documents;
             if ((registryMap.TryGetValue(compositeKey, out var existingEntry) || registryMap.TryGetValue(documentId, out existingEntry))
                 && existingEntry != null)
             {
@@ -810,8 +810,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
         var resolvedAlias = typeAlias;
         if (Registry != null)
         {
-            var registryDoc = Registry.CurrentDocument;
-            if (TryFindRegistryEntry(registryDoc.Data.Documents, documentId, resolvedAlias, out var entry) && entry != null)
+            var registryData = Registry.ReadData();
+            if (TryFindRegistryEntry(registryData.Documents, documentId, resolvedAlias, out var entry) && entry != null)
             {
                 if (entry.IsDeleted)
                 {
@@ -848,7 +848,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
     }
 
     /// <inheritdoc />
-    public async ValueTask<CrdtDocument<TState>> GetDocumentStateAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    public async ValueTask<TState> GetDocumentDataAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
     {
         if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
 
@@ -858,7 +858,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
         var localTypedDoc = TryGetLocalDocument<TState>(documentId);
         if (localTypedDoc != null)
         {
-            return localTypedDoc.CurrentDocument;
+            return localTypedDoc.ReadData();
         }
 
         var documentTypeAlias = GetTypeAlias<TState>();
@@ -870,7 +870,38 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
             var promotedDoc = await ResolveOrPromoteLocalDocumentAsync(documentId, documentTypeAlias, cancellationToken).ConfigureAwait(false);
             if (promotedDoc is IDistributedCrdtDocument<TState> promotedTypedDoc)
             {
-                return promotedTypedDoc.CurrentDocument;
+                return promotedTypedDoc.ReadData();
+            }
+        }
+
+        var remoteDoc = await remoteProxyClient.GetRemoteDocumentStateAsync<TState>(documentId, shardId, documentTypeAlias, cancellationToken).ConfigureAwait(false);
+        return remoteDoc.Data!;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<CrdtDocument<TState>> GetDocumentStateAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        if (string.IsNullOrWhiteSpace(documentId)) throw new ArgumentException("Document ID cannot be null or empty.", nameof(documentId));
+
+        TouchParentScopeActivity();
+        documentId = stringPool.GetOrAdd(documentId);
+
+        var localTypedDoc = TryGetLocalDocument<TState>(documentId);
+        if (localTypedDoc != null)
+        {
+            return localTypedDoc.ReadFullDocument();
+        }
+
+        var documentTypeAlias = GetTypeAlias<TState>();
+        var shardId = await GetShardIdAsync<TState>(documentId, cancellationToken).ConfigureAwait(false);
+        var isLocal = await distributionManager.IsShardLocalAsync(shardId, cancellationToken).ConfigureAwait(false);
+
+        if (isLocal)
+        {
+            var promotedDoc = await ResolveOrPromoteLocalDocumentAsync(documentId, documentTypeAlias, cancellationToken).ConfigureAwait(false);
+            if (promotedDoc is IDistributedCrdtDocument<TState> promotedTypedDoc)
+            {
+                return promotedTypedDoc.ReadFullDocument();
             }
         }
 
@@ -1344,8 +1375,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
         }
 
         var registry = Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
-        var registryDoc = await registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-        var registryMap = registryDoc.Data.Documents;
+        var registryMap = registry.ReadData().Documents;
         if ((registryMap.TryGetValue(compositeKey, out var existingEntry) || registryMap.TryGetValue(documentId, out existingEntry))
             && existingEntry != null
             && existingEntry.IsDeleted)
@@ -1488,8 +1518,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
         try
         {
             var registry = Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
-            var registryDoc = await registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-            var registryMap = registryDoc.Data.Documents;
+            var registryMap = registry.ReadData().Documents;
             bool changed = false;
 
             var versionVectorManager = serviceProvider.GetRequiredService<IShardVersionVectorManager>();
@@ -1682,17 +1711,17 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
         }
 
         var registry = Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
-        var registryDoc = await registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
+        var registryData = registry.ReadData();
 
         var matchingKeys = new List<KeyValuePair<string, CrdtRegistryEntry>>();
         if (!string.IsNullOrWhiteSpace(typeAlias))
         {
             var compositeKey = CrdtRegistryEntry.GetRegistryKey(typeAlias, documentId);
-            if (registryDoc.Data.Documents.TryGetValue(compositeKey, out var compositeEntry) && !compositeEntry.IsDeleted)
+            if (registryData.Documents.TryGetValue(compositeKey, out var compositeEntry) && !compositeEntry.IsDeleted)
             {
                 matchingKeys.Add(new KeyValuePair<string, CrdtRegistryEntry>(compositeKey, compositeEntry));
             }
-            else if (registryDoc.Data.Documents.TryGetValue(documentId, out var legacyEntry) &&
+            else if (registryData.Documents.TryGetValue(documentId, out var legacyEntry) &&
                      !legacyEntry.IsDeleted &&
                      string.Equals(legacyEntry.TypeAlias, typeAlias, StringComparison.Ordinal))
             {
@@ -1701,7 +1730,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
         }
         else
         {
-            foreach (var kvp in registryDoc.Data.Documents)
+            foreach (var kvp in registryData.Documents)
             {
                 if (!kvp.Value.IsDeleted &&
                     (string.Equals(kvp.Key, documentId, StringComparison.Ordinal) ||

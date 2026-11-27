@@ -51,7 +51,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     private readonly TState initialState;
     
     private readonly object syncRoot = new();
-    private CrdtDocument<TState> currentDocument;
+    private readonly ICrdtDocumentBuffer<TState> documentBuffer;
     private int hasCompletedInitialStorageLoad;
     
     private readonly object debounceSyncRoot = new();
@@ -76,16 +76,10 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     public string TypeAlias { get; }
 
     /// <inheritdoc />
-    public CrdtDocument<TState> CurrentDocument
-    {
-        get
-        {
-            lock (syncRoot)
-            {
-                return currentDocument;
-            }
-        }
-    }
+    public CrdtDocumentResidencyMode ResidencyMode => documentBuffer.Mode;
+
+    /// <inheritdoc />
+    public CrdtDocument<TState> CurrentDocument => ReadFullDocument();
 
     public DistributedCrdtDocument(
         TState initialState,
@@ -107,7 +101,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         IEnumerable<IDocumentStateObserver<TState>> stateObservers,
         IEnumerable<IDocumentPatchObserver> patchObservers,
         string? typeAlias = null,
-        ICrdtStringPool? stringPool = null)
+        ICrdtStringPool? stringPool = null,
+        CrdtDocumentResidencyMode? residencyMode = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(initialState);
@@ -141,7 +136,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         this.initialState = initialState;
 
         var metadata = metadataManager.Initialize(initialState);
-        currentDocument = new CrdtDocument<TState>(initialState, metadata);
+        var initialDocument = new CrdtDocument<TState>(initialState, metadata);
 
         var scopeContext = serviceProvider.GetService<CrdtScopeContext>();
         var replicaContext = serviceProvider.GetService<ReplicaContext>();
@@ -154,13 +149,45 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         TypeAlias = this.stringPool.GetOrAdd(ResolveTypeAlias(serviceProvider, typeAlias));
         ShardId = this.stringPool.GetOrAdd(initialState is CrdtRegistryState
             ? DocumentId
-            : shardIdProvider.GetShardId(currentDocument) ?? string.Empty);
+            : shardIdProvider.GetShardId(initialDocument) ?? string.Empty);
+
+        var effectiveResidencyMode = typeof(TState) == typeof(CrdtRegistryState)
+            ? CrdtDocumentResidencyMode.Unpacked
+            : (residencyMode ?? options.Value.DefaultDocumentResidencyMode);
+
+        this.documentBuffer = CreateDocumentBuffer(effectiveResidencyMode, initialDocument, metadataManager, serializer);
+    }
+
+    /// <inheritdoc />
+    public TState ReadData()
+    {
+        lock (syncRoot)
+        {
+            return documentBuffer.GetData();
+        }
+    }
+
+    /// <inheritdoc />
+    public CrdtDocument<TState> ReadFullDocument()
+    {
+        lock (syncRoot)
+        {
+            return documentBuffer.UnpackFullDocument();
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask<TState> GetDataAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return new ValueTask<TState>(ReadData());
     }
     
     /// <inheritdoc />
     public ValueTask<CrdtDocument<TState>> GetDocumentAsync(CancellationToken cancellationToken = default)
     {
-        return new ValueTask<CrdtDocument<TState>>(CurrentDocument);
+        cancellationToken.ThrowIfCancellationRequested();
+        return new ValueTask<CrdtDocument<TState>>(ReadFullDocument());
     }
 
     /// <inheritdoc />
@@ -355,9 +382,12 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     {
         if (isDisposed || commandPipeline.IsCurrentThreadPipelineProcessor)
         {
-            CrdtDocument<TState> currentDoc;
-            lock (syncRoot) { currentDoc = currentDocument; }
-            var snapshotData = serializer.SerializeToBytes(currentDoc);
+            byte[] snapshotData;
+            lock (syncRoot)
+            {
+                snapshotData = documentBuffer.GetSerializedBytes();
+            }
+
             return new CrdtSnapshotDataDto(snapshotData, GetLocalState());
         }
 
@@ -583,13 +613,6 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        CrdtDocument<TState> currentDoc;
-
-        lock (syncRoot)
-        {
-            currentDoc = currentDocument;
-        }
-
         var debounceCapacity = -1;
         lock (debounceSyncRoot)
         {
@@ -600,13 +623,20 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         }
 
         var estimator = serviceProvider.GetService<ICrdtMemoryEstimator>() ?? new CrdtMemoryEstimator();
-        var footprint = estimator.EstimateDocumentFootprint(
-            currentDoc,
-            DocumentId,
-            ShardId,
-            debounceCapacity,
-            GetLocalState(),
-            GetAotContexts());
+        var localState = GetLocalState();
+        var aotContexts = GetAotContexts();
+
+        DocumentMemoryFootprintDto footprint;
+        lock (syncRoot)
+        {
+            footprint = documentBuffer.EstimateFootprint(
+                estimator,
+                DocumentId,
+                ShardId,
+                debounceCapacity,
+                localState,
+                aotContexts);
+        }
 
         return new ValueTask<DocumentMemoryFootprintDto>(footprint);
     }
@@ -664,6 +694,25 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             debounceTimer = null;
             debounceBuffer = null;
         }
+
+        lock (syncRoot)
+        {
+            documentBuffer.Dispose();
+        }
+    }
+
+    private static ICrdtDocumentBuffer<TState> CreateDocumentBuffer(
+        CrdtDocumentResidencyMode residencyMode,
+        CrdtDocument<TState> initialDocument,
+        ICrdtMetadataManager metadataManager,
+        ICrdtSerializer serializer)
+    {
+        return residencyMode switch
+        {
+            CrdtDocumentResidencyMode.PackedMetadata => new PackedMetadataDocumentBuffer<TState>(initialDocument, metadataManager, serializer),
+            CrdtDocumentResidencyMode.FullySerialized => new FullySerializedDocumentBuffer<TState>(initialDocument, serializer),
+            _ => new UnpackedDocumentBuffer<TState>(initialDocument, serializer)
+        };
     }
 
     private static Expression<Func<TState, object>> GetOrAddPropertySelector(string? targetProperty)
@@ -729,25 +778,56 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 || (storage is BufferedDistributedCrdtStorageDecorator decorator && decorator.InnerStorage is MemoryCrdtStorage);
 
             var storageDocKey = GetStorageDocumentKey();
-            var localStoredDoc = await storage.LoadDocumentAsync<TState>(ShardId, storageDocKey, cancellationToken).ConfigureAwait(false);
-            if (localStoredDoc == null && !string.Equals(storageDocKey, DocumentId, StringComparison.Ordinal))
-            {
-                localStoredDoc = await storage.LoadDocumentAsync<TState>(ShardId, DocumentId, cancellationToken).ConfigureAwait(false);
-            }
-
             var loadedFromMigratedShard = false;
-            if (localStoredDoc == null)
+
+            byte[]? rawStoredBytes = null;
+            CrdtDocument<TState>? localStoredDoc = null;
+
+            if (ResidencyMode == CrdtDocumentResidencyMode.FullySerialized)
             {
-                localStoredDoc = await storage.LoadDocumentFromAnyShardAsync<TState>(storageDocKey, cancellationToken).ConfigureAwait(false);
-                if (localStoredDoc == null && !string.Equals(storageDocKey, DocumentId, StringComparison.Ordinal))
+                rawStoredBytes = await storage.LoadSerializedDocumentAsync(ShardId, storageDocKey, cancellationToken).ConfigureAwait(false);
+                if ((rawStoredBytes == null || rawStoredBytes.Length == 0) && !string.Equals(storageDocKey, DocumentId, StringComparison.Ordinal))
                 {
-                    localStoredDoc = await storage.LoadDocumentFromAnyShardAsync<TState>(DocumentId, cancellationToken).ConfigureAwait(false);
+                    rawStoredBytes = await storage.LoadSerializedDocumentAsync(ShardId, DocumentId, cancellationToken).ConfigureAwait(false);
                 }
 
-                if (localStoredDoc != null)
+                if (rawStoredBytes == null || rawStoredBytes.Length == 0)
                 {
-                    loadedFromMigratedShard = true;
-                    logger.LogInformation("Loaded state for document {DocumentId} ({TypeAlias}) from a previous shard mapping into current shard {ShardId}.", DocumentId, TypeAlias, ShardId);
+                    rawStoredBytes = await storage.LoadSerializedDocumentFromAnyShardAsync(storageDocKey, cancellationToken).ConfigureAwait(false);
+                    if ((rawStoredBytes == null || rawStoredBytes.Length == 0) && !string.Equals(storageDocKey, DocumentId, StringComparison.Ordinal))
+                    {
+                        rawStoredBytes = await storage.LoadSerializedDocumentFromAnyShardAsync(DocumentId, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    if (rawStoredBytes is { Length: > 0 })
+                    {
+                        loadedFromMigratedShard = true;
+                        logger.LogInformation("Loaded serialized state for document {DocumentId} ({TypeAlias}) from a previous shard mapping into current shard {ShardId}.", DocumentId, TypeAlias, ShardId);
+                    }
+                }
+            }
+
+            if (rawStoredBytes == null || rawStoredBytes.Length == 0)
+            {
+                localStoredDoc = await storage.LoadDocumentAsync<TState>(ShardId, storageDocKey, cancellationToken).ConfigureAwait(false);
+                if (localStoredDoc == null && !string.Equals(storageDocKey, DocumentId, StringComparison.Ordinal))
+                {
+                    localStoredDoc = await storage.LoadDocumentAsync<TState>(ShardId, DocumentId, cancellationToken).ConfigureAwait(false);
+                }
+
+                if (localStoredDoc == null)
+                {
+                    localStoredDoc = await storage.LoadDocumentFromAnyShardAsync<TState>(storageDocKey, cancellationToken).ConfigureAwait(false);
+                    if (localStoredDoc == null && !string.Equals(storageDocKey, DocumentId, StringComparison.Ordinal))
+                    {
+                        localStoredDoc = await storage.LoadDocumentFromAnyShardAsync<TState>(DocumentId, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    if (localStoredDoc != null)
+                    {
+                        loadedFromMigratedShard = true;
+                        logger.LogInformation("Loaded state for document {DocumentId} ({TypeAlias}) from a previous shard mapping into current shard {ShardId}.", DocumentId, TypeAlias, ShardId);
+                    }
                 }
             }
 
@@ -759,6 +839,64 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 {
                     orphanedDoc = await storage.LoadOrphanedDocumentAsync<TState>(ShardId, DocumentId, cancellationToken).ConfigureAwait(false);
                 }
+            }
+
+            if (rawStoredBytes is { Length: > 0 } && orphanedDoc == null)
+            {
+                var hasUnpersistedLocalMutations = false;
+                lock (syncRoot)
+                {
+                    if (!isDirty)
+                    {
+                        documentBuffer.StoreSerializedBytes(rawStoredBytes);
+                        if (loadedFromMigratedShard)
+                        {
+                            isDirty = true;
+                        }
+                    }
+                    else
+                    {
+                        hasUnpersistedLocalMutations = true;
+                    }
+                }
+
+                if (!hasUnpersistedLocalMutations)
+                {
+                    CrdtDocument<TState> unpackedStoredDoc;
+                    lock (syncRoot)
+                    {
+                        unpackedStoredDoc = documentBuffer.UnpackFullDocument();
+                    }
+
+                    MergeDocumentMetadataIntoShardVersionVector(unpackedStoredDoc, forceMergeForSingleDocumentShard: true);
+                }
+                else
+                {
+                    var storedDocFromRaw = serializer.DeserializeFromBytes<CrdtDocument<TState>>(rawStoredBytes);
+                    CrdtDocument<TState> currentDoc;
+                    lock (syncRoot)
+                    {
+                        currentDoc = documentBuffer.UnpackFullDocument();
+                    }
+
+                    await merger.MergeStateAsync(currentDoc, storedDocFromRaw, cancellationToken).ConfigureAwait(false);
+                    MergeDocumentMetadataIntoShardVersionVector(currentDoc, forceMergeForSingleDocumentShard: true);
+
+                    lock (syncRoot)
+                    {
+                        documentBuffer.StoreFullDocument(currentDoc);
+                        isDirty = true;
+                    }
+                }
+
+                await NotifyStateChangedAsync(cancellationToken).ConfigureAwait(false);
+                logger.LogInformation("Loaded initial serialized state for document {DocumentId} ({TypeAlias}) from storage.", DocumentId, TypeAlias);
+                return;
+            }
+
+            if (rawStoredBytes is { Length: > 0 } && localStoredDoc == null)
+            {
+                localStoredDoc = serializer.DeserializeFromBytes<CrdtDocument<TState>>(rawStoredBytes);
             }
 
             CrdtDocument<TState>? storedDoc = null;
@@ -786,7 +924,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 {
                     if (!isDirty)
                     {
-                        currentDocument = storedDoc.Value;
+                        documentBuffer.StoreFullDocument(storedDoc.Value);
                         if ((localStoredDoc != null && orphanedDoc != null) || loadedFromMigratedShard)
                         {
                             isDirty = true;
@@ -807,7 +945,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                     CrdtDocument<TState> currentDoc;
                     lock (syncRoot)
                     {
-                        currentDoc = currentDocument;
+                        currentDoc = documentBuffer.UnpackFullDocument();
                     }
 
                     await merger.MergeStateAsync(currentDoc, storedDoc.Value, cancellationToken).ConfigureAwait(false);
@@ -815,7 +953,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
                     lock (syncRoot)
                     {
-                        currentDocument = currentDoc;
+                        documentBuffer.StoreFullDocument(currentDoc);
                         isDirty = true;
                     }
                 }
@@ -904,7 +1042,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                 CrdtDocument<TState> docState;
                 lock (syncRoot)
                 {
-                    docState = currentDocument;
+                    docState = documentBuffer.UnpackFullDocument();
                 }
 
                 var propertySelector = GetOrAddPropertySelector(cmd.TargetProperty);
@@ -916,7 +1054,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
                 lock (syncRoot)
                 {
-                    currentDocument = result.Document;
+                    documentBuffer.StoreFullDocument(result.Document);
                     isDirty = true;
                 }
             }, cmd.CancellationToken).ConfigureAwait(false);
@@ -944,13 +1082,13 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             await versionVectorManager.ExecuteShardLockedAsync(ShardId, () =>
             {
                 CrdtDocument<TState> currentDoc;
-                lock (syncRoot) { currentDoc = currentDocument; }
+                lock (syncRoot) { currentDoc = documentBuffer.UnpackFullDocument(); }
 
                 var result = syncApplicator.ApplyPatch(currentDoc, patchToApply);
 
                 lock (syncRoot)
                 {
-                    currentDocument = result.Document;
+                    documentBuffer.StoreFullDocument(result.Document);
                     isDirty = true;
                 }
 
@@ -1117,13 +1255,13 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             await versionVectorManager.ExecuteShardLockedAsync(ShardId, () =>
             {
                 CrdtDocument<TState> currentDoc;
-                lock (syncRoot) { currentDoc = currentDocument; }
+                lock (syncRoot) { currentDoc = documentBuffer.UnpackFullDocument(); }
 
                 var result = syncApplicator.ApplyPatch(currentDoc, patchToApply);
 
                 lock (syncRoot)
                 {
-                    currentDocument = result.Document;
+                    documentBuffer.StoreFullDocument(result.Document);
                     isDirty = true;
                 }
 
@@ -1150,13 +1288,13 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             await versionVectorManager.ExecuteShardLockedAsync(ShardId, () =>
             {
                 CrdtDocument<TState> currentDoc;
-                lock (syncRoot) { currentDoc = currentDocument; }
+                lock (syncRoot) { currentDoc = documentBuffer.UnpackFullDocument(); }
 
                 var result = syncApplicator.ApplyPatch(currentDoc, cmd.Patch!.Value);
 
                 lock (syncRoot)
                 {
-                    currentDocument = result.Document;
+                    documentBuffer.StoreFullDocument(result.Document);
                     isDirty = true;
                 }
 
@@ -1177,12 +1315,15 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     {
         try
         {
-            CrdtDocument<TState> currentDoc;
-            lock (syncRoot) { currentDoc = currentDocument; }
+            byte[] snapshotBytes;
+            lock (syncRoot)
+            {
+                snapshotBytes = documentBuffer.GetSerializedBytes();
+            }
 
             var globalState = GetLocalState();
 
-            cmd.ResultSnapshotData = serializer.SerializeToBytes(currentDoc);
+            cmd.ResultSnapshotData = snapshotBytes;
             cmd.ResultGlobalState = globalState;
             return Task.CompletedTask;
         }
@@ -1203,7 +1344,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             bool wasAlreadyDirty;
             lock (syncRoot)
             {
-                currentDoc = currentDocument;
+                currentDoc = documentBuffer.UnpackFullDocument();
                 wasAlreadyDirty = isDirty;
             }
 
@@ -1217,7 +1358,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
                 lock (syncRoot)
                 {
-                    currentDocument = currentDoc;
+                    documentBuffer.StoreFullDocument(currentDoc);
                     isDirty = true;
                 }
             }
@@ -1474,11 +1615,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
     private async Task ExecuteCheckpointDirectAsync(CancellationToken cancellationToken)
     {
-        CrdtDocument<TState> currentDoc = default;
         byte[]? snapshotBytes = null;
         var shouldSave = false;
-        var isMemoryStorage = storage is MemoryCrdtStorage
-            || (storage is BufferedDistributedCrdtStorageDecorator decorator && decorator.InnerStorage is MemoryCrdtStorage);
 
         try
         {
@@ -1489,13 +1627,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                     return;
                 }
 
-                currentDoc = currentDocument;
-                if (!isMemoryStorage)
-                {
-                    // Serialize once inside the document lock so storage backends
-                    // can persist the exact byte array without re-serializing or hitting concurrent mutations.
-                    snapshotBytes = serializer.SerializeToBytes(currentDocument);
-                }
+                // Obtain serialized document bytes inside the document lock (O(1) buffer copy in FullySerialized mode).
+                snapshotBytes = documentBuffer.GetSerializedBytes();
 
                 isDirty = false;
                 shouldSave = true;
@@ -1507,14 +1640,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             }
 
             var storageDocKey = GetStorageDocumentKey();
-            if (isMemoryStorage)
-            {
-                await storage.SaveDocumentAsync(ShardId, storageDocKey, currentDoc, cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                await storage.SaveSerializedDocumentAsync<TState>(ShardId, storageDocKey, snapshotBytes!, cancellationToken).ConfigureAwait(false);
-            }
+            await storage.SaveSerializedDocumentAsync<TState>(ShardId, storageDocKey, snapshotBytes!, cancellationToken).ConfigureAwait(false);
 
             telemetry.RecordDocumentCheckpointSaved(DocumentId);
             logger.LogDebug("Saved checkpoint to storage for document {DocumentId}.", DocumentId);
@@ -1544,7 +1670,9 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         {
             lock (syncRoot)
             {
-                metadataManager.EvictReplica(currentDocument, cmd.ReplicaIdToEvict!);
+                var currentDoc = documentBuffer.UnpackFullDocument();
+                metadataManager.EvictReplica(currentDoc, cmd.ReplicaIdToEvict!);
+                documentBuffer.StoreFullDocument(currentDoc);
                 isDirty = true;
             }
 
@@ -1565,7 +1693,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
             lock (syncRoot)
             {
                 var metadata = metadataManager.Initialize(initialState);
-                currentDocument = new CrdtDocument<TState>(initialState, metadata);
+                var resetDoc = new CrdtDocument<TState>(initialState, metadata);
+                documentBuffer.StoreFullDocument(resetDoc);
                 isDirty = true;
             }
 
@@ -1588,16 +1717,19 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
             lock (syncRoot)
             {
+                CrdtDocument<TState>? currentDoc = null;
                 var compactedAny = false;
                 foreach (var factory in policyFactories)
                 {
+                    currentDoc ??= documentBuffer.UnpackFullDocument();
                     var policy = factory.CreatePolicy();
-                    metadataManager.Compact(currentDocument, policy);
+                    metadataManager.Compact(currentDoc.Value, policy);
                     compactedAny = true;
                 }
 
-                if (compactedAny)
+                if (compactedAny && currentDoc.HasValue)
                 {
+                    documentBuffer.StoreFullDocument(currentDoc.Value);
                     isDirty = true;
                 }
             }

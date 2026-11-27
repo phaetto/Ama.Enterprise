@@ -12,6 +12,7 @@ using Ama.CRDT.Models;
 using Ama.CRDT.Models.Aot;
 using Ama.CRDT.Models.Intents;
 using Ama.CRDT.Services.Providers;
+using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
@@ -301,10 +302,9 @@ public sealed class ScopeMemoryOverheadIntegrationTests
     [IntegrationFact]
     public async Task MeasureHighCardinalityDynamicScopes_ScalingAndEvictionMemoryReclamation()
     {
-        var sharedBackingStorage = new MemoryCrdtStorage();
         using var sp = BuildNode(services =>
         {
-            services.AddSingleton<IDistributedCrdtStorage>(sharedBackingStorage);
+            services.AddSingleton<IDistributedCrdtStorage, MemoryCrdtStorage>();
         });
 
         var scopeManager = sp.GetRequiredService<DistributedCrdtScopeManager>();
@@ -517,6 +517,131 @@ public sealed class ScopeMemoryOverheadIntegrationTests
         activeDocsAfterDemotion.ShouldBe(11);  // 10 user docs + 1 system registry
         footprintAfterDemotion.ShouldBeLessThan(footprintBeforeDemotion);
         reductionPct.ShouldBeGreaterThan(35.0);
+    }
+
+    [IntegrationFact]
+    public async Task MeasureScopeMemoryFootprint_AcrossDocumentResidencyModes_AndVerifyPooledBufferRelease()
+    {
+        var modes = new[]
+        {
+            CrdtDocumentResidencyMode.Unpacked,
+            CrdtDocumentResidencyMode.PackedMetadata,
+            CrdtDocumentResidencyMode.FullySerialized
+        };
+
+        var estimatedWholeBytesByMode = new Dictionary<CrdtDocumentResidencyMode, long>();
+        var estimatedMetaBytesByMode = new Dictionary<CrdtDocumentResidencyMode, long>();
+        var retainedHeapByMode = new Dictionary<CrdtDocumentResidencyMode, long>();
+
+        output.WriteLine("=== Document Residency Mode Memory Footprint Comparison (15 Docs, 20 Items, 30 Ops/Doc, Brotli Enabled) ===");
+        output.WriteLine("| Residency Mode | Est. Data Bytes | Est. Metadata Bytes | Est. User Docs Total | Retained Managed Heap |");
+        output.WriteLine("| :--- | :---: | :---: | :---: | :---: |");
+
+        foreach (var mode in modes)
+        {
+            using var sp = BuildNode(services =>
+            {
+                services.Configure<DistributedCrdtOptions>(o =>
+                {
+                    o.DefaultDocumentResidencyMode = mode;
+                });
+
+                services.AddCrdt()
+                        .AddCrdtSystemTextJson(useBrotliCompression: true)
+                        .AddCrdtAotContext(new ScopeMemoryOverheadAotContext())
+                        .AddCrdtJsonTypeInfoResolver(ScopeMemoryOverheadJsonContext.Default);
+            });
+
+            var scopeFactory = sp.GetRequiredService<IDistributedCrdtScopeFactory>();
+
+            // Warmup serializer, ArrayPool buckets, and DI
+            using (var warmup = scopeFactory.CreateScope($"residency-warmup-{mode}", "HostReplica"))
+            {
+                await PopulateScopeWithDocumentsAsync(warmup, docCount: 2, initialItems: 5, opsPerDoc: 5);
+            }
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            long heapBefore = GC.GetTotalMemory(forceFullCollection: true);
+
+            using var scope = scopeFactory.CreateScope($"residency-bench-{mode}", "HostReplica");
+            await PopulateScopeWithDocumentsAsync(scope, docCount: 15, initialItems: 20, opsPerDoc: 30);
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            long heapAfter = GC.GetTotalMemory(forceFullCollection: true);
+            long retainedHeap = Math.Max(1, heapAfter - heapBefore);
+
+            long totalDataBytes = 0;
+            long totalMetaBytes = 0;
+            long totalWholeBytes = 0;
+
+            var activeDocs = scope.Orchestrator.GetActiveDocuments();
+            var docBufferRefs = new List<(object Buffer, System.Reflection.FieldInfo BufferArrayField, System.Reflection.FieldInfo BufferLenField)>();
+
+            foreach (var activeDoc in activeDocs)
+            {
+                if (string.Equals(activeDoc.DocumentId, Constants.SystemRegistryDocumentId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var typedDoc = (IDistributedCrdtDocument<DistributedMemoryTestModel>)activeDoc;
+                typedDoc.ResidencyMode.ShouldBe(mode);
+
+                var fp = await activeDoc.EstimateMemoryFootprintAsync(CancellationToken.None);
+                totalDataBytes += fp.DataBytes;
+                totalMetaBytes += fp.MetadataBytes;
+                totalWholeBytes += fp.WholeDocumentBytes;
+
+                if (mode != CrdtDocumentResidencyMode.Unpacked)
+                {
+                    var docBufferField = activeDoc.GetType().GetField("documentBuffer", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                    docBufferField.ShouldNotBeNull();
+                    var bufferObj = docBufferField!.GetValue(activeDoc);
+                    bufferObj.ShouldNotBeNull();
+
+                    var rentedFieldName = mode == CrdtDocumentResidencyMode.PackedMetadata ? "rentedMetadataBuffer" : "rentedDocumentBuffer";
+                    var lengthFieldName = mode == CrdtDocumentResidencyMode.PackedMetadata ? "metadataLength" : "documentLength";
+
+                    var rentedField = bufferObj!.GetType().GetField(rentedFieldName, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                    var lenField = bufferObj.GetType().GetField(lengthFieldName, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+                    rentedField.ShouldNotBeNull();
+                    lenField.ShouldNotBeNull();
+
+                    rentedField!.GetValue(bufferObj).ShouldNotBeNull();
+                    ((int)lenField!.GetValue(bufferObj)!).ShouldBeGreaterThan(0);
+
+                    docBufferRefs.Add((bufferObj, rentedField, lenField));
+                }
+            }
+
+            estimatedWholeBytesByMode[mode] = totalWholeBytes;
+            estimatedMetaBytesByMode[mode] = totalMetaBytes;
+            retainedHeapByMode[mode] = retainedHeap;
+
+            output.WriteLine($"| {mode} | {totalDataBytes:N0} B | {totalMetaBytes:N0} B | {totalWholeBytes:N0} B | {retainedHeap:N0} B |");
+
+            // Dispose the scope and verify all rented ArrayPool<byte> buffers are deterministically returned and cleared
+            scope.Dispose();
+
+            foreach (var (bufferObj, arrayField, lenField) in docBufferRefs)
+            {
+                arrayField.GetValue(bufferObj).ShouldBeNull();
+                ((int)lenField.GetValue(bufferObj)!).ShouldBe(0);
+            }
+        }
+
+        // PackedMetadata and FullySerialized modes must significantly reduce metadata and whole-document memory footprint vs Unpacked
+        estimatedMetaBytesByMode[CrdtDocumentResidencyMode.PackedMetadata]
+            .ShouldBeLessThan(estimatedMetaBytesByMode[CrdtDocumentResidencyMode.Unpacked]);
+        estimatedWholeBytesByMode[CrdtDocumentResidencyMode.PackedMetadata]
+            .ShouldBeLessThan(estimatedWholeBytesByMode[CrdtDocumentResidencyMode.Unpacked]);
+        estimatedWholeBytesByMode[CrdtDocumentResidencyMode.FullySerialized]
+            .ShouldBeLessThan(estimatedWholeBytesByMode[CrdtDocumentResidencyMode.PackedMetadata]);
     }
 
     private static ServiceProvider BuildNode(Action<IServiceCollection>? configureExtra = null)
@@ -747,9 +872,15 @@ public sealed class ScopeMemoryOverheadIntegrationTests
         int Peers,
         int DotsPerReplica);
 
-    private sealed class SimulatedExternalCrdtStorage : IDistributedCrdtStorage
+    private sealed class SimulatedExternalCrdtStorage : IDistributedCrdtStorage, IDisposable
     {
-        private readonly MemoryCrdtStorage inner = new();
+        private readonly MemoryCrdtStorage inner;
+
+        public SimulatedExternalCrdtStorage(ICrdtSerializer serializer)
+        {
+            ArgumentNullException.ThrowIfNull(serializer);
+            this.inner = new MemoryCrdtStorage(serializer);
+        }
 
         public void Append(IComparable documentId, IReadOnlyList<CrdtOperation> operations)
             => inner.Append(documentId, operations);
@@ -804,6 +935,9 @@ public sealed class ScopeMemoryOverheadIntegrationTests
 
         public Task AppendBatchAsync(IReadOnlyList<JournaledOperation> operations, CancellationToken cancellationToken = default)
             => inner.AppendBatchAsync(operations, cancellationToken);
+
+        public void Dispose()
+            => inner.Dispose();
     }
 
     private sealed class MultiShardTestProvider : IShardIdProvider

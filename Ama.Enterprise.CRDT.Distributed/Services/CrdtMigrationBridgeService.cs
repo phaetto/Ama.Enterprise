@@ -336,8 +336,8 @@ public sealed class CrdtMigrationBridgeService<TSourceState, TTargetState> : Bac
             return;
         }
 
-        var registrySnapshot = await registryDoc.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-        if (registrySnapshot.Data is null)
+        var registryData = await registryDoc.GetDataAsync(cancellationToken).ConfigureAwait(false);
+        if (registryData is null)
         {
             return;
         }
@@ -350,7 +350,7 @@ public sealed class CrdtMigrationBridgeService<TSourceState, TTargetState> : Bac
         long discoveredCount = 0;
 
         // Scan active and tombstoned documents matching SourceTypeAlias
-        foreach (var kvp in registrySnapshot.Data.Documents)
+        foreach (var kvp in registryData.Documents)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -692,14 +692,14 @@ public sealed class CrdtMigrationBridgeService<TSourceState, TTargetState> : Bac
             return false;
         }
 
-        var snapshot = await registryDoc.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-        if (snapshot.Data is null)
+        var registryData = await registryDoc.GetDataAsync(cancellationToken).ConfigureAwait(false);
+        if (registryData is null)
         {
             return false;
         }
 
         var compositeKey = CrdtRegistryEntry.GetRegistryKey(options.SourceTypeAlias, sourceDocumentId);
-        return snapshot.Data.Documents.TryGetValue(compositeKey, out var entry) && entry.IsDeleted;
+        return registryData.Documents.TryGetValue(compositeKey, out var entry) && entry.IsDeleted;
     }
 
     private ICrdtDocumentMigrator<TSourceState, TTargetState> ResolveMigrator(IServiceProvider scopedProvider)

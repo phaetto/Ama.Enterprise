@@ -13,6 +13,13 @@ public sealed class DistributedCrdtOptions
     public bool ActiveSyncEnabled { get; set; }
 
     /// <summary>
+    /// Gets or sets the default in-memory residency representation for distributed CRDT documents
+    /// when a specific document type does not specify an explicit override.
+    /// Defaults to <see cref="CrdtDocumentResidencyMode.Unpacked"/>.
+    /// </summary>
+    public CrdtDocumentResidencyMode DefaultDocumentResidencyMode { get; set; } = CrdtDocumentResidencyMode.Unpacked;
+
+    /// <summary>
     /// Gets or sets the debouncing window in milliseconds for Active Sync broadcasts.
     /// When greater than 0, rapid successive operations are buffered and broadcasted as a single combined patch when the timer elapses.
     /// This prevents network broadcast storms and socket saturation under massive throughput loads (e.g., 5000+ ops/sec).

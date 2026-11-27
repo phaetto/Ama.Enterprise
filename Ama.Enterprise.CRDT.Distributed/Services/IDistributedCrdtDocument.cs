@@ -182,19 +182,50 @@ public interface IDistributedCrdtDocument
 /// </summary>
 /// <example>
 /// <code>
+/// var data = typedDoc.ReadData();
 /// var crdtDoc = await typedDoc.GetDocumentAsync(cancellationToken);
 /// </code>
 /// </example>
 public interface IDistributedCrdtDocument<TState> : IDistributedCrdtDocument where TState : class, new()
 {
     /// <summary>
-    /// Gets a thread-safe snapshot of the strictly typed underlying CRDT document directly from memory without channel or asynchronous overhead.
+    /// Gets the active in-memory residency mode for this document instance.
     /// </summary>
-    CrdtDocument<TState> CurrentDocument { get; }
+    CrdtDocumentResidencyMode ResidencyMode { get; }
 
     /// <summary>
-    /// Exposes the strictly typed underlying CRDT document containing the application state.
+    /// Synchronously reads the materialized domain data (<typeparamref name="TState"/>).
+    /// In <see cref="CrdtDocumentResidencyMode.Unpacked"/> and <see cref="CrdtDocumentResidencyMode.PackedMetadata"/> modes, this is an O(1) reference return without unpacking metadata.
+    /// In <see cref="CrdtDocumentResidencyMode.FullySerialized"/> mode, this deserializes the state on demand.
     /// </summary>
+    /// <returns>The domain data model instance.</returns>
+    TState ReadData();
+
+    /// <summary>
+    /// Synchronously reads the full <see cref="CrdtDocument{TState}"/> including causal <see cref="CrdtMetadata"/>.
+    /// In <see cref="CrdtDocumentResidencyMode.PackedMetadata"/> mode, this unpacks the binary metadata.
+    /// In <see cref="CrdtDocumentResidencyMode.FullySerialized"/> mode, this deserializes the full document.
+    /// </summary>
+    /// <returns>The full materialized CRDT document.</returns>
+    CrdtDocument<TState> ReadFullDocument();
+
+    /// <summary>
+    /// Gets a thread-safe snapshot of the strictly typed underlying CRDT document directly from memory without channel or asynchronous overhead.
+    /// </summary>
+    CrdtDocument<TState> CurrentDocument => ReadFullDocument();
+
+    /// <summary>
+    /// Asynchronously retrieves the domain data (<typeparamref name="TState"/>) without unpacking metadata when in <see cref="CrdtDocumentResidencyMode.PackedMetadata"/> mode.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A value task containing the domain data model.</returns>
+    ValueTask<TState> GetDataAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Exposes the strictly typed underlying CRDT document containing the application state and causal metadata.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A value task containing the full CRDT document.</returns>
     ValueTask<CrdtDocument<TState>> GetDocumentAsync(CancellationToken cancellationToken = default);
 
     /// <summary>

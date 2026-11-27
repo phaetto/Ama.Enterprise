@@ -115,9 +115,10 @@ public static class Program
             options.AntiEntropyIntervalSeconds = 5;
             options.MaintenanceIntervalSeconds = 5 * 60;
             options.CompactionTtlSeconds = 5 * 60;
+            options.DefaultDocumentResidencyMode = CrdtDocumentResidencyMode.Unpacked;
             options.ShardReplicationFactor = 2;
             options.EnableSharding = true;
-            options.JournalMode = CrdtJournalMode.DiskWal;
+            options.JournalMode = CrdtJournalMode.Direct;
             options.WalChannelCapacity = 100000;
             options.WalMaxBatchSize = 10000;
             options.WalDirectoryPath = AppContext.BaseDirectory;
@@ -148,7 +149,7 @@ public static class Program
         services.AddDistributedCrdtQuery<FleetState, PurgeOfflineDevicesCommand, PurgeOfflineDevicesSummaryDto, PurgeOfflineDevicesMapReduce>("fleet-purge-offline");
 
         // Register Showcase file-based CRDT storage overriding memory fallbacks for all documents
-        services.AddDistributedCrdtStorage<ShowCaseCrdtStorage>();
+        //services.AddDistributedCrdtStorage<ShowCaseCrdtStorage>();
 
         // Register the background multi-document orchestration and route inbound intents from the network
         services.AddDistributedCrdtReplica(replicaId, "internal");
@@ -1062,8 +1063,7 @@ public static class Program
         var exportedTrackerState = clusterTracker.ExportState();
         var tombstonedReplicas = exportedTrackerState.TombstonedReplicas;
 
-        var regDoc = await orchestrator.Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-        var regState = regDoc.Data ?? new CrdtRegistryState();
+        var regState = await orchestrator.Registry.GetDataAsync(cancellationToken).ConfigureAwait(false) ?? new CrdtRegistryState();
 
         var shardDocCounts = new Dictionary<string, int>(StringComparer.Ordinal)
         {
@@ -1191,8 +1191,7 @@ public static class Program
 
         if (string.Equals(documentId, orchestrator.Registry.DocumentId, StringComparison.Ordinal))
         {
-            var regDoc = await orchestrator.Registry.GetDocumentAsync(cancellationToken).ConfigureAwait(false);
-            var regState = regDoc.Data ?? new CrdtRegistryState();
+            var regState = await orchestrator.Registry.GetDataAsync(cancellationToken).ConfigureAwait(false) ?? new CrdtRegistryState();
             sw.Stop();
 
             lock (ConsoleLock)

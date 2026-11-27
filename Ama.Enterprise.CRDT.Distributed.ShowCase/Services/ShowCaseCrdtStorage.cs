@@ -69,6 +69,28 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
 
     public async Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new()
     {
+        var bytes = await LoadSerializedDocumentAsync(shardId, documentId, cancellationToken).ConfigureAwait(false);
+        if (bytes is { Length: > 0 })
+        {
+            return serializer.DeserializeFromBytes<CrdtDocument<TState>>(bytes);
+        }
+
+        return null;
+    }
+
+    public async Task<CrdtDocument<TState>?> LoadDocumentFromAnyShardAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        var bytes = await LoadSerializedDocumentFromAnyShardAsync(documentId, cancellationToken).ConfigureAwait(false);
+        if (bytes is { Length: > 0 })
+        {
+            return serializer.DeserializeFromBytes<CrdtDocument<TState>>(bytes);
+        }
+
+        return null;
+    }
+
+    public async Task<byte[]?> LoadSerializedDocumentAsync(string shardId, string documentId, CancellationToken cancellationToken = default)
+    {
         if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
 
         await readLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -82,7 +104,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
             if (result is byte[] bytes)
             {
-                return serializer.DeserializeFromBytes<CrdtDocument<TState>>(bytes);
+                return bytes;
             }
         }
         catch (Exception ex)
@@ -98,7 +120,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
         return null;
     }
 
-    public async Task<CrdtDocument<TState>?> LoadDocumentFromAnyShardAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    public async Task<byte[]?> LoadSerializedDocumentFromAnyShardAsync(string documentId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(documentId)) throw new ArgumentException("Value cannot be null or empty.", nameof(documentId));
 
@@ -112,7 +134,7 @@ public sealed class ShowCaseCrdtStorage : IDistributedCrdtStorage, IDisposable
             var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
             if (result is byte[] bytes)
             {
-                return serializer.DeserializeFromBytes<CrdtDocument<TState>>(bytes);
+                return bytes;
             }
         }
         catch (Exception ex)
