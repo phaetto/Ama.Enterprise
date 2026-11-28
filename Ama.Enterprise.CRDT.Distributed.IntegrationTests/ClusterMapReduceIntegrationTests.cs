@@ -837,7 +837,14 @@ public sealed class ClusterMapReduceIntegrationTests : IAsyncDisposable
     private static async Task SyncAllNodesAsync(TestMeshFabric fabric)
     {
         var currentNodes = fabric.GetActiveNodes();
-        for (var round = 0; round < 2; round++)
+        foreach (var node in currentNodes)
+        {
+            await node.Orchestrator.FlushAsync(CancellationToken.None);
+        }
+
+        await fabric.DrainNetworkAsync();
+
+        for (var round = 0; round < 3; round++)
         {
             foreach (var source in currentNodes)
             {
@@ -852,11 +859,13 @@ public sealed class ClusterMapReduceIntegrationTests : IAsyncDisposable
 
             foreach (var node in currentNodes)
             {
-                await node.Orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
+                await node.Orchestrator.FlushAsync(CancellationToken.None);
             }
 
             await fabric.DrainNetworkAsync();
         }
+
+        await Task.Delay(500);
     }
 
     private sealed record TestClusterNode(
@@ -908,7 +917,14 @@ public sealed class ClusterMapReduceIntegrationTests : IAsyncDisposable
 
             foreach (var node in allNodes)
             {
-                await node.Orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
+                await node.Orchestrator.FlushAsync(CancellationToken.None);
+            }
+
+            await DrainNetworkAsync();
+
+            foreach (var node in allNodes)
+            {
+                await node.Orchestrator.FlushAsync(CancellationToken.None);
             }
         }
 

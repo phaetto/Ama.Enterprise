@@ -12,8 +12,6 @@ using Ama.CRDT.Extensions;
 using Ama.CRDT.Models;
 using Ama.CRDT.Models.Aot;
 using Ama.CRDT.Models.Intents;
-using Ama.CRDT.Services.GarbageCollection;
-using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
@@ -26,7 +24,6 @@ using Ama.Enterprise.Project.Tests.Common.Attributes;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Shouldly;
-using Xunit;
 
 [CrdtAotType(typeof(DocumentResidencyModeIntegrationTests.ResidencyTestState))]
 [CrdtAotType(typeof(List<string>))]

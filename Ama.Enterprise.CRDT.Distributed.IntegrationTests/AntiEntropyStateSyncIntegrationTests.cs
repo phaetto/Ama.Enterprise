@@ -2028,6 +2028,8 @@ public sealed class AntiEntropyStateSyncIntegrationTests
             await node2Handler.HandlePayloadAsync(TestMeshId, node1PeerId, payloads[i], CancellationToken.None);
         }
 
+        await node2Orch.FlushAsync(CancellationToken.None);
+
         sw.Stop();
 
         // Assert: All 500 documents promoted, merged, and tracked in ClusterTracker in a fraction of a second

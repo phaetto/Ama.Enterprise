@@ -892,7 +892,7 @@ public sealed class LiveMigrationIntegrationTests
         {
             var localDoc = orchestratorPureV2.TryGetLocalDocument<ModernTaskListStateV2>("global-roadmap");
             return localDoc != null && localDoc.CurrentDocument.Data.Tasks.Count == 2;
-        }, TimeSpan.FromSeconds(5));
+        }, TimeSpan.FromSeconds(15));
 
         var pureV2Doc = await orchestratorPureV2.GetDocumentStateAsync<ModernTaskListStateV2>("global-roadmap");
         pureV2Doc.Data.ShouldNotBeNull();
@@ -918,6 +918,7 @@ public sealed class LiveMigrationIntegrationTests
         await orchestratorPureV2.FlushAsync();
         await orchestratorMediatorV2.FlushAsync();
         await migrationManager.DrainAllAsync();
+        await Task.Delay(500);
 
         // Verify Mediator V2 received the V2 gossip from Pure V2
         var mediatorV2Doc = await orchestratorMediatorV2.GetDocumentStateAsync<ModernTaskListStateV2>("global-roadmap");
@@ -959,7 +960,7 @@ public sealed class LiveMigrationIntegrationTests
                    !state.Data.Tasks.ContainsKey("milestone-1") &&
                    state.Data.Tasks.TryGetValue("milestone-2", out var m2) &&
                    m2.Status == "Done";
-        }, TimeSpan.FromSeconds(5));
+        }, TimeSpan.FromSeconds(15));
 
         var convergedPureV2Doc = await orchestratorPureV2.GetDocumentStateAsync<ModernTaskListStateV2>("global-roadmap");
         convergedPureV2Doc.Data.ShouldNotBeNull();

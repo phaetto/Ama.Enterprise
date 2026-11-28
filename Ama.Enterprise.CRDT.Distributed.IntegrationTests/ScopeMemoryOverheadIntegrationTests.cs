@@ -673,6 +673,14 @@ public sealed class ScopeMemoryOverheadIntegrationTests
         mockP2p.SetReturnsDefault(Task.CompletedTask);
         services.AddSingleton(mockP2p.Object);
 
+        var mockSender = new Mock<IDirectMessageSender>();
+        mockSender.SetReturnsDefault(Task.CompletedTask);
+        services.AddSingleton(mockSender.Object);
+
+        var mockRpcCorrelator = new Mock<IP2pRpcCorrelator>();
+        mockRpcCorrelator.SetReturnsDefault(Task.CompletedTask);
+        services.AddSingleton(mockRpcCorrelator.Object);
+
         configureExtra?.Invoke(services);
 
         return services.BuildServiceProvider();

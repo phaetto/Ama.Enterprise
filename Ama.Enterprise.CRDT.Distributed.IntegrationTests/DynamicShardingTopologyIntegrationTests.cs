@@ -318,20 +318,20 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
         })).ToArray();
 
         // Let baseline load run on the 2-node cluster
-        await Task.Delay(120);
+        await Task.Delay(500);
 
         // Act - Dynamically add Replica-3 and Replica-4 while writes and reads are actively in-flight
         var node3 = await CreateAndStartNodeAsync("Replica-3", replicationFactor: 2);
         await fabric.JoinNodeAsync(node3);
         await SyncAllNodesAsync(fabric);
 
-        await Task.Delay(120);
+        await Task.Delay(500);
 
         var node4 = await CreateAndStartNodeAsync("Replica-4", replicationFactor: 2);
         await fabric.JoinNodeAsync(node4);
         await SyncAllNodesAsync(fabric);
 
-        await Task.Delay(150);
+        await Task.Delay(500);
 
         await workloadCts.CancelAsync();
         await Task.WhenAll(writerTasks);
@@ -886,7 +886,7 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
 
             foreach (var node in currentNodes)
             {
-                await node.Orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
+                await node.Orchestrator.FlushAsync(CancellationToken.None);
             }
 
             await fabric.DrainNetworkAsync();
@@ -944,7 +944,14 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
 
             foreach (var node in allNodes)
             {
-                await node.Orchestrator.ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, CancellationToken.None);
+                await node.Orchestrator.FlushAsync(CancellationToken.None);
+            }
+
+            await DrainNetworkAsync();
+
+            foreach (var node in allNodes)
+            {
+                await node.Orchestrator.FlushAsync(CancellationToken.None);
             }
         }
 

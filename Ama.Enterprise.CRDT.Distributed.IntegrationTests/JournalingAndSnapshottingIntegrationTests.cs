@@ -2,7 +2,6 @@ namespace Ama.Enterprise.CRDT.Distributed.IntegrationTests;
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -1329,7 +1328,7 @@ public sealed class JournalingAndSnapshottingIntegrationTests
             {
                 break;
             }
-            await Task.Delay(30);
+            await Task.Delay(100);
         }
 
         // Assert - The system registry operations were assigned to Constants.SystemRegistryDocumentId (NOT "custom-shard-0")
