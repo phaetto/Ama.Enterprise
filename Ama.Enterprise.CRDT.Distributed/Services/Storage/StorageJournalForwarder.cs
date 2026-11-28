@@ -528,7 +528,7 @@ internal sealed class StorageJournalForwarder : ICrdtOperationJournal, IDisposab
             ? softThreshold 
             : hardThreshold;
 
-        this.logger.LogWarning("[{ReplicaId}] Journal dynamically crossed real-time threshold ({Threshold}). Reactively executed immediate aggressive trim explicitly offloading constraints to snapshots.", replicaContext.ReplicaId, thresholdUsed);
+        this.logger.LogWarning("[{ReplicaId}] Journal dynamically crossed threshold ({Threshold}). Executed immediate aggressive trim offloading sync to snapshots.", replicaContext.ReplicaId, thresholdUsed);
     }
 
     private static void MergeRegistryVersionVector(

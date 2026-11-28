@@ -50,6 +50,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
 
     private readonly ConcurrentDictionary<string, IDistributedCrdtDocument> activeDocuments = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> shardIdCache = new(StringComparer.Ordinal);
+    private readonly SemaphoreSlim initializeLock = new(1, 1);
+    private readonly TaskCompletionSource initializationGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private int syncPending;
     private int scopePendingCommandCount;
@@ -58,6 +60,20 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
 
     /// <inheritdoc />
     string IOrchestratorCommandTarget.ScopeReplicaId => scopeReplicaId;
+
+    /// <inheritdoc />
+    bool IOrchestratorCommandTarget.IsInitialized => InitializationStage == OrchestratorInitializationStage.Initialized;
+
+    /// <inheritdoc />
+    ValueTask IOrchestratorCommandTarget.WaitForInitializationGateAsync()
+    {
+        if (InitializationStage == OrchestratorInitializationStage.Initialized || Volatile.Read(ref disposed) != 0)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        return new ValueTask(initializationGate.Task);
+    }
 
     /// <summary>
     /// Gets a value indicating whether the current execution context is already running inside this orchestrator's command processing loop.
@@ -138,26 +154,36 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
     /// <inheritdoc />
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        if (IsCurrentThreadOrchestratorProcessor)
+        if (Volatile.Read(ref disposed) != 0)
         {
-            await ProcessInitializeInternalAsync(cancellationToken).ConfigureAwait(false);
             return;
         }
 
-        var cmd = stripePool.RentCommand();
-        cmd.Target = this;
-        cmd.Type = OrchestratorCommandType.Initialize;
-        cmd.CancellationToken = cancellationToken;
+        if (InitializationStage == OrchestratorInitializationStage.Initialized && Registry != null)
+        {
+            await ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, cancellationToken).ConfigureAwait(false);
+            return;
+        }
 
-        Interlocked.Increment(ref scopePendingCommandCount);
+        await initializeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await stripePool.EnqueueAndWaitAsync(cmd, cancellationToken).ConfigureAwait(false);
+            if (Volatile.Read(ref disposed) != 0)
+            {
+                return;
+            }
+
+            if (InitializationStage == OrchestratorInitializationStage.Initialized && Registry != null)
+            {
+                await ReevaluateTopologyAsync(IntentDeliveryMode.Acknowledged, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            await ProcessInitializeInternalAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            Interlocked.Decrement(ref scopePendingCommandCount);
-            stripePool.ReturnCommand(cmd);
+            initializeLock.Release();
         }
     }
 
@@ -170,6 +196,41 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
     /// <inheritdoc />
     public async Task ReevaluateTopologyAsync(IntentDeliveryMode deliveryMode, CancellationToken cancellationToken = default)
     {
+        if (InitializationStage != OrchestratorInitializationStage.Initialized)
+        {
+            if (deliveryMode == IntentDeliveryMode.FireAndForget)
+            {
+                Interlocked.Exchange(ref syncPending, 1);
+                var ffEarlyCmd = stripePool.RentCommand();
+                ffEarlyCmd.Target = this;
+                ffEarlyCmd.Type = OrchestratorCommandType.ReevaluateTopology;
+                ffEarlyCmd.IsFireAndForget = true;
+                ffEarlyCmd.CancellationToken = CancellationToken.None;
+
+                Interlocked.Increment(ref scopePendingCommandCount);
+                if (stripePool.TryEnqueueFireAndForget(ffEarlyCmd))
+                {
+                    return;
+                }
+
+                try
+                {
+                    await stripePool.EnqueueFireAndForgetAsync(ffEarlyCmd, cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    Interlocked.Decrement(ref scopePendingCommandCount);
+                    Interlocked.Exchange(ref syncPending, 0);
+                    stripePool.ReturnCommand(ffEarlyCmd);
+                    throw;
+                }
+
+                return;
+            }
+
+            await WaitForOrchestratorInitializedAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         if (IsCurrentThreadOrchestratorProcessor && deliveryMode != IntentDeliveryMode.FireAndForget)
         {
             Interlocked.Exchange(ref syncPending, 0);
@@ -557,6 +618,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
             typeAlias = stringPool.GetOrAdd(typeAlias);
         }
 
+        if (InitializationStage != OrchestratorInitializationStage.Initialized)
+        {
+            await WaitForOrchestratorInitializedAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         if (Registry != null && string.Equals(Registry.DocumentId, documentId, StringComparison.Ordinal))
         {
             return Registry;
@@ -776,18 +842,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
 
         if (!skipStorageLoad)
         {
-            if (doc is IDocumentCommandTarget commandTarget)
-            {
-                var commandPipeline = serviceProvider.GetRequiredService<IDocumentCommandPipeline>();
-                var initCmd = commandPipeline.RentCommand();
-                initCmd.Target = commandTarget;
-                initCmd.Type = DocumentCommandType.Initialize;
-                await commandPipeline.EnqueueFireAndForgetAsync(initCmd, cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                await doc.InitializeAsync(cancellationToken).ConfigureAwait(false);
-            }
+            await doc.InitializeAsync(cancellationToken).ConfigureAwait(false);
         }
 
         await NotifyTopologyChangedAsync(cancellationToken).ConfigureAwait(false);
@@ -1043,6 +1098,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
         documentId = stringPool.GetOrAdd(documentId);
         typeAlias = stringPool.GetOrAdd(typeAlias);
 
+        if (InitializationStage != OrchestratorInitializationStage.Initialized)
+        {
+            await WaitForOrchestratorInitializedAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         var registry = Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");
         var registryKey = CrdtRegistryEntry.GetRegistryKey(typeAlias, documentId);
         var intent = new MapSetIntent(registryKey, new CrdtRegistryEntry(documentId, typeAlias, false));
@@ -1292,6 +1352,8 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
             return;
         }
 
+        initializationGate.TrySetResult();
+
         if (ownsFallbackStripePool && stripePool is IDisposable disposableStripePool)
         {
             disposableStripePool.Dispose();
@@ -1309,6 +1371,17 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
 
         activeDocuments.Clear();
         shardIdCache.Clear();
+        initializeLock.Dispose();
+    }
+
+    private ValueTask WaitForOrchestratorInitializedAsync(CancellationToken cancellationToken)
+    {
+        if (InitializationStage == OrchestratorInitializationStage.Initialized || Volatile.Read(ref disposed) != 0)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        return new ValueTask(initializationGate.Task.WaitAsync(cancellationToken));
     }
 
     private async Task NotifyTopologyChangedAsync(CancellationToken cancellationToken)
@@ -1363,6 +1436,7 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
             await ProcessSyncDocumentsInternalAsync(cancellationToken).ConfigureAwait(false);
 
             Volatile.Write(ref initializationStage, (int)OrchestratorInitializationStage.Initialized);
+            initializationGate.TrySetResult();
         }
         catch
         {
@@ -1716,6 +1790,11 @@ public sealed class CrdtDocumentOrchestrator : ICrdtDocumentOrchestrator, IOrche
         if (!string.IsNullOrWhiteSpace(typeAlias))
         {
             typeAlias = stringPool.GetOrAdd(typeAlias);
+        }
+
+        if (InitializationStage != OrchestratorInitializationStage.Initialized)
+        {
+            await WaitForOrchestratorInitializedAsync(cancellationToken).ConfigureAwait(false);
         }
 
         var registry = Registry ?? throw new InvalidOperationException("Orchestrator registry is not initialized. Ensure InitializeAsync is called.");

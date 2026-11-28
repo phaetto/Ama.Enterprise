@@ -121,8 +121,8 @@ public static class Program
             options.DefaultDocumentResidencyMode = CrdtDocumentResidencyMode.PackedMetadata;
             options.JournalHardTrimThreshold = 50000;
             options.ShardReplicationFactor = 2;
-            options.EnableSharding = true;
-            options.JournalMode = CrdtJournalMode.DiskWal;
+            //options.EnableSharding = true;
+            //options.JournalMode = CrdtJournalMode.DiskWal;
             options.WalChannelCapacity = 100000;
             options.WalMaxBatchSize = 10000;
             options.WalDirectoryPath = AppContext.BaseDirectory;
@@ -153,7 +153,7 @@ public static class Program
         services.AddDistributedCrdtQuery<FleetState, PurgeOfflineDevicesCommand, PurgeOfflineDevicesSummaryDto, PurgeOfflineDevicesMapReduce>("fleet-purge-offline");
 
         // Register Showcase file-based CRDT storage overriding memory fallbacks for all documents
-        services.AddDistributedCrdtStorage<ShowCaseCrdtStorage>();
+        //services.AddDistributedCrdtStorage<ShowCaseCrdtStorage>();
 
         // Register the background multi-document orchestration and route inbound intents from the network
         services.AddDistributedCrdtReplica(replicaId, "internal");

@@ -282,7 +282,7 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
                     Interlocked.Increment(ref failedWrites);
                 }
 
-                await Task.Delay(15);
+                await Task.Delay(5);
             }
         })).ToArray();
 
@@ -318,27 +318,26 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
         })).ToArray();
 
         // Let baseline load run on the 2-node cluster
-        await Task.Delay(500);
+        await Task.Delay(100);
 
         // Act - Dynamically add Replica-3 and Replica-4 while writes and reads are actively in-flight
         var node3 = await CreateAndStartNodeAsync("Replica-3", replicationFactor: 2);
         await fabric.JoinNodeAsync(node3);
         await SyncAllNodesAsync(fabric);
 
-        await Task.Delay(500);
+        await Task.Delay(100);
 
         var node4 = await CreateAndStartNodeAsync("Replica-4", replicationFactor: 2);
         await fabric.JoinNodeAsync(node4);
         await SyncAllNodesAsync(fabric);
 
-        await Task.Delay(500);
+        await Task.Delay(100);
 
         await workloadCts.CancelAsync();
         await Task.WhenAll(writerTasks);
         await Task.WhenAll(readerTasks);
 
         // Final anti-entropy convergence across the expanded 4-node ring
-        await SyncAllNodesAsync(fabric);
         await SyncAllNodesAsync(fabric);
 
         // Assert - Zero failed writes, zero failed reads, and every acknowledged write is readable from any node in the cluster
@@ -867,7 +866,7 @@ public sealed class DynamicShardingTopologyIntegrationTests : IAsyncDisposable
 
         await fabric.DrainNetworkAsync();
 
-        for (int round = 0; round < 2; round++)
+        for (int round = 0; round < 5; round++)
         {
             foreach (var source in currentNodes)
             {

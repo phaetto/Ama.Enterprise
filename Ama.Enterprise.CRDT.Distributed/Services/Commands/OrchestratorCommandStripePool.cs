@@ -114,6 +114,11 @@ public sealed class OrchestratorCommandStripePool : IOrchestratorCommandStripePo
         ArgumentNullException.ThrowIfNull(command);
         var target = command.Target ?? throw new InvalidOperationException("Orchestrator command Target must be assigned before enqueuing.");
 
+        if (!target.IsInitialized && command.Type != OrchestratorCommandType.Initialize)
+        {
+            await target.WaitForInitializationGateAsync().ConfigureAwait(false);
+        }
+
         if (((IOrchestratorCommandStripePool)this).IsCurrentThreadProcessingTarget(target))
         {
             telemetry.RecordOrchestratorCommandEnqueued();
@@ -180,7 +185,8 @@ public sealed class OrchestratorCommandStripePool : IOrchestratorCommandStripePo
         ArgumentNullException.ThrowIfNull(command);
         var target = command.Target ?? throw new InvalidOperationException("Orchestrator command Target must be assigned before enqueuing.");
 
-        if (((IOrchestratorCommandStripePool)this).IsCurrentThreadProcessingTarget(target))
+        if (((IOrchestratorCommandStripePool)this).IsCurrentThreadProcessingTarget(target) &&
+            (target.IsInitialized || command.Type == OrchestratorCommandType.Initialize))
         {
             telemetry.RecordOrchestratorCommandEnqueued();
             try
@@ -356,6 +362,11 @@ public sealed class OrchestratorCommandStripePool : IOrchestratorCommandStripePo
 
                     if (target is not null)
                     {
+                        if (!target.IsInitialized && cmd.Type != OrchestratorCommandType.Initialize)
+                        {
+                            await target.WaitForInitializationGateAsync().ConfigureAwait(false);
+                        }
+
                         CurrentStripeIndex.Value = stripeIndex;
                         CurrentProcessingTarget.Value = target;
                         try

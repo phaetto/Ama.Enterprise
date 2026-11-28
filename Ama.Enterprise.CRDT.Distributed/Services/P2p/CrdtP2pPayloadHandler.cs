@@ -116,7 +116,7 @@ public sealed class CrdtP2pPayloadHandler : IApplicationPayloadHandler, IDisposa
             }
         }
 
-        if (!hasExistingScope || scope == null)
+        if (!hasExistingScope || scope == null || scope.Orchestrator.InitializationStage != OrchestratorInitializationStage.Initialized)
         {
             scope = await scopeManager.GetOrCreateScopeAsync(targetScopeId, replicaId, cancellationToken).ConfigureAwait(false);
         }

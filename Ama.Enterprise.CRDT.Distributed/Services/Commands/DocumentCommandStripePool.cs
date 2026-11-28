@@ -121,6 +121,11 @@ public sealed class DocumentCommandStripePool : IDocumentCommandStripePool, IDis
         ArgumentNullException.ThrowIfNull(command);
         var target = command.Target ?? throw new InvalidOperationException("Command Target must be assigned before enqueuing.");
 
+        if (!target.IsInitialized && command.Type != DocumentCommandType.Initialize)
+        {
+            await target.WaitForInitializationGateAsync().ConfigureAwait(false);
+        }
+
         if (IsCurrentThreadStripeProcessor)
         {
             var inlineDocId = target.DocumentId;
@@ -171,7 +176,7 @@ public sealed class DocumentCommandStripePool : IDocumentCommandStripePool, IDis
         ArgumentNullException.ThrowIfNull(command);
         var target = command.Target ?? throw new InvalidOperationException("Command Target must be assigned before enqueuing.");
 
-        if (IsCurrentThreadStripeProcessor)
+        if (IsCurrentThreadStripeProcessor && (target.IsInitialized || command.Type == DocumentCommandType.Initialize))
         {
             var inlineDocId = target.DocumentId;
             telemetry.RecordDocumentCommandEnqueued(inlineDocId);
@@ -330,6 +335,11 @@ public sealed class DocumentCommandStripePool : IDocumentCommandStripePool, IDis
 
                     if (target is not null)
                     {
+                        if (!target.IsInitialized && cmd.Type != DocumentCommandType.Initialize)
+                        {
+                            await target.WaitForInitializationGateAsync().ConfigureAwait(false);
+                        }
+
                         CurrentStripeIndex.Value = stripeIndex;
                         try
                         {

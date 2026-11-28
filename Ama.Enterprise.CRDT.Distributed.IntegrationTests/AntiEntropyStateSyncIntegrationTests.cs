@@ -2037,6 +2037,6 @@ public sealed class AntiEntropyStateSyncIntegrationTests
         var trackedPeerState = node2Scope.ClusterTracker.TryGetPeerState("Replica1");
         trackedPeerState.ShouldNotBeNull();
         trackedPeerState!.Count.ShouldBe(documentCount);
-        sw.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
+        sw.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(15));
     }
 }

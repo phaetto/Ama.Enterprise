@@ -60,6 +60,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     
     private readonly object syncRoot = new();
     private readonly ICrdtDocumentBuffer<TState> documentBuffer;
+    private readonly SemaphoreSlim initializeLock = new(1, 1);
+    private readonly TaskCompletionSource initializationGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int hasCompletedInitialStorageLoad;
     
     private readonly object debounceSyncRoot = new();
@@ -80,6 +82,20 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
     /// <inheritdoc />
     public string TypeAlias { get; }
+
+    /// <inheritdoc />
+    bool IDocumentCommandTarget.IsInitialized => Volatile.Read(ref hasCompletedInitialStorageLoad) != 0;
+
+    /// <inheritdoc />
+    ValueTask IDocumentCommandTarget.WaitForInitializationGateAsync()
+    {
+        if (Volatile.Read(ref hasCompletedInitialStorageLoad) != 0 || isDisposed)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        return new ValueTask(initializationGate.Task);
+    }
 
     /// <inheritdoc />
     public CrdtDocumentResidencyMode ResidencyMode => documentBuffer.Mode;
@@ -198,26 +214,24 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// <inheritdoc />
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        if (isDisposed) return;
-
-        if (commandPipeline.IsCurrentThreadPipelineProcessor)
+        if (isDisposed || Volatile.Read(ref hasCompletedInitialStorageLoad) != 0)
         {
-            await ProcessInitializeInternalAsync(cancellationToken).ConfigureAwait(false);
             return;
         }
 
-        var cmd = commandPipeline.RentCommand();
-        cmd.Target = this;
-        cmd.Type = DocumentCommandType.Initialize;
-        cmd.CancellationToken = cancellationToken;
-
+        await initializeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await commandPipeline.EnqueueAndWaitAsync(cmd, cancellationToken).ConfigureAwait(false);
+            if (isDisposed || Volatile.Read(ref hasCompletedInitialStorageLoad) != 0)
+            {
+                return;
+            }
+
+            await ProcessInitializeInternalAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            commandPipeline.ReturnCommand(cmd);
+            initializeLock.Release();
         }
     }
 
@@ -737,6 +751,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     public void Dispose()
     {
         isDisposed = true;
+        initializationGate.TrySetResult();
+
         lock (debounceSyncRoot)
         {
             debounceTimer?.Dispose();
@@ -748,6 +764,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
         {
             documentBuffer.Dispose();
         }
+
+        initializeLock.Dispose();
     }
 
     private static ICrdtDocumentBuffer<TState> CreateDocumentBuffer(
@@ -810,7 +828,7 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
 
     private async Task ProcessInitializeInternalAsync(CancellationToken cancellationToken)
     {
-        if (Interlocked.Exchange(ref hasCompletedInitialStorageLoad, 1) != 0)
+        if (Volatile.Read(ref hasCompletedInitialStorageLoad) != 0)
         {
             return;
         }
@@ -938,6 +956,9 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                     }
                 }
 
+                Volatile.Write(ref hasCompletedInitialStorageLoad, 1);
+                initializationGate.TrySetResult();
+
                 await NotifyStateChangedAsync(cancellationToken).ConfigureAwait(false);
                 logger.LogInformation("Loaded initial serialized state for document {DocumentId} ({TypeAlias}) from storage.", DocumentId, TypeAlias);
                 return;
@@ -1007,13 +1028,21 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
                     }
                 }
 
+                Volatile.Write(ref hasCompletedInitialStorageLoad, 1);
+                initializationGate.TrySetResult();
+
                 await NotifyStateChangedAsync(cancellationToken).ConfigureAwait(false);
                 logger.LogInformation("Loaded initial state for document {DocumentId} ({TypeAlias}) from storage.", DocumentId, TypeAlias);
+            }
+            else
+            {
+                Volatile.Write(ref hasCompletedInitialStorageLoad, 1);
+                initializationGate.TrySetResult();
             }
         }
         catch (Exception ex)
         {
-            Interlocked.Exchange(ref hasCompletedInitialStorageLoad, 0);
+            Volatile.Write(ref hasCompletedInitialStorageLoad, 0);
             logger.LogError(ex, "Failed to load initial state for document {DocumentId} ({TypeAlias}) from storage.", DocumentId, TypeAlias);
             throw;
         }
@@ -1024,7 +1053,8 @@ public sealed class DistributedCrdtDocument<TState> : IDistributedCrdtDocument<T
     /// </summary>
     internal void MarkAsNewlyCreatedLocalDocument()
     {
-        Interlocked.Exchange(ref hasCompletedInitialStorageLoad, 1);
+        Volatile.Write(ref hasCompletedInitialStorageLoad, 1);
+        initializationGate.TrySetResult();
     }
 
     private void MergeDocumentMetadataIntoShardVersionVector(CrdtDocument<TState> doc, bool forceMergeForSingleDocumentShard = false)

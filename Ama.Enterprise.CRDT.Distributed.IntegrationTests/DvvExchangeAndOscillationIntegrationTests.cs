@@ -1528,7 +1528,7 @@ public sealed class DvvExchangeAndOscillationIntegrationTests : IAsyncDisposable
         using var network = WireMeshWithInspection(recordedMessages, allNodes);
 
         // Converge initial registry creation across all 3 nodes first
-        for (int round = 0; round < 2; round++)
+        for (int round = 0; round < 5; round++)
         {
             for (int i = 0; i < allNodes.Length; i++)
             {

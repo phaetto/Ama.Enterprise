@@ -8,6 +8,7 @@ using Ama.Enterprise.CRDT.Distributed.Models;
 /// </summary>
 /// <example>
 /// <code>
+/// await target.WaitForInitializationGateAsync();
 /// await target.ExecuteCommandInternalAsync(command);
 /// </code>
 /// </example>
@@ -27,6 +28,17 @@ public interface IDocumentCommandTarget
     /// Gets the shard identifier of the document.
     /// </summary>
     string ShardId { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether the document has completed initialization and opened its command processing gate.
+    /// </summary>
+    bool IsInitialized { get; }
+
+    /// <summary>
+    /// Waits asynchronously until the document has finished initializing before processing any enqueued stripe commands.
+    /// </summary>
+    /// <returns>A value task that completes once initialization has finished.</returns>
+    ValueTask WaitForInitializationGateAsync();
 
     /// <summary>
     /// Executes the specified pooled command against the document state machine.
