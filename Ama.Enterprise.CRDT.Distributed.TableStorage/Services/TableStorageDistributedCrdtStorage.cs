@@ -20,6 +20,8 @@ using Ama.CRDT.Services.Serialization;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.TableStorage.Models;
+using Ama.Enterprise.CRDT.Distributed.Services.Storage;
+using Ama.Enterprise.CRDT.Distributed.Services.Sharding;
 
 /// <summary>
 /// A unified Azure Table Storage implementation managing CRDT states, global version vectors, and operation journals explicitly without reflection to ensure AOT compatibility.

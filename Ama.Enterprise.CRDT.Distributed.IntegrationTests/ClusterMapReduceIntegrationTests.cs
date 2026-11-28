@@ -16,6 +16,8 @@ using Ama.CRDT.Services.Providers;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
+using Ama.Enterprise.CRDT.Distributed.Services.MapReduce;
+using Ama.Enterprise.CRDT.Distributed.Services.Sharding;
 using Ama.Enterprise.P2p.Models.Core;
 using Ama.Enterprise.P2p.Models.Transports;
 using Ama.Enterprise.P2p.Services.Core;

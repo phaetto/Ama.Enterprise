@@ -7,7 +7,7 @@ using System.Threading.Tasks.Sources;
 using Ama.CRDT.Models;
 using Ama.CRDT.Models.Intents;
 using Ama.CRDT.Services;
-using Ama.Enterprise.CRDT.Distributed.Services;
+using Ama.Enterprise.CRDT.Distributed.Services.Commands;
 
 /// <summary>
 /// Defines the command types processed by the shared document state machine pipeline.

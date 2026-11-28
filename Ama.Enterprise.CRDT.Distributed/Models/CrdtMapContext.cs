@@ -3,7 +3,7 @@ namespace Ama.Enterprise.CRDT.Distributed.Models;
 using System;
 using System.Collections.Generic;
 using Ama.CRDT.Models;
-using Ama.Enterprise.CRDT.Distributed.Services;
+using Ama.Enterprise.CRDT.Distributed.Services.Documents;
 
 /// <summary>
 /// Provides execution context for a single document during the Map phase of a distributed Map/Reduce operation.

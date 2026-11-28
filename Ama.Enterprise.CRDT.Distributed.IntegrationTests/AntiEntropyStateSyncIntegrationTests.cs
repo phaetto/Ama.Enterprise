@@ -25,8 +25,10 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Moq;
 using Shouldly;
-using Ama.Enterprise.CRDT.Distributed.Services.P2p;
 using Ama.Enterprise.CRDT.Distributed.Services.Observers;
+using Ama.Enterprise.CRDT.Distributed.Services.Storage;
+using Ama.Enterprise.CRDT.Distributed.Services.Sharding;
+using Ama.Enterprise.CRDT.Distributed.Services.AntiEntropy;
 
 [CrdtAotType(typeof(AntiEntropyStateSyncIntegrationTests.SyncTestState))]
 [CrdtAotType(typeof(Dictionary<string, string>))]

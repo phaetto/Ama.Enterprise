@@ -4,6 +4,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.Enterprise.CRDT.Distributed.Models;
+using Ama.Enterprise.CRDT.Distributed.Services.Scopes;
 using Ama.Enterprise.P2p.Models.Core;
 
 /// <summary>

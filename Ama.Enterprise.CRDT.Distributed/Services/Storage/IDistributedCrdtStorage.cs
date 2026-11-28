@@ -1,0 +1,205 @@
+namespace Ama.Enterprise.CRDT.Distributed.Services.Storage;
+
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using Ama.CRDT.Models;
+using Ama.CRDT.Services.Journaling;
+using Ama.Enterprise.CRDT.Distributed.Models;
+
+/// <summary>
+/// Defines a unified persistence and journaling mechanism for distributed CRDT documents.
+/// Combines document state, global DVV, and operation journaling to prevent gaps in reconstruction.
+/// </summary>
+public interface IDistributedCrdtStorage : ICrdtOperationJournal
+{
+    /// <summary>
+    /// Loads the globally tracked version vector representing the entire replica context state, partitioned by shards.
+    /// </summary>
+    /// <param name="replicaId">The active node replica ID.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The stored ShardVersionVectorMap, or null if it doesn't exist.</returns>
+    Task<ShardVersionVectorMap?> LoadShardVersionVectorMapAsync(string replicaId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Persists the global replica version vector partitioned map strictly after operations map appropriately across the bounds.
+    /// </summary>
+    /// <param name="replicaId">The active node replica ID.</param>
+    /// <param name="shardVersionVectorMap">The newly updated complete ShardVersionVectorMap.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous save operation.</returns>
+    Task SaveShardVersionVectorMapAsync(string replicaId, ShardVersionVectorMap shardVersionVectorMap, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Loads the overarching cluster states topology matrix effectively preventing split-brain restart node amnesia natively.
+    /// </summary>
+    /// <param name="replicaId">The local node active replica identifier securely bounding the local isolated environment boundaries.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The dynamically mapped states resolving active boundaries naturally.</returns>
+    Task<ClusterStateSnapshotDto?> LoadClusterStateAsync(string replicaId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Safely persists the complex tracker topology states actively bypassing multi-node synchronization deadlocks and zombie constraints securely gracefully.
+    /// </summary>
+    /// <param name="replicaId">The local node active replica identifier.</param>
+    /// <param name="state">The structural data explicitly bypassing logic bounds capturing tracked node matrices safely.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>An asynchronous task tracking storage operations securely.</returns>
+    Task SaveClusterStateAsync(string replicaId, ClusterStateSnapshotDto state, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Loads the stored CRDT document state including its Dotted Version Vectors and metadata.
+    /// </summary>
+    /// <typeparam name="TState">The application state bounded by the document.</typeparam>
+    /// <param name="shardId">The shard identifier isolating document bounds.</param>
+    /// <param name="documentId">The globally unique identifier for this document type (Topic).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The stored document, or null if no previous state exists.</returns>
+    Task<CrdtDocument<TState>?> LoadDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new();
+
+    /// <summary>
+    /// Attempts to load a stored CRDT document state regardless of its persisted shard identifier.
+    /// Used as a fallback when a product's <see cref="Ama.CRDT.Services.Providers.IShardIdProvider"/> implementation changes across deployments and runs against older persisted data.
+    /// </summary>
+    /// <typeparam name="TState">The application state bounded by the document.</typeparam>
+    /// <param name="documentId">The globally unique identifier for this document type (Topic).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The stored document, or null if no previous state exists under any shard.</returns>
+    Task<CrdtDocument<TState>?> LoadDocumentFromAnyShardAsync<TState>(string documentId, CancellationToken cancellationToken = default) where TState : class, new()
+    {
+        return Task.FromResult<CrdtDocument<TState>?>(null);
+    }
+
+    /// <summary>
+    /// Loads the raw serialized CRDT document snapshot bytes directly from storage without deserializing into a <see cref="CrdtDocument{TState}"/>.
+    /// </summary>
+    /// <param name="shardId">The shard identifier isolating document bounds.</param>
+    /// <param name="documentId">The globally unique identifier for this document type (Topic).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The stored serialized document bytes, or null if no previous state exists.</returns>
+    /// <example>
+    /// <code>
+    /// byte[]? rawBytes = await storage.LoadSerializedDocumentAsync("shard-0", "doc-123", cancellationToken);
+    /// </code>
+    /// </example>
+    Task<byte[]?> LoadSerializedDocumentAsync(string shardId, string documentId, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult<byte[]?>(null);
+    }
+
+    /// <summary>
+    /// Attempts to load the raw serialized CRDT document snapshot bytes regardless of its persisted shard identifier.
+    /// </summary>
+    /// <param name="documentId">The globally unique identifier for this document type (Topic).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The stored serialized document bytes, or null if no previous state exists under any shard.</returns>
+    /// <example>
+    /// <code>
+    /// byte[]? rawBytes = await storage.LoadSerializedDocumentFromAnyShardAsync("doc-123", cancellationToken);
+    /// </code>
+    /// </example>
+    Task<byte[]?> LoadSerializedDocumentFromAnyShardAsync(string documentId, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult<byte[]?>(null);
+    }
+
+    /// <summary>
+    /// Attempts to load an orphaned document state from previous replica identities. 
+    /// Used as a fallback during initialization to prevent state loss when dynamic node scaling occurs.
+    /// </summary>
+    /// <typeparam name="TState">The application state bounded by the document.</typeparam>
+    /// <param name="shardId">The shard identifier isolating document bounds.</param>
+    /// <param name="documentId">The globally unique identifier for this document type (Topic).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The bootstrapped orphaned document, or null if no orphaned state exists.</returns>
+    Task<CrdtDocument<TState>?> LoadOrphanedDocumentAsync<TState>(string shardId, string documentId, CancellationToken cancellationToken = default) where TState : class, new();
+
+    /// <summary>
+    /// Persists the updated CRDT document state after patches or remote operations are applied.
+    /// </summary>
+    /// <typeparam name="TState">The application state bounded by the document.</typeparam>
+    /// <param name="shardId">The shard identifier isolating document bounds.</param>
+    /// <param name="documentId">The globally unique identifier for this document type (Topic).</param>
+    /// <param name="document">The full document containing the latest state and metadata tracking.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous save operation.</returns>
+    Task SaveDocumentAsync<TState>(string shardId, string documentId, CrdtDocument<TState> document, CancellationToken cancellationToken = default) where TState : class, new();
+
+    /// <summary>
+    /// Persists a pre-serialized CRDT document snapshot so checkpointing can serialize once inside the document lock and write the bytes directly to storage.
+    /// </summary>
+    /// <typeparam name="TState">The application state bounded by the document.</typeparam>
+    /// <param name="shardId">The shard identifier isolating document bounds.</param>
+    /// <param name="documentId">The globally unique identifier for this document type (Topic).</param>
+    /// <param name="serializedDocument">The pre-serialized document payload bytes.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous save operation.</returns>
+    Task SaveSerializedDocumentAsync<TState>(string shardId, string documentId, byte[] serializedDocument, CancellationToken cancellationToken = default) where TState : class, new();
+
+    /// <summary>
+    /// Persists a batch of pre-serialized CRDT document snapshots in a single storage operation or transaction.
+    /// </summary>
+    /// <param name="checkpoints">The list of serialized document checkpoints to persist.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous batch save operation.</returns>
+    /// <example>
+    /// <code>
+    /// await storage.SaveSerializedDocumentBatchAsync(checkpoints, cancellationToken);
+    /// </code>
+    /// </example>
+    async Task SaveSerializedDocumentBatchAsync(IReadOnlyList<SerializedDocumentCheckpointDto> checkpoints, CancellationToken cancellationToken = default)
+    {
+        if (checkpoints == null || checkpoints.Count == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < checkpoints.Count; i++)
+        {
+            var item = checkpoints[i];
+            await SaveSerializedDocumentAsync<object>(item.ShardId, item.DocumentId, item.SerializedDocument, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Permanently deletes the document state and unloads its specific journal operations.
+    /// </summary>
+    /// <param name="shardId">The shard identifier isolating document bounds.</param>
+    /// <param name="documentId">The specific identifier to tombstone.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous deletion.</returns>
+    Task DeleteDocumentAsync(string shardId, string documentId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Retrieves the total number of journaled operations currently stored for a specific shard, evaluating limits efficiently.
+    /// </summary>
+    /// <param name="shardId">The identifier of the shard.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The total operation count natively.</returns>
+    Task<long> GetJournalCountAsync(string shardId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Asynchronously trims the underlying operation journal securely to remove obsolete operations strictly mapped across the background synchronized version vector bounds for a specific shard.
+    /// </summary>
+    /// <param name="shardId">The identifier of the shard.</param>
+    /// <param name="globalMinimumVersionVector">The mapped version vector boundaries resolving safe historic patch removal limits.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous trim operation.</returns>
+    Task TrimAsync(string shardId, IReadOnlyDictionary<string, long> globalMinimumVersionVector, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Retrieves all currently persisted operations from the journal. 
+    /// Used during initialization to replay uncheckpointed operations protecting against data loss securely.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>An asynchronous stream of all journaled operations.</returns>
+    IAsyncEnumerable<JournaledOperation> GetAllJournaledOperationsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Persists a batch of journaled operations across one or more documents and shards in a single storage operation.
+    /// </summary>
+    /// <param name="operations">The list of journaled operations to persist.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous batch append operation.</returns>
+    Task AppendBatchAsync(IReadOnlyList<JournaledOperation> operations, CancellationToken cancellationToken = default);
+}

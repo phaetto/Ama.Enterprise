@@ -11,7 +11,6 @@ using Ama.CRDT.Extensions;
 using Ama.CRDT.Services.Providers;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
-using Ama.Enterprise.CRDT.Distributed.Services;
 using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 using Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 using Ama.Enterprise.CRDT.MessagePack.Extensions;
@@ -29,6 +28,11 @@ using Ama.Enterprise.P2p.WebRTC.Extensions;
 using Ama.Enterprise.P2p.WebRTC.AspNetCore.Extensions;
 using Ama.Enterprise.P2p.WebRTC.AspNetCore.Services;
 using Ama.Enterprise.P2p.AspNetCore.Models;
+using Ama.Enterprise.CRDT.Distributed.Services.Documents;
+using Ama.Enterprise.CRDT.Distributed.Services.Sharding;
+using Ama.Enterprise.CRDT.Distributed.Services.Scopes;
+using Ama.Enterprise.CRDT.Distributed.Services.Lifecycle;
+using Ama.Enterprise.CRDT.Distributed.Services;
 
 /// <summary>
 /// Entry point for demonstrating Multiple Distributed CRDTs orchestrated via a global registry.

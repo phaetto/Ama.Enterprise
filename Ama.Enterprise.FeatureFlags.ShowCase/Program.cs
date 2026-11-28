@@ -3,6 +3,7 @@ namespace Ama.Enterprise.FeatureFlags.ShowCase;
 using Ama.Enterprise.CRDT.Distributed.Extensions;
 using Ama.Enterprise.CRDT.Distributed.Models;
 using Ama.Enterprise.CRDT.Distributed.Services;
+using Ama.Enterprise.CRDT.Distributed.Services.Lifecycle;
 using Ama.Enterprise.CRDT.Distributed.Services.Observers;
 using Ama.Enterprise.CRDT.Distributed.TableStorage.Extensions;
 using Ama.Enterprise.CRDT.MessagePack.Extensions;

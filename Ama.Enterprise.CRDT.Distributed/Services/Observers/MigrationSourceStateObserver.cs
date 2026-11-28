@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ama.CRDT.Services;
 using Ama.Enterprise.CRDT.Distributed.Models;
+using Ama.Enterprise.CRDT.Distributed.Services.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>

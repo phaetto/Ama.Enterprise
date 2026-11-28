@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Ama.Enterprise.CRDT.Distributed.Models;
-using Ama.Enterprise.CRDT.Distributed.Services;
+using Ama.Enterprise.CRDT.Distributed.Services.MapReduce;
 using Ama.Enterprise.CRDT.Distributed.ShowCase.Models;
 
 /// <summary>
